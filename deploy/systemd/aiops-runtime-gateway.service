@@ -1,0 +1,21 @@
+[Unit]
+Description=KubeNova Runtime Gateway
+Documentation=https://github.com/Feize1995/aiops-k8s-manager
+After=network-online.target
+Wants=network-online.target
+PartOf=aiops.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/k8s-aiops-manager/runtime-gateway.env
+EnvironmentFile=-/opt/k8s-aiops-manager/current/env/runtime-gateway.env
+WorkingDirectory=/opt/k8s-aiops-manager/current/runtime-gateway
+ExecStart=/opt/k8s-aiops-manager/current/runtime-gateway/runtime-gateway
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=20s
+KillSignal=SIGTERM
+NoNewPrivileges=true
+
+[Install]
+WantedBy=aiops.target

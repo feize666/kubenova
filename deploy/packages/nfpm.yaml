@@ -1,0 +1,52 @@
+name: aiops-manager
+arch: "{{ .Env.PKG_ARCH }}"
+platform: linux
+version: "{{ .Env.PKG_VERSION }}"
+section: default
+priority: optional
+maintainer: KubeNova Team <ops@example.com>
+description: KubeNova runtime gateway + systemd assets
+vendor: AIOps
+homepage: https://github.com/Feize1995/aiops-k8s-manager
+license: Proprietary
+
+contents:
+  - src: .release/runtime-gateway
+    dst: /opt/k8s-aiops-manager/current/runtime-gateway/runtime-gateway
+    file_info:
+      mode: 0755
+
+  - src: deploy/systemd/aiops-runtime-gateway.service
+    dst: /usr/lib/systemd/system/aiops-runtime-gateway.service
+    file_info:
+      mode: 0644
+
+  - src: deploy/systemd/aiops-control-api.service
+    dst: /usr/lib/systemd/system/aiops-control-api.service
+    file_info:
+      mode: 0644
+
+  - src: deploy/systemd/aiops.target
+    dst: /usr/lib/systemd/system/aiops.target
+    file_info:
+      mode: 0644
+
+  - src: deploy/systemd/env/runtime-gateway.env.example
+    dst: /opt/k8s-aiops-manager/current/env/runtime-gateway.env.example
+    file_info:
+      mode: 0644
+
+  - src: deploy/systemd/env/control-api.env.example
+    dst: /opt/k8s-aiops-manager/current/env/control-api.env.example
+    file_info:
+      mode: 0644
+
+overrides:
+  deb:
+    scripts:
+      postinstall: deploy/packages/scripts/postinstall.sh
+      preremove: deploy/packages/scripts/preremove.sh
+  rpm:
+    scripts:
+      postinstall: deploy/packages/scripts/postinstall.sh
+      preremove: deploy/packages/scripts/preremove.sh

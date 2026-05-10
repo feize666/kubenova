@@ -1,0 +1,119 @@
+import { apiRequest } from "./client";
+import type { CreateRuntimeSessionResponse } from "./runtime";
+import { buildRuntimeTargetParams, resolveRuntimeContainer, type RuntimeTargetBase } from "./runtime";
+
+export type LogLevel = "INFO" | "WARN" | "ERROR";
+
+export interface LogRecord {
+  id: string;
+  clusterId: string;
+  namespace: string;
+  pod: string;
+  level: LogLevel;
+  message: string;
+  timestamp: string;
+}
+
+export interface LogsQueryParams {
+  clusterId?: string;
+  namespace?: string;
+  pod?: string;
+  container?: string;
+  level?: LogLevel;
+  keyword?: string;
+  tailLines?: number;
+  sinceSeconds?: number;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface LogsRouteTarget extends RuntimeTargetBase {
+  level?: LogLevel;
+  keyword?: string;
+  from?: string;
+  returnTo?: string;
+  returnClusterId?: string;
+  returnNamespace?: string;
+  returnKeyword?: string;
+  returnPhase?: string;
+  returnPage?: number;
+}
+
+export interface LogsResourceFocus {
+  kind?: string;
+  name?: string;
+  id?: string;
+  section?: string;
+}
+
+export function buildLogsQueryParams(params: LogsQueryParams): URLSearchParams {
+  const query = new URLSearchParams();
+  if (params.clusterId) query.set("clusterId", params.clusterId);
+  if (params.namespace) query.set("namespace", params.namespace);
+  if (params.pod) query.set("pod", params.pod);
+  if (params.container) query.set("container", resolveRuntimeContainer(params.container));
+  if (params.level) query.set("level", params.level);
+  if (params.keyword) query.set("keyword", params.keyword);
+  if (params.page !== undefined) query.set("page", String(params.page));
+  if (params.pageSize !== undefined) query.set("pageSize", String(params.pageSize));
+  return query;
+}
+
+export function buildLogsRoute(target: LogsRouteTarget): string {
+  const params = buildRuntimeTargetParams(target);
+  if (target.level) params.set("level", target.level);
+  if (target.keyword) params.set("keyword", target.keyword);
+  if (target.from) params.set("from", target.from);
+  if (target.returnTo) params.set("returnTo", target.returnTo);
+  if (target.returnClusterId) params.set("returnClusterId", target.returnClusterId);
+  if (target.returnNamespace) params.set("returnNamespace", target.returnNamespace);
+  if (target.returnKeyword) params.set("returnKeyword", target.returnKeyword);
+  if (target.returnPhase) params.set("returnPhase", target.returnPhase);
+  if (typeof target.returnPage === "number" && Number.isFinite(target.returnPage)) {
+    params.set("returnPage", String(target.returnPage));
+  }
+  return `/logs?${params.toString()}`;
+}
+
+export function buildLogsResourceContext(target: LogsRouteTarget, focus?: LogsResourceFocus): string {
+  const params = buildLogsQueryParams(target);
+  params.set("view", "resource");
+  if (focus?.kind) params.set("resourceKind", focus.kind);
+  if (focus?.name) params.set("resourceName", focus.name);
+  if (focus?.id) params.set("resourceId", focus.id);
+  if (focus?.section) params.set("resourceSection", focus.section);
+  return params.toString();
+}
+
+export interface LogsQueryResponse {
+  items: LogRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+  timestamp: string;
+}
+
+export function getLogs(params: LogsQueryParams, token?: string) {
+  const query: Record<string, string | number> = {};
+  buildLogsQueryParams(params).forEach((value, key) => {
+    query[key] = value;
+  });
+  return apiRequest<LogsQueryResponse>("/api/logs", { query, token });
+}
+
+export function createLogsStreamSession(params: LogsQueryParams, token?: string) {
+  return apiRequest<CreateRuntimeSessionResponse, Record<string, unknown>>("/api/logs/stream", {
+    method: "POST",
+    body: {
+      clusterId: params.clusterId,
+      namespace: params.namespace,
+      pod: params.pod,
+      container: resolveRuntimeContainer(params.container),
+      level: params.level,
+      keyword: params.keyword,
+      tailLines: params.tailLines,
+      sinceSeconds: params.sinceSeconds,
+    },
+    token,
+  });
+}

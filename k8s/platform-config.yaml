@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aiops-platform-config
+  namespace: aiops
+data:
+  POSTGRES_DB: aiops
+  POSTGRES_USER: aiops
+  CONTROL_API_PORT: "4000"
+  RUNTIME_GATEWAY_PORT: "4100"
+  FRONTEND_PORT: "3000"
+  CONTROL_API_BASE_URL: "https://aiops.local/api"
+  CONTROL_API_INTERNAL_BASE_URL: "http://control-api:4000"
+  RUNTIME_GATEWAY_BASE_URL: "wss://aiops.local/ws"
+  RUNTIME_GATEWAY_PUBLIC_BASE_URL: "wss://aiops.local"
+  CORS_ORIGINS: "https://aiops.local"
+  NEXT_PUBLIC_CONTROL_API_BASE: ""
+  AI_MODEL_BASE_URL: "https://api.openai.com/v1"
+  AI_MODEL_NAME: "gpt-4o-mini"
+  AI_MODEL_MAX_TOKENS: "4096"
+  AI_MODEL_TIMEOUT_MS: "30000"
+  SWAGGER_ENABLED: "false"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aiops-platform-secret
+  namespace: aiops
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: change-me
+  DATABASE_URL: postgresql://aiops:change-me@postgres:5432/aiops
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET: replace-with-long-random-jwt-secret
+  JWT_EXPIRES_IN: 15m
+  REFRESH_TOKEN_EXPIRES_IN: 7d
+  DEFAULT_ADMIN_EMAIL: admin@local.dev
+  DEFAULT_ADMIN_PASSWORD: change-me-now
+  RUNTIME_TOKEN_SECRET: replace-with-runtime-token-secret
+  RUNTIME_GATEWAY_INTERNAL_SECRET: replace-with-internal-shared-secret
+  AI_MODEL_API_KEY: ""

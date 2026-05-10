@@ -1,0 +1,21 @@
+[Unit]
+Description=KubeNova Control API (NestJS)
+Documentation=https://github.com/Feize1995/aiops-k8s-manager
+After=network-online.target
+Wants=network-online.target
+PartOf=aiops.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/k8s-aiops-manager/control-api.env
+EnvironmentFile=-/opt/k8s-aiops-manager/current/env/control-api.env
+WorkingDirectory=/opt/k8s-aiops-manager/current/control-api
+ExecStart=/usr/bin/env sh -c 'npx prisma migrate deploy && exec /usr/bin/node dist/src/main.js'
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+NoNewPrivileges=true
+
+[Install]
+WantedBy=aiops.target

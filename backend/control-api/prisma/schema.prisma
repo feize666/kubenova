@@ -1,0 +1,406 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String           @id @default(cuid())
+  email        String           @unique
+  name         String?
+  passwordHash String?
+  role         String           @default("user")
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  sessions     Session[]
+  runtimeSessions RuntimeSession[]
+  aiConversationSessions AiConversationSession[]
+  auditLogs    AuditLog[]
+}
+
+model Session {
+  id               String   @id @default(cuid())
+  userId           String
+  refreshTokenHash String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model ClusterRegistry {
+  id              String           @id @default(cuid())
+  name            String
+  apiServer       String
+  status          String           @default("unknown")
+  metadata        Json?
+  deletedAt       DateTime?        // 软删除时间戳，非null表示已删除
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  runtimeSessions  RuntimeSession[]
+  auditLogs        AuditLog[]
+  workloads        WorkloadRecord[]
+  networkResources NetworkResource[]
+  storageResources StorageResource[]
+  configResources  ConfigResource[]
+  namespaces       NamespaceRecord[]
+  alerts           MonitoringAlert[]
+  credential       ClusterCredential?
+  resourceCapabilities ApiResourceCapability[]
+  clusterProfile   ClusterProfile?
+  healthSnapshot   ClusterHealthSnapshot?
+
+  // 仅对未删除集群强制名称唯一（deletedAt 为 null 时才参与唯一约束）
+  @@index([name, deletedAt])
+}
+
+model ClusterHealthSnapshot {
+  id           String   @id @default(cuid())
+  clusterId    String   @unique
+  ok           Boolean
+  status       String   // running|offline|checking|disabled|offline-mode
+  latencyMs    Int?
+  checkedAt    DateTime @default(now())
+  reason       String?
+  source       String   // auto|manual|event
+  timeoutMs    Int
+  failureCount Int      @default(0)
+  detailJson   Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cluster      ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([checkedAt])
+}
+
+model RuntimeSession {
+  id          String          @id @default(cuid())
+  clusterId   String
+  userId      String?
+  type        String
+  namespace   String
+  pod         String
+  container   String
+  expiresAt   DateTime
+  closedAt    DateTime?
+  createdAt   DateTime        @default(now())
+  cluster     ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  user        User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([clusterId])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AiConversationSession {
+  id                String                  @id @default(cuid())
+  ownerUserId       String
+  title             String
+  surface           String                  @default("shared")
+  clusterContextJson Json?
+  deletedAt         DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  ownerUser         User                    @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  messages          AiConversationMessage[]
+
+  @@index([ownerUserId, updatedAt])
+  @@index([deletedAt])
+}
+
+model AiConversationMessage {
+  id                   String                @id @default(cuid())
+  sessionId            String
+  role                 String
+  content              String
+  attachmentsJson      Json?
+  voiceInputJson       Json?
+  structuredJson       Json?
+  actionDescriptorsJson Json?
+  createdAt            DateTime              @default(now())
+  session              AiConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model AuditLog {
+  id          String           @id @default(cuid())
+  actorUserId String?
+  action      String
+  resourceType String
+  resourceId  String?
+  message     String?
+  metadata    Json?
+  clusterId   String?
+  createdAt   DateTime         @default(now())
+  actorUser   User?            @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  cluster     ClusterRegistry? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([clusterId])
+  @@index([createdAt])
+}
+
+// ── 工作负载记录 ────────────────────────────────────────
+model WorkloadRecord {
+  id            String   @id @default(cuid())
+  clusterId     String
+  namespace     String
+  kind          String   // Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob
+  name          String
+  state         String   @default("active")   // active|disabled|deleted
+  replicas      Int?
+  readyReplicas Int?
+  spec          Json?
+  statusJson    Json?
+  labels        Json?
+  annotations   Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  cluster       ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, namespace, kind, name])
+  @@index([clusterId])
+  @@index([namespace])
+  @@index([kind])
+  @@index([state])
+}
+
+// ── 网络资源（Service / Ingress）──────────────────────
+model NetworkResource {
+  id         String   @id @default(cuid())
+  clusterId  String
+  namespace  String
+  kind       String   // Service|Ingress
+  name       String
+  state      String   @default("active")
+  spec       Json?
+  statusJson Json?
+  labels     Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  cluster    ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, namespace, kind, name])
+  @@index([clusterId])
+  @@index([namespace])
+  @@index([kind])
+}
+
+// ── 存储资源（PV / PVC）──────────────────────────────
+model StorageResource {
+  id           String   @id @default(cuid())
+  clusterId    String
+  namespace    String?  // PV is cluster-scoped, PVC is namespaced
+  kind         String   // PV|PVC
+  name         String
+  state        String   @default("active")
+  capacity     String?
+  accessModes  Json?
+  storageClass String?
+  bindingMode  String?
+  spec         Json?
+  statusJson   Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cluster      ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, kind, name])
+  @@index([clusterId])
+  @@index([kind])
+}
+
+// ── 配置资源（ConfigMap / Secret）────────────────────
+model ConfigResource {
+  id         String           @id @default(cuid())
+  clusterId  String
+  namespace  String
+  kind       String           // ConfigMap|Secret
+  name       String
+  state      String           @default("active")
+  dataKeys   Json?            // list of key names (no values for secrets)
+  currentRev Int              @default(1)
+  labels     Json?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  cluster    ClusterRegistry  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  revisions  ConfigRevision[]
+
+  @@unique([clusterId, namespace, kind, name])
+  @@index([clusterId])
+  @@index([namespace])
+  @@index([kind])
+}
+
+// ── 配置版本历史 ──────────────────────────────────────
+model ConfigRevision {
+  id         String         @id @default(cuid())
+  configId   String
+  revision   Int
+  data       Json?          // full data snapshot (secrets masked)
+  changedBy  String?
+  changeNote String?
+  createdAt  DateTime       @default(now())
+
+  config     ConfigResource @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@unique([configId, revision])
+  @@index([configId])
+  @@index([createdAt])
+}
+
+// ── 命名空间 ──────────────────────────────────────────
+model NamespaceRecord {
+  id        String   @id @default(cuid())
+  clusterId String
+  name      String
+  state     String   @default("active")
+  labels    Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cluster   ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, name])
+  @@index([clusterId])
+}
+
+// ── 监控告警 ──────────────────────────────────────────
+model MonitoringAlert {
+  id           String    @id @default(cuid())
+  clusterId    String?
+  namespace    String?
+  severity     String    // critical|warning|info
+  title        String
+  message      String
+  source       String?   // prometheus|custom
+  resourceType String?
+  resourceName String?
+  status       String    @default("firing")  // firing|resolved|silenced
+  firedAt      DateTime  @default(now())
+  resolvedAt   DateTime?
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  cluster      ClusterRegistry? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+
+  @@index([clusterId])
+  @@index([severity])
+  @@index([status])
+  @@index([firedAt])
+}
+
+// ── 集群凭证（加密存储）──────────────────────────────
+model ClusterCredential {
+  id             String   @id @default(cuid())
+  clusterId      String   @unique
+  credentialType String   // kubeconfig|serviceaccount|token
+  encryptedData  String   // AES-256-GCM encrypted kubeconfig or token
+  keyRef         String?  // reference to KMS key id
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  cluster        ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([clusterId])
+}
+
+model RegistryConnector {
+  id                String   @id @default(cuid())
+  name              String
+  type              String   // harbor|oci
+  endpoint          String
+  projectScope      String?
+  authType          String   // basic|token
+  username          String?
+  passwordSecretRef String?
+  verifyTls         Boolean  @default(true)
+  state             String   @default("active")
+  lastCheckedAt     DateTime?
+  lastError         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  catalogCache      RegistryCatalogCache[]
+
+  @@unique([name])
+  @@index([type, state])
+}
+
+model RegistryCatalogCache {
+  id           String   @id @default(cuid())
+  connectorId  String
+  repository   String
+  tag          String?
+  digest       String?
+  artifactType String?
+  pulledAt     DateTime @default(now())
+
+  connector    RegistryConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  @@index([connectorId, repository])
+  @@index([pulledAt])
+}
+
+model ApiResourceCapability {
+  id               String   @id @default(cuid())
+  clusterId        String
+  group            String
+  version          String
+  kind             String
+  resource         String
+  namespaced       Boolean
+  verbsJson        Json
+  lastDiscoveredAt DateTime @default(now())
+
+  cluster          ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, group, version, resource])
+  @@index([clusterId, namespaced])
+}
+
+model ClusterProfile {
+  id              String   @id @default(cuid())
+  clusterId       String   @unique
+  environmentType String   // on-prem|private-cloud|public-cloud|edge
+  provider        String
+  region          String?
+  labelsJson      Json?
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  cluster         ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([environmentType, provider])
+}
+
+model RbacBinding {
+  id               String   @id @default(cuid())
+  name             String
+  kind             String   // RoleBinding|ClusterRoleBinding
+  namespace        String   @default("")
+  subject          String
+  subjectKind      String   // User|Group|ServiceAccount
+  subjectNamespace String   @default("")
+  state            String   @default("active") // active|disabled
+  version          Int      @default(1)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([kind, state, updatedAt])
+  @@index([name, namespace, subject])
+}
