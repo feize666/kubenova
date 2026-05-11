@@ -35,6 +35,7 @@ import type { TableProps } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { useModuleTableState } from "@/components/module-page";
+import { buildTablePagination } from "@/lib/table/pagination";
 import {
   createRbac,
   deleteRbac,
@@ -834,12 +835,10 @@ export default function RbacPage() {
           columns={columns}
           dataSource={rows}
           loading={{ spinning: query.isLoading, description: "RBAC 数据加载中..." }}
-          pagination={{
+          pagination={buildTablePagination({
             current: tableState.page,
             pageSize: tableState.pageSize,
             total: filtered.length,
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条`,
             onChange: (nextPage, nextPageSize) => {
               if (nextPageSize !== tableState.pageSize) {
                 tableState.setPageSize(nextPageSize);
@@ -847,7 +846,8 @@ export default function RbacPage() {
               }
               tableState.setPage(nextPage);
             },
-          }}
+            showTotal: (total) => `共 ${total} 条`,
+          })}
           locale={{
             emptyText:
               query.isLoading ? (

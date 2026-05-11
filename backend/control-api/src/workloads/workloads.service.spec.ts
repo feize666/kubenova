@@ -120,6 +120,58 @@ describe('WorkloadsService list online gate', () => {
       expect.objectContaining({ clusterId: 'c-1', clusterIds: undefined }),
     );
   });
+
+  it('passes normalized sortBy/sortOrder to repository', async () => {
+    const { service, repository, clusterHealthService } = build();
+    (repository.list as jest.Mock).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 10,
+    });
+    (
+      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
+    ).mockResolvedValue(['c-1']);
+
+    await service.list({
+      kind: 'pods',
+      sortBy: 'name',
+      sortOrder: 'ASC',
+    });
+
+    expect(repository.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'Pod',
+        sortBy: 'name',
+        sortOrder: 'asc',
+      }),
+    );
+  });
+
+  it('ignores invalid sortBy/sortOrder and keeps default behavior', async () => {
+    const { service, repository, clusterHealthService } = build();
+    (repository.list as jest.Mock).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 10,
+    });
+    (
+      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
+    ).mockResolvedValue(['c-1']);
+
+    await service.list({
+      sortBy: 'unknownField',
+      sortOrder: 'SIDEWAYS',
+    });
+
+    expect(repository.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sortBy: undefined,
+        sortOrder: undefined,
+      }),
+    );
+  });
 });
 
 describe('WorkloadsService workspace advanced validation', () => {

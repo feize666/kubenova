@@ -1,6 +1,5 @@
 "use client";
 
-import { SearchOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -11,9 +10,8 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
-import { NamespaceSelect } from "@/components/namespace-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { getClusters } from "@/lib/api/clusters";
 import { getNamespaces } from "@/lib/api/namespaces";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
@@ -23,12 +21,13 @@ import {
   getDynamicResourceDetail,
   getDynamicResources,
   refreshResourceDiscovery,
-  updateDynamicResourceYaml,
   type DynamicResourceIdentity,
   type DynamicResourceItem,
 } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { buildTablePagination } from "@/lib/table/pagination";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 type GatewayKindKey = "gatewayclass" | "gateway" | "httproute";
 
@@ -103,9 +102,8 @@ export default function GatewayApiPage() {
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
   const lastDiscoveryRefreshAtRef = useRef<Record<string, number>>({});
-
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter();
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
@@ -115,12 +113,11 @@ export default function GatewayApiPage() {
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
-  const [yamlValue, setYamlValue] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm<GatewayFormValues & HttpRouteFormValues>();
 
   const kindMeta = GATEWAY_KIND_META[kind];
-  const canCreate = true;
+  const canCreate = Boolean(clusterId);
 
   const clustersQuery = useQuery({
     queryKey: ["gateway-api", "clusters", accessToken],
@@ -128,20 +125,27 @@ export default function GatewayApiPage() {
     enabled: !isInitializing && Boolean(accessToken),
   });
 
-  const selectedClusterId = clusterId || clustersQuery.data?.items?.[0]?.id || "";
-
+  const clusterOptions = useMemo(
+    () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
+    [clustersQuery.data?.items],
+  );
+  const clusterMap = useMemo(
+    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
+    [clustersQuery.data?.items],
+  );
   const namespacesQuery = useQuery({
-    queryKey: ["gateway-api", "namespaces", selectedClusterId, accessToken],
-    queryFn: () => getNamespaces({ clusterId: selectedClusterId }, accessToken ?? undefined),
-    enabled: Boolean(accessToken) && Boolean(selectedClusterId),
+    queryKey: ["gateway-api", "namespaces", clusterId || "all", accessToken],
+    queryFn: () => getNamespaces({ clusterId: clusterId || undefined }, accessToken ?? undefined),
+    enabled: Boolean(accessToken) && Boolean(clusterId),
   });
 
   const listQuery = useQuery({
-    queryKey: ["gateway-api", kind, selectedClusterId, namespace, keyword, page, pageSize, accessToken],
+    queryKey: ["gateway-api", kind, clusterId || "all", namespace, keyword, page, pageSize, accessToken],
     queryFn: () =>
+      // TODO: backend must accept omitted clusterId for the all-clusters default view.
       getDynamicResources(
         {
-          clusterId: selectedClusterId,
+          clusterId: clusterId || undefined,
           group: "gateway.networking.k8s.io",
           version: kindMeta.version,
           resource: kindMeta.resource,
@@ -152,12 +156,17 @@ export default function GatewayApiPage() {
         },
         accessToken ?? undefined,
       ),
-    enabled: Boolean(accessToken) && Boolean(selectedClusterId),
+    enabled: Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
 
   const refreshDiscoveryMutation = useMutation({
-    mutationFn: () => refreshResourceDiscovery(selectedClusterId, accessToken ?? undefined),
+    mutationFn: () => {
+      if (!clusterId) {
+        throw new Error("请先选择集群后再刷新资源发现");
+      }
+      return refreshResourceDiscovery(clusterId, accessToken ?? undefined);
+    },
     onSuccess: async () => {
       await listQuery.refetch();
     },
@@ -167,19 +176,19 @@ export default function GatewayApiPage() {
   });
 
   useEffect(() => {
-    if (!accessToken || !selectedClusterId || refreshDiscoveryMutation.isPending) {
+    if (!accessToken || !clusterId || refreshDiscoveryMutation.isPending) {
       return;
     }
 
     const now = Date.now();
-    const lastTriggeredAt = lastDiscoveryRefreshAtRef.current[selectedClusterId] ?? 0;
+    const lastTriggeredAt = lastDiscoveryRefreshAtRef.current[clusterId] ?? 0;
     if (now - lastTriggeredAt < 5 * 60 * 1000) {
       return;
     }
 
-    lastDiscoveryRefreshAtRef.current[selectedClusterId] = now;
+    lastDiscoveryRefreshAtRef.current[clusterId] = now;
     refreshDiscoveryMutation.mutate();
-  }, [accessToken, selectedClusterId, refreshDiscoveryMutation]);
+  }, [accessToken, clusterId, refreshDiscoveryMutation]);
 
   const openYamlMutation = useMutation({
     mutationFn: (identity: DynamicResourceIdentity) => getDynamicResourceDetail(identity, accessToken ?? undefined),
@@ -190,24 +199,10 @@ export default function GatewayApiPage() {
         kind: identity.resource,
         name: identity.name,
       });
-      setYamlValue(detail.yaml);
       setYamlOpen(true);
     },
     onError: (error) => {
       void message.error(error instanceof Error ? error.message : "读取 YAML 失败");
-    },
-  });
-
-  const applyYamlMutation = useMutation({
-    mutationFn: (payload: DynamicResourceIdentity & { yaml: string }) =>
-      updateDynamicResourceYaml({ ...payload, yaml: payload.yaml }, accessToken ?? undefined),
-    onSuccess: async () => {
-      void message.success("YAML 已应用");
-      setYamlOpen(false);
-      await listQuery.refetch();
-    },
-    onError: (error) => {
-      void message.error(error instanceof Error ? error.message : "应用 YAML 失败");
     },
   });
 
@@ -244,6 +239,7 @@ export default function GatewayApiPage() {
   });
 
   const rows = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
+  const effectivePageSize = listQuery.data?.pageSize ?? pageSize;
   const knownNamespaces = useMemo(
     () =>
       Array.from(
@@ -256,16 +252,18 @@ export default function GatewayApiPage() {
   );
   const tableData = useMemo(
     () =>
-      rows.filter((item) =>
-        mergedFilters.length === 0
-          ? true
-          : mergedFilters.every((filter) =>
-              Object.entries(item.labels ?? {}).some(([key, value]) =>
-                `${key}=${value}`.toLowerCase().includes(filter.toLowerCase()),
-              ),
-            ),
+      rows.filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          (mergedFilters.length === 0
+            ? true
+            : mergedFilters.every((filter) =>
+                Object.entries(item.labels ?? {}).some(([key, value]) =>
+                  `${key}=${value}`.toLowerCase().includes(filter.toLowerCase()),
+                ),
+              )),
       ),
-    [rows, mergedFilters],
+    [clusterMap, rows, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -293,7 +291,7 @@ export default function GatewayApiPage() {
     if (kind === "gateway") {
       const addressValue = values.addresses?.trim();
       createMutation.mutate({
-        clusterId: selectedClusterId,
+        clusterId,
         group: "gateway.networking.k8s.io",
         version: "v1",
         resource: "gateways",
@@ -348,7 +346,7 @@ export default function GatewayApiPage() {
 
     if (kind === "gatewayclass") {
       createMutation.mutate({
-        clusterId: selectedClusterId,
+        clusterId,
         group: "gateway.networking.k8s.io",
         version: "v1",
         resource: "gatewayclasses",
@@ -378,7 +376,7 @@ export default function GatewayApiPage() {
     if (kind === "httproute") {
       const hostnames = values.hostnames ? values.hostnames.split(/\s+/).filter(Boolean) : [];
       createMutation.mutate({
-        clusterId: selectedClusterId,
+        clusterId,
         group: "gateway.networking.k8s.io",
         version: "v1",
         resource: "httproutes",
@@ -422,11 +420,6 @@ export default function GatewayApiPage() {
       });
     }
   };
-
-  const clusterMap = useMemo(
-    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
-    [clustersQuery.data?.items],
-  );
 
   const columns: ColumnsType<GatewayRow> = [
     {
@@ -522,7 +515,22 @@ export default function GatewayApiPage() {
         titleZh="Gateway API"
         titleEn="Gateway API"
         description="管理 GatewayClass、Gateway 与 HTTPRoute 资源。"
-        titleSuffix={canCreate ? <Button type="primary" onClick={() => { createForm.resetFields(); setCreateOpen(true); }}>新增资源</Button> : null}
+        titleSuffix={
+          <Button
+            type="primary"
+            disabled={!canCreate}
+            onClick={() => {
+              if (!clusterId) {
+                void message.error("请先选择集群后再新增资源");
+                return;
+              }
+              createForm.resetFields();
+              setCreateOpen(true);
+            }}
+          >
+            新增资源
+          </Button>
+        }
       />
 
       <Card>
@@ -542,46 +550,27 @@ export default function GatewayApiPage() {
             />
           </Col>
         </Row>
-        <Row gutter={[12, 12]} align="middle" style={{ marginBottom: 16 }}>
-          <Col xs={24} sm={12} md={6} lg={4}>
-            <Select
-              style={{ width: "100%" }}
-              placeholder="全部集群"
-              value={selectedClusterId || undefined}
-              onChange={(value) => {
-                setClusterId(value);
-                setPage(1);
-              }}
-              options={(clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id }))}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={5} lg={4}>
-            <NamespaceSelect
-              value={namespace}
-              onChange={(value) => {
-                setNamespace(value);
-                setPage(1);
-              }}
-              knownNamespaces={knownNamespaces}
-              clusterId={selectedClusterId}
-            />
-          </Col>
-          <Col xs={24} sm={16} md={7} lg={6}>
-            <Input
-              prefix={<SearchOutlined />}
-              allowClear
-              placeholder="按名称/标签搜索"
-              value={keywordInput}
-              onChange={(event) => setKeywordInput(event.target.value)}
-              onPressEnter={handleSearch}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={4} lg={3}>
-            <Button icon={<SearchOutlined />} type="primary" onClick={handleSearch}>
-              查询
-            </Button>
-          </Col>
-        </Row>
+        <NetworkResourcePageFilters
+          clusterId={clusterId}
+          namespace={namespace}
+          keywordInput={keywordInput}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onClusterChange={(value) => {
+            onClusterChange(value);
+            setPage(1);
+          }}
+          onNamespaceChange={(value) => {
+            onNamespaceChange(value);
+            setPage(1);
+          }}
+          onKeywordInputChange={setKeywordInput}
+          onSearch={handleSearch}
+          keywordPlaceholder="按名称/标签搜索"
+        />
 
         {!isInitializing && !accessToken ? (
           <Alert type="warning" showIcon message="未登录或登录初始化中，请稍后重试。" style={{ marginBottom: 16 }} />
@@ -598,24 +587,25 @@ export default function GatewayApiPage() {
         ) : null}
 
         <Table<GatewayRow>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
           dataSource={tableData}
           loading={listQuery.isLoading}
-          pagination={{
+          pagination={buildTablePagination({
             current: listQuery.data?.page ?? page,
-            pageSize: listQuery.data?.pageSize ?? pageSize,
+            pageSize: effectivePageSize,
             total: listQuery.data?.total ?? 0,
-            showSizeChanger: true,
             onChange: (nextPage, nextPageSize) => {
-              setPage(nextPage);
-              if (nextPageSize !== pageSize) {
+              if (nextPageSize !== effectivePageSize) {
                 setPageSize(nextPageSize);
                 setPage(1);
+                return;
               }
+              setPage(nextPage);
             },
-          }}
+          })}
           scroll={{ x: getTableScrollX(columns) }}
           onRow={(record) => ({
             onClick: () => {

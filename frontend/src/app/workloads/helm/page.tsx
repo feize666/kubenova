@@ -39,10 +39,12 @@ import {
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { NamespaceSelect } from "@/components/namespace-select";
+import { ClusterSelect } from "@/components/cluster-select";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { buildTablePagination } from "@/lib/table/pagination";
 import {
   executeHelmAction,
   getHelmCharts,
@@ -84,7 +86,7 @@ export default function HelmPage() {
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [installOpen, setInstallOpen] = useState(false);
   const [rollbackOpen, setRollbackOpen] = useState(false);
@@ -106,13 +108,18 @@ export default function HelmPage() {
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
 
+  const helmClusterOptions = useMemo(
+    () =>
+      (clustersQuery.data?.items ?? []).map((c) => ({
+        label: c.name,
+        value: c.id,
+      })),
+    [clustersQuery.data?.items],
+  );
+
   const selectedClusterId = useMemo(() => {
-    if (clusterId) {
-      return clusterId;
-    }
-    const items = clustersQuery.data?.items ?? [];
-    return items.find((item) => item.hasKubeconfig !== false)?.id ?? items[0]?.id ?? "";
-  }, [clusterId, clustersQuery.data?.items]);
+    return clusterId;
+  }, [clusterId]);
 
   const selectedCluster = useMemo(
     () => (clustersQuery.data?.items ?? []).find((item) => item.id === selectedClusterId),
@@ -137,7 +144,7 @@ export default function HelmPage() {
         },
         accessToken ?? undefined,
     ),
-    enabled: !isInitializing && Boolean(accessToken) && Boolean(selectedClusterId) && selectedClusterReady,
+    enabled: !isInitializing && Boolean(accessToken) && selectedClusterReady,
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
 
@@ -145,7 +152,7 @@ export default function HelmPage() {
     queryKey: ["helm", "repositories", installClusterId || selectedClusterId, accessToken],
     queryFn: () =>
       getHelmRepositories(
-        { clusterId: installClusterId || selectedClusterId },
+        { clusterId: installClusterId || selectedClusterId, page: 1, pageSize: 200 },
         accessToken ?? undefined,
       ),
     enabled: Boolean(accessToken) && Boolean(installClusterId || selectedClusterId),
@@ -179,7 +186,17 @@ export default function HelmPage() {
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
 
-  const rows = useMemo(() => releasesQuery.data?.items ?? [], [releasesQuery.data?.items]);
+  const rows = useMemo(
+    () =>
+      (releasesQuery.data?.items ?? []).filter((row) => {
+        if (!hasKnownCluster(clusterMap, row.clusterId)) {
+          return false;
+        }
+        const cluster = clustersQuery.data?.items?.find((item) => item.id === row.clusterId);
+        return cluster?.hasKubeconfig !== false;
+      }),
+    [clusterMap, clustersQuery.data?.items, releasesQuery.data?.items],
+  );
   const releaseNameWidth = useMemo(
     () => getAdaptiveNameWidth(rows.map((row) => row.name), { max: 320 }),
     [rows],
@@ -277,9 +294,9 @@ export default function HelmPage() {
   const clusterOptions = useMemo(
     () =>
       (clustersQuery.data?.items ?? []).map((c) => ({
-        label: c.hasKubeconfig === false ? `${c.name}（未配置 kubeconfig）` : c.name,
-        value: c.id,
-      })),
+              label: c.name,
+              value: c.id,
+            })),
     [clustersQuery.data],
   );
 
@@ -559,17 +576,15 @@ export default function HelmPage() {
       <Card>
         <Row gutter={[12, 12]} align="middle" style={{ marginBottom: 12 }}>
           <Col xs={24} sm={12} md={6} lg={4}>
-            <Select
-              style={{ width: "100%" }}
-              placeholder="选择集群"
-              value={selectedClusterId || undefined}
+            <ClusterSelect
+              value={selectedClusterId}
               onChange={(v) => {
-                setClusterId(v ?? "");
+                setClusterId(v);
                 setPage(1);
                 setSelectedRowId(null);
                 setDetailTarget(null);
               }}
-              options={clusterOptions}
+              options={helmClusterOptions}
               loading={clustersQuery.isLoading}
             />
           </Col>
@@ -624,6 +639,16 @@ export default function HelmPage() {
           />
         ) : null}
 
+        {!selectedClusterId ? (
+          <Alert
+            type="info"
+            showIcon
+            message="当前显示全部集群的 Helm Release。"
+            description="列表会自动隐藏未知集群与未配置 kubeconfig 的集群。"
+            style={{ marginBottom: 16 }}
+          />
+        ) : null}
+
         {!releasesQuery.isError && selectedCluster && selectedCluster.hasKubeconfig === false ? (
           <Alert
             type="warning"
@@ -635,6 +660,7 @@ export default function HelmPage() {
         ) : null}
 
         <Table<HelmReleaseItem>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
@@ -643,16 +669,20 @@ export default function HelmPage() {
             onClick: () => setSelectedRowId(record.id),
           })}
           loading={releasesQuery.isLoading}
-          pagination={{
+          pagination={buildTablePagination({
             current: page,
             pageSize,
             total: releasesQuery.data?.total ?? 0,
-            onChange: (p) => {
-              setPage(p);
+            disabled: releasesQuery.isLoading,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage);
               setDetailTarget(null);
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+              }
             },
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

@@ -50,7 +50,7 @@ export function MetricRingVisual({
   value,
   percent,
   color,
-  size = 120,
+  size = 112,
   showGlow = false,
 }: {
   value: string;
@@ -111,11 +111,12 @@ export function MetricRingVisual({
       >
         <Typography.Text
           style={{
-            fontSize: Math.max(12, Math.round(size / 5)),
+            fontSize: Math.max(11, Math.round(size / 6)),
             fontWeight: 700,
             color: "var(--surface-text)",
             fontVariantNumeric: "tabular-nums",
             lineHeight: 1,
+            whiteSpace: "nowrap",
           }}
         >
           {value}
@@ -189,11 +190,11 @@ export function PodMetricCell({
   kind: "cpu" | "memory";
 }) {
   const ringValue = MetricUnitFormatter({ kind, value });
-  const displayPercent = typeof percent === "number" && Number.isFinite(percent) ? percent : 0;
+  const displayPercent = typeof percent === "number" && Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
   const color = kind === "cpu" ? "#3fb950" : "#58a6ff";
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <MetricRingVisual value={ringValue} percent={displayPercent} color={color} size={64} />
+      <MetricRingVisual value={ringValue} percent={displayPercent} color={color} size={52} />
     </div>
   );
 }

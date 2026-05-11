@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Button,
   Card,
   Form,
   Input,
@@ -36,11 +35,13 @@ import {
   type NetworkResource,
 } from "@/lib/api/network";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { buildTablePagination } from "@/lib/table/pagination";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 type IngressResource = NetworkResource & {
   spec?: {
@@ -66,14 +67,14 @@ export default function IngressPage() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const [clusterId, setClusterId] = useState(() => searchParams.get("cluster") ?? "");
-  const [namespace, setNamespace] = useState(() => searchParams.get("namespace") ?? "");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(searchParams.get("cluster") ?? "", searchParams.get("namespace") ?? "");
   const initialKeyword = searchParams.get("keyword") ?? "";
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -106,10 +107,7 @@ export default function IngressPage() {
   });
 
   const clusterFilterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
 
@@ -191,10 +189,12 @@ export default function IngressPage() {
   );
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter((item) =>
-        matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+      (data?.items ?? []).filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -353,12 +353,14 @@ export default function IngressPage() {
           clusterOptions={clusterFilterOptions}
           clusterLoading={clustersQuery.isLoading}
           knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
-            setClusterId(value);
+            onClusterChange(value);
             setPage(1);
           }}
           onNamespaceChange={(value) => {
-            setNamespace(value);
+            onNamespaceChange(value);
             setPage(1);
           }}
           onKeywordInputChange={(value) => {
@@ -368,6 +370,7 @@ export default function IngressPage() {
             }
           }}
           onSearch={handleSearch}
+          keywordPlaceholder="按名称/标签搜索（示例：ingress-a app=web env=prod）"
         />
 
         {!isInitializing && !accessToken ? (
@@ -390,18 +393,25 @@ export default function IngressPage() {
         ) : null}
 
         <Table<IngressResource>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={{
+          pagination={buildTablePagination({
             current: page,
             pageSize,
             total: data?.total ?? 0,
-            onChange: (p) => setPage(p),
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+            disabled: isLoading && !data,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage);
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+              }
+            },
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

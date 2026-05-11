@@ -1,6 +1,7 @@
 import { apiRequest } from "./client";
 import type { Cluster, ClusterListResponse, GetClustersParams, QueryParams } from "./types";
 import type { ClusterDetailModel } from "@/lib/contracts/domain";
+import { getClusterHealthList } from "./cluster-health";
 
 export async function getClusters(params: GetClustersParams = {}, token: string): Promise<ClusterListResponse> {
   const query: QueryParams = {
@@ -26,16 +27,36 @@ export async function getClusters(params: GetClustersParams = {}, token: string)
   if (!params.selectableOnly) {
     return { ...result, items: visibleItems, total: visibleItems.length };
   }
-  const selectableItems = visibleItems.filter(
-    (item) =>
-      item.state === "active" &&
-      item.hasKubeconfig !== false,
-  );
-  return {
-    ...result,
-    items: selectableItems,
-    total: selectableItems.length,
-  };
+  try {
+    const health = await getClusterHealthList(
+      {
+        lifecycleState: "active",
+        runtimeStatus: "running",
+        page: 1,
+        pageSize: 500,
+      },
+      token,
+      { suppressAuthExpiryBroadcast: true },
+    );
+    const onlineIds = new Set(health.items.map((item) => item.clusterId));
+    const onlineSelectable = visibleItems.filter(
+      (item) =>
+        item.state === "active" &&
+        item.hasKubeconfig !== false &&
+        onlineIds.has(item.id),
+    );
+    return {
+      ...result,
+      items: onlineSelectable,
+      total: onlineSelectable.length,
+    };
+  } catch {
+    return {
+      ...result,
+      items: [],
+      total: 0,
+    };
+  }
 }
 
 export interface ClusterPayload {

@@ -23,6 +23,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { NamespaceSelect } from "@/components/namespace-select";
+import { ClusterSelect } from "@/components/cluster-select";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
@@ -43,7 +44,7 @@ import {
 import { ApiError } from "@/lib/api/client";
 import type { HpaMetricSpec, HpaMetricTargetType } from "@/lib/contracts";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { getTableScrollX } from "@/lib/table-column-widths";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -132,8 +133,8 @@ function formatConfig(item: AutoscalingPolicyItem): string {
   return `mode=${item.config.updateMode}, resources=${resources}`;
 }
 
-function getPolicyResourceName(item: AutoscalingPolicyItem): string {
-  return item.resourceName ?? item.workloadName;
+function getAutoscalingResourceName(item: AutoscalingPolicyItem): string {
+  return (item.resourceName || item.workloadName || "").trim();
 }
 
 function parseJsonValue<T>(value: string | undefined, field: string): T | undefined {
@@ -332,6 +333,11 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
   const effectiveTypeFilter = defaultType ?? typeFilter;
 
   const [form] = Form.useForm<PolicyFormValues>();
+  const formType =
+    (Form.useWatch("type", form) as AutoscalingType | undefined) ??
+    editing?.type ??
+    defaultType ??
+    "HPA";
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "autoscaling", accessToken],
@@ -355,21 +361,21 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     enabled: queryEnabled,
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
-  const selectedItem = useMemo(
-    () => policiesQuery.data?.items?.find((item) => item.id === selectedRowId) ?? null,
-    [policiesQuery.data?.items, selectedRowId],
-  );
-
   const clusterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
-    ],
-    [clustersQuery.data],
+    () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
+    [clustersQuery.data?.items],
   );
   const clusterMap = useMemo(
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
     [clustersQuery.data?.items],
+  );
+  const visiblePolicies = useMemo(
+    () => (policiesQuery.data?.items ?? []).filter((item) => hasKnownCluster(clusterMap, item.clusterId)),
+    [clusterMap, policiesQuery.data?.items],
+  );
+  const selectedItem = useMemo(
+    () => visiblePolicies.find((item) => item.id === selectedRowId) ?? null,
+    [selectedRowId, visiblePolicies],
   );
   const policiesEmptyText =
     clusterId || namespace.trim() || kind || keyword.trim() || effectiveTypeFilter
@@ -392,7 +398,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       "autoscaling-events",
       selectedItem?.clusterId,
       selectedItem?.namespace,
-      selectedItem?.resourceName ?? selectedItem?.workloadName,
+      selectedItem ? getAutoscalingResourceName(selectedItem) : undefined,
       accessToken,
     ],
     queryFn: () =>
@@ -401,7 +407,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           clusterId: selectedItem!.clusterId,
           namespace: selectedItem!.namespace,
           kind: selectedItem!.workloadKind,
-          name: getPolicyResourceName(selectedItem!),
+          name: getAutoscalingResourceName(selectedItem!),
           hours: 24,
         },
         accessToken,
@@ -438,7 +444,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         clusterId: row.clusterId,
         namespace: row.namespace,
         kind: row.workloadKind,
-        name: getPolicyResourceName(row),
+        name: getAutoscalingResourceName(row),
         hpaMinReplicas: row.config.minReplicas,
         hpaMaxReplicas: row.config.maxReplicas,
         hpaTargetCpu: row.config.targetCpuUtilizationPercentage,
@@ -455,7 +461,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         clusterId: row.clusterId,
         namespace: row.namespace,
         kind: row.workloadKind,
-        name: getPolicyResourceName(row),
+        name: getAutoscalingResourceName(row),
         vpaUpdateMode: row.config.updateMode,
         vpaMinCpu: row.config.minAllowedCpu,
         vpaMaxCpu: row.config.maxAllowedCpu,
@@ -558,7 +564,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             clusterId: editing.clusterId,
             namespace: editing.namespace,
             kind: editing.workloadKind,
-            name: getPolicyResourceName(editing),
+            name: getAutoscalingResourceName(editing),
           },
           {
             hpa: {
@@ -579,7 +585,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           clusterId: editing.clusterId,
           namespace: editing.namespace,
           kind: editing.workloadKind,
-          name: getPolicyResourceName(editing),
+          name: getAutoscalingResourceName(editing),
         },
         {
           vpa: {
@@ -611,12 +617,12 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     mutationFn: (item: AutoscalingPolicyItem) =>
       deleteAutoscalingPolicy(
         item.type,
-        {
-          clusterId: item.clusterId,
-          namespace: item.namespace,
-          kind: item.workloadKind,
-          name: item.resourceName ?? getPolicyResourceName(item),
-        },
+          {
+            clusterId: item.clusterId,
+            namespace: item.namespace,
+            kind: item.workloadKind,
+            name: getAutoscalingResourceName(item),
+          },
         accessToken,
       ),
     onSuccess: async (_, item) => {
@@ -651,7 +657,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       width: 220,
       render: (_, row) => (
         <Space orientation="vertical" size={0}>
-          <Typography.Text code>{getPolicyResourceName(row)}</Typography.Text>
+          <Typography.Text code>{getAutoscalingResourceName(row)}</Typography.Text>
         </Space>
       ),
     },
@@ -725,7 +731,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                 if (key === "detail") {
                   setDetailRequest({
                     kind: row.type === "HPA" ? "HorizontalPodAutoscaler" : "VerticalPodAutoscaler",
-                    id: `${row.clusterId}/${row.namespace}/${getPolicyResourceName(row)}`,
+                    id: `${row.clusterId}/${row.namespace}/${getAutoscalingResourceName(row)}`,
                   });
                   return;
                 }
@@ -740,7 +746,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                 if (key === "delete") {
                   Modal.confirm({
                     title: `删除 ${row.type} 策略`,
-                    content: `确认删除 ${row.resourceName ?? getPolicyResourceName(row)} 的 ${row.type} 策略？`,
+                    content: `确认删除 ${getAutoscalingResourceName(row)} 的 ${row.type} 策略？`,
                     okText: "删除",
                     okButtonProps: { danger: true },
                     cancelText: "取消",
@@ -792,11 +798,10 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       <Card>
         <Row gutter={[12, 12]} align="middle">
           <Col xs={24} sm={12} md={8} lg={6}>
-            <Select
-              className="resource-filter-select"
+            <ClusterSelect
               value={clusterId}
               options={clusterOptions}
-              style={{ width: "100%" }}
+              loading={clustersQuery.isLoading}
               onChange={(value) => setClusterId(value)}
             />
           </Col>
@@ -858,7 +863,18 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         </Col>
         <Col xs={12} md={6}>
           <Card>
-            <Statistic title="未覆盖资源" value={policiesQuery.data?.overview.uncoveredWorkloads ?? 0} valueStyle={{ color: (policiesQuery.data?.overview.uncoveredWorkloads ?? 0) > 0 ? "#fa8c16" : undefined }} />
+            <Statistic
+              title="未覆盖资源"
+              value={policiesQuery.data?.overview.uncoveredWorkloads ?? 0}
+              styles={{
+                content: {
+                  color:
+                    (policiesQuery.data?.overview.uncoveredWorkloads ?? 0) > 0
+                      ? "#fa8c16"
+                      : undefined,
+                },
+              }}
+            />
           </Card>
         </Col>
         <Col xs={12} md={6}>
@@ -872,7 +888,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         <Table<AutoscalingPolicyItem>
           rowKey="id"
           columns={columns}
-          dataSource={policiesQuery.data?.items ?? []}
+          dataSource={visiblePolicies}
           onRow={(record) => ({
             onClick: () => setSelectedRowId(record.id),
           })}
@@ -888,7 +904,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           {selectedItem ? (
             <>
               <Typography.Text>
-                资源：<Typography.Text strong>{getPolicyResourceName(selectedItem)}</Typography.Text>
+                资源：<Typography.Text strong>{getAutoscalingResourceName(selectedItem)}</Typography.Text>
               </Typography.Text>
               <Typography.Text type="secondary">
                 集群：{getClusterDisplayName(clusterMap, selectedItem.clusterId)} · 名称空间：{selectedItem.namespace}
@@ -910,11 +926,11 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           </Typography.Title>
           <Typography.Text type="secondary">
             {selectedItem
-              ? `${getPolicyResourceName(selectedItem)} · ${getClusterDisplayName(clusterMap, selectedItem.clusterId)}/${selectedItem.namespace}`
+              ? `${getAutoscalingResourceName(selectedItem)} · ${getClusterDisplayName(clusterMap, selectedItem.clusterId)}/${selectedItem.namespace}`
               : ""}
           </Typography.Text>
           <Table<AutoscalingEventItem>
-            rowKey={(item, index) => `${item.timestamp}-${item.reason}-${index}`}
+            rowKey={(item) => `${item.timestamp}-${item.reason}`}
             columns={eventColumns}
             dataSource={selectedItem ? eventsQuery.data?.items ?? [] : []}
             loading={queryEnabled && Boolean(selectedItem) && !eventsQuery.data && eventsQuery.isLoading}
@@ -984,18 +1000,14 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="name" label="工作负载名称" rules={[{ required: true, message: "请输入名称" }]}>
+              <Form.Item name="name" label={editing ? "策略资源名称" : "工作负载名称"} rules={[{ required: true, message: "请输入名称" }]}>
                 <Input disabled={Boolean(editing)} />
               </Form.Item>
             </Col>
           </Row>
 
-          <Form.Item noStyle shouldUpdate>
-            {({ getFieldValue }) => {
-              const type = getFieldValue("type") as AutoscalingType;
-              if (type === "HPA") {
-                return (
-                  <>
+          {formType === "HPA" ? (
+            <>
                     <Row gutter={12}>
                       <Col span={8}>
                         <Form.Item
@@ -1065,7 +1077,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                     >
                       <Form.List name="hpaMetrics">
                         {(fields, { remove }) => (
-                          <Space direction="vertical" style={{ width: "100%" }} size={12}>
+                          <Space orientation="vertical" style={{ width: "100%" }} size={12}>
                             {fields.length === 0 ? (
                               <Typography.Text type="secondary">
                                 未配置高级指标。可选添加 Resource/Pods/External 指标。
@@ -1179,7 +1191,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                     </Card>
 
                     <Card size="small" title="扩缩容策略 (behavior)" style={{ marginBottom: 12 }}>
-                      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                      <Space orientation="vertical" size={12} style={{ width: "100%" }}>
                         {(["scaleUp", "scaleDown"] as const).map((ruleKey) => (
                           <Card
                             key={ruleKey}
@@ -1209,7 +1221,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
 
                           <Form.List name={["hpaBehavior", ruleKey, "policies"]}>
                             {(fields, { add, remove }) => (
-                              <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                              <Space orientation="vertical" size={8} style={{ width: "100%" }}>
                                 <Button
                                   type="dashed"
                                   onClick={() => {
@@ -1281,12 +1293,9 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                         </Form.Item>
                       </Col>
                     </Row>
-                  </>
-                );
-              }
-
-              return (
-                <>
+            </>
+          ) : (
+            <>
                   <Row gutter={12}>
                     <Col span={8}>
                       <Form.Item name="vpaUpdateMode" label="更新模式" rules={[{ required: true, message: "请选择模式" }]}>
@@ -1327,10 +1336,8 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                       </Form.Item>
                     </Col>
                   </Row>
-                </>
-              );
-            }}
-          </Form.Item>
+            </>
+          )}
         </Form>
       </Modal>
 
@@ -1343,7 +1350,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                 clusterId: yamlTarget.clusterId,
                 namespace: yamlTarget.namespace,
                 kind: yamlTarget.type === "HPA" ? "HorizontalPodAutoscaler" : "VerticalPodAutoscaler",
-                name: getPolicyResourceName(yamlTarget),
+                name: getAutoscalingResourceName(yamlTarget),
               }
             : null
         }

@@ -96,6 +96,17 @@ prepare_frontend_deps() {
   echo "[预检] 前端依赖安装完成"
 }
 
+clean_frontend_dev_cache() {
+  if [[ "$FRONTEND_BOOT_MODE" != "dev" ]]; then
+    return
+  fi
+
+  if [[ -d "$FRONTEND_DIR/.next/dev" ]]; then
+    echo "[预检] 清理前端 dev 缓存..."
+    rm -rf "$FRONTEND_DIR/.next/dev"
+  fi
+}
+
 prepare_control_api_deps() {
   local nest_bin="$CONTROL_API_DIR/node_modules/.bin/nest"
   if [[ -f "$nest_bin" ]]; then
@@ -203,6 +214,7 @@ wait_for_redis
 prepare_runtime_gateway
 prepare_frontend_deps
 prepare_control_api_deps
+clean_frontend_dev_cache
 prepare_frontend_standalone
 
 # ── 进程管理 ────────────────────────────────────────────

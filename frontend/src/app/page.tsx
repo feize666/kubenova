@@ -142,9 +142,9 @@ export default function HomePage() {
   const cpuRing = liveSnapshot?.available ? (
     <MetricRingVisual
       value={formatLiveCpu(liveSnapshot.cpuUsage)}
-      percent={typeof liveSnapshot.cpuUsage === "number" ? liveSnapshot.cpuUsage * 100 : 0}
+      percent={typeof liveSnapshot.cpuUsage === "number" ? Math.min(100, liveSnapshot.cpuUsage * 1000) : 0}
       color="#3fb950"
-      size={124}
+      size={112}
       showGlow
     />
   ) : null;
@@ -154,7 +154,7 @@ export default function HomePage() {
       value={formatLiveMemory(liveSnapshot.memoryUsage)}
       percent={typeof liveSnapshot.memoryUsage === "number" ? (liveSnapshot.memoryUsage / (1024 ** 3)) * 100 : 0}
       color="#58a6ff"
-      size={124}
+      size={112}
       showGlow
     />
   ) : null;

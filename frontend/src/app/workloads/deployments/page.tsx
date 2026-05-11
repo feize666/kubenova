@@ -24,7 +24,6 @@ import {
   InputNumber,
   Modal,
   Row,
-  Select,
   Space,
   Table,
   Tag,
@@ -57,7 +56,6 @@ import {
   enableWorkload,
   getWorkloads,
   patchWorkloadById,
-  type WorkloadListItem,
   type WorkloadItem,
   type WorkloadsListResponse,
   type WorkloadState,
@@ -66,13 +64,11 @@ import {
 import { type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { NamespaceSelect } from "@/components/namespace-select";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import {
-  extractWorkloadImage,
-  extractWorkloadImages,
-  WORKLOAD_IMAGE_PLACEHOLDER,
-} from "@/lib/workloads/image";
+import { useAntdTableSortPagination } from "@/lib/table";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import {
   runScaleConvergence,
   type ScaleConvergenceRound,
@@ -107,8 +103,6 @@ type DeploymentRow = {
   集群: string;
   名称: string;
   名称空间: string;
-  镜像: string;
-  解析镜像列表: string[];
   副本数: number;
   就绪数: number;
   可用数: number;
@@ -147,21 +141,8 @@ function mapStatus(status: WorkloadStatus): DeploymentStatus {
   return "异常";
 }
 
-function extractImageDataFromItem(item: WorkloadItem): {
-  primaryImage: string;
-  allImages: string[];
-} {
-  const workload = item as unknown as WorkloadListItem;
-  const allImages = extractWorkloadImages(workload);
-  return {
-    primaryImage: extractWorkloadImage(workload, WORKLOAD_IMAGE_PLACEHOLDER),
-    allImages,
-  };
-}
-
 function mapItemToRow(item: WorkloadItem): DeploymentRow {
   const { current, desired } = parseReplicaPair(item.replicas);
-  const { primaryImage, allImages } = extractImageDataFromItem(item);
   return {
     key: `${item.clusterId}/${item.namespace}/${item.name}`,
     id: (item as WorkloadItem & { id?: string }).id ?? "",
@@ -169,8 +150,6 @@ function mapItemToRow(item: WorkloadItem): DeploymentRow {
     集群: item.clusterId,
     名称: item.name,
     名称空间: item.namespace,
-    镜像: primaryImage,
-    解析镜像列表: allImages,
     副本数: desired,
     就绪数: current,
     可用数: current,
@@ -216,21 +195,30 @@ export default function DeploymentsPage() {
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [namespace, setNamespace] = useState("");
-  const [分页, set分页] = useState({ current: 1, pageSize: 6 });
-  const [排序, set排序] = useState<{ field?: string; order?: "ascend" | "descend" }>({});
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<DeploymentRow>({
+    defaultPageSize: 6,
+  });
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [扩缩容行, set扩缩容行] = useState<DeploymentRow | null>(null);
+  const editingRow = 扩缩容行;
   const [目标副本, set目标副本] = useState<number>(1);
   const [scaleConvergence, setScaleConvergence] = useState<ScaleConvergenceViewState | null>(null);
   const [yaml目标, setYaml目标] = useState<ResourceIdentity | null>(null);
 
   // CRUD Modal state
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingRow, setEditingRow] = useState<DeploymentRow | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<DeploymentFormValues>();
 
-  const workloadsKey = ["workloads", "deployments", clusterId, 关键字, namespace, 分页.current, 分页.pageSize, 排序.field, 排序.order, accessToken];
+  const workloadsKey = ["workloads", "deployments", clusterId, 关键字, namespace, pagination.pageIndex + 1, pagination.pageSize, sortBy, sortOrder, accessToken];
 
   const query = useQuery({
     queryKey: workloadsKey,
@@ -238,10 +226,10 @@ export default function DeploymentsPage() {
       getWorkloads(
         "deployments",
         {
-          page: 分页.current,
-          pageSize: 分页.pageSize,
-          sortBy: 排序.field,
-          sortOrder: 排序.order === "ascend" ? "asc" : 排序.order === "descend" ? "desc" : undefined,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
           keyword: 关键字.trim() || undefined,
           namespace: namespace.trim() || undefined,
           clusterId: clusterId || undefined,
@@ -260,10 +248,7 @@ export default function DeploymentsPage() {
   });
 
   const clusterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
   const clusterMap = useMemo(
@@ -465,7 +450,6 @@ export default function DeploymentsPage() {
       { accessorKey: "名称" },
       { accessorKey: "名称空间" },
       { accessorKey: "集群" },
-      { accessorKey: "镜像" },
       { accessorKey: "副本数" },
       { accessorKey: "就绪数" },
       { accessorKey: "可用数" },
@@ -514,14 +498,14 @@ export default function DeploymentsPage() {
     },
   });
 
-  const 表格数据 = table.getRowModel().rows.map((row) => row.original);
+  const 表格数据 = table.getRowModel().rows.map((row) => row.original).filter((row) => hasKnownCluster(clusterMap, row.集群));
   const 名称列宽度 = useMemo(
     () => getAdaptiveNameWidth(表格数据.map((row) => row.名称), { max: 340 }),
     [表格数据],
   );
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    set分页({ ...分页, current: 1 });
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     set关键字(parsed.keyword);
   };
@@ -675,8 +659,9 @@ export default function DeploymentsPage() {
         ) : (
           name
         ),
+      ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "集群", key: "集群", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: DeploymentRow) => clusterMap[row.集群] ?? row.集群 },
+    { title: "集群", dataIndex: "集群", key: "集群", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: DeploymentRow) => getClusterDisplayName(clusterMap, row.集群) },
     { title: "名称空间", dataIndex: "名称空间", key: "名称空间", width: TABLE_COL_WIDTH.namespace },
     {
       title: "状态",
@@ -692,36 +677,25 @@ export default function DeploymentsPage() {
       width: TABLE_COL_WIDTH.status,
       render: (value: "启用" | "禁用") => <Tag color={value === "禁用" ? "default" : "green"}>{value}</Tag>,
     },
-    { title: "副本", dataIndex: "副本数", key: "副本数", width: TABLE_COL_WIDTH.replicas },
-    { title: "就绪", dataIndex: "就绪数", key: "就绪数", width: TABLE_COL_WIDTH.ready },
-    { title: "可用", dataIndex: "可用数", key: "可用数", width: TABLE_COL_WIDTH.available },
+    { title: "副本", dataIndex: "副本数", key: "副本数", width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
+    { title: "就绪", dataIndex: "就绪数", key: "就绪数", width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
+    { title: "可用", dataIndex: "可用数", key: "可用数", width: TABLE_COL_WIDTH.available, ...getSortableColumnProps("availableReplicas") },
     { title: "策略", dataIndex: "策略", key: "策略", width: TABLE_COL_WIDTH.strategy },
     { title: "修订版本", dataIndex: "修订版本", key: "修订版本", width: TABLE_COL_WIDTH.revision },
-    {
-      title: "镜像",
-      dataIndex: "镜像",
-      key: "镜像",
-      width: TABLE_COL_WIDTH.image,
-      ellipsis: true,
-      render: (value: string) => (
-        <Typography.Text code style={{ fontSize: 12 }}>
-          {value}
-        </Typography.Text>
-      ),
-    },
     {
       title: "创建时间",
       dataIndex: "创建时间",
       key: "创建时间",
       width: TABLE_COL_WIDTH.time,
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      ...getSortableColumnProps("createdAt"),
     },
     {
       title: "操作",
       key: "actions",
       width: TABLE_COL_WIDTH.actionCompact,
       fixed: "right",
-      align: "center",
+      align: "left",
       render: (_: unknown, row: DeploymentRow) => (
         <Dropdown
           trigger={["click"]}
@@ -753,16 +727,12 @@ export default function DeploymentsPage() {
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
           <Row gutter={[12, 12]} align="middle">
             <Col xs={24} sm={12} md={6} lg={4}>
-              <Select
-                className="resource-filter-select"
-                style={{ width: "100%" }}
-                placeholder="全部集群"
-                value={clusterId || undefined}
+              <ClusterSelect
+                value={clusterId}
                 onChange={(v) => {
-                  setClusterId(v ?? "");
-                  set分页({ ...分页, current: 1 });
+                  setClusterId(v);
+                  resetPage();
                 }}
-                allowClear
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
               />
@@ -772,7 +742,7 @@ export default function DeploymentsPage() {
                 value={namespace}
                 onChange={(v) => {
                   setNamespace(v);
-                  set分页({ ...分页, current: 1 });
+                  resetPage();
                 }}
                 knownNamespaces={knownNamespaces}
                 clusterId={clusterId}
@@ -838,30 +808,16 @@ export default function DeploymentsPage() {
             />
           ) : null}
           <Table<DeploymentRow>
+            className="pod-table"
             bordered
             rowKey="key"
             columns={antd列}
             dataSource={表格数据}
             loading={(query.isLoading && !query.data) || actionMutation.isPending}
-            onChange={(pager, _filters, sorter) => {
-              set分页({
-                current: pager.current ?? 1,
-                pageSize: pager.pageSize ?? 6,
-              });
-              if (!Array.isArray(sorter)) {
-                set排序({
-                  field: typeof sorter.field === "string" ? sorter.field : undefined,
-                  order: sorter.order ?? undefined,
-                });
-              }
-            }}
-            pagination={{
-              current: 分页.current,
-              pageSize: 分页.pageSize,
-              total: query.data?.total ?? 0,
-              showSizeChanger: true,
-              showTotal: (total) => `共 ${total} 条`,
-            }}
+            onChange={(paginationInfo, filters, sorter, extra) =>
+              handleTableChange(paginationInfo, filters, sorter, extra, (query.isLoading && !query.data) || actionMutation.isPending)
+            }
+            pagination={getPaginationConfig(query.data?.total ?? 0, (query.isLoading && !query.data) || actionMutation.isPending)}
             scroll={{ x: getTableScrollX(antd列) }}
             locale={{ emptyText: query.isLoading ? "正在加载..." : <Empty description="暂无数据" /> }}
           />
@@ -918,18 +874,14 @@ export default function DeploymentsPage() {
           >
             <Input placeholder="例如：default" />
           </Form.Item>
-          <Form.Item
-            label="集群"
-            name="clusterId"
-            rules={[{ required: true, message: "请选择集群" }]}
-          >
-            <Select
-              placeholder="请选择集群"
+          <Form.Item label="集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
+            <ClusterSelect
+              value={form.getFieldValue("clusterId")}
+              onChange={(value) => form.setFieldValue("clusterId", value)}
               options={clusterSelectOptions}
               loading={clustersQuery.isLoading}
-              disabled={Boolean(editingRow)}
-              showSearch
-              optionFilterProp="label"
+              allowClear={false}
+              placeholder="请选择集群"
             />
           </Form.Item>
           <Form.Item

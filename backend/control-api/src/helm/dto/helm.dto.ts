@@ -8,6 +8,8 @@ export interface HelmListQuery {
 
 export interface HelmRepositoryQuery {
   clusterId?: string;
+  page?: string;
+  pageSize?: string;
 }
 
 export interface HelmRepositoryCreateRequest {

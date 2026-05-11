@@ -2,7 +2,9 @@
 
 import { Alert, Button, Drawer, Empty, Skeleton, Space, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
+import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceDetailContent } from "./renderers";
 import type { ResourceDetailDrawerProps } from "./types";
 import { getKindTitle, getRenderProfile, normalizeKind } from "./utils";
@@ -12,7 +14,7 @@ export function ResourceDetailDrawer({
   onClose,
   token,
   request,
-  width = 720,
+  width,
   extra,
   children,
   onNavigateRequest,
@@ -33,6 +35,12 @@ export function ResourceDetailDrawer({
     queryFn: () => getResourceDetail({ kind: normalizedKind, id: requestId }, token),
     enabled: open && Boolean(normalizedKind && requestId),
   });
+  const clusterQuery = useQuery({
+    queryKey: ["resource-detail", "clusters", token],
+    queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, token!),
+    enabled: open && Boolean(token),
+  });
+  const clusterMap = Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name]));
   const hasDetailData = Boolean(query.data);
 
   const title = (() => {
@@ -52,11 +60,19 @@ export function ResourceDetailDrawer({
   return (
     <Drawer
       title={title}
-      width={width}
+      size="large"
       open={open}
       destroyOnHidden
       onClose={onClose}
+      classNames={{
+        wrapper: "resource-detail-drawer-wrapper",
+      }}
       styles={{
+        wrapper: {
+          width: width ? `min(50vw, ${width}px)` : "min(50vw, 960px)",
+          minWidth: width ?? 720,
+          maxWidth: "none",
+        },
         body: {
           display: "flex",
           flexDirection: "column",
@@ -104,7 +120,7 @@ export function ResourceDetailDrawer({
         ) : query.data ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <Typography.Text type="secondary">
-              集群 {query.data.overview.clusterId}
+              集群 {getClusterDisplayName(clusterMap, query.data.overview.clusterId)}
               {query.data.overview.namespace ? ` · 名称空间 ${query.data.overview.namespace}` : ""}
               {` · 资源 ${query.data.overview.kind}/${query.data.overview.name}`}
             </Typography.Text>

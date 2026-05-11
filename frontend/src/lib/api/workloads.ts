@@ -418,6 +418,8 @@ export interface WorkloadListParams {
   keyword?: string;
   page?: number;
   pageSize?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
 export function getWorkloadsByKind(
@@ -431,6 +433,8 @@ export function getWorkloadsByKind(
   if (params.keyword) query.keyword = params.keyword;
   if (params.page) query.page = params.page;
   if (params.pageSize) query.pageSize = params.pageSize;
+  if (params.sortBy) query.sortBy = params.sortBy;
+  if (params.sortOrder) query.sortOrder = params.sortOrder;
   return apiRequest<WorkloadListResponse>('/api/workloads', { query, token });
 }
 

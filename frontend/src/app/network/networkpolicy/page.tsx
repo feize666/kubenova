@@ -1,11 +1,10 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, Modal, Row, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Card, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { NamespaceSelect } from "@/components/namespace-select";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceRowActions } from "@/components/resource-row-actions";
@@ -15,11 +14,13 @@ import { NetworkResourcePageFilters } from "@/components/network-resource-page-f
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { matchLabelExpressions, parseResourceSearchInput } from "@/components/resource-action-bar";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { buildTablePagination } from "@/lib/table/pagination";
 import { createNetworkResource, deleteNetworkResource, getNetworkResources, type CreateNetworkResourcePayload, type NetworkResource } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 type NetworkPolicyResource = NetworkResource & {
   spec?: {
@@ -45,13 +46,13 @@ export default function NetworkPolicyPage() {
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter();
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -82,10 +83,7 @@ export default function NetworkPolicyPage() {
   });
 
   const clusterFilterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
 
@@ -125,10 +123,12 @@ export default function NetworkPolicyPage() {
 
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter((item) =>
-        matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+      (data?.items ?? []).filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters],
   );
 
   const nameWidth = useMemo(
@@ -279,12 +279,14 @@ export default function NetworkPolicyPage() {
           clusterOptions={clusterFilterOptions}
           clusterLoading={clustersQuery.isLoading}
           knownNamespaces={Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean)))}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
-            setClusterId(value);
+            onClusterChange(value);
             setPage(1);
           }}
           onNamespaceChange={(value) => {
-            setNamespace(value);
+            onNamespaceChange(value);
             setPage(1);
           }}
           onKeywordInputChange={(value) => {
@@ -296,6 +298,7 @@ export default function NetworkPolicyPage() {
             }
           }}
           onSearch={handleSearch}
+          keywordPlaceholder="按名称/标签搜索（示例：np-a app=web env=prod）"
         />
 
         {!isInitializing && !accessToken ? <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" style={{ marginBottom: 16 }} /> : null}
@@ -311,18 +314,25 @@ export default function NetworkPolicyPage() {
         ) : null}
 
         <Table<NetworkPolicyResource>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={{
+          pagination={buildTablePagination({
             current: page,
             pageSize,
             total: data?.total ?? 0,
-            onChange: (p) => setPage(p),
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+            disabled: isLoading && !data,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage);
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+              }
+            },
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

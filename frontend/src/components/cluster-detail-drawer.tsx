@@ -40,19 +40,18 @@ export function ClusterDetailDrawer({
   return (
     <Drawer
       title={query.data ? `集群详情 · ${query.data.displayName}` : "集群详情"}
-      width={840}
+      size="large"
       open={open}
       destroyOnHidden
       onClose={onClose}
-      extra={
-        <Space>
-          <Button onClick={() => void query.refetch()} loading={query.isFetching} disabled={!clusterId}>
-            刷新
-          </Button>
-          {onRefreshRequest ? <Button onClick={onRefreshRequest}>同步列表</Button> : null}
-        </Space>
-      }
+      classNames={{
+        wrapper: "cluster-detail-drawer-wrapper",
+      }}
       styles={{
+        wrapper: {
+          width: "min(50vw, 960px)",
+          minWidth: 720,
+        },
         body: {
           display: "flex",
           flexDirection: "column",
@@ -61,6 +60,14 @@ export function ClusterDetailDrawer({
           padding: 0,
         },
       }}
+      extra={
+        <Space>
+          <Button onClick={() => void query.refetch()} loading={query.isFetching} disabled={!clusterId}>
+            刷新
+          </Button>
+          {onRefreshRequest ? <Button onClick={onRefreshRequest}>同步列表</Button> : null}
+        </Space>
+      }
     >
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 24 }}>
         {!cluster ? (

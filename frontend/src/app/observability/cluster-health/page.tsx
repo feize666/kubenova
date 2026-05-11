@@ -31,7 +31,8 @@ import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { buildTablePagination } from "@/lib/table/pagination";
 import {
   getClusterHealthDetail,
   getClusterHealthList,
@@ -105,7 +106,6 @@ export default function ClusterHealthCenterPage() {
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
     [clustersQuery.data?.items],
   );
-
   const healthQuery = useQuery({
     queryKey: [
       "cluster-health",
@@ -134,6 +134,7 @@ export default function ClusterHealthCenterPage() {
     enabled,
     refetchInterval: 30_000,
   });
+  const effectivePageSize = healthQuery.data?.pageSize ?? pageSize;
 
   const detailQuery = useQuery({
     queryKey: ["cluster-health-detail", detailClusterId, accessToken],
@@ -159,7 +160,10 @@ export default function ClusterHealthCenterPage() {
     },
   });
 
-  const items = useMemo(() => healthQuery.data?.items ?? [], [healthQuery.data?.items]);
+  const items = useMemo(
+    () => (healthQuery.data?.items ?? []).filter((item) => hasKnownCluster(clusterMap, item.clusterId)),
+    [clusterMap, healthQuery.data?.items],
+  );
   const stats = useMemo(() => {
     const total = items.length;
     const running = items.filter((item) => item.runtimeStatus === "running").length;
@@ -284,17 +288,17 @@ export default function ClusterHealthCenterPage() {
         </Col>
         <Col xs={24} md={6}>
           <Card>
-            <Statistic title="运行中" value={stats.running} valueStyle={{ color: "#389e0d" }} />
+            <Statistic title="运行中" value={stats.running} styles={{ content: { color: "#389e0d" } }} />
           </Card>
         </Col>
         <Col xs={24} md={6}>
           <Card>
-            <Statistic title="离线" value={stats.offline} valueStyle={{ color: "#cf1322" }} />
+            <Statistic title="离线" value={stats.offline} styles={{ content: { color: "#cf1322" } }} />
           </Card>
         </Col>
         <Col xs={24} md={6}>
           <Card>
-            <Statistic title="探测中" value={stats.checking} valueStyle={{ color: "#1677ff" }} />
+            <Statistic title="探测中" value={stats.checking} styles={{ content: { color: "#1677ff" } }} />
           </Card>
         </Col>
       </Row>
@@ -412,31 +416,39 @@ export default function ClusterHealthCenterPage() {
 
       <Card>
         <Table<ClusterHealthListItem>
+          className="pod-table"
           rowKey="clusterId"
           columns={columns}
           dataSource={items}
           loading={healthQuery.isLoading}
-          pagination={{
+          pagination={buildTablePagination({
             current: healthQuery.data?.page ?? page,
-            pageSize: healthQuery.data?.pageSize ?? pageSize,
+            pageSize: effectivePageSize,
             total: healthQuery.data?.total ?? 0,
-            showSizeChanger: true,
+            disabled: healthQuery.isLoading,
             onChange: (nextPage, nextPageSize) => {
-              setPage(nextPage);
-              if (nextPageSize !== pageSize) {
+              if (nextPageSize !== effectivePageSize) {
                 setPageSize(nextPageSize);
                 setPage(1);
+                return;
               }
+              setPage(nextPage);
             },
-          }}
+          })}
         />
       </Card>
 
       <Drawer
         title="集群健康详情"
         open={Boolean(detailClusterId)}
-        width={560}
+        size="large"
         onClose={() => setDetailClusterId("")}
+        styles={{
+          wrapper: {
+            width: "min(50vw, 960px)",
+            minWidth: 720,
+          },
+        }}
       >
         {detailQuery.isLoading ? <Typography.Text>加载中...</Typography.Text> : null}
         {detailQuery.isError ? (

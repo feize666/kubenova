@@ -19,9 +19,10 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { useAuth } from "@/components/auth-context";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ClusterSelect } from "@/components/cluster-select";
 import { getClusters } from "@/lib/api/clusters";
 import { ApiError } from "@/lib/api/client";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import {
   createHelmRepository,
   deleteHelmRepository,
@@ -36,6 +37,7 @@ import {
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { buildTablePagination } from "@/lib/table/pagination";
 
 interface RepositoryFormValues {
   clusterId: string;
@@ -69,6 +71,8 @@ export default function HelmRepositoriesPage() {
   const [presetOpen, setPresetOpen] = useState(false);
   const [presetNames, setPresetNames] = useState<string[]>([]);
   const [importWithSync, setImportWithSync] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [editingRepository, setEditingRepository] = useState<HelmRepositoryItem | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
@@ -117,29 +121,6 @@ export default function HelmRepositoriesPage() {
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
-
-  const selectedClusterId = useMemo(() => {
-    if (clusterId) {
-      return clusterId;
-    }
-    const items = clustersQuery.data?.items ?? [];
-    return items[0]?.id ?? "";
-  }, [clusterId, clustersQuery.data?.items]);
-  const repositoriesQuery = useQuery({
-    queryKey: ["helm", "repositories", selectedClusterId, accessToken],
-    queryFn: () => getHelmRepositories({ clusterId: selectedClusterId }, accessToken ?? undefined),
-    enabled: Boolean(accessToken) && Boolean(selectedClusterId),
-    ...RESOURCE_LIST_REFRESH_OPTIONS,
-  });
-  const presetsQuery = useQuery({
-    queryKey: ["helm", "repository-presets", accessToken],
-    queryFn: () => getHelmRepositoryPresets(accessToken ?? undefined),
-    enabled: Boolean(accessToken),
-    staleTime: 5 * 60 * 1000,
-    ...RESOURCE_LIST_REFRESH_OPTIONS,
-  });
-
-  const rows = useMemo(() => repositoriesQuery.data?.items ?? [], [repositoriesQuery.data?.items]);
 
   const mutation = useMutation({
     mutationFn: async (values: RepositoryFormValues) => {
@@ -222,7 +203,7 @@ export default function HelmRepositoriesPage() {
     mutationFn: async () =>
       importHelmRepositoryPresets(
         {
-          clusterId: selectedClusterId,
+          clusterId,
           names: presetNames.length > 0 ? presetNames : undefined,
           sync: importWithSync,
         },
@@ -281,7 +262,7 @@ export default function HelmRepositoriesPage() {
     },
   });
 
-  const clusterOptions = useMemo(
+  const repositoryClusterOptions = useMemo(
     () =>
       (clustersQuery.data?.items ?? []).map((item) => ({
         label: item.name,
@@ -289,9 +270,38 @@ export default function HelmRepositoriesPage() {
       })),
     [clustersQuery.data?.items],
   );
+  const repositoriesQuery = useQuery({
+    queryKey: ["helm", "repositories", clusterId, page, pageSize, accessToken],
+    queryFn: () =>
+      getHelmRepositories(
+        { clusterId: clusterId || undefined, page, pageSize },
+        accessToken ?? undefined,
+      ),
+    enabled: Boolean(accessToken),
+    ...RESOURCE_LIST_REFRESH_OPTIONS,
+  });
+  const presetsQuery = useQuery({
+    queryKey: ["helm", "repository-presets", accessToken],
+    queryFn: () => getHelmRepositoryPresets(accessToken ?? undefined),
+    enabled: Boolean(accessToken),
+    staleTime: 5 * 60 * 1000,
+    ...RESOURCE_LIST_REFRESH_OPTIONS,
+  });
   const clusterMap = useMemo(
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
     [clustersQuery.data?.items],
+  );
+
+  const rows = useMemo(
+    () =>
+      (repositoriesQuery.data?.items ?? []).filter((row) => {
+        if (!hasKnownCluster(clusterMap, row.clusterId)) {
+          return false;
+        }
+        const cluster = clustersQuery.data?.items?.find((item) => item.id === row.clusterId);
+        return cluster?.hasKubeconfig !== false;
+      }),
+    [clusterMap, clustersQuery.data?.items, repositoriesQuery.data?.items],
   );
   const presetOptions = useMemo(
     () =>
@@ -444,7 +454,7 @@ export default function HelmRepositoriesPage() {
               setFormError(null);
               setMode("create");
               form.setFieldsValue({
-                clusterId: selectedClusterId || undefined,
+                clusterId: clusterId || undefined,
                 name: "",
                 url: "",
               });
@@ -458,16 +468,10 @@ export default function HelmRepositoriesPage() {
       <Card>
         <Row gutter={[12, 12]} align="middle" style={{ marginBottom: 12 }}>
           <Col xs={24} sm={12} md={6} lg={4}>
-            <Select
-              className="resource-filter-select"
-              style={{ width: "100%" }}
-              placeholder="选择集群"
-              value={selectedClusterId || undefined}
-              onChange={(v) => {
-                setClusterId(v ?? "");
-                setDetailTarget(null);
-              }}
-              options={clusterOptions}
+            <ClusterSelect
+              value={clusterId}
+              onChange={(v) => setClusterId(v)}
+              options={repositoryClusterOptions}
             />
           </Col>
         </Row>
@@ -497,7 +501,19 @@ export default function HelmRepositoriesPage() {
           columns={columns}
           dataSource={rows}
           loading={repositoriesQuery.isLoading && rows.length === 0}
-          pagination={false}
+          pagination={buildTablePagination({
+            current: repositoriesQuery.data?.page ?? page,
+            pageSize: repositoriesQuery.data?.pageSize ?? pageSize,
+            total: repositoriesQuery.data?.total ?? 0,
+            disabled: repositoriesQuery.isLoading && rows.length === 0,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage);
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+              }
+            },
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
@@ -534,7 +550,7 @@ export default function HelmRepositoriesPage() {
       >
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
-            <Select disabled={mode === "edit"} options={clusterOptions} />
+            <Select disabled={mode === "edit"} options={repositoryClusterOptions} />
           </Form.Item>
           <Form.Item name="name" label="仓库名称" rules={[{ required: true, message: "请输入仓库名称" }]}>
             <Input disabled={mode === "edit"} placeholder="bitnami" />
@@ -591,7 +607,7 @@ export default function HelmRepositoriesPage() {
       >
         <Form form={quickUrlForm} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
-            <Select options={clusterOptions} />
+            <Select options={repositoryClusterOptions} />
           </Form.Item>
           <Form.Item
             name="url"

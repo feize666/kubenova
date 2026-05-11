@@ -23,9 +23,13 @@ describe('AutoscalingService list and create guards', () => {
       listReadableClusterIdsForResourceRead: jest.fn(),
     } as unknown as ClusterHealthService;
     const hpaApi = {
+      readNamespacedHorizontalPodAutoscaler: jest.fn(),
+      replaceNamespacedHorizontalPodAutoscaler: jest.fn(),
       createNamespacedHorizontalPodAutoscaler: jest.fn(),
     };
     const customApi = {
+      getNamespacedCustomObject: jest.fn(),
+      replaceNamespacedCustomObject: jest.fn(),
       createNamespacedCustomObject: jest.fn(),
     };
     const k8sClientService = {
@@ -46,6 +50,62 @@ describe('AutoscalingService list and create guards', () => {
       clusterHealthService,
       hpaApi,
       customApi,
+    };
+  }
+
+  function makeHpaResource(name: string) {
+    return {
+      metadata: {
+        name,
+        namespace: 'default',
+        resourceVersion: 'rv-1',
+      },
+      spec: {
+        scaleTargetRef: {
+          kind: 'Deployment',
+          name: 'web',
+        },
+        minReplicas: 1,
+        maxReplicas: 3,
+        metrics: [
+          {
+            type: 'Resource',
+            resource: {
+              name: 'cpu',
+              target: {
+                type: 'Utilization',
+                averageUtilization: 60,
+              },
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  function makeVpaResource(name: string) {
+    return {
+      metadata: {
+        name,
+        namespace: 'default',
+        resourceVersion: 'rv-1',
+      },
+      spec: {
+        targetRef: {
+          kind: 'Deployment',
+          name: 'web',
+        },
+        updatePolicy: {
+          updateMode: 'Auto',
+        },
+        resourcePolicy: {
+          containerPolicies: [
+            {
+              controlledResources: ['cpu', 'memory'],
+            },
+          ],
+        },
+      },
     };
   }
 
@@ -125,5 +185,261 @@ describe('AutoscalingService list and create guards', () => {
         },
       ),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('updates HPA without changing the resource name suffix', async () => {
+    const { service, clustersService, hpaApi } = build();
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
+    );
+    hpaApi.readNamespacedHorizontalPodAutoscaler.mockResolvedValue(
+      makeHpaResource('web-hpa'),
+    );
+    hpaApi.replaceNamespacedHorizontalPodAutoscaler.mockResolvedValue(
+      makeHpaResource('web-hpa'),
+    );
+
+    await service.update(
+      { username: 'alice', role: 'platform-admin' },
+      'HPA',
+      'Deployment',
+      'web-hpa',
+      { clusterId: 'c-1', namespace: 'default' },
+      { hpa: { minReplicas: 2 } },
+    );
+
+    expect(hpaApi.replaceNamespacedHorizontalPodAutoscaler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'web-hpa',
+        namespace: 'default',
+        body: expect.objectContaining({
+          spec: expect.objectContaining({
+            scaleTargetRef: expect.objectContaining({
+              name: 'web',
+            }),
+          }),
+          metadata: expect.objectContaining({
+            name: 'web-hpa',
+            namespace: 'default',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('updates VPA without appending the suffix twice', async () => {
+    const { service, clustersService, customApi } = build();
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
+    );
+    customApi.getNamespacedCustomObject.mockResolvedValue(
+      makeVpaResource('web-vpa'),
+    );
+    customApi.replaceNamespacedCustomObject.mockResolvedValue(
+      makeVpaResource('web-vpa'),
+    );
+
+    await service.update(
+      { username: 'alice', role: 'platform-admin' },
+      'VPA',
+      'Deployment',
+      'web-vpa',
+      { clusterId: 'c-1', namespace: 'default' },
+      { vpa: { updateMode: 'Initial' } },
+    );
+
+    expect(customApi.replaceNamespacedCustomObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'web-vpa',
+        namespace: 'default',
+        plural: 'verticalpodautoscalers',
+        body: expect.objectContaining({
+          spec: expect.objectContaining({
+            targetRef: expect.objectContaining({
+              name: 'web',
+            }),
+          }),
+          metadata: expect.objectContaining({
+            name: 'web-vpa',
+            namespace: 'default',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('creates autoscaling resources without doubling existing suffixes', async () => {
+    const { service, clustersService, hpaApi, customApi } = build();
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
+    );
+    hpaApi.createNamespacedHorizontalPodAutoscaler.mockResolvedValue(
+      makeHpaResource('web-hpa'),
+    );
+    customApi.createNamespacedCustomObject.mockResolvedValue(
+      makeVpaResource('web-vpa'),
+    );
+
+    await service.create(
+      { username: 'alice', role: 'platform-admin' },
+      {
+        clusterId: 'c-1',
+        namespace: 'default',
+        kind: 'Deployment',
+        name: 'web-hpa',
+        type: 'HPA',
+        hpa: { minReplicas: 1, maxReplicas: 2 },
+      },
+    );
+
+    await service.create(
+      { username: 'alice', role: 'platform-admin' },
+      {
+        clusterId: 'c-1',
+        namespace: 'default',
+        kind: 'Deployment',
+        name: 'web-vpa',
+        type: 'VPA',
+        vpa: { updateMode: 'Auto' },
+      },
+    );
+
+    expect(hpaApi.createNamespacedHorizontalPodAutoscaler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          metadata: expect.objectContaining({
+            name: 'web-hpa',
+          }),
+        }),
+      }),
+    );
+    expect(customApi.createNamespacedCustomObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({
+          metadata: expect.objectContaining({
+            name: 'web-vpa',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('creates autoscaling resources from workload name with expected suffixes', async () => {
+    const { service, clustersService, hpaApi, customApi } = build();
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
+    );
+    hpaApi.createNamespacedHorizontalPodAutoscaler.mockResolvedValue(
+      makeHpaResource('web-hpa'),
+    );
+    customApi.createNamespacedCustomObject.mockResolvedValue(
+      makeVpaResource('web-vpa'),
+    );
+
+    await service.create(
+      { username: 'alice', role: 'platform-admin' },
+      {
+        clusterId: 'c-1',
+        namespace: 'default',
+        kind: 'Deployment',
+        name: 'web',
+        type: 'HPA',
+        hpa: { minReplicas: 1, maxReplicas: 2 },
+      },
+    );
+
+    await service.create(
+      { username: 'alice', role: 'platform-admin' },
+      {
+        clusterId: 'c-1',
+        namespace: 'default',
+        kind: 'Deployment',
+        name: 'web',
+        type: 'VPA',
+        vpa: { updateMode: 'Auto' },
+      },
+    );
+
+    expect(hpaApi.createNamespacedHorizontalPodAutoscaler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        namespace: 'default',
+        body: expect.objectContaining({
+          metadata: expect.objectContaining({
+            name: 'web-hpa',
+            namespace: 'default',
+          }),
+        }),
+      }),
+    );
+    expect(customApi.createNamespacedCustomObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        namespace: 'default',
+        plural: 'verticalpodautoscalers',
+        body: expect.objectContaining({
+          metadata: expect.objectContaining({
+            name: 'web-vpa',
+            namespace: 'default',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('updates HPA with the exact resource name', async () => {
+    const { service, clustersService, hpaApi } = build();
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
+    hpaApi.readNamespacedHorizontalPodAutoscaler.mockResolvedValue(
+      makeHpaResource('web-hpa'),
+    );
+    hpaApi.replaceNamespacedHorizontalPodAutoscaler.mockResolvedValue(
+      makeHpaResource('web-hpa'),
+    );
+
+    await service.update(
+      { username: 'alice', role: 'platform-admin' },
+      'HPA',
+      'Deployment',
+      'web-hpa',
+      { clusterId: 'c-1', namespace: 'default' },
+      { hpa: { minReplicas: 2 } },
+    );
+
+    expect(hpaApi.replaceNamespacedHorizontalPodAutoscaler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'web-hpa',
+        body: expect.objectContaining({
+          metadata: expect.objectContaining({ name: 'web-hpa' }),
+        }),
+      }),
+    );
+  });
+
+  it('updates VPA with the exact resource name', async () => {
+    const { service, clustersService, customApi } = build();
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
+    customApi.getNamespacedCustomObject.mockResolvedValue(
+      makeVpaResource('web-vpa'),
+    );
+    customApi.replaceNamespacedCustomObject.mockResolvedValue(
+      makeVpaResource('web-vpa'),
+    );
+
+    await service.update(
+      { username: 'alice', role: 'platform-admin' },
+      'VPA',
+      'Deployment',
+      'web-vpa',
+      { clusterId: 'c-1', namespace: 'default' },
+      { vpa: { updateMode: 'Initial' } },
+    );
+
+    expect(customApi.replaceNamespacedCustomObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'web-vpa',
+        body: expect.objectContaining({
+          metadata: expect.objectContaining({ name: 'web-vpa' }),
+        }),
+      }),
+    );
   });
 });

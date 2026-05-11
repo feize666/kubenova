@@ -691,13 +691,13 @@ export function DashboardChartsV2({ stats }: { stats?: DashboardStats }) {
                     <div style={{ padding: 12, border: `1px solid ${t.innerBorder}`, borderRadius: 6 }}>
                       <div style={{ fontSize: 11, color: t.titleColor, marginBottom: 8 }}>CPU</div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <MetricRingVisual
-                          value={MetricUnitFormatter({ kind: "cpu", value: liveSnapshot.cpuUsage })}
-                          percent={typeof liveSnapshot.cpuUsage === "number" ? liveSnapshot.cpuUsage * 100 : 0}
+                      <MetricRingVisual
+                        value={MetricUnitFormatter({ kind: "cpu", value: liveSnapshot.cpuUsage })}
+                          percent={typeof liveSnapshot.cpuUsage === "number" ? Math.min(100, liveSnapshot.cpuUsage * 1000) : 0}
                           color="#3fb950"
-                          size={104}
+                          size={88}
                           showGlow
-                        />
+                      />
                       </div>
                       <div style={{ marginTop: 10 }}>
                         <TrendBars values={liveCpuSeries.length > 0 ? liveCpuSeries : [liveSnapshot.cpuUsage ?? 0]} color="#3fb950" isDark={isDark} />
@@ -708,13 +708,13 @@ export function DashboardChartsV2({ stats }: { stats?: DashboardStats }) {
                     <div style={{ padding: 12, border: `1px solid ${t.innerBorder}`, borderRadius: 6 }}>
                       <div style={{ fontSize: 11, color: t.titleColor, marginBottom: 8 }}>Memory</div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <MetricRingVisual
-                          value={MetricUnitFormatter({ kind: "memory", value: liveSnapshot.memoryUsage })}
+                      <MetricRingVisual
+                        value={MetricUnitFormatter({ kind: "memory", value: liveSnapshot.memoryUsage })}
                           percent={typeof liveSnapshot.memoryUsage === "number" ? (liveSnapshot.memoryUsage / (1024 ** 3)) * 100 : 0}
                           color="#58a6ff"
-                          size={104}
+                          size={88}
                           showGlow
-                        />
+                      />
                       </div>
                       <div style={{ marginTop: 10 }}>
                         <TrendBars values={liveMemorySeries.length > 0 ? liveMemorySeries : [liveSnapshot.memoryUsage ?? 0]} color="#58a6ff" isDark={isDark} />

@@ -4,6 +4,8 @@ import { Alert, Card, Col, Input, Row, Select, Space, Switch, Table, Tag, Typogr
 import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { hasKnownCluster } from "@/lib/cluster-display-name";
+import { buildCompactTablePagination } from "@/lib/table/pagination";
 
 export type ModuleRecord = {
   key: string;
@@ -23,6 +25,7 @@ type ModulePageProps = {
   hasInitialData?: boolean;
   error?: string;
   tableProps?: TableProps<ModuleRecord>;
+  clusterMap?: Record<string, string>;
   filterState?: {
     keyword: string;
     namespace: string;
@@ -101,6 +104,7 @@ export function ModulePage({
   hasInitialData = false,
   error,
   tableProps,
+  clusterMap,
   filterState,
 }: ModulePageProps) {
   const [localKeyword, setLocalKeyword] = useState("");
@@ -116,6 +120,10 @@ export function ModulePage({
 
   const filteredData = useMemo(() => {
     return dataSource.filter((item) => {
+      const itemClusterId = typeof item.clusterId === "string" ? item.clusterId : undefined;
+      if (clusterMap && !hasKnownCluster(clusterMap, itemClusterId)) {
+        return false;
+      }
       const text = Object.values(item).join(" ").toLowerCase();
       const matchKeyword = text.includes(keyword.trim().toLowerCase());
       const matchNamespace =
@@ -124,7 +132,7 @@ export function ModulePage({
         !onlyHealthy || !item.status || item.status.includes("运行") || item.status.includes("就绪") || item.status.includes("正常");
       return matchKeyword && matchNamespace && matchHealthy;
     });
-  }, [dataSource, keyword, namespace, onlyHealthy]);
+  }, [clusterMap, dataSource, keyword, namespace, onlyHealthy]);
 
   const enhancedColumns = useMemo(() => {
     return (columns ?? []).map((column) => {
@@ -208,7 +216,12 @@ export function ModulePage({
           dataSource={filteredData}
           loading={loading && !hasInitialData}
           scroll={{ x: tableScrollX }}
-          pagination={{ pageSize: 6, showSizeChanger: false }}
+          pagination={buildCompactTablePagination({
+            current: 1,
+            pageSize: 6,
+            total: filteredData.length,
+            onChange: () => undefined,
+          })}
           {...tableProps}
         />
       </Card>

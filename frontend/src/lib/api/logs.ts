@@ -7,6 +7,7 @@ export type LogLevel = "INFO" | "WARN" | "ERROR";
 export interface LogRecord {
   id: string;
   clusterId: string;
+  clusterName?: string;
   namespace: string;
   pod: string;
   level: LogLevel;
@@ -28,11 +29,18 @@ export interface LogsQueryParams {
 }
 
 export interface LogsRouteTarget extends RuntimeTargetBase {
+  clusterName?: string;
+  resourceKind?: string;
+  resourceName?: string;
+  resourceId?: string;
   level?: LogLevel;
   keyword?: string;
+  sinceSeconds?: number;
+  tailLines?: number;
   from?: string;
   returnTo?: string;
   returnClusterId?: string;
+  returnClusterName?: string;
   returnNamespace?: string;
   returnKeyword?: string;
   returnPhase?: string;
@@ -54,6 +62,8 @@ export function buildLogsQueryParams(params: LogsQueryParams): URLSearchParams {
   if (params.container) query.set("container", resolveRuntimeContainer(params.container));
   if (params.level) query.set("level", params.level);
   if (params.keyword) query.set("keyword", params.keyword);
+  if (params.tailLines !== undefined) query.set("tailLines", String(params.tailLines));
+  if (params.sinceSeconds !== undefined) query.set("sinceSeconds", String(params.sinceSeconds));
   if (params.page !== undefined) query.set("page", String(params.page));
   if (params.pageSize !== undefined) query.set("pageSize", String(params.pageSize));
   return query;
@@ -61,11 +71,22 @@ export function buildLogsQueryParams(params: LogsQueryParams): URLSearchParams {
 
 export function buildLogsRoute(target: LogsRouteTarget): string {
   const params = buildRuntimeTargetParams(target);
+  if (target.clusterName) params.set("clusterName", target.clusterName);
+  if (target.resourceKind) params.set("resourceKind", target.resourceKind);
+  if (target.resourceName) params.set("resourceName", target.resourceName);
+  if (target.resourceId) params.set("resourceId", target.resourceId);
   if (target.level) params.set("level", target.level);
   if (target.keyword) params.set("keyword", target.keyword);
+  if (typeof target.sinceSeconds === "number" && Number.isFinite(target.sinceSeconds)) {
+    params.set("sinceSeconds", String(target.sinceSeconds));
+  }
+  if (typeof target.tailLines === "number" && Number.isFinite(target.tailLines)) {
+    params.set("tailLines", String(target.tailLines));
+  }
   if (target.from) params.set("from", target.from);
   if (target.returnTo) params.set("returnTo", target.returnTo);
   if (target.returnClusterId) params.set("returnClusterId", target.returnClusterId);
+  if (target.returnClusterName) params.set("returnClusterName", target.returnClusterName);
   if (target.returnNamespace) params.set("returnNamespace", target.returnNamespace);
   if (target.returnKeyword) params.set("returnKeyword", target.returnKeyword);
   if (target.returnPhase) params.set("returnPhase", target.returnPhase);
@@ -78,6 +99,9 @@ export function buildLogsRoute(target: LogsRouteTarget): string {
 export function buildLogsResourceContext(target: LogsRouteTarget, focus?: LogsResourceFocus): string {
   const params = buildLogsQueryParams(target);
   params.set("view", "resource");
+  if (target.resourceKind) params.set("resourceKind", target.resourceKind);
+  if (target.resourceName) params.set("resourceName", target.resourceName);
+  if (target.resourceId) params.set("resourceId", target.resourceId);
   if (focus?.kind) params.set("resourceKind", focus.kind);
   if (focus?.name) params.set("resourceName", focus.name);
   if (focus?.id) params.set("resourceId", focus.id);

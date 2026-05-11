@@ -3,11 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Drawer, Input, Space, Typography } from "antd";
 import { useMutation, useQuery } from "@tanstack/react-query";
+//import {
+//  getClusters,
+//  getResourceYaml,
+//  updateResourceYaml,
+//  type ResourceIdentity,
+//} from "@/lib/api/resources";
+
 import {
   getResourceYaml,
   updateResourceYaml,
   type ResourceIdentity,
 } from "@/lib/api/resources";
+
+import { getClusters } from "@/lib/api/clusters";
+
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 
 interface ResourceYamlDrawerProps {
   open: boolean;
@@ -32,6 +43,15 @@ export function ResourceYamlDrawer({
     queryFn: () => getResourceYaml(identity!, token),
     enabled: open && Boolean(identity?.clusterId && identity?.namespace && identity?.kind && identity?.name),
   });
+  const clusterQuery = useQuery({
+    queryKey: ["resource-yaml", "clusters", token],
+    queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, token!),
+    enabled: open && Boolean(token),
+  });
+  const clusterMap = useMemo(
+    () => Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name])),
+    [clusterQuery.data?.items],
+  );
 
   useEffect(() => {
     const nextYaml = query.data?.yaml;
@@ -112,7 +132,7 @@ export function ResourceYamlDrawer({
       <Space orientation="vertical" size={12} style={{ width: "100%" }}>
         {identity ? (
           <Typography.Text type="secondary">
-            集群 {identity.clusterId} · 名称空间 {identity.namespace} · 资源 {identity.kind}/{identity.name}
+            集群 {getClusterDisplayName(clusterMap, identity.clusterId)} · 名称空间 {identity.namespace} · 资源 {identity.kind}/{identity.name}
           </Typography.Text>
         ) : null}
         {errorMessage ? <Alert type="error" showIcon message={errorMessage} /> : null}

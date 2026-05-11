@@ -178,24 +178,6 @@ export function getRealtimeQueryPrefixes(event: RealtimeEvent): QueryPrefix[] {
       return [
         ["namespaces"],
         ["serviceaccounts", "namespaces"],
-        ["workloads", "pods"],
-        ["workloads", "deployments"],
-        ["workloads", "statefulsets"],
-        ["workloads", "daemonsets"],
-        ["workloads", "replicasets"],
-        ["workloads", "jobs"],
-        ["workloads", "cronjobs"],
-        ["network", "Service"],
-        ["network", "Endpoints"],
-        ["network", "EndpointSlice"],
-        ["network", "Ingress"],
-        ["network", "IngressRoute"],
-        ["configs", "configmaps"],
-        ["configs", "secrets"],
-        ["serviceaccounts"],
-        ["storage", "PV"],
-        ["storage", "PVC"],
-        ["storage", "SC"],
       ];
     case "clusters":
       return [

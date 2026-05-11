@@ -1,24 +1,27 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  ArrowLeftOutlined,
   ColumnWidthOutlined,
   CopyOutlined,
-  DisconnectOutlined,
   LoadingOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { App, Button, Card, Select, Space, Tag, Tooltip, Typography, theme } from "antd";
 import { ApiError } from "@/lib/api/client";
+import { getClusters } from "@/lib/api/clusters";
 import { createRuntimeSession, resolveSafeRuntimeReturnTo, type CreateRuntimeSessionResponse } from "@/lib/api/runtime";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
   buildTerminalInputPayload,
   buildTerminalPingPayload,
   buildTerminalResizePayload,
+  buildGatewayWsCandidates,
   parseTerminalMessagePayload,
   type TerminalConnectionStatus,
   type TerminalParsedMessage,
@@ -151,6 +154,11 @@ export default function TerminalPage() {
   const { message } = App.useApp();
   const { accessToken, isInitializing } = useAuth();
   const searchParams = useSearchParams();
+  const clustersQuery = useQuery({
+    queryKey: ["clusters", "list", accessToken],
+    queryFn: () => getClusters({ state: "active", selectableOnly: true }, accessToken!),
+    enabled: !isInitializing && Boolean(accessToken),
+  });
 
   const [status, setStatus] = useState<TerminalConnectionStatus>("disconnected");
   const [sessionInfo, setSessionInfo] = useState<RuntimeSessionView | null>(null);
@@ -183,6 +191,18 @@ export default function TerminalPage() {
       pod: searchParams.get("pod")?.trim() || "",
     }),
     [searchParams],
+  );
+  const clusterNameHint =
+    searchParams.get("clusterName")?.trim() ||
+    searchParams.get("returnClusterName")?.trim() ||
+    "";
+  const clusterMap = useMemo(
+    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
+    [clustersQuery.data?.items],
+  );
+  const clusterDisplayName = useMemo(
+    () => getClusterDisplayName(clusterMap, targetBase.clusterId, clusterNameHint),
+    [clusterMap, clusterNameHint, targetBase.clusterId],
   );
   const fromPage = searchParams.get("from") ?? "";
   const returnTo = searchParams.get("returnTo")?.trim() ?? "";
@@ -282,6 +302,29 @@ export default function TerminalPage() {
     }
   };
 
+  const openGatewaySocket = async (
+    gatewayWsUrl: string,
+    onSocketReady: (socket: WebSocket) => void,
+  ): Promise<WebSocket> => {
+    const candidates = buildGatewayWsCandidates(gatewayWsUrl);
+    if (candidates.length === 0) {
+      throw new Error("未找到可用的 WebSocket 地址");
+    }
+
+    let lastError: unknown = null;
+    for (const candidate of candidates) {
+      try {
+        const socket = new WebSocket(candidate);
+        onSocketReady(socket);
+        return socket;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error("创建 WebSocket 连接失败");
+  };
+
   const sessionAlmostExpired = (expiresAtMs?: number) => {
     if (!expiresAtMs) return false;
     return expiresAtMs - Date.now() <= SESSION_RENEW_WINDOW_MS;
@@ -358,7 +401,6 @@ export default function TerminalPage() {
     wsRef.current = null;
     setStatus("disconnected");
     setLastNotice("终端已手动断开。");
-    manualDisconnectRef.current = false;
     if (showToast) {
       message.info("终端已断开");
     }
@@ -400,6 +442,7 @@ export default function TerminalPage() {
           blockReconnectRef.current = true;
         }
         setLastWarning(mapped.text);
+        setStatus("disconnected");
         if (attemptUserInitiatedRef.current) {
           const codeKey = (parsed.code || mapped.text || "runtime-error").toLowerCase();
           toastOnce(`runtime-error-${codeKey}`, "error", mapped.text);
@@ -485,9 +528,11 @@ export default function TerminalPage() {
       if (!isCurrent()) return;
       setSessionInfo(session);
 
-      const socket = new WebSocket(session.gatewayWsUrl);
-      socket.binaryType = "arraybuffer";
-      wsRef.current = socket;
+      const socket = await openGatewaySocket(session.gatewayWsUrl, (nextSocket) => {
+        nextSocket.binaryType = "arraybuffer";
+        wsRef.current = nextSocket;
+      });
+      if (!isCurrent()) return;
       clearConnectTimeout();
       connectTimeoutRef.current = setTimeout(() => {
         if (!isCurrent() || socket.readyState !== WebSocket.CONNECTING) return;
@@ -531,7 +576,7 @@ export default function TerminalPage() {
       socket.onerror = () => {
         if (!isCurrent()) return;
         clearConnectTimeout();
-        setLastWarning(`连接发生错误，等待关闭事件确认失败原因。目标地址：${session.gatewayWsUrl}`);
+        setLastWarning(`连接发生错误，等待关闭事件确认失败原因。目标地址：${socket.url || session.gatewayWsUrl}`);
       };
 
       socket.onclose = (event) => {
@@ -550,7 +595,7 @@ export default function TerminalPage() {
         const mapped = mapCloseError({
           code: event.code,
           reason: event.reason,
-          targetWsUrl: session.gatewayWsUrl,
+          targetWsUrl: socket.url || session.gatewayWsUrl,
           expiresAtMs: session.expiresAtMs,
         });
         setLastWarning(mapped.text);
@@ -561,13 +606,13 @@ export default function TerminalPage() {
             const closeErrorKey = `close-${event.code}-${(event.reason || "unknown").toLowerCase()}`;
             toastOnce(`runtime-error-${closeErrorKey}`, "error", mapped.text);
           }
-          connectingRef.current = false;
-          return;
         }
         connectingRef.current = false;
-        scheduleReconnect();
+        if (!blockReconnectRef.current) {
+          scheduleReconnect();
+        }
       };
-    } catch (error) {
+      } catch (error) {
       if (!isCurrent()) return;
       clearConnectTimeout();
       setStatus("disconnected");
@@ -582,9 +627,9 @@ export default function TerminalPage() {
       connectingRef.current = false;
       if (explained.blockReconnect) {
         blockReconnectRef.current = true;
-        return;
+      } else {
+        scheduleReconnect();
       }
-      scheduleReconnect();
     }
   };
   connectTerminalRef.current = connectTerminal;
@@ -742,7 +787,6 @@ export default function TerminalPage() {
   const missingText = missingParams.length
     ? `缺少连接参数：${missingParams.join("、")}。请从资源页面点击“进入终端”，或补全 ?clusterId=&namespace=&pod=&container=`
     : "";
-
   return (
     <Card className="cyber-panel terminal-workspace-card" styles={{ body: { padding: 20 } }} style={{ borderRadius: 28, overflow: "hidden" }}>
       <div style={{ display: "grid", gap: 16 }}>
@@ -769,7 +813,7 @@ export default function TerminalPage() {
                 {podPhase ? <Tag color={podPhase === "Running" ? "success" : "warning"}>Pod {podPhase}</Tag> : null}
               </Space>
               <Typography.Text type="secondary">
-                {targetBase.clusterId || "-"} / {targetBase.namespace || "-"} / {targetBase.pod || "-"} · 来源 {sourceLabel}
+                {clusterDisplayName} / {targetBase.namespace || "-"} / {targetBase.pod || "-"} · 来源 {sourceLabel}
               </Typography.Text>
             </div>
             <Space wrap>
@@ -783,8 +827,11 @@ export default function TerminalPage() {
               <Button icon={<ReloadOutlined />} onClick={() => void connectTerminal({ forceNewSession: true, userInitiated: true })} disabled={status === "connecting" || missingParams.length > 0}>
                 新建会话
               </Button>
-              <Button icon={<DisconnectOutlined />} onClick={handleDisconnectAndReturn} disabled={status === "disconnected"}>
+              <Button onClick={() => disconnectTerminal(true)}>
                 断开
+              </Button>
+              <Button danger icon={<ArrowLeftOutlined />} onClick={() => handleDisconnectAndReturn()}>
+                退出
               </Button>
               <Button icon={<ColumnWidthOutlined />} onClick={clearTerminal}>
                 清屏
@@ -796,6 +843,7 @@ export default function TerminalPage() {
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Tag variant="filled">Cluster {clusterDisplayName}</Tag>
             <Tag variant="filled">Container {selectedContainer || "-"}</Tag>
             <Tooltip title={sessionInfo?.gatewayWsUrl || "未创建"}>
               <Tag variant="filled" color="blue">Gateway {sessionInfo?.sessionId ? "已绑定" : "未创建"}</Tag>
@@ -843,7 +891,7 @@ export default function TerminalPage() {
               <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
               <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#38bdf8", display: "inline-block" }} />
               <Typography.Text style={{ color: "#e2e8f0", fontWeight: 600 }}>
-                {targetBase.pod || "terminal"}.{targetBase.namespace || "default"}
+                {clusterDisplayName} · {targetBase.pod || "terminal"}.{targetBase.namespace || "default"}
               </Typography.Text>
             </Space>
             <Space size={8}>

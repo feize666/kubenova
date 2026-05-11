@@ -48,6 +48,8 @@ export interface WorkloadsListQuery {
   state?: string;
   page?: string;
   pageSize?: string;
+  sortBy?: string;
+  sortOrder?: string;
 }
 
 export interface WorkloadActionPayload {
@@ -345,6 +347,63 @@ export class WorkloadsService {
     return map[k] ?? kind;
   }
 
+  private normalizeSortBy(
+    sortBy?: string,
+  ):
+    | 'clusterId'
+    | 'namespace'
+    | 'kind'
+    | 'name'
+    | 'state'
+    | 'replicas'
+    | 'readyReplicas'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'id'
+    | undefined {
+    if (!sortBy) {
+      return undefined;
+    }
+    const normalized = sortBy.trim();
+    const sortableFields = new Set([
+      'clusterId',
+      'namespace',
+      'kind',
+      'name',
+      'state',
+      'replicas',
+      'readyReplicas',
+      'createdAt',
+      'updatedAt',
+      'id',
+    ]);
+    if (sortableFields.has(normalized)) {
+      return normalized as
+        | 'clusterId'
+        | 'namespace'
+        | 'kind'
+        | 'name'
+        | 'state'
+        | 'replicas'
+        | 'readyReplicas'
+        | 'createdAt'
+        | 'updatedAt'
+        | 'id';
+    }
+    return undefined;
+  }
+
+  private normalizeSortOrder(sortOrder?: string): 'asc' | 'desc' | undefined {
+    if (!sortOrder) {
+      return undefined;
+    }
+    const normalized = sortOrder.trim().toLowerCase();
+    if (normalized === 'asc' || normalized === 'desc') {
+      return normalized;
+    }
+    return undefined;
+  }
+
   isLegacyKind(kind: string): boolean {
     return this.normalizeKind(kind) !== kind;
   }
@@ -379,6 +438,8 @@ export class WorkloadsService {
       state: query.state,
       page: this.parsePositiveInt(query.page, 1),
       pageSize: this.parsePositiveInt(query.pageSize, 10),
+      sortBy: this.normalizeSortBy(query.sortBy),
+      sortOrder: this.normalizeSortOrder(query.sortOrder),
     };
 
     const result = await this.repository.list(params);

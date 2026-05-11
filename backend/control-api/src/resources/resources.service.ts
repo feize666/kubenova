@@ -326,7 +326,7 @@ export interface DiscoveryCatalogResponse {
 }
 
 export interface DynamicResourceQuery {
-  clusterId: string;
+  clusterId?: string;
   group?: string;
   version?: string;
   resource?: string;
@@ -762,84 +762,223 @@ export class ResourcesService {
     }>;
     timestamp: string;
   }> {
-    const clusterId = query.clusterId?.trim();
-    if (!clusterId) {
-      throw new BadRequestException('clusterId 不能为空');
-    }
-    const capability = await this.findDynamicCapability({
-      clusterId,
-      group: query.group,
-      version: query.version,
-      resource: query.resource,
-    });
     const page = this.parsePositiveInt(query.page, 1);
     const pageSize = this.parsePositiveInt(query.pageSize, 20);
     const keyword = query.keyword?.trim().toLowerCase();
-    const namespace =
-      capability.namespaced && query.namespace?.trim()
-        ? query.namespace.trim()
-        : undefined;
-    const client = await this.makeObjectClient(clusterId);
-    const list = (await client.list(
-      this.toApiVersion(capability.group, capability.version),
-      capability.kind,
-      namespace,
-    )) as { items?: any[] };
-    const rawItems = Array.isArray(list.items) ? list.items : [];
-    const normalizedItems = rawItems
-      .map((item) => {
-        const metadata = this.toRecord(item?.metadata);
-        const status = this.toRecord(item?.status);
-        const name = this.asString(metadata.name);
-        const ns = this.asString(metadata.namespace);
-        const labels = this.toStringMap(metadata.labels);
-        if (!name) {
-          return null;
-        }
-        const state =
-          this.asString(status.phase) ||
-          this.asString(status.state) ||
-          this.asString(status.reason) ||
-          'unknown';
-        return {
-          id: `${clusterId}/${ns}/${name}`,
+    const normalizedQueryClusterId = query.clusterId?.trim();
+    if (normalizedQueryClusterId) {
+      const capability = await this.findDynamicCapability({
+        clusterId: normalizedQueryClusterId,
+        group: query.group,
+        version: query.version,
+        resource: query.resource,
+      });
+      const namespace =
+        capability.namespaced && query.namespace?.trim()
+          ? query.namespace.trim()
+          : undefined;
+      const client = await this.makeObjectClient(normalizedQueryClusterId);
+      const list = (await client.list(
+        this.toApiVersion(capability.group, capability.version),
+        capability.kind,
+        namespace,
+      )) as { items?: any[] };
+      const rawItems = Array.isArray(list.items) ? list.items : [];
+      const normalizedItems = rawItems
+        .map((item) => {
+          const metadata = this.toRecord(item?.metadata);
+          const status = this.toRecord(item?.status);
+          const name = this.asString(metadata.name);
+          const ns = this.asString(metadata.namespace);
+          const labels = this.toStringMap(metadata.labels);
+          if (!name) {
+            return null;
+          }
+          const state =
+            this.asString(status.phase) ||
+            this.asString(status.state) ||
+            this.asString(status.reason) ||
+            'unknown';
+          return {
+            id: `${normalizedQueryClusterId}/${ns}/${name}`,
+            clusterId: normalizedQueryClusterId,
+            namespace: ns,
+            name,
+            kind: capability.kind,
+            apiVersion: this.toApiVersion(capability.group, capability.version),
+            state,
+            labels,
+            createdAt: this.asString(metadata.creationTimestamp) || undefined,
+            updatedAt: undefined,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+      const filtered = keyword
+        ? normalizedItems.filter((item) =>
+            `${item.name} ${item.namespace} ${item.state}`
+              .toLowerCase()
+              .includes(keyword),
+          )
+        : normalizedItems;
+      const total = filtered.length;
+      const start = (page - 1) * pageSize;
+      const items = filtered.slice(start, start + pageSize);
+
+      return {
+        clusterId: normalizedQueryClusterId,
+        group: capability.group,
+        version: capability.version,
+        resource: capability.resource,
+        kind: capability.kind,
+        namespaced: capability.namespaced,
+        page,
+        pageSize,
+        total,
+        items,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const clusterIds = await this.resolveDynamicClusterIds(undefined);
+    if (clusterIds.length === 0) {
+      return {
+        clusterId: '',
+        group: query.group?.trim() ?? '',
+        version: query.version?.trim() ?? '',
+        resource: query.resource?.trim() ?? '',
+        kind: '',
+        namespaced: false,
+        page,
+        pageSize,
+        total: 0,
+        items: [],
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const results = await Promise.allSettled(
+      clusterIds.map(async (clusterId) => {
+        const capability = await this.findDynamicCapability({
           clusterId,
-          namespace: ns,
-          name,
-          kind: capability.kind,
-          apiVersion: this.toApiVersion(capability.group, capability.version),
-          state,
-          labels,
-          createdAt: this.asString(metadata.creationTimestamp) || undefined,
-          updatedAt: undefined,
+          group: query.group,
+          version: query.version,
+          resource: query.resource,
+        });
+        const namespace =
+          capability.namespaced && query.namespace?.trim() && normalizedQueryClusterId
+            ? query.namespace.trim()
+            : undefined;
+        const client = await this.makeObjectClient(clusterId);
+        const list = (await client.list(
+          this.toApiVersion(capability.group, capability.version),
+          capability.kind,
+          namespace,
+        )) as { items?: any[] };
+        const rawItems = Array.isArray(list.items) ? list.items : [];
+        const normalizedItems = rawItems
+          .map((item) => {
+            const metadata = this.toRecord(item?.metadata);
+            const status = this.toRecord(item?.status);
+            const name = this.asString(metadata.name);
+            const ns = this.asString(metadata.namespace);
+            const labels = this.toStringMap(metadata.labels);
+            if (!name) {
+              return null;
+            }
+            const state =
+              this.asString(status.phase) ||
+              this.asString(status.state) ||
+              this.asString(status.reason) ||
+              'unknown';
+            return {
+              id: `${clusterId}/${ns}/${name}`,
+              clusterId,
+              namespace: ns,
+              name,
+              kind: capability.kind,
+              apiVersion: this.toApiVersion(
+                capability.group,
+                capability.version,
+              ),
+              state,
+              labels,
+              createdAt: this.asString(metadata.creationTimestamp) || undefined,
+              updatedAt: undefined,
+            };
+          })
+          .filter((item): item is NonNullable<typeof item> => Boolean(item));
+        return {
+          capability,
+          items: normalizedItems,
         };
-      })
-      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+      }),
+    );
+
+    const fulfilled = results
+      .filter(
+        (
+          result,
+        ): result is PromiseFulfilledResult<{
+          capability: {
+            clusterId: string;
+            group: string;
+            version: string;
+            resource: string;
+            kind: string;
+            namespaced: boolean;
+          };
+          items: Array<{
+            id: string;
+            clusterId: string;
+            namespace: string;
+            name: string;
+            kind: string;
+            apiVersion: string;
+            state: string;
+            createdAt?: string;
+            updatedAt?: string;
+          }>;
+        }> => result.status === 'fulfilled',
+      )
+      .map((result) => result.value);
+    const aggregatedItems = fulfilled.flatMap((item) => item.items);
+    const firstCapability = fulfilled[0]?.capability;
 
     const filtered = keyword
-      ? normalizedItems.filter((item) =>
+      ? aggregatedItems.filter((item) =>
           `${item.name} ${item.namespace} ${item.state}`
             .toLowerCase()
             .includes(keyword),
         )
-      : normalizedItems;
+      : aggregatedItems;
     const total = filtered.length;
     const start = (page - 1) * pageSize;
     const items = filtered.slice(start, start + pageSize);
 
     return {
-      clusterId,
-      group: capability.group,
-      version: capability.version,
-      resource: capability.resource,
-      kind: capability.kind,
-      namespaced: capability.namespaced,
+      clusterId: normalizedQueryClusterId ?? '',
+      group: firstCapability?.group ?? query.group?.trim() ?? '',
+      version: firstCapability?.version ?? query.version?.trim() ?? '',
+      resource: firstCapability?.resource ?? query.resource?.trim() ?? '',
+      kind: firstCapability?.kind ?? '',
+      namespaced: firstCapability?.namespaced ?? false,
       page,
       pageSize,
       total,
       items,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private async resolveDynamicClusterIds(clusterId?: string): Promise<string[]> {
+    if (clusterId?.trim()) {
+      return [clusterId.trim()];
+    }
+    const readableClusterIds =
+      await this.clusterHealthService.listReadableClusterIdsForResourceRead();
+    const pagedClusterIds = await this.listAllReadableClusterIds();
+    return [...new Set([...readableClusterIds, ...pagedClusterIds])];
   }
 
   async getDynamicResourceDetail(identity: DynamicResourceIdentity): Promise<{
@@ -3220,6 +3359,34 @@ export class ResourcesService {
     }
     const kc = this.k8sClientService.createClient(kubeconfig);
     return k8s.KubernetesObjectApi.makeApiClient(kc);
+  }
+
+  private async listAllReadableClusterIds(): Promise<string[]> {
+    const pageSize = 200;
+    let page = 1;
+    const clusterIds: string[] = [];
+
+    while (true) {
+      const clusters = await this.clustersService.list({
+        state: 'active',
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      const readable = clusters.items
+        .filter(
+          (item) => item.state === 'active' && item.hasKubeconfig !== false,
+        )
+        .map((item) => item.id);
+      clusterIds.push(...readable);
+
+      if (clusters.items.length < pageSize) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return [...new Set(clusterIds)];
   }
 
   private async discoverCapabilities(clusterId: string): Promise<

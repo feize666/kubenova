@@ -219,6 +219,8 @@ export class AutoscalingService {
       if (!current) {
         throw new NotFoundException('HPA 策略不存在');
       }
+      const workloadName =
+        current.spec?.scaleTargetRef?.name ?? identity.name;
       const config = this.buildHpaConfig(
         {
           minReplicas:
@@ -244,6 +246,7 @@ export class AutoscalingService {
         identity,
         config,
         current.metadata.resourceVersion,
+        workloadName,
       );
       this.audit(
         actor,
@@ -261,6 +264,8 @@ export class AutoscalingService {
     if (!current) {
       throw new NotFoundException('VPA 策略不存在');
     }
+    const workloadName =
+      current.spec?.targetRef?.name ?? identity.name;
     const config = this.buildVpaConfig(
       {
         updateMode:
@@ -296,6 +301,7 @@ export class AutoscalingService {
       identity,
       config,
       current.metadata.resourceVersion,
+      workloadName,
     );
     this.audit(
       actor,
@@ -425,7 +431,12 @@ export class AutoscalingService {
       throw new NotFoundException('集群 kubeconfig 不可用');
     }
     const coreApi = this.k8sClientService.getCoreApi(kubeconfig);
-    const resourceName = this.resolveAutoscalingResourceName(name, kind);
+    const resourceName =
+      kind === HPA_KIND
+        ? this.resolveAutoscalingResourceName(name, '-hpa')
+        : kind === VPA_KIND
+          ? this.resolveAutoscalingResourceName(name, '-vpa')
+          : name.trim();
     const fieldSelector = `involvedObject.name=${resourceName},involvedObject.namespace=${namespace}`;
     const resp = await coreApi.listNamespacedEvent({
       namespace,
@@ -547,10 +558,14 @@ export class AutoscalingService {
     const api = this.k8sClientService
       .createClient(kubeconfig)
       .makeApiClient(k8s.AutoscalingV2Api);
+    const resourceName = this.resolveAutoscalingResourceName(
+      identity.name,
+      '-hpa',
+    );
     const body: K8sObject = {
       apiVersion: HPA_API_VERSION,
       kind: HPA_KIND,
-      metadata: { name: `${identity.name}-hpa`, namespace: identity.namespace },
+      metadata: { name: resourceName, namespace: identity.namespace },
       spec: this.toHpaSpec(identity, config),
     };
     try {
@@ -560,6 +575,11 @@ export class AutoscalingService {
       });
       return resp as K8sObject;
     } catch (error) {
+      if (this.getErrorStatusCode(error) === 404) {
+        throw new BadRequestException(
+          'HPA 创建失败: 当前集群未安装 autoscaling/v2 HorizontalPodAutoscaler API',
+        );
+      }
       this.throwConflictIfAlreadyExists(
         error,
         'HPA',
@@ -576,6 +596,7 @@ export class AutoscalingService {
     identity: Identity,
     config: Record<string, unknown>,
     resourceVersion?: string,
+    workloadName?: string,
   ): Promise<K8sObject> {
     const kubeconfig = await this.getKubeconfig(identity.clusterId);
     const api = this.k8sClientService
@@ -585,20 +606,27 @@ export class AutoscalingService {
       apiVersion: HPA_API_VERSION,
       kind: HPA_KIND,
       metadata: {
-        name: `${identity.name}-hpa`,
+        name: identity.name.endsWith('-hpa')
+          ? identity.name
+          : this.resolveAutoscalingResourceName(identity.name, '-hpa'),
         namespace: identity.namespace,
         resourceVersion,
       },
-      spec: this.toHpaSpec(identity, config),
+      spec: this.toHpaSpec(identity, config, workloadName),
     };
     try {
       const resp = await api.replaceNamespacedHorizontalPodAutoscaler({
-        name: `${identity.name}-hpa`,
+        name: body.metadata.name,
         namespace: identity.namespace,
         body: body as any,
       });
       return resp as K8sObject;
     } catch (error) {
+      if (this.isMissingAutoscalingResourceError(error)) {
+        throw new BadRequestException(
+          `HPA 更新失败: horizontalpodautoscalers.autoscaling "${body.metadata.name}" not found`,
+        );
+      }
       throw new BadRequestException(
         `HPA 更新失败: ${this.extractK8sErrorMessage(error)}`,
       );
@@ -658,7 +686,12 @@ export class AutoscalingService {
   ): Promise<K8sObject> {
     const kubeconfig = await this.getKubeconfig(identity.clusterId);
     const api = this.k8sClientService.getCustomObjectsApi(kubeconfig);
-    const body = this.toVpaObject(identity, config);
+    const body = this.toVpaObject(
+      identity,
+      config,
+      undefined,
+      this.resolveAutoscalingResourceName(identity.name, '-vpa'),
+    );
     try {
       const resp = await api.createNamespacedCustomObject({
         group: VPA_GROUP,
@@ -669,6 +702,11 @@ export class AutoscalingService {
       });
       return resp as K8sObject;
     } catch (error) {
+      if (this.getErrorStatusCode(error) === 404) {
+        throw new BadRequestException(
+          'VPA 创建失败: 当前集群未安装 autoscaling.k8s.io/v1 VerticalPodAutoscaler CRD',
+        );
+      }
       this.throwConflictIfAlreadyExists(
         error,
         'VPA',
@@ -696,21 +734,32 @@ export class AutoscalingService {
     identity: Identity,
     config: Record<string, unknown>,
     resourceVersion?: string,
+    workloadName?: string,
   ): Promise<K8sObject> {
     const kubeconfig = await this.getKubeconfig(identity.clusterId);
     const api = this.k8sClientService.getCustomObjectsApi(kubeconfig);
-    const body = this.toVpaObject(identity, config, resourceVersion);
+    const body = this.toVpaObject(
+      identity,
+      config,
+      resourceVersion,
+      workloadName,
+    );
     try {
       const resp = await api.replaceNamespacedCustomObject({
         group: VPA_GROUP,
         version: VPA_VERSION,
         namespace: identity.namespace,
-        plural: VPA_PLURAL,
-        name: identity.name,
+      plural: VPA_PLURAL,
+        name: body.metadata.name,
         body: body as any,
       });
       return resp as K8sObject;
     } catch (error) {
+      if (this.isMissingAutoscalingResourceError(error)) {
+        throw new BadRequestException(
+          `VPA 更新失败: verticalpodautoscalers.autoscaling.k8s.io "${body.metadata.name}" not found`,
+        );
+      }
       throw new BadRequestException(
         `VPA 更新失败: ${this.extractK8sErrorMessage(error)}`,
       );
@@ -737,6 +786,11 @@ export class AutoscalingService {
         } as any,
       });
     } catch (error) {
+      if (this.getErrorStatusCode(error) === 404) {
+        throw new BadRequestException(
+          'VPA 删除失败: 当前集群未安装 autoscaling.k8s.io/v1 VerticalPodAutoscaler CRD',
+        );
+      }
       throw new BadRequestException(
         `VPA 删除失败: ${this.extractK8sErrorMessage(error)}`,
       );
@@ -866,13 +920,14 @@ export class AutoscalingService {
   private toHpaSpec(
     identity: Identity,
     config: Record<string, unknown>,
+    workloadName?: string,
   ): K8sObject {
     const metrics = this.buildHpaMetricsFromConfig(config);
     return {
       scaleTargetRef: {
         apiVersion: this.resolveWorkloadApiVersion(identity.kind),
         kind: identity.kind,
-        name: identity.name,
+        name: workloadName ?? identity.name,
       },
       minReplicas: this.readNumber(config.minReplicas, 1),
       maxReplicas: this.readNumber(config.maxReplicas, 1),
@@ -885,15 +940,19 @@ export class AutoscalingService {
     identity: Identity,
     config: Record<string, unknown>,
     resourceVersion?: string,
+    workloadName?: string,
   ): K8sObject {
     const controlledResources = Array.isArray(config.controlledResources)
       ? config.controlledResources
       : ['cpu', 'memory'];
+    const resourceName = identity.name.endsWith('-vpa')
+      ? identity.name
+      : this.resolveAutoscalingResourceName(identity.name, '-vpa');
     return {
       apiVersion: `${VPA_GROUP}/${VPA_VERSION}`,
       kind: VPA_KIND,
       metadata: {
-        name: `${identity.name}-vpa`,
+        name: resourceName,
         namespace: identity.namespace,
         ...(resourceVersion ? { resourceVersion } : {}),
       },
@@ -901,7 +960,7 @@ export class AutoscalingService {
         targetRef: {
           apiVersion: this.resolveWorkloadApiVersion(identity.kind),
           kind: identity.kind,
-          name: identity.name,
+          name: workloadName ?? identity.name,
         },
         updatePolicy: {
           updateMode: this.readVpaUpdateMode(config.updateMode),
@@ -970,7 +1029,7 @@ export class AutoscalingService {
         'targetMemoryUtilizationPercentage',
       );
     }
-    if (input.metrics) config.metrics = input.metrics;
+    if (input.metrics) config.metrics = this.normalizeHpaMetrics(input.metrics);
     if (input.behavior) config.behavior = input.behavior;
     return config;
   }
@@ -1019,6 +1078,65 @@ export class AutoscalingService {
     return metrics as HpaPolicyConfig['metrics'];
   }
 
+  private normalizeHpaMetrics(metrics: HpaPolicyConfig['metrics']): K8sObject[] {
+    if (!Array.isArray(metrics)) {
+      return [];
+    }
+
+    return metrics.flatMap((metric): K8sObject[] => {
+      if (!metric || typeof metric !== 'object') {
+        return [];
+      }
+
+      const sourceType = metric.sourceType;
+      const targetType = metric.targetType;
+      const targetValue = metric.targetValue;
+      if (!sourceType || !targetType || !targetValue) {
+        return [];
+      }
+
+      if (sourceType === 'Resource') {
+        const name = metric.name;
+        if (!name) return [];
+        return [
+          {
+            type: 'Resource',
+            resource: {
+              name,
+              target: {
+                type: targetType,
+                averageUtilization:
+                  targetType === 'Utilization' ? Number(targetValue) : undefined,
+                averageValue:
+                  targetType === 'AverageValue' ? targetValue : undefined,
+                value: targetType === 'Value' ? targetValue : undefined,
+              },
+            },
+          },
+        ];
+      }
+
+      const metricName = metric.metricName;
+      if (!metricName) return [];
+      const selector = metric.selector;
+      return [
+        {
+          type: sourceType,
+          [sourceType === 'Pods' ? 'pods' : 'external']: {
+            metric: { name: metricName },
+            ...(selector ? { selector } : {}),
+            target: {
+              type: targetType,
+              averageValue:
+                targetType === 'AverageValue' ? targetValue : undefined,
+              value: targetType === 'Value' ? targetValue : undefined,
+            },
+          },
+        },
+      ];
+    });
+  }
+
   private readHpaBehavior(behavior: unknown): HpaPolicyConfig['behavior'] {
     if (!behavior || typeof behavior !== 'object') return undefined;
     return behavior as HpaPolicyConfig['behavior'];
@@ -1061,9 +1179,77 @@ export class AutoscalingService {
       });
     }
     if (Array.isArray(config.metrics) && config.metrics.length > 0) {
-      return config.metrics as K8sObject[];
+      return config.metrics.flatMap((metric) =>
+        this.normalizeSingleHpaMetric(metric),
+      );
     }
     return metrics;
+  }
+
+  private normalizeSingleHpaMetric(metric: unknown): K8sObject[] {
+    if (!metric || typeof metric !== 'object' || Array.isArray(metric)) {
+      return [];
+    }
+    const raw = metric as Record<string, unknown>;
+    if (typeof raw.type === 'string' && raw.type.trim()) {
+      if (
+        raw.type === 'Resource' &&
+        raw.targetType &&
+        (!raw.resource || typeof raw.resource !== 'object')
+      ) {
+        const resource = raw.resource as Record<string, unknown> | undefined;
+        return this.normalizeSingleHpaMetric({
+          sourceType: 'Resource',
+          name: (raw.name as string | undefined) ?? (resource?.name as string | undefined),
+          targetType: raw.targetType,
+          targetValue: raw.targetValue,
+        });
+      }
+      return [raw as K8sObject];
+    }
+    const sourceType = raw.sourceType;
+    const targetType = raw.targetType;
+    const targetValue = raw.targetValue;
+    if (!sourceType || !targetType || !targetValue) {
+      return [];
+    }
+    if (sourceType === 'Resource') {
+      const name = raw.name;
+      if (!name) return [];
+      return [
+        {
+          type: 'Resource',
+          resource: {
+            name,
+            target: {
+              type: targetType,
+              averageUtilization:
+                targetType === 'Utilization' ? Number(targetValue) : undefined,
+              averageValue:
+                targetType === 'AverageValue' ? targetValue : undefined,
+              value: targetType === 'Value' ? targetValue : undefined,
+            },
+          },
+        },
+      ];
+    }
+    const metricName = raw.metricName ?? raw.name;
+    if (!metricName) return [];
+    const selector = raw.selector;
+    return [
+      {
+        type: sourceType,
+        [sourceType === 'Pods' ? 'pods' : 'external']: {
+          metric: { name: metricName },
+          ...(selector ? { selector } : {}),
+          target: {
+            type: targetType,
+            averageValue: targetType === 'AverageValue' ? targetValue : undefined,
+            value: targetType === 'Value' ? targetValue : undefined,
+          },
+        },
+      },
+    ];
   }
 
   private readVpaUpdateMode(value: unknown): 'Off' | 'Initial' | 'Auto' {
@@ -1393,15 +1579,9 @@ export class AutoscalingService {
     });
   }
 
-  private resolveAutoscalingResourceName(name: string, kind: string): string {
-    const trimmedKind = kind.trim();
-    if (trimmedKind === 'HorizontalPodAutoscaler') {
-      return name.endsWith('-hpa') ? name : `${name}-hpa`;
-    }
-    if (trimmedKind === 'VerticalPodAutoscaler') {
-      return name.endsWith('-vpa') ? name : `${name}-vpa`;
-    }
-    return name;
+  private resolveAutoscalingResourceName(name: string, suffix: '-hpa' | '-vpa'): string {
+    const trimmedName = name.trim();
+    return trimmedName.endsWith(suffix) ? trimmedName : `${trimmedName}${suffix}`;
   }
 
   private getErrorStatusCode(error: unknown): number | undefined {
@@ -1414,6 +1594,24 @@ export class AutoscalingService {
       status?: number;
     };
     return typed.statusCode ?? typed.response?.statusCode ?? typed.status;
+  }
+
+  private isMissingAutoscalingResourceError(error: unknown): boolean {
+    if (this.getErrorStatusCode(error) !== 404) {
+      return false;
+    }
+    const record = this.toRecord(error);
+    const responseBody = this.toRecord(record.response?.body);
+    const body = this.toRecord(record.body);
+    const text = JSON.stringify([responseBody, body, record, error])
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    return (
+      text.includes('not found') ||
+      text.includes('notfound') ||
+      text.includes('could not be found') ||
+      text.includes('missing')
+    );
   }
 
   private isAlreadyExistsError(error: unknown): boolean {

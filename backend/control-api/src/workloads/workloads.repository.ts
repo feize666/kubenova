@@ -28,6 +28,18 @@ export interface WorkloadListParams {
   state?: string;
   page?: number;
   pageSize?: number;
+  sortBy?:
+    | 'clusterId'
+    | 'namespace'
+    | 'kind'
+    | 'name'
+    | 'state'
+    | 'replicas'
+    | 'readyReplicas'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'id';
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface WorkloadListResult {
@@ -40,6 +52,22 @@ export interface WorkloadListResult {
 @Injectable()
 export class WorkloadsRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  private buildOrderBy(
+    params: WorkloadListParams,
+  ): Prisma.WorkloadRecordOrderByWithRelationInput[] {
+    const sortBy = params.sortBy;
+    const sortOrder = params.sortOrder ?? 'desc';
+    if (!sortBy) {
+      return [{ createdAt: 'desc' }, { id: 'asc' }];
+    }
+
+    if (sortBy === 'id') {
+      return [{ id: sortOrder }];
+    }
+
+    return [{ [sortBy]: sortOrder }, { id: 'asc' }];
+  }
 
   async list(params: WorkloadListParams): Promise<WorkloadListResult> {
     const page = params.page && params.page > 0 ? params.page : 1;
@@ -74,7 +102,7 @@ export class WorkloadsRepository {
     const [rows, total] = await Promise.all([
       this.prisma.workloadRecord.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        orderBy: this.buildOrderBy(params),
         skip,
         take: pageSize,
       }),

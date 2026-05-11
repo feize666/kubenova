@@ -62,6 +62,7 @@ import {
 } from "@/lib/api/cluster-health";
 import type { Cluster } from "@/lib/api/types";
 import { queryKeys } from "@/lib/query/keys";
+import { buildTablePagination } from "@/lib/table/pagination";
 
 export type ClusterTableRecord = Cluster & { key: string };
 
@@ -641,12 +642,10 @@ export default function ClustersPage() {
           dataSource={visibleTableData}
           loading={{ spinning: query.isLoading, description: "集群数据加载中..." }}
           scroll={{ x: getTableScrollX(columns) }}
-          pagination={{
+          pagination={buildTablePagination({
             current: query.data?.page ?? page,
             pageSize: query.data?.pageSize ?? pageSize,
             total: query.data?.total ?? visibleTableData.length,
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条`,
             onChange: (nextPage, nextPageSize) => {
               setPage(nextPage);
               if (nextPageSize !== pageSize) {
@@ -654,7 +653,7 @@ export default function ClustersPage() {
                 setPage(1);
               }
             },
-          }}
+          })}
           locale={{
             emptyText:
               query.isLoading ? "正在加载..." : <Empty description="暂无符合条件的集群数据" />,

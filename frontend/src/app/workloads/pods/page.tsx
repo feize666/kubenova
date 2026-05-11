@@ -28,7 +28,7 @@ import {
   message,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { ColumnsType } from "antd/es/table";
+import type { ColumnsType, ColumnType } from "antd/es/table";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -37,6 +37,8 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { PodMetricCell } from "@/components/visual-system";
+import { ClusterSelect } from "@/components/cluster-select";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { getClusters } from "@/lib/api/clusters";
 import { buildLogsRoute } from "@/lib/api/logs";
 import {
@@ -47,10 +49,10 @@ import type { WorkloadListItem, WorkloadKindParam } from "@/lib/api/workloads";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { extractWorkloadImage } from "@/lib/workloads/image";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { buildTerminalRoute } from "@/lib/workloads/terminal";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { useAntdTableSortPagination } from "@/lib/table";
 
 // Pod 状态类型
 type PodPhase = "Running" | "Pending" | "Failed" | "Succeeded" | string;
@@ -248,7 +250,6 @@ type PodRow = WorkloadListItem & {
   restartCount: number;
   containerNames: string[];
   containerImages: string[];
-  image: string;
   cpuUsagePercent: number | null;
   memoryUsagePercent: number | null;
   cpuUsage: number | null;
@@ -286,7 +287,6 @@ function mapItemToRow(item: WorkloadListItem): PodRow {
     readyReplicas: item.readyReplicas ?? readyReplicas ?? 0,
     containerNames: containerNames ?? [],
     containerImages: containerImages ?? [],
-    image: extractWorkloadImage(item),
     cpuUsagePercent: cpuUsagePercent ?? null,
     memoryUsagePercent: memoryUsagePercent ?? null,
     cpuUsage: cpuUsage ?? null,
@@ -323,31 +323,55 @@ export default function PodsPage() {
   const router = useRouter();
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter();
 
   // 筛选状态
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [phaseFilter, setPhaseFilter] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const {
+    sortBy,
+    sortOrder,
+    getSortableColumnProps,
+    resetPage,
+    pagination,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<PodRow>({
+    storageKey: "workloads/pods/table-sort",
+    defaultPageSize: 10,
+    defaultSortBy: "createdAt",
+    defaultSortOrder: "desc",
+    allowedSortBy: [
+      "name",
+      "clusterId",
+      "namespace",
+      "readyReplicas",
+      "phase",
+      "cpuUsage",
+      "memoryUsage",
+      "restartCount",
+      "podIP",
+      "nodeName",
+      "createdAt",
+    ],
+  });
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const page = pagination.pageIndex + 1;
+  const pageSize = pagination.pageSize;
 
   // 集群列表（供筛选下拉）
   const clustersQuery = useQuery({
     queryKey: ["clusters", "list-for-pods", accessToken],
-    queryFn: () => getClusters({ state: "active", selectableOnly: true }, accessToken),
+    queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
-  const clusterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+  const clusterFilterOptions = useMemo(
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
   const clusterMap = useMemo(
@@ -363,8 +387,12 @@ export default function PodsPage() {
       clusterId,
       namespace,
       keyword,
+      phaseFilter,
+      mergedFilters,
       page,
       pageSize,
+      sortBy,
+      sortOrder,
       accessToken,
     ],
     queryFn: () =>
@@ -376,13 +404,17 @@ export default function PodsPage() {
           keyword: keyword.trim() || undefined,
           page,
           pageSize,
-        },
+          sortBy,
+          sortOrder,
+          ...(phaseFilter ? { state: phaseFilter } : {}),
+        } as Parameters<typeof getWorkloadsByKind>[1],
         accessToken,
     ),
     enabled: !isInitializing && Boolean(accessToken),
   });
+  const tableBusy = podsQuery.isFetching;
 
-  const allRows = useMemo<PodRow[]>(
+  const rows = useMemo<PodRow[]>(
     () => (podsQuery.data?.items ?? []).map(mapItemToRow),
     [podsQuery.data],
   );
@@ -396,11 +428,14 @@ export default function PodsPage() {
     [podsQuery.data],
   );
 
-  // Client-side filtering: phase and labels
+  // Client-side filtering only applies to labels on the current backend page.
   const tableData = useMemo<PodRow[]>(() => {
-    let rows = phaseFilter ? allRows.filter((row) => row.phase === phaseFilter) : allRows;
+    let nextRows = rows.filter((row) => hasKnownCluster(clusterMap, row.clusterId));
+    if (phaseFilter) {
+      nextRows = nextRows.filter((row) => row.phase === phaseFilter);
+    }
     if (mergedFilters.length > 0) {
-      rows = rows.filter((row) => {
+      nextRows = nextRows.filter((row) => {
         const itemLabels = (row.labels as Record<string, string> | null | undefined) ?? {};
         return mergedFilters.every((lf) => {
           const [k, v] = lf.split("=");
@@ -408,11 +443,40 @@ export default function PodsPage() {
         });
       });
     }
-    return rows;
-  }, [allRows, phaseFilter, mergedFilters]);
+    return nextRows;
+  }, [clusterMap, mergedFilters, phaseFilter, rows]);
+  const displayedRows = useMemo<PodRow[]>(() => {
+    const rowsToSort = [...tableData];
+    if (!sortBy || !sortOrder) {
+      return rowsToSort;
+    }
+    const direction = sortOrder === "desc" ? -1 : 1;
+    const getNumeric = (value: unknown) => {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+      if (typeof value === "string") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+    const getString = (value: unknown) => (value === null || value === undefined ? "" : String(value));
+    return rowsToSort.sort((left, right) => {
+      const leftValue = (left as unknown as Record<string, unknown>)[sortBy];
+      const rightValue = (right as unknown as Record<string, unknown>)[sortBy];
+      const leftNumeric = getNumeric(leftValue);
+      const rightNumeric = getNumeric(rightValue);
+      if (leftNumeric !== null && rightNumeric !== null) {
+        return (leftNumeric - rightNumeric) * direction;
+      }
+      return getString(leftValue).localeCompare(getString(rightValue), "zh-Hans-CN") * direction;
+    });
+  }, [sortBy, sortOrder, tableData]);
+  const displayedTotal = podsQuery.data?.total ?? tableData.length;
   const handleSearch = () => {
     const parsed = parseSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labels);
     setKeyword(parsed.keyword);
   };
@@ -430,12 +494,14 @@ export default function PodsPage() {
   function buildTerminalParams(row: PodRow): string {
     return buildTerminalRoute({
       clusterId: row.clusterId,
+      clusterName: getClusterDisplayName(clusterMap, row.clusterId),
       namespace: row.namespace,
       pod: row.name,
       containerNames: row.containerNames,
       from: "pods",
       returnTo: "/workloads/pods",
       returnClusterId: clusterId || row.clusterId,
+      returnClusterName: getClusterDisplayName(clusterMap, clusterId || row.clusterId),
       returnNamespace: namespace || row.namespace,
       returnKeyword: keyword || row.name,
       returnPhase: phaseFilter || undefined,
@@ -446,16 +512,22 @@ export default function PodsPage() {
   function buildLogsParams(row: PodRow): string {
     return buildLogsRoute({
       clusterId: row.clusterId,
+      clusterName: getClusterDisplayName(clusterMap, row.clusterId),
       namespace: row.namespace,
       pod: row.name,
-      containerNames: row.containerNames,
+      resourceKind: "Pod",
+      resourceName: row.name,
+      resourceId: row.id,
       from: "pods",
       returnTo: "/workloads/pods",
       returnClusterId: clusterId || row.clusterId,
+      returnClusterName: getClusterDisplayName(clusterMap, clusterId || row.clusterId),
       returnNamespace: namespace || row.namespace,
       returnKeyword: keyword || row.name,
       returnPhase: phaseFilter || undefined,
       returnPage: page,
+      tailLines: 200,
+      sinceSeconds: 24 * 60 * 60,
     }).replace(/^\/logs\?/, "");
   }
 
@@ -505,7 +577,7 @@ export default function PodsPage() {
   function renderUsageCell(value: number | null, row: PodRow, kind: "cpu" | "memory") {
     if (!row.usageAvailable || value === null) {
       return (
-        <Space direction="vertical" size={2} style={{ width: "100%", alignItems: "center" }}>
+        <Space orientation="vertical" size={2} style={{ width: "100%", alignItems: "flex-start" }}>
           <Tag color="default" style={{ marginInlineEnd: 0 }}>
             无可用指标
           </Tag>
@@ -522,7 +594,7 @@ export default function PodsPage() {
         value={value}
         percent={
           kind === "cpu"
-            ? Math.min(100, value >= 1 ? value * 100 : value * 1000)
+            ? Math.min(100, Math.max(0, value * 100))
             : Math.min(100, (value / (1024 ** 3)) * 100)
         }
       />
@@ -534,9 +606,10 @@ export default function PodsPage() {
       title: "Pod 名称",
       dataIndex: "name",
       key: "name",
-      width: getAdaptiveNameWidth(allRows.map((row) => row.name), { max: 340 }),
-      align: "center",
+      width: getAdaptiveNameWidth(tableData.map((row) => row.name), { max: 340 }),
+      align: "left",
       ellipsis: true,
+      ...getSortableColumnProps("name"),
       render: (name: string, row: PodRow) =>
         row.id ? (
           <Typography.Link
@@ -550,102 +623,101 @@ export default function PodsPage() {
             {name}
           </Typography.Text>
         ),
-    },
+    } as unknown as ColumnType<PodRow>,
     {
       title: "集群",
       dataIndex: "clusterId",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
-      align: "center",
+      align: "left",
       ellipsis: true,
+      ...getSortableColumnProps("clusterId"),
       render: (_: unknown, row: PodRow) => getClusterDisplayName(clusterMap, row.clusterId),
-    },
+    } as unknown as ColumnType<PodRow>,
     {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
       width: TABLE_COL_WIDTH.namespace,
-      align: "center",
-    },
-    {
-      title: "镜像",
-      dataIndex: "image",
-      key: "image",
-      width: TABLE_COL_WIDTH.imageCompact,
-      align: "center",
-      ellipsis: true,
-    },
+      align: "left",
+      ...getSortableColumnProps("namespace"),
+    } as unknown as ColumnType<PodRow>,
     {
       title: "就绪",
-      key: "ready",
+      dataIndex: "readyReplicas",
+      key: "readyReplicas",
       width: 90,
-      align: "center",
+      align: "left",
+      ...getSortableColumnProps("readyReplicas"),
       render: (_: unknown, row: PodRow) => `${row.readyReplicas}/${row.replicas}`,
-    },
+    } as unknown as ColumnType<PodRow>,
     {
       title: "状态",
       dataIndex: "phase",
       key: "phase",
       width: TABLE_COL_WIDTH.status,
-      align: "center",
+      align: "left",
+      ...getSortableColumnProps("phase"),
       render: (phase: string) => <Tag color={podPhaseColor(phase)}>{phase}</Tag>,
-    },
+    } as unknown as ColumnType<PodRow>,
     {
       title: "CPU 使用率",
-      key: "cpuUsagePercent",
+      dataIndex: "cpuUsage",
+      key: "cpuUsage",
       width: 160,
-      align: "center",
-      render: (_: unknown, row: PodRow) =>
-        row.cpuUsage !== null
-          ? renderUsageCell(row.cpuUsage, row, "cpu")
-          : renderUsageCell(row.cpuUsagePercent, row, "cpu"),
-    },
+      align: "left",
+      ...getSortableColumnProps("cpuUsage"),
+      render: (_: unknown, row: PodRow) => renderUsageCell(row.cpuUsage ?? row.cpuUsagePercent, row, "cpu"),
+    } as unknown as ColumnType<PodRow>,
     {
-      title: "Memory 使用率",
-      key: "memoryUsagePercent",
+      title: "内存使用率",
+      dataIndex: "memoryUsage",
+      key: "memoryUsage",
       width: 160,
-      align: "center",
-      render: (_: unknown, row: PodRow) =>
-        row.memoryUsage !== null
-          ? renderUsageCell(row.memoryUsage, row, "memory")
-          : renderUsageCell(row.memoryUsagePercent, row, "memory"),
-    },
+      align: "left",
+      ...getSortableColumnProps("memoryUsage"),
+      render: (_: unknown, row: PodRow) => renderUsageCell(row.memoryUsage ?? row.memoryUsagePercent, row, "memory"),
+    } as unknown as ColumnType<PodRow>,
     {
       title: "重启次数",
       dataIndex: "restartCount",
       key: "restartCount",
       width: TABLE_COL_WIDTH.replicas,
-      align: "center",
-    },
+      align: "left",
+      ...getSortableColumnProps("restartCount"),
+    } as unknown as ColumnType<PodRow>,
     {
       title: "Pod IP",
       dataIndex: "podIP",
       key: "podIP",
       width: TABLE_COL_WIDTH.ip,
-      align: "center",
-    },
+      align: "left",
+      ...getSortableColumnProps("podIP"),
+    } as unknown as ColumnType<PodRow>,
     {
       title: "节点",
       dataIndex: "nodeName",
       key: "nodeName",
       width: TABLE_COL_WIDTH.node,
-      align: "center",
+      align: "left",
       ellipsis: true,
-    },
+      ...getSortableColumnProps("nodeName"),
+    } as unknown as ColumnType<PodRow>,
     {
       title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
       width: TABLE_COL_WIDTH.time,
-      align: "center",
+      align: "left",
+      ...getSortableColumnProps("createdAt"),
       render: (v: string) => <ResourceTimeCell value={v} now={now} mode="relative" />,
-    },
+    } as unknown as ColumnType<PodRow>,
     {
       title: "操作",
       key: "quick-actions",
       width: TABLE_COL_WIDTH.actionCompact,
       fixed: "right",
-      align: "center",
+      align: "left",
       render: (_: unknown, row: PodRow) => (
         <Dropdown
           menu={{
@@ -706,28 +778,27 @@ export default function PodsPage() {
         />
         <Row gutter={[8, 8]} align="middle" style={{ marginBottom: 10 }}>
           <Col xs={24} sm={12} md={5} lg={4}>
-            <Select
-              className="resource-filter-select"
-              style={{ width: "100%" }}
+            <ClusterSelect
               value={clusterId}
               onChange={(v) => {
-                setClusterId(v);
-                setPage(1);
+                onClusterChange(v);
+                resetPage();
               }}
-              options={clusterOptions}
+              options={clusterFilterOptions}
               loading={clustersQuery.isLoading}
-              placeholder="选择集群"
             />
           </Col>
           <Col xs={24} sm={12} md={4} lg={3}>
             <NamespaceSelect
               value={namespace}
               onChange={(v) => {
-                setNamespace(v);
-                setPage(1);
+                onNamespaceChange(v);
+                resetPage();
               }}
               knownNamespaces={knownNamespaces}
               clusterId={clusterId}
+              disabled={namespaceDisabled}
+              placeholder={namespacePlaceholder}
             />
           </Col>
           <Col xs={24} md={7} lg={6}>
@@ -746,7 +817,7 @@ export default function PodsPage() {
               value={phaseFilter}
               onChange={(v) => {
                 setPhaseFilter(v);
-                setPage(1);
+                resetPage();
               }}
               options={PHASE_OPTIONS}
               placeholder="状态过滤"
@@ -775,30 +846,18 @@ export default function PodsPage() {
           />
         ) : null}
 
-          <Table<PodRow>
-            rowKey="key"
-            bordered
-            columns={columns}
-            dataSource={tableData}
+        <Table<PodRow>
+          rowKey="key"
+          bordered
+          columns={columns}
+          dataSource={displayedRows}
           loading={{ spinning: podsQuery.isLoading && !podsQuery.data, description: "Pod 数据加载中..." }}
           scroll={{ x: getTableScrollX(columns) }}
           className="pod-table"
-          pagination={{
-            current: page,
-            pageSize,
-            total: phaseFilter
-              ? tableData.length
-              : (podsQuery.data?.total ?? 0),
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条`,
-            onChange: (nextPage, nextPageSize) => {
-              setPage(nextPage);
-              if (nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-              }
-            },
-          }}
+          onChange={(paginationInfo, filters, sorter, extra) =>
+            handleTableChange(paginationInfo, filters, sorter, extra, tableBusy)
+          }
+          pagination={getPaginationConfig(displayedTotal, tableBusy)}
           locale={{
             emptyText:
               podsQuery.isLoading && !podsQuery.data ? (
@@ -828,7 +887,7 @@ export default function PodsPage() {
         }}
       />
 
-      <style jsx global>{`
+      <style>{`
         .pod-action-trigger.ant-btn {
           display: inline-flex;
           align-items: center;
@@ -917,36 +976,6 @@ export default function PodsPage() {
           border-color: rgba(148, 163, 184, 0.16);
         }
 
-        .pod-table .ant-table-thead > tr > th,
-        .pod-table .ant-table-tbody > tr > td {
-          text-align: center;
-          vertical-align: middle;
-        }
-
-        .pod-table .ant-table-cell {
-          vertical-align: middle !important;
-        }
-
-        .pod-table .ant-table-thead > tr > th {
-          padding-top: 14px;
-          padding-bottom: 14px;
-          line-height: 1.2;
-        }
-
-        .pod-table .ant-table-tbody > tr > td {
-          padding-top: 12px;
-          padding-bottom: 12px;
-          line-height: 1.2;
-        }
-
-        .pod-table .ant-table-cell-fix-right {
-          vertical-align: middle !important;
-        }
-
-        .pod-table .ant-table-tbody > tr > td .ant-typography,
-        .pod-table .ant-table-tbody > tr > td .ant-tag {
-          margin-inline: auto;
-        }
       `}</style>
     </Space>
   );

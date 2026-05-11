@@ -4381,7 +4381,6 @@ export default function NetworkTopologyPage() {
           onClose={() => setDetailRequest(null)}
           token={token}
           request={detailRequest}
-          width={1120}
           onNavigateRequest={(request) => setDetailRequest(request)}
         />
       </section>

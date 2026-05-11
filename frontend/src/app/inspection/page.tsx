@@ -24,6 +24,7 @@ import type { Dayjs } from "dayjs";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
+import { buildTablePagination } from "@/lib/table/pagination";
 import {
   getCapabilityBaseline,
   type CapabilityBaselineMatrixItem,
@@ -85,6 +86,10 @@ export default function InspectionPage() {
   const [refreshingInspection, setRefreshingInspection] = useState(false);
   const [timePreset, setTimePreset] = useState<MonitoringTimePreset | "custom">("24h");
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [capabilityPage, setCapabilityPage] = useState(1);
+  const [capabilityPageSize, setCapabilityPageSize] = useState(10);
+  const [issuePage, setIssuePage] = useState(1);
+  const [issuePageSize, setIssuePageSize] = useState(12);
   const enabled = !isInitializing && Boolean(accessToken);
   const timeQuery = useMemo(() => {
     if (timePreset !== "custom") {
@@ -125,10 +130,7 @@ export default function InspectionPage() {
   });
 
   const clusterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
     [clustersQuery.data],
   );
 
@@ -340,6 +342,18 @@ export default function InspectionPage() {
     };
   }, [capabilityQuery.data]);
 
+  const capabilityItems = useMemo(() => capabilityQuery.data?.items ?? [], [capabilityQuery.data?.items]);
+  const capabilityPagedItems = useMemo(() => {
+    const start = (capabilityPage - 1) * capabilityPageSize;
+    return capabilityItems.slice(start, start + capabilityPageSize);
+  }, [capabilityItems, capabilityPage, capabilityPageSize]);
+
+  const issueItems = useMemo(() => reportQuery.data?.items ?? [], [reportQuery.data?.items]);
+  const issuePagedItems = useMemo(() => {
+    const start = (issuePage - 1) * issuePageSize;
+    return issueItems.slice(start, start + issuePageSize);
+  }, [issueItems, issuePage, issuePageSize]);
+
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Card>
@@ -480,9 +494,21 @@ export default function InspectionPage() {
         <Table<CapabilityBaselineMatrixItem>
           rowKey={(record) => `${record.category}-${record.capabilityName}`}
           columns={capabilityColumns}
-          dataSource={capabilityQuery.data?.items ?? []}
+          dataSource={capabilityPagedItems}
           loading={capabilityQuery.isLoading}
-          pagination={{ pageSize: 10, showSizeChanger: false }}
+          pagination={buildTablePagination({
+            current: capabilityPage,
+            pageSize: capabilityPageSize,
+            total: capabilityItems.length,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== capabilityPageSize) {
+                setCapabilityPageSize(nextPageSize);
+                setCapabilityPage(1);
+                return;
+              }
+              setCapabilityPage(nextPage);
+            },
+          })}
           scroll={{ x: 1300 }}
         />
       </Card>
@@ -500,9 +526,21 @@ export default function InspectionPage() {
         <Table<InspectionIssue>
           rowKey="id"
           columns={columns}
-          dataSource={reportQuery.data?.items ?? []}
+          dataSource={issuePagedItems}
           loading={reportQuery.isLoading}
-          pagination={{ pageSize: 12, showSizeChanger: false }}
+          pagination={buildTablePagination({
+            current: issuePage,
+            pageSize: issuePageSize,
+            total: issueItems.length,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== issuePageSize) {
+                setIssuePageSize(nextPageSize);
+                setIssuePage(1);
+                return;
+              }
+              setIssuePage(nextPage);
+            },
+          })}
         />
       </Card>
 

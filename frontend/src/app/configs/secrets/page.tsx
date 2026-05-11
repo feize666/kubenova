@@ -1,6 +1,6 @@
 "use client";
 
-import { MinusCircleOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { MinusCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
@@ -30,7 +30,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import {
   createConfig,
   deleteConfig,
@@ -39,10 +39,12 @@ import {
 } from "@/lib/api/configs";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
-import { NamespaceSelect } from "@/components/namespace-select";
+import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { buildTablePagination } from "@/lib/table/pagination";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 const SECRET_TYPE_OPTIONS = [
   { label: "Opaque", value: "Opaque" },
@@ -68,13 +70,13 @@ export default function SecretsPage() {
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter();
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -100,10 +102,7 @@ export default function SecretsPage() {
   });
 
   const clusterFilterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
 
@@ -166,6 +165,7 @@ export default function SecretsPage() {
   const clusterMap = Object.fromEntries(
     (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
   );
+  const effectivePageSize = data?.pageSize ?? pageSize;
 
   // Extract known namespaces from loaded data
   const knownNamespaces = useMemo(
@@ -185,10 +185,12 @@ export default function SecretsPage() {
 
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter((item) =>
-        matchLabelExpressions(resolveItemLabels(item), mergedFilters),
+      (data?.items ?? []).filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          matchLabelExpressions(resolveItemLabels(item), mergedFilters),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -278,52 +280,28 @@ export default function SecretsPage() {
       />
 
       <Card>
-        <Row gutter={[12, 12]} align="middle" style={{ marginBottom: 16 }}>
-          <Col xs={24} sm={12} md={6} lg={4}>
-            <Select
-              className="resource-filter-select"
-              style={{ width: "100%" }}
-              placeholder="全部集群"
-              value={clusterId || undefined}
-              onChange={(v) => { setClusterId(v ?? ""); setPage(1); }}
-              allowClear
-              options={clusterFilterOptions}
-              loading={clustersQuery.isLoading}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={5} lg={4}>
-            <NamespaceSelect
-              value={namespace}
-              onChange={(v) => {
-                setNamespace(v);
-                setPage(1);
-              }}
-              knownNamespaces={knownNamespaces}
-              clusterId={clusterId}
-            />
-          </Col>
-          <Col xs={24} sm={16} md={7} lg={6}>
-            <Input
-              prefix={<SearchOutlined />}
-              allowClear
-              placeholder="按名称/标签搜索（示例：secret-a app=web env=prod）"
-              value={keywordInput}
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onPressEnter={handleSearch}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={4} lg={3}>
-            <Space>
-              <Button
-                icon={<SearchOutlined />}
-                type="primary"
-                onClick={handleSearch}
-              >
-                查询
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+        <ResourceClusterNamespaceFilters
+          clusterId={clusterId}
+          namespace={namespace}
+          keywordInput={keywordInput}
+          clusterOptions={clusterFilterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onClusterChange={(value) => {
+            onClusterChange(value);
+            setPage(1);
+          }}
+          onNamespaceChange={(value) => {
+            onNamespaceChange(value);
+            setPage(1);
+          }}
+          onKeywordInputChange={setKeywordInput}
+          onSearch={handleSearch}
+          keywordPlaceholder="按名称/标签搜索（示例：secret-a app=web env=prod）"
+          marginBottom={16}
+        />
 
         {!isInitializing && !accessToken ? (
           <Alert
@@ -345,18 +323,26 @@ export default function SecretsPage() {
         ) : null}
 
         <Table<ConfigResourceItem>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={{
+          pagination={buildTablePagination({
             current: page,
-            pageSize,
+            pageSize: effectivePageSize,
             total: data?.total ?? 0,
-            onChange: (p) => setPage(p),
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+            disabled: isLoading && !data,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== effectivePageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+                return;
+              }
+              setPage(nextPage);
+            },
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

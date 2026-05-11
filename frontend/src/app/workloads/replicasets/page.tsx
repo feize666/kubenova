@@ -39,7 +39,7 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import {
   applyWorkloadActionById,
   createWorkload,
@@ -51,13 +51,14 @@ import {
 import { type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { NamespaceSelect } from "@/components/namespace-select";
-import { extractWorkloadImage } from "@/lib/workloads/image";
+import { ClusterSelect } from "@/components/cluster-select";
 import {
   runScaleConvergence,
   type ScaleConvergenceRound,
 } from "@/lib/workloads/scale-convergence";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { useAntdTableSortPagination } from "@/lib/table";
 
 function stateTag(state: string) {
   if (state === "active") return <Tag color="green">启用</Tag>;
@@ -91,8 +92,9 @@ export default function ReplicaSetsPage() {
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [clusterId, setClusterId] = useState("");
   const [namespace, setNamespace] = useState("");
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const { pagination, resetPage, getPaginationConfig, handleTableChange } = useAntdTableSortPagination<WorkloadListItem>({
+    defaultPageSize: 10,
+  });
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<WorkloadListItem | null>(null);
@@ -104,14 +106,14 @@ export default function ReplicaSetsPage() {
   const [scaleConvergence, setScaleConvergence] = useState<ScaleConvergenceViewState | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
 
-  const queryKey = ["workloads", "ReplicaSet", { clusterId, keyword, namespace, page, pageSize }, accessToken];
+  const queryKey = ["workloads", "ReplicaSet", { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize }, accessToken];
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey,
     queryFn: () =>
       getWorkloadsByKind(
         "ReplicaSet",
-        { clusterId: clusterId || undefined, keyword: keyword.trim() || undefined, namespace: namespace.trim() || undefined, page, pageSize },
+        { clusterId: clusterId || undefined, keyword: keyword.trim() || undefined, namespace: namespace.trim() || undefined, page: pagination.pageIndex + 1, pageSize: pagination.pageSize },
         accessToken || undefined,
       ),
     enabled: !isInitializing && Boolean(accessToken),
@@ -125,10 +127,7 @@ export default function ReplicaSetsPage() {
   });
 
   const clusterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
   const clusterMap = useMemo(
@@ -147,10 +146,12 @@ export default function ReplicaSetsPage() {
   );
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter((item) =>
-        matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+      (data?.items ?? []).filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -158,7 +159,7 @@ export default function ReplicaSetsPage() {
   );
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
@@ -389,13 +390,6 @@ export default function ReplicaSetsPage() {
     },
     { title: "集群", dataIndex: "clusterId", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId) },
     { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
-    {
-      title: "镜像",
-      key: "image",
-      width: TABLE_COL_WIDTH.imageCompact,
-      ellipsis: true,
-      render: (_: unknown, item: WorkloadListItem) => extractWorkloadImage(item),
-    },
     { title: "期望副本", dataIndex: "replicas", key: "replicas", width: TABLE_COL_WIDTH.replicas },
     { title: "实际副本", dataIndex: "readyReplicas", key: "readyReplicas", width: TABLE_COL_WIDTH.ready },
     {
@@ -416,7 +410,7 @@ export default function ReplicaSetsPage() {
       title: "操作",
       key: "actions",
       width: TABLE_COL_WIDTH.actionCompact,
-      align: "center",
+      align: "left",
       fixed: "right",
       render: (_: unknown, row: WorkloadListItem) => (
         <Dropdown
@@ -450,12 +444,9 @@ export default function ReplicaSetsPage() {
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
           <Row gutter={[12, 12]} align="middle">
             <Col xs={24} sm={12} md={6} lg={4}>
-              <Select
-                style={{ width: "100%" }}
-                placeholder="全部集群"
-                value={clusterId || undefined}
-                onChange={(v) => { setClusterId(v ?? ""); setPage(1); }}
-                allowClear
+              <ClusterSelect
+                value={clusterId}
+                onChange={(v) => { setClusterId(v); resetPage(); }}
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
               />
@@ -463,7 +454,7 @@ export default function ReplicaSetsPage() {
             <Col xs={24} sm={12} md={5} lg={4}>
               <NamespaceSelect
                 value={namespace}
-                onChange={(v) => { setNamespace(v); setPage(1); }}
+                onChange={(v) => { setNamespace(v); resetPage(); }}
                 knownNamespaces={knownNamespaces}
                 clusterId={clusterId}
               />
@@ -534,18 +525,16 @@ export default function ReplicaSetsPage() {
           ) : null}
 
           <Table<WorkloadListItem>
+            className="pod-table"
             bordered
             rowKey="id"
             columns={columns}
             dataSource={tableData}
             loading={(isLoading && !data) || actionMutation.isPending}
-            pagination={{
-              current: page,
-              pageSize,
-              total: data?.total ?? 0,
-              onChange: (p) => setPage(p),
-              showTotal: (total) => `共 ${total} 条`,
-            }}
+            onChange={(paginationInfo, filters, sorter, extra) =>
+              handleTableChange(paginationInfo, filters, sorter, extra, (isLoading && !data) || actionMutation.isPending)
+            }
+            pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
             scroll={{ x: getTableScrollX(columns) }}
           />
         </Space>

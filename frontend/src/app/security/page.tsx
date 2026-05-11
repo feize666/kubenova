@@ -33,6 +33,8 @@ import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { buildTablePagination } from "@/lib/table/pagination";
 import {
   type AuditLogRecord,
   type SecurityEvent,
@@ -146,16 +148,17 @@ function SecurityEventsTab() {
 
   const filteredItems = useMemo(() => {
     const raw = data?.items ?? [];
-    if (!keyword.trim()) return raw;
+    const known = raw.filter((item) => hasKnownCluster(clusterMap, item.cluster));
+    if (!keyword.trim()) return known;
     const kw = keyword.trim().toLowerCase();
-    return raw.filter(
+    return known.filter(
       (item) =>
         item.title.toLowerCase().includes(kw) ||
         item.type.toLowerCase().includes(kw) ||
         item.resourceName.toLowerCase().includes(kw) ||
         item.cluster.toLowerCase().includes(kw),
     );
-  }, [data?.items, keyword]);
+  }, [clusterMap, data?.items, keyword]);
 
   const handleRefreshEvents = async () => {
     setRefreshingEvents(true);
@@ -212,7 +215,7 @@ function SecurityEventsTab() {
       dataIndex: "cluster",
       key: "cluster",
       width: 140,
-      render: (v: string) => <Tag>{clusterMap[v] ?? v}</Tag>,
+      render: (v: string) => <Tag>{getClusterDisplayName(clusterMap, v)}</Tag>,
     },
     {
       title: "发生时间",
@@ -316,14 +319,12 @@ function SecurityEventsTab() {
         loading={isLoading}
         size="small"
         scroll={{ x: 1000 }}
-        pagination={{
+        pagination={buildTablePagination({
           current: page,
           pageSize: PAGE_SIZE,
           total: data?.total ?? 0,
-          showSizeChanger: false,
-          showTotal: (total) => `共 ${total} 条`,
           onChange: (p) => setPage(p),
-        }}
+        })}
         rowClassName={(record) =>
           record.severity === "critical" && record.status === "open"
             ? "ant-table-row-danger"
@@ -508,14 +509,12 @@ function AuditLogsTab() {
         loading={isLoading}
         size="small"
         scroll={{ x: 900 }}
-        pagination={{
+        pagination={buildTablePagination({
           current: page,
           pageSize: PAGE_SIZE,
           total: data?.total ?? 0,
-          showSizeChanger: false,
-          showTotal: (total) => `共 ${total} 条`,
           onChange: (p) => setPage(p),
-        }}
+        })}
       />
     </>
   );

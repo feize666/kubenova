@@ -47,10 +47,12 @@ import {
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { NamespaceSelect } from "@/components/namespace-select";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { useAntdTableSortPagination } from "@/lib/table";
 
 function stateTag(state: string) {
   if (state === "active") return <Tag color="green">运行中</Tag>;
@@ -75,8 +77,9 @@ export default function JobsPage() {
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [clusterId, setClusterId] = useState("");
   const [namespace, setNamespace] = useState("");
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const { pagination, resetPage, getPaginationConfig, handleTableChange } = useAntdTableSortPagination<WorkloadListItem>({
+    defaultPageSize: 10,
+  });
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -85,14 +88,14 @@ export default function JobsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<FormValues>();
 
-  const queryKey = ["workloads", "Job", { clusterId, keyword, namespace, page, pageSize }, accessToken];
+  const queryKey = ["workloads", "Job", { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize }, accessToken];
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey,
     queryFn: () =>
       getWorkloadsByKind(
         "Job",
-        { clusterId: clusterId || undefined, keyword: keyword.trim() || undefined, namespace: namespace.trim() || undefined, page, pageSize },
+        { clusterId: clusterId || undefined, keyword: keyword.trim() || undefined, namespace: namespace.trim() || undefined, page: pagination.pageIndex + 1, pageSize: pagination.pageSize },
         accessToken || undefined,
     ),
     enabled: !isInitializing && Boolean(accessToken),
@@ -106,10 +109,7 @@ export default function JobsPage() {
   });
 
   const clusterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
   const clusterMap = useMemo(
@@ -128,10 +128,12 @@ export default function JobsPage() {
   );
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter((item) =>
-        matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+      (data?.items ?? []).filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -139,7 +141,7 @@ export default function JobsPage() {
   );
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
@@ -280,7 +282,7 @@ export default function JobsPage() {
       title: "操作",
       key: "actions",
       width: TABLE_COL_WIDTH.actionCompact,
-      align: "center",
+      align: "left",
       fixed: "right",
       render: (_: unknown, row: WorkloadListItem) => (
         <Dropdown
@@ -314,12 +316,9 @@ export default function JobsPage() {
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
           <Row gutter={[12, 12]} align="middle">
             <Col xs={24} sm={12} md={6} lg={4}>
-              <Select
-                style={{ width: "100%" }}
-                placeholder="全部集群"
-                value={clusterId || undefined}
-                onChange={(v) => { setClusterId(v ?? ""); setPage(1); }}
-                allowClear
+              <ClusterSelect
+                value={clusterId}
+                onChange={(v) => { setClusterId(v); resetPage(); }}
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
               />
@@ -327,7 +326,7 @@ export default function JobsPage() {
             <Col xs={24} sm={12} md={5} lg={4}>
               <NamespaceSelect
                 value={namespace}
-                onChange={(v) => { setNamespace(v); setPage(1); }}
+                onChange={(v) => { setNamespace(v); resetPage(); }}
                 knownNamespaces={knownNamespaces}
                 clusterId={clusterId}
               />
@@ -369,18 +368,16 @@ export default function JobsPage() {
           ) : null}
 
           <Table<WorkloadListItem>
+            className="pod-table"
             bordered
             rowKey="id"
             columns={columns}
             dataSource={tableData}
             loading={isLoading && !data}
-            pagination={{
-              current: page,
-              pageSize,
-              total: data?.total ?? 0,
-              onChange: (p) => setPage(p),
-              showTotal: (total) => `共 ${total} 条`,
-            }}
+            onChange={(paginationInfo, filters, sorter, extra) =>
+              handleTableChange(paginationInfo, filters, sorter, extra, isLoading && !data)
+            }
+            pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
             scroll={{ x: getTableScrollX(columns) }}
           />
         </Space>

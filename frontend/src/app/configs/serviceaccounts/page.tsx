@@ -1,16 +1,14 @@
 "use client";
 
-import { CopyOutlined, SearchOutlined } from "@ant-design/icons";
+import { CopyOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Alert,
   Button,
   Card,
-  Col,
   Form,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Table,
@@ -20,10 +18,10 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { NamespaceSelect } from "@/components/namespace-select";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import {
   matchLabelExpressions,
@@ -37,6 +35,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { getNamespaces } from "@/lib/api/namespaces";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { buildTablePagination } from "@/lib/table/pagination";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { Dropdown } from "antd";
 import {
@@ -48,6 +47,7 @@ import {
   type DynamicResourceIdentity,
   type DynamicResourceItem,
 } from "@/lib/api/resources";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 type ServiceAccountRecord = DynamicResourceItem;
 
@@ -93,9 +93,8 @@ export default function ServiceAccountsPage() {
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
   const lastDiscoveryRefreshAtRef = useRef<Record<string, number>>({});
-
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter();
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
@@ -120,23 +119,22 @@ export default function ServiceAccountsPage() {
     queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken!),
     enabled: !isInitializing && Boolean(accessToken),
   });
-
-  const selectedClusterId = useMemo(() => {
-    if (clusterId) return clusterId;
-    return clustersQuery.data?.items?.[0]?.id ?? "";
-  }, [clusterId, clustersQuery.data?.items]);
+  const clusterOptions = useMemo(
+    () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
+    [clustersQuery.data?.items],
+  );
 
   const namespacesQuery = useQuery({
-    queryKey: ["serviceaccounts", "namespaces", selectedClusterId, accessToken],
-    queryFn: () => getNamespaces({ clusterId: selectedClusterId }, accessToken ?? undefined),
-    enabled: Boolean(accessToken) && Boolean(selectedClusterId),
+    queryKey: ["serviceaccounts", "namespaces", clusterId || "all", accessToken],
+    queryFn: () => getNamespaces({ clusterId: clusterId || undefined }, accessToken ?? undefined),
+    enabled: Boolean(accessToken) && Boolean(clusterId),
   });
 
   const listQuery = useQuery({
     queryKey: [
       "serviceaccounts",
       "list",
-      selectedClusterId,
+      clusterId || "all",
       namespace,
       keyword,
       page,
@@ -146,7 +144,7 @@ export default function ServiceAccountsPage() {
     queryFn: () =>
       getDynamicResources(
         {
-          clusterId: selectedClusterId,
+          clusterId: clusterId || undefined,
           group: "",
           version: "v1",
           resource: "serviceaccounts",
@@ -157,12 +155,17 @@ export default function ServiceAccountsPage() {
         },
         accessToken ?? undefined,
       ),
-    enabled: Boolean(accessToken) && Boolean(selectedClusterId),
+    enabled: Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
 
   const refreshDiscoveryMutation = useMutation({
-    mutationFn: () => refreshResourceDiscovery(selectedClusterId, accessToken ?? undefined),
+    mutationFn: () => {
+      if (!clusterId) {
+        throw new Error("请先选择集群后再刷新资源发现");
+      }
+      return refreshResourceDiscovery(clusterId, accessToken ?? undefined);
+    },
     onSuccess: async () => {
       await listQuery.refetch();
     },
@@ -172,19 +175,19 @@ export default function ServiceAccountsPage() {
   });
 
   useEffect(() => {
-    if (!accessToken || !selectedClusterId || refreshDiscoveryMutation.isPending) {
+    if (!accessToken || !clusterId || refreshDiscoveryMutation.isPending) {
       return;
     }
 
     const now = Date.now();
-    const lastTriggeredAt = lastDiscoveryRefreshAtRef.current[selectedClusterId] ?? 0;
+    const lastTriggeredAt = lastDiscoveryRefreshAtRef.current[clusterId] ?? 0;
     if (now - lastTriggeredAt < 5 * 60 * 1000) {
       return;
     }
 
-    lastDiscoveryRefreshAtRef.current[selectedClusterId] = now;
+    lastDiscoveryRefreshAtRef.current[clusterId] = now;
     refreshDiscoveryMutation.mutate();
-  }, [accessToken, selectedClusterId, refreshDiscoveryMutation]);
+  }, [accessToken, clusterId, refreshDiscoveryMutation]);
 
   const openYamlMutation = useMutation({
     mutationFn: (identity: DynamicResourceIdentity) => getDynamicResourceDetail(identity, accessToken ?? undefined),
@@ -225,7 +228,7 @@ export default function ServiceAccountsPage() {
       const yaml = buildServiceAccountYaml(name, ns);
       return updateDynamicResourceYaml(
         {
-          clusterId: selectedClusterId,
+          clusterId,
           group: "",
           version: "v1",
           resource: "serviceaccounts",
@@ -248,10 +251,16 @@ export default function ServiceAccountsPage() {
   });
 
   const rowsRaw = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
+  const effectivePageSize = listQuery.data?.pageSize ?? pageSize;
 
   const knownNamespaces = useMemo(
     () => Array.from(new Set(rowsRaw.map((item) => item.namespace).filter(Boolean))).sort(),
     [rowsRaw],
+  );
+
+  const clusterMap = useMemo(
+    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name])),
+    [clustersQuery.data?.items],
   );
 
   const resolveItemLabels = (item: ServiceAccountRecord): Record<string, string> | null | undefined => {
@@ -263,8 +272,11 @@ export default function ServiceAccountsPage() {
   };
 
   const tableData = useMemo(
-    () => rowsRaw.filter((item) => matchLabelExpressions(resolveItemLabels(item), mergedFilters)),
-    [rowsRaw, mergedFilters],
+    () =>
+      rowsRaw.filter(
+        (item) => hasKnownCluster(clusterMap, item.clusterId) && matchLabelExpressions(resolveItemLabels(item), mergedFilters),
+      ),
+    [clusterMap, rowsRaw, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -399,8 +411,6 @@ export default function ServiceAccountsPage() {
     }
   };
 
-  const clusterMap = Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]));
-
   const columns: ColumnsType<ServiceAccountRecord> = [
     {
       title: "名称",
@@ -488,54 +498,43 @@ export default function ServiceAccountsPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/configs/serviceaccounts"
-        titleSuffix={<ResourceAddButton title="新增资源" onClick={() => setCreateOpen(true)} />}
+        titleSuffix={
+          <ResourceAddButton
+            title="新增资源"
+            disabled={!clusterId}
+            onClick={() => {
+              if (!clusterId) {
+                void message.error("请先选择集群后再新增资源");
+                return;
+              }
+              setCreateOpen(true);
+            }}
+          />
+        }
       />
 
       <Card>
-        <Row gutter={[12, 12]} align="middle" style={{ marginBottom: 16 }}>
-          <Col xs={24} sm={12} md={6} lg={4}>
-            <Select
-              className="resource-filter-select"
-              style={{ width: "100%" }}
-              placeholder="全部集群"
-              value={selectedClusterId || undefined}
-              onChange={(value) => {
-                setClusterId(value);
-                setPage(1);
-              }}
-              options={(clustersQuery.data?.items ?? []).map((item) => ({
-                label: item.name,
-                value: item.id,
-              }))}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={5} lg={4}>
-            <NamespaceSelect
-              value={namespace}
-              knownNamespaces={knownNamespaces}
-              clusterId={selectedClusterId}
-              onChange={(value) => {
-                setNamespace(value.trim());
-                setPage(1);
-              }}
-            />
-          </Col>
-          <Col xs={24} sm={16} md={7} lg={6}>
-            <Input
-              allowClear
-              prefix={<SearchOutlined />}
-              placeholder="输入关键字，或 label 过滤（如 env=prod team=platform）"
-              value={keywordInput}
-              onChange={(event) => setKeywordInput(event.target.value)}
-              onPressEnter={handleSearch}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={4} lg={3}>
-            <Button icon={<SearchOutlined />} type="primary" onClick={handleSearch}>
-              查询
-            </Button>
-          </Col>
-        </Row>
+        <NetworkResourcePageFilters
+          clusterId={clusterId}
+          namespace={namespace}
+          keywordInput={keywordInput}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onClusterChange={(value) => {
+            onClusterChange(value);
+            setPage(1);
+          }}
+          onNamespaceChange={(value) => {
+            onNamespaceChange(value);
+            setPage(1);
+          }}
+          onKeywordInputChange={setKeywordInput}
+          onSearch={handleSearch}
+          keywordPlaceholder="输入关键字，或 label 过滤（如 env=prod team=platform）"
+        />
 
         {!isInitializing && !accessToken ? (
           <Alert type="warning" showIcon message="未登录或登录初始化中，请稍后重试。" style={{ marginBottom: 16 }} />
@@ -552,6 +551,7 @@ export default function ServiceAccountsPage() {
         ) : null}
 
         <Table<ServiceAccountRecord>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
@@ -564,19 +564,20 @@ export default function ServiceAccountsPage() {
               }
             },
           })}
-          pagination={{
+          pagination={buildTablePagination({
             current: listQuery.data?.page ?? page,
-            pageSize: listQuery.data?.pageSize ?? pageSize,
+            pageSize: effectivePageSize,
             total: listQuery.data?.total ?? 0,
-            showSizeChanger: true,
+            disabled: listQuery.isLoading && !listQuery.data,
             onChange: (nextPage, nextPageSize) => {
-              setPage(nextPage);
-              if (nextPageSize !== pageSize) {
+              if (nextPageSize !== effectivePageSize) {
                 setPageSize(nextPageSize);
                 setPage(1);
+                return;
               }
+              setPage(nextPage);
             },
-          }}
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

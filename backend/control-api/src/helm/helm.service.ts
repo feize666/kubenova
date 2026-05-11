@@ -34,6 +34,7 @@ const execFileAsync = promisify(execFile);
 interface HelmReleaseItem {
   name: string;
   namespace: string;
+  clusterId?: string;
   revision?: string;
   updated?: string;
   status?: string;
@@ -73,6 +74,8 @@ interface HelmRepositoryItem {
 interface HelmRepositoryListPayload {
   items: HelmRepositoryItem[];
   total: number;
+  page: number;
+  pageSize: number;
   timestamp: string;
 }
 
@@ -162,6 +165,11 @@ interface SyncOptions {
   only?: HelmRepositoryRecord[];
   strict?: boolean;
 }
+
+type HelmClusterItem = {
+  id: string;
+  hasKubeconfig: boolean;
+};
 
 const HELM_REPOSITORY_PRESETS: HelmRepositoryPresetItem[] = [
   {
@@ -288,11 +296,21 @@ export class HelmService {
   async listRepositories(
     query: HelmRepositoryQuery,
   ): Promise<HelmRepositoryListPayload> {
-    const clusterId = this.requireNonEmpty(query.clusterId, 'clusterId');
-    const records = await this.mergeRepositoryInventory(clusterId);
+    const page = this.parsePositiveInt(query.page, 1);
+    const pageSize = this.parsePositiveInt(query.pageSize, 20);
+    const clusterId = this.normalizeOptional(query.clusterId);
+
+    const records = clusterId
+      ? await this.mergeRepositoryInventory(clusterId)
+      : await this.listAllRepositoryInventory();
+
+    const total = records.length;
+    const start = (page - 1) * pageSize;
     return {
-      items: records.map((item) => this.toRepositoryItem(item)),
-      total: records.length,
+      items: records.slice(start, start + pageSize).map((item) => this.toRepositoryItem(item)),
+      total,
+      page,
+      pageSize,
       timestamp: new Date().toISOString(),
     };
   }
@@ -615,15 +633,17 @@ export class HelmService {
   }
 
   async listReleases(query: HelmListQuery): Promise<HelmListPayload> {
-    const clusterId = this.requireNonEmpty(query.clusterId, 'clusterId');
+    const clusterId = this.normalizeOptional(query.clusterId);
     const namespace = this.normalizeOptional(query.namespace);
     const keyword = this.normalizeOptional(query.keyword)?.toLowerCase();
     const page = this.parsePositiveInt(query.page, 1);
     const pageSize = this.parsePositiveInt(query.pageSize, 20);
 
-    const releases = await this.withKubeconfig(clusterId, (ctx) =>
-      this.fetchReleases(ctx, namespace),
-    );
+    const releases = clusterId
+      ? await this.withKubeconfig(clusterId, (ctx) =>
+          this.fetchReleases(ctx, namespace),
+        )
+      : await this.listAllReleases(namespace);
 
     const filtered = keyword
       ? releases.filter((item) => {
@@ -1339,6 +1359,68 @@ export class HelmService {
     return mergedRecords;
   }
 
+  private async listAllRepositoryInventory(): Promise<HelmRepositoryRecord[]> {
+    const clusters = await this.listHelmClusters();
+    if (clusters.length === 0) {
+      return [];
+    }
+
+    const records: HelmRepositoryRecord[] = [];
+    for (const cluster of clusters) {
+      try {
+        const merged = await this.mergeRepositoryInventory(cluster.id);
+        records.push(...merged);
+      } catch {
+        continue;
+      }
+    }
+
+    return this.sortRepositoryRecords(records);
+  }
+
+  private async listAllReleases(
+    namespace?: string,
+  ): Promise<HelmReleaseItem[]> {
+    const clusters = await this.listHelmClusters();
+    if (clusters.length === 0) {
+      return [];
+    }
+
+    const merged = new Map<string, HelmReleaseItem>();
+    const errors: unknown[] = [];
+
+    await Promise.all(
+      clusters.map(async (cluster) => {
+        try {
+          const releases = await this.withKubeconfig(cluster.id, (ctx) =>
+            this.fetchReleases(ctx, namespace),
+          );
+          for (const release of releases) {
+            if (!release.name || !release.namespace) {
+              continue;
+            }
+            const key = `${release.namespace}/${release.name}/${cluster.id}`;
+            const current = merged.get(key);
+            if (!current) {
+              merged.set(key, { ...release, clusterId: cluster.id });
+            }
+          }
+        } catch (error) {
+          errors.push(error);
+        }
+      }),
+    );
+
+    const releases = Array.from(merged.values());
+    if (releases.length > 0) {
+      return this.sortReleaseRecords(releases);
+    }
+    if (errors.length > 0) {
+      throw errors[0];
+    }
+    return [];
+  }
+
   private async readHostRepositoryInventory(): Promise<
     HelmCliRepositoryItem[]
   > {
@@ -2031,6 +2113,51 @@ export class HelmService {
       repositoryFromChart,
     );
     return matched ? [matched] : undefined;
+  }
+
+  private async listHelmClusters(): Promise<HelmClusterItem[]> {
+    const clusters = await this.clustersService.list({
+      state: 'active',
+      page: '1',
+      pageSize: '5000',
+    });
+    return clusters.items.filter((item) => item.hasKubeconfig !== false);
+  }
+
+  private sortReleaseRecords(records: HelmReleaseItem[]): HelmReleaseItem[] {
+    return [...records].sort((left, right) => {
+      const leftUpdated = this.toSortableTime(left.updated);
+      const rightUpdated = this.toSortableTime(right.updated);
+      if (leftUpdated !== rightUpdated) {
+        return rightUpdated - leftUpdated;
+      }
+      const leftKey = `${left.clusterId ?? ''}/${left.namespace}/${left.name}`;
+      const rightKey = `${right.clusterId ?? ''}/${right.namespace}/${right.name}`;
+      return leftKey.localeCompare(rightKey);
+    });
+  }
+
+  private sortRepositoryRecords(
+    records: HelmRepositoryRecord[],
+  ): HelmRepositoryRecord[] {
+    return [...records].sort((left, right) => {
+      const leftTime = this.toSortableTime(left.updatedAt);
+      const rightTime = this.toSortableTime(right.updatedAt);
+      if (leftTime !== rightTime) {
+        return rightTime - leftTime;
+      }
+      const leftKey = `${left.clusterId}/${left.name}`;
+      const rightKey = `${right.clusterId}/${right.name}`;
+      return leftKey.localeCompare(rightKey);
+    });
+  }
+
+  private toSortableTime(value?: string): number {
+    if (!value) {
+      return 0;
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
   }
 
   private resolvePresetSelection(

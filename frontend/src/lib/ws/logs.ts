@@ -41,6 +41,7 @@ interface RuntimeLogPayload {
   log?: unknown;
   line?: unknown;
   content?: unknown;
+  contentB64?: unknown;
   timestamp?: unknown;
   time?: unknown;
 }
@@ -77,6 +78,20 @@ function toTimestamp(raw: unknown): number {
   return Date.now();
 }
 
+function decodeBase64Text(value?: string): string {
+  if (!value) return "";
+  try {
+    if (typeof window === "undefined") {
+      return Buffer.from(value, "base64").toString("utf8");
+    }
+    const binary = window.atob(value);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return "";
+  }
+}
+
 function makeLogItem(
   text: string,
   ts: number,
@@ -92,7 +107,8 @@ function makeLogItem(
 
 function parseJsonPayload(payload: RuntimeLogPayload): RuntimeLogItem[] {
   const ts = toTimestamp(payload.timestamp ?? payload.time);
-  const candidate = payload.message ?? payload.log ?? payload.line ?? payload.content;
+  const candidate =
+    payload.message ?? payload.log ?? payload.line ?? payload.content ?? decodeBase64Text(typeof payload.contentB64 === "string" ? payload.contentB64 : undefined);
   const itemType =
     payload.type === "stderr" ? "stderr" : payload.type === "stdout" ? "stdout" : payload.type === "system" ? "system" : undefined;
   const state = typeof payload.state === "string" ? payload.state : undefined;
@@ -205,6 +221,27 @@ export class RuntimeLogsSocket {
     this.connectInternal({ resetReconnectAttempt: true });
   }
 
+  static parseSocketMessage(eventName: string, payload: unknown): RuntimeLogItem[] {
+    if (eventName === "logs.ack" || eventName === "runtime.ready" || eventName === "connect" || eventName === "disconnect") {
+      return [];
+    }
+    if (eventName === "runtime.error") {
+      const text =
+        typeof payload === "object" && payload && !Array.isArray(payload)
+          ? toText((payload as { message?: unknown }).message ?? payload)
+          : toText(payload);
+      if (!text.trim()) {
+        return [];
+      }
+      return [makeLogItem(text, Date.now(), { type: "system" })];
+    }
+    return parseRawMessage(payload);
+  }
+
+  static isTerminalStateMessage(eventName: string): boolean {
+    return eventName === "runtime.ready" || eventName === "connect" || eventName === "disconnect" || eventName === "logs.ack";
+  }
+
   private connectInternal(input: { resetReconnectAttempt: boolean }): void {
     this.clearReconnectTimer();
     if (input.resetReconnectAttempt) {
@@ -249,6 +286,31 @@ export class RuntimeLogsSocket {
     };
 
     this.ws.onmessage = (event) => {
+      if (typeof event.data === "string") {
+        try {
+          const frame = JSON.parse(event.data) as { event?: unknown; data?: unknown; payload?: unknown; type?: unknown };
+          const eventName = typeof frame.event === "string" ? frame.event : typeof frame.type === "string" ? frame.type : "";
+          if (eventName && RuntimeLogsSocket.isTerminalStateMessage(eventName)) {
+            const payload = frame.data ?? frame.payload;
+            const items = RuntimeLogsSocket.parseSocketMessage(eventName, payload);
+            if (items.length > 0) {
+              this.options.onLogs?.(items);
+            }
+            return;
+          }
+          if (eventName) {
+            const payload = frame.data ?? frame.payload;
+            const items = RuntimeLogsSocket.parseSocketMessage(eventName, payload);
+            if (items.length > 0) {
+              this.options.onLogs?.(items);
+            }
+            return;
+          }
+        } catch {
+          // fall back to raw message parsing
+        }
+      }
+
       const items = parseRawMessage(event.data);
       if (items.length > 0) {
         this.options.onLogs?.(items);
@@ -296,7 +358,7 @@ export class RuntimeLogsSocket {
   private handleUnexpectedClose(): void {
     if (!this.reconnectEnabled) {
       this.options.onStatusChange?.("连接异常");
-      this.options.onError?.("连接已断开，请点击“重新接入”重试");
+      this.options.onError?.("连接已断开，请点击“重新接入”或退出");
       return;
     }
     if (this.reconnectAttempt >= this.reconnectMaxAttempts) {
@@ -307,7 +369,7 @@ export class RuntimeLogsSocket {
         stopped: true,
       });
       this.options.onStatusChange?.("连接异常");
-      this.options.onError?.("自动重连次数已达上限，请手动重试");
+      this.options.onError?.("自动重连次数已达上限，请手动重试或退出");
       return;
     }
 

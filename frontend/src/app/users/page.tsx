@@ -10,6 +10,7 @@ import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { useModuleTableState } from "@/components/module-page";
+import { buildTablePagination } from "@/lib/table/pagination";
 import {
   createUser,
   deleteUser,
@@ -484,12 +485,10 @@ export default function UsersPage() {
           columns={columns}
           dataSource={rows}
           loading={{ spinning: query.isLoading, description: "用户数据加载中..." }}
-          pagination={{
+          pagination={buildTablePagination({
             current: tableState.page,
             pageSize: tableState.pageSize,
             total: filtered.length,
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 位用户`,
             onChange: (nextPage, nextPageSize) => {
               if (nextPageSize !== tableState.pageSize) {
                 tableState.setPageSize(nextPageSize);
@@ -497,7 +496,8 @@ export default function UsersPage() {
               }
               tableState.setPage(nextPage);
             },
-          }}
+            showTotal: (total) => `共 ${total} 位用户`,
+          })}
           locale={{
             emptyText:
               query.isLoading ? (

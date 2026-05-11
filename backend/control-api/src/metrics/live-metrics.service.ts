@@ -61,12 +61,38 @@ export class LiveMetricsService {
     if (!value) return null;
     const trimmed = value.trim();
     if (!trimmed) return null;
-    if (trimmed.endsWith('m')) {
-      const milli = Number.parseFloat(trimmed.slice(0, -1));
-      return Number.isFinite(milli) ? milli / 1000 : null;
+    const numeric = Number.parseFloat(trimmed);
+    if (!Number.isFinite(numeric)) {
+      return null;
     }
-    const parsed = Number.parseFloat(trimmed);
-    return Number.isFinite(parsed) ? parsed : null;
+    if (trimmed.endsWith('n')) {
+      return numeric / 1_000_000_000;
+    }
+    if (trimmed.endsWith('u') || trimmed.endsWith('µ') || trimmed.endsWith('μ')) {
+      return numeric / 1_000_000;
+    }
+    if (trimmed.endsWith('m')) {
+      return numeric / 1_000;
+    }
+    if (trimmed.endsWith('K') || trimmed.endsWith('k')) {
+      return numeric * 1_000;
+    }
+    if (trimmed.endsWith('M')) {
+      return numeric * 1_000_000;
+    }
+    if (trimmed.endsWith('G')) {
+      return numeric * 1_000_000_000;
+    }
+    if (trimmed.endsWith('T')) {
+      return numeric * 1_000_000_000_000;
+    }
+    if (trimmed.endsWith('P')) {
+      return numeric * 1_000_000_000_000_000;
+    }
+    if (trimmed.endsWith('E')) {
+      return numeric * 1_000_000_000_000_000_000;
+    }
+    return numeric;
   }
 
   private parseMemoryToBytes(value?: string): number | null {

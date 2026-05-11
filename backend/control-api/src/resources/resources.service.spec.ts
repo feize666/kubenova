@@ -1,4 +1,8 @@
-jest.mock('@kubernetes/client-node', () => ({}));
+jest.mock('@kubernetes/client-node', () => ({
+  KubernetesObjectApi: {
+    makeApiClient: jest.fn((kc: { __api?: unknown }) => kc.__api),
+  },
+}));
 
 import { ResourcesService } from './resources.service';
 import type { ClustersService } from '../clusters/clusters.service';
@@ -21,6 +25,9 @@ type MockedPrisma = {
   configResource: {
     findUnique: jest.Mock;
     findMany: jest.Mock;
+  };
+  apiResourceCapability?: {
+    findFirst: jest.Mock;
   };
 };
 
@@ -353,5 +360,197 @@ describe('ResourcesService detail aggregation', () => {
       'metadata',
     ]);
     expect(detail.descriptor.sections).not.toContain('network');
+  });
+});
+
+describe('ResourcesService dynamic listing', () => {
+  function buildDynamicService(prisma: MockedPrisma) {
+    const clusterHealthService = {
+      assertClusterOnlineForRead: jest.fn().mockResolvedValue(undefined),
+      listReadableClusterIdsForResourceRead: jest.fn(),
+    };
+    const clustersService = {
+      getKubeconfig: jest.fn(),
+      list: jest.fn(),
+    };
+    const k8sClientService = {
+      createClient: jest.fn((kubeconfig: string) => ({
+        __api: kubeconfig === 'kubeconfig-a'
+          ? {
+              list: jest.fn().mockResolvedValue({
+                items: [
+                  {
+                    metadata: {
+                      name: 'web-a',
+                      namespace: 'default',
+                      creationTimestamp: '2026-04-16T10:00:00.000Z',
+                    },
+                    status: { phase: 'Running' },
+                  },
+                ],
+              }),
+            }
+          : {
+              list: jest.fn().mockResolvedValue({
+                items: [
+                  {
+                    metadata: {
+                      name: 'web-b',
+                      namespace: 'default',
+                      creationTimestamp: '2026-04-16T10:01:00.000Z',
+                    },
+                    status: { state: 'Pending' },
+                  },
+                ],
+              }),
+            },
+      })),
+    };
+
+    return {
+      service: new ResourcesService(
+        clustersService as never,
+        clusterHealthService as never,
+        k8sClientService as never,
+        prisma as never,
+      ),
+      clustersService,
+      clusterHealthService,
+      k8sClientService,
+    };
+  }
+
+  it('aggregates dynamic resources across all readable clusters when clusterId is empty', async () => {
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      apiResourceCapability: {
+        findFirst: jest.fn().mockImplementation(({ where }) =>
+          Promise.resolve({
+            clusterId: where.clusterId,
+            group: '',
+            version: 'v1',
+            resource: 'deployments',
+            kind: 'Deployment',
+            namespaced: true,
+          }),
+        ),
+      },
+    };
+
+    const { service, clustersService, clusterHealthService } =
+      buildDynamicService(prisma);
+    (clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock).mockResolvedValue([
+      'cluster-b',
+    ]);
+    (clustersService.list as jest.Mock).mockResolvedValue({
+      items: [
+        { id: 'cluster-a', state: 'active', hasKubeconfig: true },
+        { id: 'cluster-b', state: 'active', hasKubeconfig: true },
+      ],
+    });
+    (clustersService.getKubeconfig as jest.Mock).mockImplementation(
+      async (clusterId: string) =>
+        clusterId === 'cluster-a' ? 'kubeconfig-a' : 'kubeconfig-b',
+    );
+
+    const result = await service.listDynamicResources({
+      group: '',
+      version: 'v1',
+      resource: 'deployments',
+    });
+
+    expect(clusterHealthService.listReadableClusterIdsForResourceRead).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(clustersService.list).toHaveBeenCalledTimes(1);
+    expect(result.clusterId).toBe('');
+    expect(result.kind).toBe('Deployment');
+    expect(result.namespaced).toBe(true);
+    expect(result.total).toBe(2);
+    expect(result.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'cluster-a/default/web-a',
+          clusterId: 'cluster-a',
+          name: 'web-a',
+          state: 'Running',
+        }),
+        expect.objectContaining({
+          id: 'cluster-b/default/web-b',
+          clusterId: 'cluster-b',
+          name: 'web-b',
+          state: 'Pending',
+        }),
+      ]),
+    );
+  });
+
+  it('keeps single-cluster dynamic listing behavior when clusterId is set', async () => {
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      apiResourceCapability: {
+        findFirst: jest.fn().mockResolvedValue({
+          clusterId: 'cluster-a',
+          group: '',
+          version: 'v1',
+          resource: 'deployments',
+          kind: 'Deployment',
+          namespaced: true,
+        }),
+      },
+    };
+
+    const { service, clustersService, clusterHealthService } =
+      buildDynamicService(prisma);
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig-a',
+    );
+
+    const result = await service.listDynamicResources({
+      clusterId: 'cluster-a',
+      version: 'v1',
+      resource: 'deployments',
+    });
+
+    expect(clusterHealthService.listReadableClusterIdsForResourceRead).not.toHaveBeenCalled();
+    expect(result.clusterId).toBe('cluster-a');
+    expect(result.kind).toBe('Deployment');
+    expect(result.total).toBe(1);
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        id: 'cluster-a/default/web-a',
+        clusterId: 'cluster-a',
+      }),
+    );
   });
 });

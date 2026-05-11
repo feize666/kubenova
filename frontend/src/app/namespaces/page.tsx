@@ -1,18 +1,15 @@
 "use client";
 
-import { DeleteOutlined, SearchOutlined } from "@ant-design/icons";
+import { DeleteOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   App,
   Card,
-  Col,
   Dropdown,
-  Button,
   Form,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Table,
@@ -43,6 +40,10 @@ import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { buildTablePagination } from "@/lib/table/pagination";
+import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 interface FormValues {
   clusterId: string;
@@ -66,21 +67,16 @@ function parseLabels(input?: string): Record<string, string> {
   return labels;
 }
 
-function labelsToText(labels?: Record<string, string>): string {
-  if (!labels) return "";
-  return Object.entries(labels)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
-}
-
 export default function NamespacesPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
 
-  const [clusterId, setClusterId] = useState("");
+  const { clusterId, onClusterChange } = useClusterNamespaceFilter();
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<NamespaceListItem | null>(null);
   const [form] = Form.useForm<FormValues>();
@@ -107,12 +103,23 @@ export default function NamespacesPage() {
 
   const clusterOptions = useMemo(
     () => [
-      { label: "全部集群", value: "" },
       ...((clustersQuery.data?.items ?? [])
         .map((item) => ({ label: item.name, value: item.id }))),
     ],
     [clustersQuery.data],
   );
+  const clusterMap = useMemo(
+    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
+    [clustersQuery.data?.items],
+  );
+  const visibleNamespaces = useMemo(
+    () => (namespacesQuery.data?.items ?? []).filter((item) => hasKnownCluster(clusterMap, item.clusterId)),
+    [clusterMap, namespacesQuery.data?.items],
+  );
+  const pagedNamespaces = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return visibleNamespaces.slice(start, start + pageSize);
+  }, [page, pageSize, visibleNamespaces]);
 
   const mutateCreate = useMutation({
     mutationFn: async (values: FormValues) =>
@@ -157,17 +164,7 @@ export default function NamespacesPage() {
     onError: (err) => message.error(err instanceof Error ? err.message : "删除失败"),
   });
 
-  const openEditModal = (row: NamespaceListItem) => {
-    setEditing(row);
-    form.setFieldsValue({
-      clusterId: row.clusterId,
-      namespace: row.namespace,
-      labelsText: labelsToText(row.labels),
-    });
-    setOpen(true);
-  };
-
-  const buildRowActions = (row: NamespaceListItem): MenuProps["items"] => [
+  const buildRowActions = (): MenuProps["items"] => [
     { key: "describe", label: "描述" },
     { key: "yaml", label: "YAML" },
     { type: "divider" },
@@ -202,7 +199,13 @@ export default function NamespacesPage() {
 
   const columns: ColumnsType<NamespaceListItem> = [
     { title: "名称空间", dataIndex: "namespace", key: "namespace", width: getAdaptiveNameWidth(namespacesQuery.data?.items?.map((item) => item.namespace) ?? []) },
-    { title: "集群", dataIndex: "clusterName", key: "clusterName", width: TABLE_COL_WIDTH.cluster },
+    {
+      title: "集群",
+      dataIndex: "clusterId",
+      key: "clusterId",
+      width: TABLE_COL_WIDTH.cluster,
+      render: (_: unknown, row) => getClusterDisplayName(clusterMap, row.clusterId, row.clusterName),
+    },
     {
       title: "标签",
       key: "labels",
@@ -230,7 +233,7 @@ export default function NamespacesPage() {
           placement="bottomRight"
           classNames={{ root: POD_ACTION_MENU_CLASS }}
           menu={{
-            items: buildRowActions(row),
+            items: buildRowActions(),
             onClick: ({ key }) => handleRowAction(row, String(key)),
           }}
         >
@@ -267,29 +270,24 @@ export default function NamespacesPage() {
       </Card>
 
       <Card className="cyber-panel">
-        <Row gutter={[12, 12]}>
-          <Col xs={24} md={8}>
-            <Select
-              value={clusterId}
-              onChange={(v) => setClusterId(v)}
-              options={clusterOptions}
-              style={{ width: "100%" }}
-            />
-          </Col>
-          <Col xs={24} md={10}>
-            <Input
-              value={keywordInput}
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onPressEnter={() => setKeyword(keywordInput.trim())}
-              placeholder="按名称空间搜索"
-            />
-          </Col>
-          <Col xs={24} md={6}>
-            <Button icon={<SearchOutlined />} type="primary" onClick={() => setKeyword(keywordInput.trim())}>
-              查询
-            </Button>
-          </Col>
-        </Row>
+        <ResourceClusterNamespaceFilters
+          clusterId={clusterId}
+          keywordInput={keywordInput}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          namespaceVisible={false}
+          onClusterChange={(value) => {
+            onClusterChange(value);
+            setPage(1);
+          }}
+          onKeywordInputChange={setKeywordInput}
+          onSearch={() => {
+            setPage(1);
+            setKeyword(keywordInput.trim());
+          }}
+          keywordPlaceholder="按名称空间搜索"
+          marginBottom={0}
+        />
       </Card>
 
       {!isInitializing && !accessToken ? (
@@ -309,13 +307,23 @@ export default function NamespacesPage() {
         <Table<NamespaceListItem>
           rowKey="id"
           columns={columns}
-          dataSource={namespacesQuery.data?.items ?? []}
+          dataSource={pagedNamespaces}
           loading={namespacesQuery.isLoading}
-          pagination={{
-            pageSize: 20,
-            showSizeChanger: false,
+          pagination={buildTablePagination({
+            current: page,
+            pageSize,
+            total: visibleNamespaces.length,
+            disabled: namespacesQuery.isLoading,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+                return;
+              }
+              setPage(nextPage);
+            },
             showTotal: (total) => `共 ${total} 项`,
-          }}
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

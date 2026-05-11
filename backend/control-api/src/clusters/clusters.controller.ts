@@ -192,7 +192,12 @@ export class ClustersController {
     let items = list.items;
     if (selectableOnly) {
       items = list.items.filter(
-        (item) => item.state === 'active' && item.hasKubeconfig,
+        (item) =>
+          item.state === 'active' &&
+          item.hasKubeconfig &&
+          (item.status ?? '').toLowerCase() !== 'offline' &&
+          (item.status ?? '').toLowerCase() !== 'checking' &&
+          (item.status ?? '').toLowerCase() !== 'offline-mode',
       );
     }
 

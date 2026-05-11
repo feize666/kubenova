@@ -5,19 +5,15 @@ import {
   ExpandOutlined,
   FileTextOutlined,
   LinkOutlined,
-  SearchOutlined,
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Button,
   Card,
-  Col,
   Dropdown,
   Form,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Table,
@@ -54,10 +50,12 @@ import {
 } from "@/lib/api/storage";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
-import { NamespaceSelect } from "@/components/namespace-select";
+import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { buildTablePagination } from "@/lib/table/pagination";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 function normalizePhase(value?: string) {
   return value?.trim().toLowerCase() ?? "";
@@ -99,13 +97,13 @@ export default function PvcPage() {
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter();
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
 
   // Modal state
@@ -131,10 +129,7 @@ export default function PvcPage() {
   });
 
   const clusterFilterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
   const clusterMap = useMemo(
@@ -146,6 +141,7 @@ export default function PvcPage() {
     () => Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter((ns): ns is string => Boolean(ns)))),
     [data],
   );
+  const effectivePageSize = data?.pageSize ?? pageSize;
 
   const createMutation = useMutation({
     mutationFn: (payload: CreateStorageResourcePayload) =>
@@ -186,10 +182,12 @@ export default function PvcPage() {
 
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter((item) =>
-        matchLabelExpressions(item.labels, mergedFilters),
+      (data?.items ?? []).filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          matchLabelExpressions(item.labels, mergedFilters),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -321,55 +319,27 @@ export default function PvcPage() {
       />
 
       <Card>
-        <Row gutter={[12, 12]} align="middle" style={{ marginBottom: 12 }}>
-          <Col xs={24} sm={12} md={6} lg={4}>
-            <Select
-              className="resource-filter-select"
-              style={{ width: "100%" }}
-            placeholder="全部集群"
-            value={clusterId || undefined}
-            onChange={(v) => {
-                setClusterId(v ?? "");
-                setPage(1);
-              }}
-              allowClear
-              options={clusterFilterOptions}
-              loading={clustersQuery.isLoading}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={5} lg={4}>
-            <NamespaceSelect
-              value={namespace}
-              onChange={(v) => {
-                setNamespace(v);
-                setPage(1);
-              }}
-              knownNamespaces={knownNamespaces}
-              clusterId={clusterId}
-            />
-          </Col>
-          <Col xs={24} sm={16} md={7} lg={6}>
-            <Input
-              prefix={<SearchOutlined />}
-              allowClear
-              placeholder="按名称/标签搜索（示例：pvc-a app=web env=prod）"
-              value={keywordInput}
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onPressEnter={handleSearch}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={4} lg={3}>
-            <Space>
-              <Button
-                icon={<SearchOutlined />}
-                type="primary"
-                onClick={handleSearch}
-              >
-                查询
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+        <ResourceClusterNamespaceFilters
+          clusterId={clusterId}
+          namespace={namespace}
+          keywordInput={keywordInput}
+          clusterOptions={clusterFilterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onClusterChange={(value) => {
+            onClusterChange(value);
+            setPage(1);
+          }}
+          onNamespaceChange={(value) => {
+            onNamespaceChange(value);
+            setPage(1);
+          }}
+          onKeywordInputChange={setKeywordInput}
+          onSearch={handleSearch}
+          keywordPlaceholder="按名称/标签搜索（示例：pvc-a app=web env=prod）"
+        />
 
         {!isInitializing && !accessToken ? (
           <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" style={{ marginBottom: 16 }} />
@@ -386,20 +356,26 @@ export default function PvcPage() {
         ) : null}
 
         <Table<StorageResource>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={{
+          pagination={buildTablePagination({
             current: page,
-            pageSize,
+            pageSize: effectivePageSize,
             total: data?.total ?? 0,
-            onChange: (p) => {
-                setPage(p);
-              },
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+            disabled: isLoading && !data,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== effectivePageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+                return;
+              }
+              setPage(nextPage);
+            },
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

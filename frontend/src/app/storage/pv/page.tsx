@@ -1,17 +1,14 @@
 "use client";
 
-import { DeleteOutlined, FileTextOutlined, LinkOutlined, SearchOutlined, ArrowsAltOutlined } from "@ant-design/icons";
+import { DeleteOutlined, FileTextOutlined, LinkOutlined, ArrowsAltOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Button,
   Card,
-  Col,
   Dropdown,
   Form,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Table,
@@ -47,9 +44,12 @@ import {
 } from "@/lib/api/storage";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
+import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { buildTablePagination } from "@/lib/table/pagination";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 function normalizePhase(value?: string) {
   return value?.trim().toLowerCase() ?? "";
@@ -98,12 +98,12 @@ export default function PvPage() {
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const [clusterId, setClusterId] = useState("");
+  const { clusterId, onClusterChange } = useClusterNamespaceFilter();
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -128,10 +128,7 @@ export default function PvPage() {
   });
 
   const clusterFilterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
 
@@ -187,13 +184,16 @@ export default function PvPage() {
   const clusterMap = Object.fromEntries(
     (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
   );
+  const effectivePageSize = data?.pageSize ?? pageSize;
 
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter((item) =>
-        matchLabelExpressions(item.labels, mergedFilters),
+      (data?.items ?? []).filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          matchLabelExpressions(item.labels, mergedFilters),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -353,44 +353,20 @@ export default function PvPage() {
       />
 
       <Card>
-        <Row gutter={[12, 12]} align="middle" style={{ marginBottom: 12 }}>
-          <Col xs={24} sm={12} md={6} lg={4}>
-            <Select
-              className="resource-filter-select"
-              style={{ width: "100%" }}
-              placeholder="全部集群"
-              value={clusterId || undefined}
-              onChange={(v) => {
-                setClusterId(v ?? "");
-                setPage(1);
-              }}
-              allowClear
-              options={clusterFilterOptions}
-              loading={clustersQuery.isLoading}
-            />
-          </Col>
-          <Col xs={24} sm={16} md={10} lg={8}>
-            <Input
-              prefix={<SearchOutlined />}
-              allowClear
-              placeholder="按名称/标签搜索（示例：pv-a app=web env=prod）"
-              value={keywordInput}
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onPressEnter={handleSearch}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={4} lg={3}>
-            <Space>
-              <Button
-                icon={<SearchOutlined />}
-                type="primary"
-                onClick={handleSearch}
-              >
-                查询
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+        <ResourceClusterNamespaceFilters
+          clusterId={clusterId}
+          keywordInput={keywordInput}
+          clusterOptions={clusterFilterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          namespaceVisible={false}
+          onClusterChange={(value) => {
+            onClusterChange(value);
+            setPage(1);
+          }}
+          onKeywordInputChange={setKeywordInput}
+          onSearch={handleSearch}
+          keywordPlaceholder="按名称/标签搜索（示例：pv-a app=web env=prod）"
+        />
 
         {!isInitializing && !accessToken ? (
           <Alert
@@ -412,20 +388,26 @@ export default function PvPage() {
         ) : null}
 
         <Table<StorageResource>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={{
+          pagination={buildTablePagination({
             current: page,
-            pageSize,
+            pageSize: effectivePageSize,
             total: data?.total ?? 0,
-            onChange: (p) => {
-              setPage(p);
+            disabled: isLoading && !data,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== effectivePageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+                return;
+              }
+              setPage(nextPage);
             },
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

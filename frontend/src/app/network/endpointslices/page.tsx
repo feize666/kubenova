@@ -1,16 +1,12 @@
 "use client";
 
-import { SearchOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Button,
   Card,
-  Col,
   Form,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Table,
@@ -21,7 +17,6 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { NamespaceSelect } from "@/components/namespace-select";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -35,8 +30,9 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { buildTablePagination } from "@/lib/table/pagination";
 import {
   createNetworkResource,
   deleteNetworkResource,
@@ -45,6 +41,7 @@ import {
   type NetworkResource,
 } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 type EndpointSlicePort = {
   name?: string;
@@ -161,17 +158,17 @@ export default function EndpointSlicesPage() {
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter();
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm<EndpointSliceFormValues>();
-  const pageSize = 10;
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["network", "EndpointSlice", { clusterId, namespace, keyword, page, pageSize }, accessToken],
@@ -197,13 +194,10 @@ export default function EndpointSlicesPage() {
   });
 
   const clusterFilterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((cluster) => ({
-        label: cluster.name,
-        value: cluster.id,
-      })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((cluster) => ({
+      label: cluster.name,
+      value: cluster.id,
+    })),
     [clustersQuery.data],
   );
 
@@ -213,6 +207,7 @@ export default function EndpointSlicesPage() {
   }));
 
   const clusterMap = Object.fromEntries((clustersQuery.data?.items ?? []).map((cluster) => [cluster.id, cluster.name]));
+  const effectivePageSize = data?.pageSize ?? pageSize;
 
   const createMutation = useMutation({
     mutationFn: (payload: EndpointSliceCreatePayload) =>
@@ -253,10 +248,12 @@ export default function EndpointSlicesPage() {
 
   const tableData = useMemo(
     () =>
-      ((data?.items ?? []) as EndpointSliceResource[]).filter((item) =>
-        matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+      ((data?.items ?? []) as EndpointSliceResource[]).filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -432,16 +429,19 @@ export default function EndpointSlicesPage() {
           clusterOptions={clusterFilterOptions}
           clusterLoading={clustersQuery.isLoading}
           knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
-            setClusterId(value);
+            onClusterChange(value);
             setPage(1);
           }}
           onNamespaceChange={(value) => {
-            setNamespace(value);
+            onNamespaceChange(value);
             setPage(1);
           }}
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
+          keywordPlaceholder="按名称/标签搜索（示例：eps-a app=web env=prod）"
         />
 
         {!isInitializing && !accessToken ? (
@@ -459,18 +459,26 @@ export default function EndpointSlicesPage() {
         ) : null}
 
         <Table<EndpointSliceResource>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={{
+          pagination={buildTablePagination({
             current: page,
-            pageSize,
+            pageSize: effectivePageSize,
             total: data?.total ?? 0,
-            onChange: (nextPage) => setPage(nextPage),
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+            disabled: isLoading && !data,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== effectivePageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+                return;
+              }
+              setPage(nextPage);
+            },
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

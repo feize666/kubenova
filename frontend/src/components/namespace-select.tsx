@@ -11,6 +11,9 @@ interface NamespaceSelectProps {
   // Namespaces dynamically discovered from already-loaded data
   knownNamespaces?: string[];
   clusterId?: string;
+  disabled?: boolean;
+  loading?: boolean;
+  placeholder?: string;
   style?: React.CSSProperties;
 }
 
@@ -19,13 +22,16 @@ export function NamespaceSelect({
   onChange,
   knownNamespaces = [],
   clusterId,
+  disabled = false,
+  loading = false,
+  placeholder = "全部名称空间",
   style,
 }: NamespaceSelectProps) {
   const { accessToken, isInitializing } = useAuth();
   const namespacesQuery = useQuery({
     queryKey: ['namespaces', clusterId || 'all', accessToken],
     queryFn: () => getNamespaces({ clusterId: clusterId || undefined }, accessToken),
-    enabled: !isInitializing && Boolean(accessToken),
+    enabled: !isInitializing && Boolean(accessToken) && Boolean(clusterId) && !disabled,
     staleTime: 30_000,
   });
 
@@ -50,12 +56,13 @@ export function NamespaceSelect({
       value={value}
       onChange={onChange}
       options={options}
-      loading={namespacesQuery.isLoading}
+      loading={loading || namespacesQuery.isLoading}
+      disabled={disabled}
       showSearch
+      placeholder={placeholder}
       filterOption={(input, option) =>
         (option?.value as string)?.toLowerCase().includes(input.toLowerCase())
       }
-      placeholder="全部名称空间"
       allowClear
       onClear={() => onChange('')}
     />

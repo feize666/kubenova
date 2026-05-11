@@ -14,7 +14,9 @@ export interface HelmListQueryParams {
 }
 
 export interface HelmRepositoryListQueryParams {
-  clusterId: string;
+  clusterId?: string;
+  page?: number;
+  pageSize?: number;
 }
 
 export interface HelmRepositoryMutationPayload {
@@ -131,6 +133,8 @@ export interface HelmListResponse {
 export interface HelmRepositoryListResponse {
   items: HelmRepositoryItem[];
   total: number;
+  page: number;
+  pageSize: number;
   timestamp: string;
 }
 
@@ -198,6 +202,7 @@ interface BackendHelmListItem {
   status?: string;
   chart?: string;
   appVersion?: string;
+  clusterId?: string;
 }
 
 interface BackendHelmListResponse {
@@ -261,11 +266,12 @@ function mapListItem(item: BackendHelmListItem, clusterId: string): HelmReleaseI
   const name = item.name ?? "";
   const namespace = item.namespace ?? "";
   const revision = item.revision ?? "";
+  const resolvedClusterId = item.clusterId ?? clusterId;
   return {
-    id: `${clusterId}/${namespace}/${name}`,
+    id: `${resolvedClusterId}/${namespace}/${name}`,
     name,
     releaseName: name,
-    clusterId,
+    clusterId: resolvedClusterId,
     namespace,
     chart: item.chart ?? "",
     revision,
@@ -276,15 +282,6 @@ function mapListItem(item: BackendHelmListItem, clusterId: string): HelmReleaseI
 }
 
 export async function getHelmReleases(params: HelmListQueryParams = {}, token?: string): Promise<HelmListResponse> {
-  if (!params.clusterId) {
-    return {
-      items: [],
-      total: 0,
-      page: params.page ?? 1,
-      pageSize: params.pageSize ?? 10,
-      timestamp: new Date().toISOString(),
-    };
-  }
   const query = buildListQuery({
     clusterId: params.clusterId,
     namespace: params.namespace,
@@ -298,7 +295,7 @@ export async function getHelmReleases(params: HelmListQueryParams = {}, token?: 
     token,
   });
   const items = Array.isArray(payload.items)
-    ? payload.items.map((item) => mapListItem(item, params.clusterId!))
+    ? payload.items.map((item) => mapListItem(item, params.clusterId ?? item.clusterId ?? ""))
     : [];
   return {
     items,
@@ -315,12 +312,18 @@ export async function getHelmRepositories(
 ): Promise<HelmRepositoryListResponse> {
   const payload = await apiRequest<HelmRepositoryListResponse>("/api/helm/repositories", {
     method: "GET",
-    query: { clusterId: params.clusterId },
+    query: buildListQuery({
+      clusterId: params.clusterId,
+      page: params.page,
+      pageSize: params.pageSize,
+    }),
     token,
   });
   return {
     items: Array.isArray(payload.items) ? payload.items : [],
     total: typeof payload.total === "number" ? payload.total : 0,
+    page: typeof payload.page === "number" ? payload.page : params.page ?? 1,
+    pageSize: typeof payload.pageSize === "number" ? payload.pageSize : params.pageSize ?? 20,
     timestamp: typeof payload.timestamp === "string" ? payload.timestamp : new Date().toISOString(),
   };
 }

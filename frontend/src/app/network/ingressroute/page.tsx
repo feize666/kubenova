@@ -1,16 +1,12 @@
 "use client";
 
-import { SearchOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Button,
   Card,
-  Col,
   Form,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Table,
@@ -31,11 +27,11 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
-import { NamespaceSelect } from "@/components/namespace-select";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { buildTablePagination } from "@/lib/table/pagination";
 import {
   createNetworkResource,
   deleteNetworkResource,
@@ -45,6 +41,7 @@ import {
 } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 type IngressRouteResource = NetworkResource & {
   spec?: {
@@ -79,14 +76,14 @@ export default function IngressRoutePage() {
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const [clusterId, setClusterId] = useState(() => searchParams.get("cluster") ?? "");
-  const [namespace, setNamespace] = useState(() => searchParams.get("namespace") ?? "");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(searchParams.get("cluster") ?? "", searchParams.get("namespace") ?? "");
   const initialKeyword = searchParams.get("keyword") ?? "";
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -127,10 +124,7 @@ export default function IngressRoutePage() {
   });
 
   const clusterFilterOptions = useMemo(
-    () => [
-      { label: "全部集群", value: "" },
-      ...(clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    ],
+    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
 
@@ -204,16 +198,19 @@ export default function IngressRoutePage() {
 
   const clusterOptions = (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id }));
   const clusterMap = Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]));
+  const effectivePageSize = data?.pageSize ?? pageSize;
   const knownNamespaces = useMemo(
     () => Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean))),
     [data?.items],
   );
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter((item) =>
-        matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+      (data?.items ?? []).filter(
+        (item) =>
+          hasKnownCluster(clusterMap, item.clusterId) &&
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -328,7 +325,7 @@ export default function IngressRoutePage() {
       title: "操作",
       key: "actions",
       width: TABLE_COL_WIDTH.actionCompact,
-      align: "center",
+      align: "left",
       fixed: "right",
       render: (_: unknown, row: IngressRouteResource) => (
         <ResourceRowActions
@@ -366,12 +363,14 @@ export default function IngressRoutePage() {
           clusterOptions={clusterFilterOptions}
           clusterLoading={clustersQuery.isLoading}
           knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
-            setClusterId(value);
+            onClusterChange(value);
             setPage(1);
           }}
           onNamespaceChange={(value) => {
-            setNamespace(value);
+            onNamespaceChange(value);
             setPage(1);
           }}
           onKeywordInputChange={(value) => {
@@ -381,6 +380,7 @@ export default function IngressRoutePage() {
             }
           }}
           onSearch={handleSearch}
+          keywordPlaceholder="按名称/标签搜索（示例：ir-a app=web env=prod）"
         />
 
         {!isInitializing && !accessToken ? (
@@ -398,18 +398,26 @@ export default function IngressRoutePage() {
         ) : null}
 
         <Table<IngressRouteResource>
+          className="pod-table"
           bordered
           rowKey="id"
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={{
+          pagination={buildTablePagination({
             current: page,
-            pageSize,
+            pageSize: effectivePageSize,
             total: data?.total ?? 0,
-            onChange: (p) => setPage(p),
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+            disabled: isLoading && !data,
+            onChange: (nextPage, nextPageSize) => {
+              if (nextPageSize !== effectivePageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+                return;
+              }
+              setPage(nextPage);
+            },
+          })}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

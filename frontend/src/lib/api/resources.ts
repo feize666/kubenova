@@ -566,7 +566,7 @@ export interface DiscoveryCatalogResponse {
 }
 
 export interface DynamicResourceQuery {
-  clusterId: string;
+  clusterId?: string;
   group?: string;
   version: string;
   resource: string;

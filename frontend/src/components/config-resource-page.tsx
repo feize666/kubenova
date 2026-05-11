@@ -10,7 +10,9 @@ import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
 import { getConfigs, type ConfigKind, type ConfigResourceItem } from "@/lib/api/configs";
 import { adaptRequestError } from "@/lib/api/helpers";
+import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { queryKeys } from "@/lib/query";
+import { buildTablePagination } from "@/lib/table/pagination";
 
 type ConfigResourcePageProps = {
   kind: ConfigKind;
@@ -81,6 +83,13 @@ export function ConfigResourcePage({ kind, title, description, keyCountTitle }: 
     () => Array.from(new Set((query.data?.items ?? []).map((item) => item.namespace))).sort(),
     [query.data?.items],
   );
+  const filteredDataSource = useMemo(
+    () =>
+      dataSource.filter((item) =>
+        hasKnownCluster(clusterMap, typeof item.clusterId === "string" ? item.clusterId : undefined),
+      ),
+    [clusterMap, dataSource],
+  );
   const errorMessage = query.error ? adaptRequestError(query.error).message : undefined;
 
   const columns = useMemo<TableProps<ModuleRecord>["columns"]>(
@@ -89,7 +98,7 @@ export function ConfigResourcePage({ kind, title, description, keyCountTitle }: 
       {
         title: "集群",
         key: "clusterId",
-        render: (_: unknown, row: ModuleRecord) => clusterMap[String(row.clusterId)] ?? row.clusterId ?? "-",
+        render: (_: unknown, row: ModuleRecord) => getClusterDisplayName(clusterMap, String(row.clusterId)),
       },
       { title: "名称空间", dataIndex: "namespace", key: "namespace" },
       { title: keyCountTitle, dataIndex: "keyCount", key: "keyCount" },
@@ -109,11 +118,12 @@ export function ConfigResourcePage({ kind, title, description, keyCountTitle }: 
       title={title}
       description={description}
       columns={columns}
-      dataSource={dataSource}
+      dataSource={filteredDataSource}
       namespaceOptions={namespaceOptions}
       loading={query.isLoading}
       hasInitialData={Boolean(query.data)}
       error={errorMessage}
+      clusterMap={clusterMap}
       filterState={{
         keyword,
         namespace,
@@ -129,16 +139,15 @@ export function ConfigResourcePage({ kind, title, description, keyCountTitle }: 
         onOnlyHealthyChange: setOnlyHealthy,
       }}
       tableProps={{
-        pagination: {
+        pagination: buildTablePagination({
           current: page,
           pageSize,
           total: query.data?.total ?? 0,
-          showSizeChanger: true,
           onChange: (nextPage, nextPageSize) => {
             setPage(nextPage);
             setPageSize(nextPageSize);
           },
-        },
+        }),
       }}
     />
   );
