@@ -21,6 +21,9 @@ export interface RuntimeTokenPayload {
   keyword?: string;
   tailLines?: number;
   sinceSeconds?: number;
+  follow?: boolean;
+  previous?: boolean;
+  timestamps?: boolean;
   path: RuntimeGatewayPath;
   exp: number;
 }

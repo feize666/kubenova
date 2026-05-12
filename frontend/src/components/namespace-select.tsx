@@ -30,7 +30,7 @@ export function NamespaceSelect({
   const { accessToken, isInitializing } = useAuth();
   const namespacesQuery = useQuery({
     queryKey: ['namespaces', clusterId || 'all', accessToken],
-    queryFn: () => getNamespaces({ clusterId: clusterId || undefined }, accessToken),
+    queryFn: () => getNamespaces({ clusterId: clusterId || undefined, page: 1, pageSize: 500 }, accessToken),
     enabled: !isInitializing && Boolean(accessToken) && Boolean(clusterId) && !disabled,
     staleTime: 30_000,
   });

@@ -191,6 +191,7 @@ export async function getClusterInspection(
     | string
     | ({
         clusterId?: string;
+        namespace?: string;
         token?: string;
       } & MonitoringTimeFilter),
   tokenArg?: string,
@@ -201,6 +202,7 @@ export async function getClusterInspection(
       ? { clusterId: options, token: tokenArg }
       : {
           clusterId: options?.clusterId,
+          namespace: options?.namespace,
           token: options?.token,
           range: options?.range,
           from: options?.from,
@@ -210,6 +212,7 @@ export async function getClusterInspection(
   return apiRequest<ClusterInspectionReport>("/api/monitoring/inspection", {
     query: {
       clusterId: resolved.clusterId?.trim() || undefined,
+      namespace: resolved.namespace?.trim() || undefined,
       range: resolved.range,
       from: resolved.from,
       to: resolved.to,

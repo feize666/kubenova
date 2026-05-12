@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
+import { Prisma } from '@prisma/client';
 import { ClusterHealthService } from '../clusters/cluster-health.service';
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
@@ -18,6 +19,10 @@ import { PrismaService } from '../platform/database/prisma.service';
 export interface NamespaceListQuery {
   clusterId?: string;
   keyword?: string;
+  page?: string;
+  pageSize?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface NamespaceListItem {
@@ -29,6 +34,13 @@ export interface NamespaceListItem {
   labels: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface NamespaceListResult {
+  items: NamespaceListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 interface Actor {
@@ -56,9 +68,11 @@ export class NamespacesService {
     private readonly k8sClientService: K8sClientService,
   ) {}
 
-  async list(query: NamespaceListQuery): Promise<NamespaceListItem[]> {
+  async list(query: NamespaceListQuery): Promise<NamespaceListResult> {
     const keyword = query.keyword?.trim();
     const normalizedClusterId = query.clusterId?.trim();
+    const page = this.parsePositiveInt(query.page, 1);
+    const pageSize = this.parsePositiveInt(query.pageSize, 20);
     let readableClusterIds: string[] | undefined;
     if (normalizedClusterId) {
       await this.clusterHealthService.assertClusterOnlineForRead(
@@ -69,7 +83,12 @@ export class NamespacesService {
       readableClusterIds =
         await this.clusterHealthService.listReadableClusterIdsForResourceRead();
       if (readableClusterIds.length === 0) {
-        return [];
+        return {
+          items: [],
+          total: 0,
+          page,
+          pageSize,
+        };
       }
     }
     const rows = await this.prisma.namespaceRecord.findMany({
@@ -102,10 +121,9 @@ export class NamespacesService {
           },
         },
       },
-      orderBy: [{ cluster: { name: 'asc' } }, { name: 'asc' }],
+      orderBy: this.resolveOrderBy(query.sortBy, query.sortOrder),
     });
-
-    return rows.map((row) => ({
+    const items = rows.map((row) => ({
       id: row.id,
       clusterId: row.clusterId,
       clusterName: row.cluster.name,
@@ -115,6 +133,14 @@ export class NamespacesService {
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     }));
+    const total = items.length;
+    const start = (page - 1) * pageSize;
+    return {
+      items: items.slice(start, start + pageSize),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   async create(
@@ -326,6 +352,33 @@ export class NamespacesService {
     })().catch(() => {
       // 这里是异步补偿刷新，不影响主流程返回。
     });
+  }
+
+  private resolveOrderBy(
+    sortBy?: string,
+    sortOrder?: 'asc' | 'desc',
+  ): Prisma.NamespaceRecordOrderByWithRelationInput[] {
+    const order: Prisma.SortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
+    const field = (sortBy ?? '').trim();
+    if (field === 'namespace' || field === 'name') {
+      return [{ name: order }, { id: 'asc' }];
+    }
+    if (field === 'clusterId') {
+      return [{ clusterId: order }, { id: 'asc' }];
+    }
+    if (field === 'updatedAt') {
+      return [{ updatedAt: order }, { id: 'asc' }];
+    }
+    if (field === 'createdAt') {
+      return [{ createdAt: order }, { id: 'asc' }];
+    }
+    return [{ cluster: { name: 'asc' } }, { name: 'asc' }];
+  }
+
+  private parsePositiveInt(raw: string | undefined, fallback: number): number {
+    if (!raw) return fallback;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
   }
 
   private normalizeLabels(input: unknown): Record<string, string> {

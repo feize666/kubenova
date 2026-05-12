@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { URL } from 'node:url';
 import type { AppConfig } from './platform/config/env.schema';
 import { AppModule } from './app.module';
 import { loadAiEnvFile } from './ai-assistant/ai-config.util';
@@ -21,6 +22,33 @@ async function bootstrap() {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
+  const isAllowedDevLanOrigin = (origin: string): boolean => {
+    if (process.env.NODE_ENV === 'production') {
+      return false;
+    }
+    try {
+      const parsed = new URL(origin);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return false;
+      }
+      const host = parsed.hostname;
+      if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+        return true;
+      }
+      // 允许开发态局域网/私网访问（含内网IP直连与*.local）。
+      if (
+        /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /\.local$/i.test(host)
+      ) {
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
 
   app.enableCors({
     origin: (
@@ -38,12 +66,7 @@ async function bootstrap() {
         return;
       }
 
-      // In non-production, allow localhost/127.0.0.1 origins on any port.
-      const isDev = process.env.NODE_ENV !== 'production';
-      if (
-        isDev &&
-        /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
-      ) {
+      if (isAllowedDevLanOrigin(origin)) {
         callback(null, true);
         return;
       }

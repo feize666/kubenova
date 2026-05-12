@@ -12,6 +12,8 @@ export async function getClusters(params: GetClustersParams = {}, token: string)
     selectableOnly: params.selectableOnly,
     page: params.page,
     pageSize: params.pageSize,
+    sortBy: params.sortBy,
+    sortOrder: params.sortOrder,
   };
 
   const result = await apiRequest<ClusterListResponse>("/api/clusters", {

@@ -161,6 +161,8 @@ export class ClustersController {
         pageSize: String(pageSize),
         environment: query.environment,
         status: query.status,
+        sortBy: query.sortBy,
+        sortOrder: query.sortOrder,
       });
       items.push(...list.items);
       if (list.items.length < pageSize) {

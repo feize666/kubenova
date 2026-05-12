@@ -46,8 +46,8 @@ describe('ClustersController', () => {
       createController();
     clustersService.list.mockResolvedValue({
       items: [
-        { id: 'c-1', state: 'active', hasKubeconfig: true },
-        { id: 'c-2', state: 'active', hasKubeconfig: true },
+        { id: 'c-1', state: 'active', hasKubeconfig: true, status: 'normal' },
+        { id: 'c-2', state: 'active', hasKubeconfig: true, status: 'offline' },
         { id: 'c-3', state: 'disabled', hasKubeconfig: true },
       ],
       page: 1,
@@ -55,9 +55,6 @@ describe('ClustersController', () => {
       total: 3,
       timestamp: new Date().toISOString(),
     });
-    clusterHealthService.listSelectableClusterIdsForResourceRead.mockResolvedValue(
-      ['c-1'],
-    );
 
     const req = { headers: {} } as any;
     const res = {
@@ -69,9 +66,7 @@ describe('ClustersController', () => {
       selectableOnly: 'true',
     } as any);
 
-    expect(
-      clusterHealthService.listSelectableClusterIdsForResourceRead,
-    ).toHaveBeenCalled();
+    expect(clustersService.list).toHaveBeenCalled();
     expect(resp.data.items).toHaveLength(1);
     expect(resp.data.items[0].id).toBe('c-1');
     expect(resp.data.total).toBe(1);

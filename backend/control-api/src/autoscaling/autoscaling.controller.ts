@@ -40,6 +40,10 @@ export class AutoscalingController {
     @Query('type') type?: AutoscalingType,
     @Query('state') state?: 'enabled' | 'disabled',
     @Query('keyword') keyword?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
   ) {
     return this.autoscalingService.list({
       clusterId: clusterId?.trim() || undefined,
@@ -48,6 +52,10 @@ export class AutoscalingController {
       type,
       state,
       keyword: keyword?.trim() || undefined,
+      page: page?.trim() || undefined,
+      pageSize: pageSize?.trim() || undefined,
+      sortBy: sortBy?.trim() || undefined,
+      sortOrder,
     });
   }
 

@@ -39,7 +39,7 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
   applyWorkloadActionById,
   createWorkload,
@@ -92,7 +92,15 @@ export default function ReplicaSetsPage() {
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [clusterId, setClusterId] = useState("");
   const [namespace, setNamespace] = useState("");
-  const { pagination, resetPage, getPaginationConfig, handleTableChange } = useAntdTableSortPagination<WorkloadListItem>({
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getPaginationConfig,
+    getSortableColumnProps,
+    handleTableChange,
+  } = useAntdTableSortPagination<WorkloadListItem>({
     defaultPageSize: 10,
   });
 
@@ -106,14 +114,27 @@ export default function ReplicaSetsPage() {
   const [scaleConvergence, setScaleConvergence] = useState<ScaleConvergenceViewState | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
 
-  const queryKey = ["workloads", "ReplicaSet", { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize }, accessToken];
+  const queryKey = [
+    "workloads",
+    "ReplicaSet",
+    { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize, sortBy, sortOrder },
+    accessToken,
+  ];
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey,
     queryFn: () =>
       getWorkloadsByKind(
         "ReplicaSet",
-        { clusterId: clusterId || undefined, keyword: keyword.trim() || undefined, namespace: namespace.trim() || undefined, page: pagination.pageIndex + 1, pageSize: pagination.pageSize },
+        {
+          clusterId: clusterId || undefined,
+          keyword: keyword.trim() || undefined,
+          namespace: namespace.trim() || undefined,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
+        },
         accessToken || undefined,
       ),
     enabled: !isInitializing && Boolean(accessToken),
@@ -148,7 +169,6 @@ export default function ReplicaSetsPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
     [clusterMap, data?.items, mergedFilters],
@@ -387,17 +407,19 @@ export default function ReplicaSetsPage() {
         ) : (
           name
         ),
+      ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "clusterId", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId) },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
-    { title: "期望副本", dataIndex: "replicas", key: "replicas", width: TABLE_COL_WIDTH.replicas },
-    { title: "实际副本", dataIndex: "readyReplicas", key: "readyReplicas", width: TABLE_COL_WIDTH.ready },
+    { title: "集群", dataIndex: "clusterId", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
+    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
+    { title: "期望副本", dataIndex: "replicas", key: "replicas", width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
+    { title: "实际副本", dataIndex: "readyReplicas", key: "readyReplicas", width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
     {
       title: "状态",
       dataIndex: "state",
       key: "state",
       width: TABLE_COL_WIDTH.status,
       render: (value: string) => stateTag(value),
+      ...getSortableColumnProps("state"),
     },
     {
       title: "创建时间",
@@ -405,6 +427,7 @@ export default function ReplicaSetsPage() {
       key: "createdAt",
       width: TABLE_COL_WIDTH.time,
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      ...getSortableColumnProps("createdAt"),
     },
     {
       title: "操作",

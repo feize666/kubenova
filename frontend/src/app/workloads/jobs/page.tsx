@@ -49,7 +49,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
@@ -77,7 +77,15 @@ export default function JobsPage() {
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [clusterId, setClusterId] = useState("");
   const [namespace, setNamespace] = useState("");
-  const { pagination, resetPage, getPaginationConfig, handleTableChange } = useAntdTableSortPagination<WorkloadListItem>({
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getPaginationConfig,
+    getSortableColumnProps,
+    handleTableChange,
+  } = useAntdTableSortPagination<WorkloadListItem>({
     defaultPageSize: 10,
   });
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
@@ -88,14 +96,27 @@ export default function JobsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<FormValues>();
 
-  const queryKey = ["workloads", "Job", { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize }, accessToken];
+  const queryKey = [
+    "workloads",
+    "Job",
+    { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize, sortBy, sortOrder },
+    accessToken,
+  ];
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey,
     queryFn: () =>
       getWorkloadsByKind(
         "Job",
-        { clusterId: clusterId || undefined, keyword: keyword.trim() || undefined, namespace: namespace.trim() || undefined, page: pagination.pageIndex + 1, pageSize: pagination.pageSize },
+        {
+          clusterId: clusterId || undefined,
+          keyword: keyword.trim() || undefined,
+          namespace: namespace.trim() || undefined,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
+        },
         accessToken || undefined,
     ),
     enabled: !isInitializing && Boolean(accessToken),
@@ -130,7 +151,6 @@ export default function JobsPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
     [clusterMap, data?.items, mergedFilters],
@@ -259,17 +279,19 @@ export default function JobsPage() {
         ) : (
           name
         ),
+      ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "clusterId", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId) },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
-    { title: "完成数", dataIndex: "readyReplicas", key: "readyReplicas", width: TABLE_COL_WIDTH.ready },
-    { title: "期望完成", dataIndex: "replicas", key: "replicas", width: TABLE_COL_WIDTH.replicas },
+    { title: "集群", dataIndex: "clusterId", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
+    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
+    { title: "完成数", dataIndex: "readyReplicas", key: "readyReplicas", width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
+    { title: "期望完成", dataIndex: "replicas", key: "replicas", width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
     {
       title: "状态",
       dataIndex: "state",
       key: "state",
       width: TABLE_COL_WIDTH.status,
       render: (value: string) => stateTag(value),
+      ...getSortableColumnProps("state"),
     },
     {
       title: "创建时间",
@@ -277,6 +299,7 @@ export default function JobsPage() {
       key: "createdAt",
       width: TABLE_COL_WIDTH.time,
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      ...getSortableColumnProps("createdAt"),
     },
     {
       title: "操作",

@@ -44,8 +44,9 @@ import {
 import { ApiError } from "@/lib/api/client";
 import type { HpaMetricSpec, HpaMetricTargetType } from "@/lib/contracts";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
+import { useAntdTableSortPagination } from "@/lib/table";
 import { getTableScrollX } from "@/lib/table-column-widths";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import {
@@ -319,6 +320,11 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [typeFilter, setTypeFilter] = useState<AutoscalingType | "">(defaultType ?? "");
+  const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
+    useAntdTableSortPagination<AutoscalingPolicyItem>({
+      defaultPageSize: 10,
+      allowedSortBy: ["workloadName", "namespace", "clusterId", "updatedAt"],
+    });
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<AutoscalingPolicyItem | null>(null);
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
@@ -331,6 +337,21 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         ? "聚焦管理 VPA 资源与事件。"
         : "统一管理 HPA/VPA 资源与事件。";
   const effectiveTypeFilter = defaultType ?? typeFilter;
+  const policiesQueryKey = [
+    "autoscaling",
+    {
+      clusterId,
+      namespace,
+      kind,
+      keyword,
+      type: effectiveTypeFilter,
+      page: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
+      sortBy,
+      sortOrder,
+    },
+    accessToken,
+  ] as const;
 
   const [form] = Form.useForm<PolicyFormValues>();
   const formType =
@@ -346,18 +367,19 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
   });
 
   const policiesQuery = useQuery({
-    queryKey: ["autoscaling", clusterId, namespace, kind, keyword, effectiveTypeFilter, accessToken],
+    queryKey: policiesQueryKey,
     queryFn: () =>
-      listAutoscalingPolicies(
-        {
-          clusterId: clusterId || undefined,
-          namespace: namespace.trim() || undefined,
-          kind: kind || undefined,
-          keyword: keyword.trim() || undefined,
-          type: effectiveTypeFilter || undefined,
-        },
-        accessToken,
-    ),
+      listAutoscalingPolicies({
+        clusterId: clusterId || undefined,
+        namespace: namespace.trim() || undefined,
+        kind: kind || undefined,
+        keyword: keyword.trim() || undefined,
+        type: effectiveTypeFilter || undefined,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy: sortBy || undefined,
+        sortOrder: sortOrder || undefined,
+      }, accessToken),
     enabled: queryEnabled,
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
@@ -370,8 +392,8 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     [clustersQuery.data?.items],
   );
   const visiblePolicies = useMemo(
-    () => (policiesQuery.data?.items ?? []).filter((item) => hasKnownCluster(clusterMap, item.clusterId)),
-    [clusterMap, policiesQuery.data?.items],
+    () => policiesQuery.data?.items ?? [],
+    [policiesQuery.data?.items],
   );
   const selectedItem = useMemo(
     () => visiblePolicies.find((item) => item.id === selectedRowId) ?? null,
@@ -521,9 +543,8 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       setModalOpen(false);
       form.resetFields();
       setSelectedRowId(created.id);
-      const queryKey = ["autoscaling", clusterId, namespace, kind, keyword, effectiveTypeFilter, accessToken];
       queryClient.setQueryData(
-        queryKey,
+        policiesQueryKey,
         (current: { items?: AutoscalingPolicyItem[]; total?: number } | undefined) => {
           if (!current?.items) {
             return {
@@ -539,7 +560,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           };
         },
       );
-      await queryClient.invalidateQueries({ queryKey });
+      await queryClient.invalidateQueries({ queryKey: policiesQueryKey });
       await queryClient.invalidateQueries({ queryKey: ["inspection", "autoscaling-hints"] });
     },
     onError: (error) => {
@@ -605,7 +626,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       setModalOpen(false);
       setEditing(null);
       form.resetFields();
-      await queryClient.invalidateQueries({ queryKey: ["autoscaling", clusterId, namespace, kind, keyword, effectiveTypeFilter, accessToken] });
+      await queryClient.invalidateQueries({ queryKey: policiesQueryKey });
       await queryClient.invalidateQueries({ queryKey: ["inspection", "autoscaling-hints"] });
     },
     onError: (error) => {
@@ -631,7 +652,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         setSelectedRowId(null);
         setYamlTarget(null);
       }
-      await queryClient.invalidateQueries({ queryKey: ["autoscaling", clusterId, namespace, kind, keyword, effectiveTypeFilter, accessToken] });
+      await queryClient.invalidateQueries({ queryKey: policiesQueryKey });
       await queryClient.invalidateQueries({ queryKey: ["inspection", "autoscaling-hints"] });
     },
     onError: (error) => {
@@ -660,6 +681,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           <Typography.Text code>{getAutoscalingResourceName(row)}</Typography.Text>
         </Space>
       ),
+      ...getSortableColumnProps("workloadName", policiesQuery.isLoading && !policiesQuery.data),
     },
     {
       title: "集群",
@@ -669,6 +691,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       align: "center",
       ellipsis: true,
       render: (value: string) => getClusterDisplayName(clusterMap, value),
+      ...getSortableColumnProps("clusterId", policiesQuery.isLoading && !policiesQuery.data),
     },
     {
       title: "名称空间",
@@ -676,6 +699,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       key: "namespace",
       width: 160,
       align: "center",
+      ...getSortableColumnProps("namespace", policiesQuery.isLoading && !policiesQuery.data),
     },
     {
       title: "配置",
@@ -706,6 +730,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       key: "updatedAt",
       width: 190,
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      ...getSortableColumnProps("updatedAt", policiesQuery.isLoading && !policiesQuery.data),
     },
     {
       title: "操作",
@@ -802,13 +827,19 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
               value={clusterId}
               options={clusterOptions}
               loading={clustersQuery.isLoading}
-              onChange={(value) => setClusterId(value)}
+              onChange={(value) => {
+                setClusterId(value);
+                resetPage();
+              }}
             />
           </Col>
           <Col xs={24} sm={12} md={8} lg={6}>
             <NamespaceSelect
               value={namespace}
-              onChange={setNamespace}
+              onChange={(value) => {
+                setNamespace(value);
+                resetPage();
+              }}
               knownNamespaces={knownNamespaces}
               style={{ width: "100%" }}
             />
@@ -818,7 +849,10 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
               className="resource-filter-select"
               value={kind}
               options={[{ label: "全部类型", value: "" }, ...kindOptions]}
-              onChange={setKind}
+              onChange={(value) => {
+                setKind(value);
+                resetPage();
+              }}
               style={{ width: "100%" }}
             />
           </Col>
@@ -832,7 +866,10 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                   { label: "HPA", value: "HPA" },
                   { label: "VPA", value: "VPA" },
                 ]}
-                onChange={(value) => setTypeFilter(value)}
+                onChange={(value) => {
+                  setTypeFilter(value);
+                  resetPage();
+                }}
                 style={{ width: "100%" }}
               />
             </Col>
@@ -841,7 +878,10 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             <Input.Search
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
-              onSearch={(value) => setKeyword(value)}
+              onSearch={(value) => {
+                resetPage();
+                setKeyword(value);
+              }}
               placeholder="按资源名称筛选"
               allowClear
             />
@@ -889,11 +929,17 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           rowKey="id"
           columns={columns}
           dataSource={visiblePolicies}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, queryEnabled && !policiesQuery.data && policiesQuery.isLoading)
+          }
           onRow={(record) => ({
             onClick: () => setSelectedRowId(record.id),
           })}
           loading={queryEnabled && !policiesQuery.data && policiesQuery.isLoading}
-          pagination={false}
+          pagination={getPaginationConfig(
+            policiesQuery.data?.total ?? policiesQuery.data?.items?.length ?? 0,
+            queryEnabled && !policiesQuery.data && policiesQuery.isLoading,
+          )}
           locale={{ emptyText: policiesEmptyText }}
           scroll={{ x: getTableScrollX(columns) }}
         />

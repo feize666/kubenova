@@ -17,7 +17,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 import { createNetworkResource, deleteNetworkResource, getNetworkResources, type CreateNetworkResourcePayload, type NetworkResource } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -51,15 +51,37 @@ export default function NetworkPolicyPage() {
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm<NetworkPolicyFormValues>();
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<NetworkPolicyResource>({
+    defaultPageSize: 10,
+  });
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["network", "NetworkPolicy", { clusterId, namespace, keyword, page, pageSize }, accessToken],
+    queryKey: [
+      "network",
+      "NetworkPolicy",
+      {
+        clusterId,
+        namespace,
+        keyword,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
+      },
+      accessToken,
+    ],
     queryFn: () =>
       getNetworkResources(
         {
@@ -67,8 +89,10 @@ export default function NetworkPolicyPage() {
           clusterId: clusterId || undefined,
           namespace: namespace.trim() || undefined,
           keyword: keyword.trim() || undefined,
-          page,
-          pageSize,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
         },
         accessToken || undefined,
     ),
@@ -98,7 +122,20 @@ export default function NetworkPolicyPage() {
       setModalOpen(false);
       form.resetFields();
       await queryClient.invalidateQueries({
-        queryKey: ["network", "NetworkPolicy", { clusterId, namespace, keyword, page, pageSize }, accessToken],
+        queryKey: [
+          "network",
+          "NetworkPolicy",
+          {
+            clusterId,
+            namespace,
+            keyword,
+            page: pagination.pageIndex + 1,
+            pageSize: pagination.pageSize,
+            sortBy,
+            sortOrder,
+          },
+          accessToken,
+        ],
         exact: true,
       });
     },
@@ -112,7 +149,20 @@ export default function NetworkPolicyPage() {
     onSuccess: async () => {
       void message.success("NetworkPolicy 删除成功");
       await queryClient.invalidateQueries({
-        queryKey: ["network", "NetworkPolicy", { clusterId, namespace, keyword, page, pageSize }, accessToken],
+        queryKey: [
+          "network",
+          "NetworkPolicy",
+          {
+            clusterId,
+            namespace,
+            keyword,
+            page: pagination.pageIndex + 1,
+            pageSize: pagination.pageSize,
+            sortBy,
+            sortOrder,
+          },
+          accessToken,
+        ],
         exact: true,
       });
     },
@@ -138,7 +188,7 @@ export default function NetworkPolicyPage() {
 
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
@@ -150,16 +200,24 @@ export default function NetworkPolicyPage() {
       key: "name",
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: NetworkPolicyResource) =>
         row.id ? <Typography.Link onClick={() => setDetailTarget({ kind: "NetworkPolicy", id: row.id })}>{name}</Typography.Link> : name,
     },
     {
       title: "集群",
-      key: "cluster",
+      key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, row: NetworkPolicyResource) => getClusterDisplayName(clusterMap, row.clusterId),
     },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace", isLoading && !data),
+    },
     {
       title: "类型",
       key: "policyTypes",
@@ -183,6 +241,7 @@ export default function NetworkPolicyPage() {
       dataIndex: "createdAt",
       key: "createdAt",
       width: TABLE_COL_WIDTH.time,
+      ...getSortableColumnProps("createdAt", isLoading && !data),
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     {
@@ -283,15 +342,16 @@ export default function NetworkPolicyPage() {
           namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
             onClusterChange(value);
-            setPage(1);
+            resetPage();
           }}
           onNamespaceChange={(value) => {
             onNamespaceChange(value);
-            setPage(1);
+            resetPage();
           }}
           onKeywordInputChange={(value) => {
             setKeywordInput(value);
             if (!value.trim()) {
+              resetPage();
               const parsed = parseResourceSearchInput("");
               setMergedFilters(parsed.labelExpressions);
               setKeyword(parsed.keyword);
@@ -320,19 +380,10 @@ export default function NetworkPolicyPage() {
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize,
-            total: data?.total ?? 0,
-            disabled: isLoading && !data,
-            onChange: (nextPage, nextPageSize) => {
-              setPage(nextPage);
-              if (nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-              }
-            },
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

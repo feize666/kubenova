@@ -33,12 +33,12 @@ import {
 } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 import { buildResourceTableColumns } from "@/lib/table/resource-table-schema";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
@@ -57,9 +57,18 @@ export default function ServicesPage() {
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<NetworkResource>({
+    defaultPageSize: 10,
+  });
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -67,10 +76,32 @@ export default function ServicesPage() {
   const [form] = Form.useForm<ServiceFormValues>();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["network", "Service", { clusterId, keyword, namespace, page, pageSize }, accessToken],
+    queryKey: [
+      "network",
+      "Service",
+      {
+        clusterId,
+        keyword,
+        namespace,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
+      },
+      accessToken,
+    ],
     queryFn: () =>
       getNetworkResources(
-        { kind: "Service", clusterId: clusterId || undefined, keyword: keyword.trim() || undefined, namespace: namespace.trim() || undefined, page, pageSize },
+        {
+          kind: "Service",
+          clusterId: clusterId || undefined,
+          keyword: keyword.trim() || undefined,
+          namespace: namespace.trim() || undefined,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
+        },
         accessToken || undefined,
     ),
     enabled: !isInitializing && Boolean(accessToken),
@@ -95,8 +126,7 @@ export default function ServicesPage() {
       setModalOpen(false);
       form.resetFields();
       void queryClient.invalidateQueries({
-        queryKey: ["network", "Service", { clusterId, keyword, namespace, page, pageSize }, accessToken],
-        exact: true,
+        queryKey: ["network", "Service"],
       });
     },
     onError: (err) => {
@@ -109,8 +139,7 @@ export default function ServicesPage() {
     onSuccess: () => {
       void message.success("Service 删除成功");
       void queryClient.invalidateQueries({
-        queryKey: ["network", "Service", { clusterId, keyword, namespace, page, pageSize }, accessToken],
-        exact: true,
+        queryKey: ["network", "Service"],
       });
     },
     onError: (err) => {
@@ -142,17 +171,6 @@ export default function ServicesPage() {
   const clusterMap = Object.fromEntries(
     (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
   );
-  const effectivePageSize = data?.pageSize ?? pageSize;
-  const filteredClusterOptions = useMemo(
-    () =>
-      clusterFilterOptions.filter((option) => {
-        if (!option.value) {
-          return true;
-        }
-        return hasKnownCluster(clusterMap, option.value);
-      }),
-    [clusterFilterOptions, clusterMap],
-  );
   const knownNamespaces = useMemo(
     () =>
       Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean))),
@@ -162,10 +180,9 @@ export default function ServicesPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -173,7 +190,7 @@ export default function ServicesPage() {
   );
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
@@ -185,6 +202,7 @@ export default function ServicesPage() {
       key: "name",
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: NetworkResource) =>
         row.id ? (
           <Typography.Link onClick={() => setDetailTarget({ kind: "Service", id: row.id })}>
@@ -196,11 +214,18 @@ export default function ServicesPage() {
     },
     cluster: {
       title: "集群",
-      key: "cluster",
+      key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, row: NetworkResource) => getClusterDisplayName(clusterMap, row.clusterId),
     },
-    namespace: { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
+    namespace: {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace", isLoading && !data),
+    },
     body: [
       {
         title: "类型",
@@ -213,6 +238,7 @@ export default function ServicesPage() {
         dataIndex: "createdAt",
         key: "createdAt",
         width: TABLE_COL_WIDTH.time,
+        ...getSortableColumnProps("createdAt", isLoading && !data),
         render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
       },
       {
@@ -255,18 +281,18 @@ export default function ServicesPage() {
           clusterId={clusterId}
           namespace={namespace}
           keywordInput={keywordInput}
-          clusterOptions={filteredClusterOptions}
+          clusterOptions={clusterFilterOptions}
           clusterLoading={clustersQuery.isLoading}
           knownNamespaces={knownNamespaces}
           namespaceDisabled={namespaceDisabled}
           namespacePlaceholder={namespaceDisabled ? "请先选择集群" : "全部名称空间"}
           onClusterChange={(value) => {
             onClusterChange(value);
-            setPage(1);
+            resetPage();
           }}
           onNamespaceChange={(value) => {
             onNamespaceChange(value);
-            setPage(1);
+            resetPage();
           }}
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
@@ -294,20 +320,10 @@ export default function ServicesPage() {
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize: effectivePageSize,
-            total: data?.total ?? 0,
-            disabled: isLoading && !data,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== effectivePageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

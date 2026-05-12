@@ -27,6 +27,8 @@ export interface ClusterListParams {
   state?: ClusterState;
   environment?: string;
   status?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
   page: number;
   pageSize: number;
 }
@@ -67,8 +69,17 @@ export class ClustersRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async list(params: ClusterListParams): Promise<ClusterListResult> {
-    const { keyword, provider, state, environment, status, page, pageSize } =
-      params;
+    const {
+      keyword,
+      provider,
+      state,
+      environment,
+      status,
+      sortBy,
+      sortOrder,
+      page,
+      pageSize,
+    } = params;
 
     const where: Prisma.ClusterRegistryWhereInput = {};
 
@@ -91,12 +102,13 @@ export class ClustersRepository {
 
     const needsMemoryFilter = !!(provider || environment || status);
 
+    const orderBy = this.resolveOrderBy(sortBy, sortOrder);
     if (!needsMemoryFilter) {
       const [total, rows] = await Promise.all([
         this.prisma.clusterRegistry.count({ where }),
         this.prisma.clusterRegistry.findMany({
           where,
-          orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+          orderBy,
           skip: (page - 1) * pageSize,
           take: pageSize,
         }),
@@ -112,7 +124,7 @@ export class ClustersRepository {
 
     const rows = await this.prisma.clusterRegistry.findMany({
       where,
-      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      orderBy,
     });
 
     const normalizedKeyword = keyword?.trim().toLowerCase();
@@ -136,6 +148,30 @@ export class ClustersRepository {
     const items = filtered.slice(start, start + pageSize);
 
     return { items, total, page, pageSize };
+  }
+
+  private resolveOrderBy(
+    sortBy?: string,
+    sortOrder?: 'asc' | 'desc',
+  ): Prisma.ClusterRegistryOrderByWithRelationInput[] {
+    const order: Prisma.SortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
+    const field = (sortBy ?? '').trim();
+    if (field === 'name') {
+      return [{ name: order }, { id: 'asc' }];
+    }
+    if (field === 'provider') {
+      return [{ name: 'asc' }, { id: 'asc' }];
+    }
+    if (field === 'environment') {
+      return [{ name: 'asc' }, { id: 'asc' }];
+    }
+    if (field === 'updatedAt') {
+      return [{ updatedAt: order }, { id: 'asc' }];
+    }
+    if (field === 'createdAt') {
+      return [{ createdAt: order }, { id: 'asc' }];
+    }
+    return [{ createdAt: 'desc' }, { id: 'asc' }];
   }
 
   async findById(id: string): Promise<ClusterRecord | null> {

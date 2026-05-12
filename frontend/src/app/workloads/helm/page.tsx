@@ -41,10 +41,10 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 import {
   executeHelmAction,
   getHelmCharts,
@@ -85,8 +85,17 @@ export default function HelmPage() {
   const [namespace, setNamespace] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<HelmReleaseItem>({
+    defaultPageSize: 10,
+  });
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [installOpen, setInstallOpen] = useState(false);
   const [rollbackOpen, setRollbackOpen] = useState(false);
@@ -132,15 +141,30 @@ export default function HelmPage() {
   const selectedClusterReady = selectedCluster?.hasKubeconfig !== false;
 
   const releasesQuery = useQuery({
-    queryKey: ["helm", "releases", { clusterId: selectedClusterId, namespace, keyword, page, pageSize }, accessToken],
+    queryKey: [
+      "helm",
+      "releases",
+      {
+        clusterId: selectedClusterId,
+        namespace,
+        keyword,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
+      },
+      accessToken,
+    ],
     queryFn: () =>
       getHelmReleases(
         {
           clusterId: selectedClusterId || undefined,
           namespace: namespace.trim() || undefined,
           keyword: keyword.trim() || undefined,
-          page,
-          pageSize,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
         },
         accessToken ?? undefined,
     ),
@@ -187,15 +211,8 @@ export default function HelmPage() {
   });
 
   const rows = useMemo(
-    () =>
-      (releasesQuery.data?.items ?? []).filter((row) => {
-        if (!hasKnownCluster(clusterMap, row.clusterId)) {
-          return false;
-        }
-        const cluster = clustersQuery.data?.items?.find((item) => item.id === row.clusterId);
-        return cluster?.hasKubeconfig !== false;
-      }),
-    [clusterMap, clustersQuery.data?.items, releasesQuery.data?.items],
+    () => releasesQuery.data?.items ?? [],
+    [releasesQuery.data?.items],
   );
   const releaseNameWidth = useMemo(
     () => getAdaptiveNameWidth(rows.map((row) => row.name), { max: 320 }),
@@ -291,15 +308,6 @@ export default function HelmPage() {
     },
   });
 
-  const clusterOptions = useMemo(
-    () =>
-      (clustersQuery.data?.items ?? []).map((c) => ({
-              label: c.name,
-              value: c.id,
-            })),
-    [clustersQuery.data],
-  );
-
   const installClusterOptions = useMemo(
     () =>
       (clustersQuery.data?.items ?? []).map((c) => ({
@@ -338,7 +346,7 @@ export default function HelmPage() {
 
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setKeyword(parsed.keyword);
     setDetailTarget(null);
   };
@@ -482,6 +490,7 @@ export default function HelmPage() {
       key: "name",
       width: releaseNameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name"),
       render: (name: string, row: HelmReleaseItem) => (
         <Typography.Link
           onClick={() => setDetailTarget({ kind: "HelmRelease", id: row.id })}
@@ -494,9 +503,16 @@ export default function HelmPage() {
       title: "集群",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId"),
       render: (_: unknown, row: HelmReleaseItem) => getClusterDisplayName(clusterMap, row.clusterId),
     },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace"),
+    },
     { title: "Chart", dataIndex: "chart", key: "chart", width: TABLE_COL_WIDTH.chart },
     { title: "修订版本", dataIndex: "revision", key: "revision", width: TABLE_COL_WIDTH.revision },
     {
@@ -504,6 +520,7 @@ export default function HelmPage() {
       dataIndex: "updatedAt",
       key: "updatedAt",
       width: TABLE_COL_WIDTH.time,
+      ...getSortableColumnProps("updatedAt"),
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     {
@@ -580,7 +597,7 @@ export default function HelmPage() {
               value={selectedClusterId}
               onChange={(v) => {
                 setClusterId(v);
-                setPage(1);
+                resetPage();
                 setSelectedRowId(null);
                 setDetailTarget(null);
               }}
@@ -593,7 +610,7 @@ export default function HelmPage() {
               value={namespace}
               onChange={(v) => {
                 setNamespace(v);
-                setPage(1);
+                resetPage();
                 setSelectedRowId(null);
                 setDetailTarget(null);
               }}
@@ -669,20 +686,13 @@ export default function HelmPage() {
             onClick: () => setSelectedRowId(record.id),
           })}
           loading={releasesQuery.isLoading}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize,
-            total: releasesQuery.data?.total ?? 0,
-            disabled: releasesQuery.isLoading,
-            onChange: (nextPage, nextPageSize) => {
-              setPage(nextPage);
+          onChange={(paginationInfo, filters, sorter, extra) => {
+            if (extra.action === "paginate") {
               setDetailTarget(null);
-              if (nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-              }
-            },
-          })}
+            }
+            handleTableChange(paginationInfo, filters, sorter, extra, releasesQuery.isLoading);
+          }}
+          pagination={getPaginationConfig(releasesQuery.data?.total ?? 0, releasesQuery.isLoading)}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

@@ -56,6 +56,8 @@ export interface ClusterHealthListParams {
   runtimeStatus?: RuntimeStatus | "";
   page?: number;
   pageSize?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
 export async function getClusterHealthList(
@@ -75,6 +77,8 @@ export async function getClusterHealthList(
       runtimeStatus: params.runtimeStatus || undefined,
       page: params.page,
       pageSize: params.pageSize,
+      sortBy: params.sortBy,
+      sortOrder: params.sortOrder,
     },
   });
 }

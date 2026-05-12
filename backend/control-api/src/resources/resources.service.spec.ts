@@ -455,14 +455,9 @@ describe('ResourcesService dynamic listing', () => {
     const { service, clustersService, clusterHealthService } =
       buildDynamicService(prisma);
     (clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock).mockResolvedValue([
+      'cluster-a',
       'cluster-b',
     ]);
-    (clustersService.list as jest.Mock).mockResolvedValue({
-      items: [
-        { id: 'cluster-a', state: 'active', hasKubeconfig: true },
-        { id: 'cluster-b', state: 'active', hasKubeconfig: true },
-      ],
-    });
     (clustersService.getKubeconfig as jest.Mock).mockImplementation(
       async (clusterId: string) =>
         clusterId === 'cluster-a' ? 'kubeconfig-a' : 'kubeconfig-b',
@@ -477,7 +472,7 @@ describe('ResourcesService dynamic listing', () => {
     expect(clusterHealthService.listReadableClusterIdsForResourceRead).toHaveBeenCalledTimes(
       1,
     );
-    expect(clustersService.list).toHaveBeenCalledTimes(1);
+    expect(clustersService.list).not.toHaveBeenCalled();
     expect(result.clusterId).toBe('');
     expect(result.kind).toBe('Deployment');
     expect(result.namespaced).toBe(true);

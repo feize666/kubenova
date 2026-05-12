@@ -574,6 +574,8 @@ export interface DynamicResourceQuery {
   keyword?: string;
   page?: number;
   pageSize?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
 export interface DynamicResourceItem {
@@ -674,6 +676,8 @@ export async function getDynamicResources(
       keyword: query.keyword,
       page: query.page,
       pageSize: query.pageSize,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
     },
     token,
   });

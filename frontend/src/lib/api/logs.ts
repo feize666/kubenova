@@ -24,11 +24,15 @@ export interface LogsQueryParams {
   keyword?: string;
   tailLines?: number;
   sinceSeconds?: number;
+  follow?: boolean;
+  previous?: boolean;
+  timestamps?: boolean;
   page?: number;
   pageSize?: number;
 }
 
 export interface LogsRouteTarget extends RuntimeTargetBase {
+  containerNames?: string[];
   clusterName?: string;
   resourceKind?: string;
   resourceName?: string;
@@ -37,6 +41,9 @@ export interface LogsRouteTarget extends RuntimeTargetBase {
   keyword?: string;
   sinceSeconds?: number;
   tailLines?: number;
+  follow?: boolean;
+  previous?: boolean;
+  timestamps?: boolean;
   from?: string;
   returnTo?: string;
   returnClusterId?: string;
@@ -64,13 +71,19 @@ export function buildLogsQueryParams(params: LogsQueryParams): URLSearchParams {
   if (params.keyword) query.set("keyword", params.keyword);
   if (params.tailLines !== undefined) query.set("tailLines", String(params.tailLines));
   if (params.sinceSeconds !== undefined) query.set("sinceSeconds", String(params.sinceSeconds));
+  if (params.follow !== undefined) query.set("follow", String(params.follow));
+  if (params.previous !== undefined) query.set("previous", String(params.previous));
+  if (params.timestamps !== undefined) query.set("timestamps", String(params.timestamps));
   if (params.page !== undefined) query.set("page", String(params.page));
   if (params.pageSize !== undefined) query.set("pageSize", String(params.pageSize));
   return query;
 }
 
 export function buildLogsRoute(target: LogsRouteTarget): string {
-  const params = buildRuntimeTargetParams(target);
+  const params = buildRuntimeTargetParams({
+    ...target,
+    container: resolveRuntimeContainer(target.container, target.containerNames),
+  });
   if (target.clusterName) params.set("clusterName", target.clusterName);
   if (target.resourceKind) params.set("resourceKind", target.resourceKind);
   if (target.resourceName) params.set("resourceName", target.resourceName);
@@ -83,6 +96,9 @@ export function buildLogsRoute(target: LogsRouteTarget): string {
   if (typeof target.tailLines === "number" && Number.isFinite(target.tailLines)) {
     params.set("tailLines", String(target.tailLines));
   }
+  if (typeof target.follow === "boolean") params.set("follow", String(target.follow));
+  if (typeof target.previous === "boolean") params.set("previous", String(target.previous));
+  if (typeof target.timestamps === "boolean") params.set("timestamps", String(target.timestamps));
   if (target.from) params.set("from", target.from);
   if (target.returnTo) params.set("returnTo", target.returnTo);
   if (target.returnClusterId) params.set("returnClusterId", target.returnClusterId);
@@ -137,6 +153,9 @@ export function createLogsStreamSession(params: LogsQueryParams, token?: string)
       keyword: params.keyword,
       tailLines: params.tailLines,
       sinceSeconds: params.sinceSeconds,
+      follow: params.follow,
+      previous: params.previous,
+      timestamps: params.timestamps,
     },
     token,
   });

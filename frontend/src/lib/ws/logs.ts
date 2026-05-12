@@ -1,3 +1,9 @@
+import {
+  connectWsWithCandidates,
+  sanitizeSensitiveMessage,
+  sanitizeWsUrlForDisplay,
+} from "./terminal";
+
 export type LogsConnectionStatus = "未连接" | "连接中" | "重连中" | "已连接" | "连接异常";
 
 export interface RuntimeLogItem {
@@ -11,6 +17,7 @@ export interface RuntimeLogItem {
 
 interface RuntimeLogsSocketOptions {
   url: string;
+  candidates?: string[];
   onStatusChange?: (status: LogsConnectionStatus) => void;
   onLogs?: (items: RuntimeLogItem[]) => void;
   onError?: (error: string) => void;
@@ -203,8 +210,14 @@ export class RuntimeLogsSocket {
 
   private readonly reconnectMaxAttempts: number;
 
+  private readonly wsCandidates: string[];
+
   constructor(options: RuntimeLogsSocketOptions) {
     this.options = options;
+    const normalizedCandidates = (options.candidates ?? [])
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    this.wsCandidates = normalizedCandidates.length > 0 ? normalizedCandidates : [options.url.trim()].filter(Boolean);
     this.reconnectEnabled = options.reconnect?.enabled ?? true;
     this.reconnectInitialDelayMs = Math.max(300, options.reconnect?.initialDelayMs ?? 1_000);
     this.reconnectMaxDelayMs = Math.max(this.reconnectInitialDelayMs, options.reconnect?.maxDelayMs ?? 20_000);
@@ -261,31 +274,31 @@ export class RuntimeLogsSocket {
     this.manualClose = false;
     this.teardownSocket();
 
+    void this.openWithCandidates();
+  }
+
+  private async openWithCandidates(): Promise<void> {
     try {
-      this.ws = new WebSocket(this.options.url);
-    } catch {
-      this.handleUnexpectedClose();
-      this.options.onStatusChange?.("连接异常");
-      this.options.onError?.("创建 WebSocket 连接失败，请检查服务是否启动");
-      return;
-    }
-
-    this.ws.onopen = () => {
-      this.clearReconnectTimer();
-      this.reconnectAttempt = 0;
-      this.reconnecting = false;
-      this.options.onReconnectStateChange?.({
-        attempt: 0,
-        maxAttempts: this.reconnectMaxAttempts,
-        nextDelayMs: 0,
-        stopped: false,
+      const socket = await connectWsWithCandidates(this.wsCandidates, (nextSocket) => {
+        this.ws = nextSocket;
       });
-      this.options.onStatusChange?.("已连接");
-      this.options.onError?.("");
-      this.options.onOpen?.();
-    };
+      this.ws = socket;
+      this.bindSocketEvents(socket);
+      this.handleConnected();
+    } catch (error) {
+      this.handleUnexpectedClose();
+      this.options.onError?.(
+        sanitizeSensitiveMessage(
+          error instanceof Error
+            ? error.message
+            : "创建 WebSocket 连接失败，请检查服务是否启动",
+        ),
+      );
+    }
+  }
 
-    this.ws.onmessage = (event) => {
+  private bindSocketEvents(socket: WebSocket): void {
+    socket.onmessage = (event) => {
       if (typeof event.data === "string") {
         try {
           const frame = JSON.parse(event.data) as { event?: unknown; data?: unknown; payload?: unknown; type?: unknown };
@@ -317,18 +330,34 @@ export class RuntimeLogsSocket {
       }
     };
 
-    this.ws.onerror = () => {
+    socket.onerror = () => {
       this.hasError = true;
-      this.options.onError?.("连接发生错误，正在尝试自动重连");
+      const safeUrl = sanitizeWsUrlForDisplay(socket.url || this.wsCandidates[0] || "");
+      this.options.onError?.(`连接发生错误，正在尝试自动重连。目标地址：${safeUrl}`);
     };
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
       if (this.manualClose) {
         this.options.onStatusChange?.("未连接");
         return;
       }
       this.handleUnexpectedClose();
     };
+  }
+
+  private handleConnected(): void {
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    this.reconnecting = false;
+    this.options.onReconnectStateChange?.({
+      attempt: 0,
+      maxAttempts: this.reconnectMaxAttempts,
+      nextDelayMs: 0,
+      stopped: false,
+    });
+    this.options.onStatusChange?.("已连接");
+    this.options.onError?.("");
+    this.options.onOpen?.();
   }
 
   disconnect(): void {
@@ -417,7 +446,15 @@ export class RuntimeLogsSocket {
   }
 }
 
-export const RUNTIME_LOGS_WS_URL = "ws://localhost:4100/ws/logs";
+function resolveDefaultLogsWsUrl(): string {
+  if (typeof window === "undefined") {
+    return "ws://127.0.0.1:4100/ws/logs";
+  }
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws/logs`;
+}
+
+export const RUNTIME_LOGS_WS_URL = resolveDefaultLogsWsUrl();
 
 export function createRuntimeLogsSubscribePayload(input: {
   tailLines?: number;

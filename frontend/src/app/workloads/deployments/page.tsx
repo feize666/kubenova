@@ -68,7 +68,7 @@ import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
   runScaleConvergence,
   type ScaleConvergenceRound,
@@ -498,7 +498,7 @@ export default function DeploymentsPage() {
     },
   });
 
-  const 表格数据 = table.getRowModel().rows.map((row) => row.original).filter((row) => hasKnownCluster(clusterMap, row.集群));
+  const 表格数据 = table.getRowModel().rows.map((row) => row.original);
   const 名称列宽度 = useMemo(
     () => getAdaptiveNameWidth(表格数据.map((row) => row.名称), { max: 340 }),
     [表格数据],
@@ -648,7 +648,7 @@ export default function DeploymentsPage() {
     {
       title: "名称",
       dataIndex: "名称",
-      key: "名称",
+      key: "name",
       width: 名称列宽度,
       ellipsis: true,
       render: (name: string, row: DeploymentRow) =>
@@ -661,31 +661,58 @@ export default function DeploymentsPage() {
         ),
       ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "集群", key: "集群", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: DeploymentRow) => getClusterDisplayName(clusterMap, row.集群) },
-    { title: "名称空间", dataIndex: "名称空间", key: "名称空间", width: TABLE_COL_WIDTH.namespace },
+    { title: "集群", dataIndex: "集群", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: DeploymentRow) => getClusterDisplayName(clusterMap, row.集群), ...getSortableColumnProps("clusterId") },
+    { title: "名称空间", dataIndex: "名称空间", key: "namespace", width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
     {
       title: "状态",
       dataIndex: "状态",
-      key: "状态",
+      key: "status",
       width: TABLE_COL_WIDTH.status,
       render: (value: DeploymentStatus) => <Tag color={状态颜色[value]}>{value}</Tag>,
+      sorter: (a, b) => {
+        const rank = (value: DeploymentStatus) => (value === "运行中" ? 2 : value === "收敛中" ? 1 : 0);
+        return rank(a.状态) - rank(b.状态) || a.名称.localeCompare(b.名称);
+      },
+      sortDirections: ["ascend", "descend", null],
     },
     {
       title: "启用状态",
       dataIndex: "启用状态",
-      key: "启用状态",
+      key: "state",
       width: TABLE_COL_WIDTH.status,
       render: (value: "启用" | "禁用") => <Tag color={value === "禁用" ? "default" : "green"}>{value}</Tag>,
+      ...getSortableColumnProps("state"),
     },
-    { title: "副本", dataIndex: "副本数", key: "副本数", width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
-    { title: "就绪", dataIndex: "就绪数", key: "就绪数", width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
-    { title: "可用", dataIndex: "可用数", key: "可用数", width: TABLE_COL_WIDTH.available, ...getSortableColumnProps("availableReplicas") },
-    { title: "策略", dataIndex: "策略", key: "策略", width: TABLE_COL_WIDTH.strategy },
-    { title: "修订版本", dataIndex: "修订版本", key: "修订版本", width: TABLE_COL_WIDTH.revision },
+    { title: "副本", dataIndex: "副本数", key: "replicas", width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
+    { title: "就绪", dataIndex: "就绪数", key: "readyReplicas", width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
+    {
+      title: "可用",
+      dataIndex: "可用数",
+      key: "availableReplicas",
+      width: TABLE_COL_WIDTH.available,
+      sorter: (a, b) => a.可用数 - b.可用数 || a.名称.localeCompare(b.名称),
+      sortDirections: ["ascend", "descend", null],
+    },
+    {
+      title: "策略",
+      dataIndex: "策略",
+      key: "strategy",
+      width: TABLE_COL_WIDTH.strategy,
+      sorter: (a, b) => a.策略.localeCompare(b.策略),
+      sortDirections: ["ascend", "descend", null],
+    },
+    {
+      title: "修订版本",
+      dataIndex: "修订版本",
+      key: "revision",
+      width: TABLE_COL_WIDTH.revision,
+      sorter: (a, b) => a.修订版本 - b.修订版本,
+      sortDirections: ["ascend", "descend", null],
+    },
     {
       title: "创建时间",
       dataIndex: "创建时间",
-      key: "创建时间",
+      key: "createdAt",
       width: TABLE_COL_WIDTH.time,
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
       ...getSortableColumnProps("createdAt"),

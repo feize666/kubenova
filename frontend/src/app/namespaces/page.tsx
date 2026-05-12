@@ -21,6 +21,8 @@ import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
+import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import {
   POD_ACTION_MENU_CLASS,
@@ -28,6 +30,9 @@ import {
   renderPodLikeResourceActionStyles,
   renderResourceActionTriggerButton,
 } from "@/components/resource-action-bar";
+import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
+import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { getClusters } from "@/lib/api/clusters";
 import {
   createNamespace,
@@ -36,14 +41,10 @@ import {
   updateNamespace,
   type NamespaceListItem,
 } from "@/lib/api/namespaces";
-import { ResourceDetailDrawer } from "@/components/resource-detail";
-import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { useAntdTableSortPagination } from "@/lib/table";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
-import { buildTablePagination } from "@/lib/table/pagination";
-import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
-import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 interface FormValues {
   clusterId: string;
@@ -71,12 +72,16 @@ export default function NamespacesPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
+  const now = useNowTicker();
 
   const { clusterId, onClusterChange } = useClusterNamespaceFilter();
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
+    useAntdTableSortPagination<NamespaceListItem>({
+      defaultPageSize: 10,
+      allowedSortBy: ["namespace", "clusterId", "updatedAt"],
+    });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<NamespaceListItem | null>(null);
   const [form] = Form.useForm<FormValues>();
@@ -89,12 +94,27 @@ export default function NamespacesPage() {
     enabled: !isInitializing && Boolean(accessToken),
   });
   const namespacesQuery = useQuery({
-    queryKey: ["namespaces", clusterId, keyword, accessToken],
+    queryKey: [
+      "namespaces",
+      {
+        clusterId,
+        keyword,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
+      },
+      accessToken,
+    ],
     queryFn: () =>
       getNamespaces(
         {
           clusterId: clusterId || undefined,
           keyword: keyword.trim() || undefined,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
         },
         accessToken,
       ),
@@ -112,14 +132,6 @@ export default function NamespacesPage() {
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
     [clustersQuery.data?.items],
   );
-  const visibleNamespaces = useMemo(
-    () => (namespacesQuery.data?.items ?? []).filter((item) => hasKnownCluster(clusterMap, item.clusterId)),
-    [clusterMap, namespacesQuery.data?.items],
-  );
-  const pagedNamespaces = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return visibleNamespaces.slice(start, start + pageSize);
-  }, [page, pageSize, visibleNamespaces]);
 
   const mutateCreate = useMutation({
     mutationFn: async (values: FormValues) =>
@@ -198,13 +210,28 @@ export default function NamespacesPage() {
   };
 
   const columns: ColumnsType<NamespaceListItem> = [
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: getAdaptiveNameWidth(namespacesQuery.data?.items?.map((item) => item.namespace) ?? []) },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      width: getAdaptiveNameWidth(namespacesQuery.data?.items?.map((item) => item.namespace) ?? []),
+      ...getSortableColumnProps("namespace", namespacesQuery.isLoading && !namespacesQuery.data),
+    },
     {
       title: "集群",
       dataIndex: "clusterId",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
       render: (_: unknown, row) => getClusterDisplayName(clusterMap, row.clusterId, row.clusterName),
+      ...getSortableColumnProps("clusterId", namespacesQuery.isLoading && !namespacesQuery.data),
+    },
+    {
+      title: "更新时间",
+      dataIndex: "updatedAt",
+      key: "updatedAt",
+      width: TABLE_COL_WIDTH.updateTime,
+      render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      ...getSortableColumnProps("updatedAt", namespacesQuery.isLoading && !namespacesQuery.data),
     },
     {
       title: "标签",
@@ -278,11 +305,11 @@ export default function NamespacesPage() {
           namespaceVisible={false}
           onClusterChange={(value) => {
             onClusterChange(value);
-            setPage(1);
+            resetPage();
           }}
           onKeywordInputChange={setKeywordInput}
           onSearch={() => {
-            setPage(1);
+            resetPage();
             setKeyword(keywordInput.trim());
           }}
           keywordPlaceholder="按名称空间搜索"
@@ -307,23 +334,15 @@ export default function NamespacesPage() {
         <Table<NamespaceListItem>
           rowKey="id"
           columns={columns}
-          dataSource={pagedNamespaces}
+          dataSource={namespacesQuery.data?.items ?? []}
           loading={namespacesQuery.isLoading}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize,
-            total: visibleNamespaces.length,
-            disabled: namespacesQuery.isLoading,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-            showTotal: (total) => `共 ${total} 项`,
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, namespacesQuery.isLoading && !namespacesQuery.data)
+          }
+          pagination={getPaginationConfig(
+            namespacesQuery.data?.total ?? namespacesQuery.data?.items?.length ?? 0,
+            namespacesQuery.isLoading && !namespacesQuery.data,
+          )}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

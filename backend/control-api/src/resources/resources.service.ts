@@ -334,6 +334,8 @@ export interface DynamicResourceQuery {
   keyword?: string;
   page?: string;
   pageSize?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface DynamicResourceIdentity {
@@ -765,6 +767,8 @@ export class ResourcesService {
     const page = this.parsePositiveInt(query.page, 1);
     const pageSize = this.parsePositiveInt(query.pageSize, 20);
     const keyword = query.keyword?.trim().toLowerCase();
+    const sortBy = this.normalizeDynamicSortBy(query.sortBy);
+    const sortOrder = query.sortOrder === 'asc' ? 'asc' : 'desc';
     const normalizedQueryClusterId = query.clusterId?.trim();
     if (normalizedQueryClusterId) {
       const capability = await this.findDynamicCapability({
@@ -821,9 +825,10 @@ export class ResourcesService {
               .includes(keyword),
           )
         : normalizedItems;
-      const total = filtered.length;
+      const sorted = this.sortDynamicItems(filtered, sortBy, sortOrder);
+      const total = sorted.length;
       const start = (page - 1) * pageSize;
-      const items = filtered.slice(start, start + pageSize);
+      const items = sorted.slice(start, start + pageSize);
 
       return {
         clusterId: normalizedQueryClusterId,
@@ -915,33 +920,9 @@ export class ResourcesService {
       }),
     );
 
-    const fulfilled = results
-      .filter(
-        (
-          result,
-        ): result is PromiseFulfilledResult<{
-          capability: {
-            clusterId: string;
-            group: string;
-            version: string;
-            resource: string;
-            kind: string;
-            namespaced: boolean;
-          };
-          items: Array<{
-            id: string;
-            clusterId: string;
-            namespace: string;
-            name: string;
-            kind: string;
-            apiVersion: string;
-            state: string;
-            createdAt?: string;
-            updatedAt?: string;
-          }>;
-        }> => result.status === 'fulfilled',
-      )
-      .map((result) => result.value);
+    const fulfilled = results.flatMap((result) =>
+      result.status === 'fulfilled' ? [result.value] : [],
+    );
     const aggregatedItems = fulfilled.flatMap((item) => item.items);
     const firstCapability = fulfilled[0]?.capability;
 
@@ -952,9 +933,10 @@ export class ResourcesService {
             .includes(keyword),
         )
       : aggregatedItems;
-    const total = filtered.length;
+    const sorted = this.sortDynamicItems(filtered, sortBy, sortOrder);
+    const total = sorted.length;
     const start = (page - 1) * pageSize;
-    const items = filtered.slice(start, start + pageSize);
+    const items = sorted.slice(start, start + pageSize);
 
     return {
       clusterId: normalizedQueryClusterId ?? '',
@@ -975,10 +957,60 @@ export class ResourcesService {
     if (clusterId?.trim()) {
       return [clusterId.trim()];
     }
-    const readableClusterIds =
-      await this.clusterHealthService.listReadableClusterIdsForResourceRead();
-    const pagedClusterIds = await this.listAllReadableClusterIds();
-    return [...new Set([...readableClusterIds, ...pagedClusterIds])];
+    // 统一仅使用“可读且在线”的集群集合，避免把离线/历史快照集群回流到全站列表。
+    return this.clusterHealthService.listReadableClusterIdsForResourceRead();
+  }
+
+  private normalizeDynamicSortBy(sortBy?: string): 'name' | 'namespace' | 'clusterId' | 'createdAt' | 'updatedAt' {
+    const value = sortBy?.trim();
+    if (
+      value === 'name' ||
+      value === 'namespace' ||
+      value === 'clusterId' ||
+      value === 'createdAt' ||
+      value === 'updatedAt'
+    ) {
+      return value;
+    }
+    return 'createdAt';
+  }
+
+  private sortDynamicItems<T extends {
+    name: string;
+    namespace: string;
+    clusterId: string;
+    createdAt?: string;
+    updatedAt?: string;
+  }>(
+    items: T[],
+    sortBy: 'name' | 'namespace' | 'clusterId' | 'createdAt' | 'updatedAt',
+    sortOrder: 'asc' | 'desc',
+  ): T[] {
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    const toTime = (value?: string): number => {
+      if (!value) return 0;
+      const ts = Date.parse(value);
+      return Number.isFinite(ts) ? ts : 0;
+    };
+    return [...items].sort((a, b) => {
+      let cmp = 0;
+      if (sortBy === 'createdAt' || sortBy === 'updatedAt') {
+        cmp =
+          toTime(a[sortBy]) - toTime(b[sortBy]);
+      } else {
+        cmp = a[sortBy].localeCompare(b[sortBy], 'zh-CN', {
+          sensitivity: 'base',
+          numeric: true,
+        });
+      }
+      if (cmp !== 0) {
+        return cmp * direction;
+      }
+      return a.name.localeCompare(b.name, 'zh-CN', {
+        sensitivity: 'base',
+        numeric: true,
+      });
+    });
   }
 
   async getDynamicResourceDetail(identity: DynamicResourceIdentity): Promise<{

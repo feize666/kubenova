@@ -27,6 +27,9 @@ export interface CreateRuntimeSessionRequest {
   command?: string;
   tailLines?: number;
   sinceSeconds?: number;
+  follow?: boolean;
+  previous?: boolean;
+  timestamps?: boolean;
 }
 
 export interface RuntimeGatewayAccessContext {
@@ -69,6 +72,9 @@ export interface RuntimeGatewaySessionBootstrap {
     keyword?: string;
     tailLines?: number;
     sinceSeconds?: number;
+    follow?: boolean;
+    previous?: boolean;
+    timestamps?: boolean;
   };
   expiresAt: string;
   reconnectable: boolean;
@@ -126,6 +132,9 @@ export class RuntimeService {
       keyword: input.type === 'logs' ? input.keyword?.trim() : undefined,
       tailLines: input.type === 'logs' ? input.tailLines : undefined,
       sinceSeconds: input.type === 'logs' ? input.sinceSeconds : undefined,
+      follow: input.type === 'logs' ? input.follow : undefined,
+      previous: input.type === 'logs' ? input.previous : undefined,
+      timestamps: input.type === 'logs' ? input.timestamps : undefined,
       path,
       exp: expiresAtEpochSeconds,
     } satisfies RuntimeTokenPayload);
@@ -220,6 +229,9 @@ export class RuntimeService {
               keyword: payload.keyword,
               tailLines: payload.tailLines,
               sinceSeconds: payload.sinceSeconds,
+              follow: payload.follow,
+              previous: payload.previous,
+              timestamps: payload.timestamps,
             }
           : undefined,
       expiresAt: new Date(payload.exp * 1000).toISOString(),
@@ -258,8 +270,11 @@ export class RuntimeService {
       throw new BadRequestException('level 必须为 INFO、WARN 或 ERROR');
     }
 
-    this.assertPositiveInt(input.tailLines, 'tailLines');
+    this.assertTailLines(input.tailLines, 'tailLines');
     this.assertPositiveInt(input.sinceSeconds, 'sinceSeconds');
+    this.assertBoolean(input.follow, 'follow');
+    this.assertBoolean(input.previous, 'previous');
+    this.assertBoolean(input.timestamps, 'timestamps');
   }
 
   private assertRequiredString(value: string | undefined, field: string): void {
@@ -275,6 +290,24 @@ export class RuntimeService {
 
     if (!Number.isInteger(value) || value <= 0) {
       throw new BadRequestException(`${field} 必须为正整数`);
+    }
+  }
+
+  private assertTailLines(value: number | undefined, field: string): void {
+    if (value === undefined) {
+      return;
+    }
+    if (!Number.isInteger(value) || (value <= 0 && value !== -1)) {
+      throw new BadRequestException(`${field} 必须为正整数或 -1`);
+    }
+  }
+
+  private assertBoolean(value: boolean | undefined, field: string): void {
+    if (value === undefined) {
+      return;
+    }
+    if (typeof value !== 'boolean') {
+      throw new BadRequestException(`${field} 必须为布尔值`);
     }
   }
 
@@ -389,11 +422,20 @@ export class RuntimeService {
       if (input.keyword) {
         query.set('keyword', input.keyword.trim());
       }
-      if (input.tailLines) {
+      if (input.tailLines !== undefined) {
         query.set('tailLines', String(input.tailLines));
       }
       if (input.sinceSeconds) {
         query.set('sinceSeconds', String(input.sinceSeconds));
+      }
+      if (typeof input.follow === 'boolean') {
+        query.set('follow', String(input.follow));
+      }
+      if (typeof input.previous === 'boolean') {
+        query.set('previous', String(input.previous));
+      }
+      if (typeof input.timestamps === 'boolean') {
+        query.set('timestamps', String(input.timestamps));
       }
     }
     const gatewayBase = this.resolveGatewayBaseForClient(access);
@@ -431,6 +473,18 @@ export class RuntimeService {
     }
 
     const configuredBase = this.runtimeGatewayBase;
+    if (configuredBase.startsWith('/')) {
+      const requestHost =
+        access?.requestHost?.trim() || this.extractHostFromOrigin(access?.requestOrigin);
+      const requestProtocol =
+        access?.requestProtocol ||
+        this.extractProtocolFromOrigin(access?.requestOrigin);
+      const wsProtocol = requestProtocol === 'https' ? 'wss' : 'ws';
+      if (requestHost) {
+        return `${wsProtocol}://${requestHost}${configuredBase}`.replace(/\/+$/, '');
+      }
+      return configuredBase;
+    }
     let configured: URL;
     try {
       configured = new URL(configuredBase);
@@ -441,36 +495,109 @@ export class RuntimeService {
     const requestHost = access?.requestHost?.trim();
     const requestProtocol = access?.requestProtocol;
     const requestOrigin = access?.requestOrigin?.trim();
+    let parsedOrigin: URL | null = null;
+    if (requestOrigin) {
+      try {
+        parsedOrigin = new URL(requestOrigin);
+      } catch {
+        parsedOrigin = null;
+      }
+    }
 
     if (requestProtocol === 'https') {
       configured.protocol = 'wss:';
     } else if (requestProtocol === 'http') {
       configured.protocol = 'ws:';
-    } else if (requestOrigin) {
-      try {
-        const parsedOrigin = new URL(requestOrigin);
-        configured.protocol =
-          parsedOrigin.protocol === 'https:' ? 'wss:' : 'ws:';
-      } catch {
-        // noop
-      }
+    } else if (parsedOrigin) {
+      configured.protocol = parsedOrigin.protocol === 'https:' ? 'wss:' : 'ws:';
     }
+
+    const requestHostName = this.extractHostName(requestHost);
+    const requestHostWithPort = this.extractHostWithPort(requestHost);
+    const requestOriginHost = parsedOrigin?.hostname ?? undefined;
+    const requestOriginHostWithPort = parsedOrigin?.host ?? undefined;
 
     const isConfiguredLoopback =
       configured.hostname === 'localhost' ||
       configured.hostname === '127.0.0.1' ||
       configured.hostname === '::1';
-    const requestHostName = requestHost?.split(':')[0] ?? '';
-    const isRequestLoopback =
-      requestHostName === 'localhost' ||
-      requestHostName === '127.0.0.1' ||
-      requestHostName === '::1';
-
-    if (isConfiguredLoopback && requestHostName && !isRequestLoopback) {
-      configured.hostname = requestHostName;
+    const isOriginLoopback =
+      requestOriginHost === 'localhost' ||
+      requestOriginHost === '127.0.0.1' ||
+      requestOriginHost === '::1';
+    // If the page called control-api through the frontend host, prefer that exact
+    // host:port so browsers can reuse the same-origin /ws proxy instead of direct
+    // access to the gateway port.
+    if (isConfiguredLoopback && requestHostWithPort) {
+      configured.host = requestHostWithPort;
+    } else if (
+      isConfiguredLoopback &&
+      requestOriginHostWithPort &&
+      !isOriginLoopback
+    ) {
+      configured.host = requestOriginHostWithPort;
     }
 
     return configured.toString().replace(/\/+$/, '');
+  }
+
+  private extractHostName(value: string | undefined): string {
+    if (!value) {
+      return '';
+    }
+    const normalized = value.trim();
+    if (!normalized) {
+      return '';
+    }
+    if (normalized.startsWith('[')) {
+      const closing = normalized.indexOf(']');
+      if (closing > 1) {
+        return normalized.slice(1, closing);
+      }
+    }
+    const lastColon = normalized.lastIndexOf(':');
+    if (lastColon > 0 && normalized.indexOf(':') === lastColon) {
+      return normalized.slice(0, lastColon);
+    }
+    return normalized;
+  }
+
+  private extractHostWithPort(value: string | undefined): string {
+    if (!value) {
+      return '';
+    }
+    return value.trim();
+  }
+
+  private extractHostFromOrigin(value: string | undefined): string {
+    if (!value) {
+      return '';
+    }
+    try {
+      return new URL(value).host;
+    } catch {
+      return '';
+    }
+  }
+
+  private extractProtocolFromOrigin(
+    value: string | undefined,
+  ): 'http' | 'https' | undefined {
+    if (!value) {
+      return undefined;
+    }
+    try {
+      const protocol = new URL(value).protocol;
+      if (protocol === 'https:') {
+        return 'https';
+      }
+      if (protocol === 'http:') {
+        return 'http';
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private isValidInternalSecret(secret: string | undefined): boolean {

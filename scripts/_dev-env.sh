@@ -33,7 +33,7 @@ load_dev_env_defaults() {
   : "${JWT_SECRET:=dev-secret-please-change-in-production}"
   : "${JWT_EXPIRES_IN:=15m}"
   : "${REFRESH_TOKEN_EXPIRES_IN:=7d}"
-  : "${RUNTIME_GATEWAY_BASE_URL:=ws://localhost:4100}"
+  : "${RUNTIME_GATEWAY_BASE_URL:=ws://127.0.0.1:4100}"
   : "${RUNTIME_TOKEN_SECRET:=dev-runtime-token-secret}"
   : "${SWAGGER_ENABLED:=true}"
   : "${CORS_ORIGINS:=http://localhost:3000}"

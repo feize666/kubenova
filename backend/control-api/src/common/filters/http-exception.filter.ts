@@ -31,7 +31,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
     const payload = this.normalizeException(exception);
-
     response.status(status).json({
       code: payload.code ?? this.defaultCode(status),
       message: this.normalizeMessage(payload.message, status),

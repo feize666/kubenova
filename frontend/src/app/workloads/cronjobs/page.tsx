@@ -48,7 +48,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
@@ -79,7 +79,15 @@ export default function CronJobsPage() {
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [clusterId, setClusterId] = useState("");
   const [namespace, setNamespace] = useState("");
-  const { pagination, resetPage, getPaginationConfig, handleTableChange } = useAntdTableSortPagination<CronJobItem>({
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getPaginationConfig,
+    getSortableColumnProps,
+    handleTableChange,
+  } = useAntdTableSortPagination<CronJobItem>({
     defaultPageSize: 10,
   });
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
@@ -90,14 +98,27 @@ export default function CronJobsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<FormValues>();
 
-  const queryKey = ["workloads", "CronJob", { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize }, accessToken];
+  const queryKey = [
+    "workloads",
+    "CronJob",
+    { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize, sortBy, sortOrder },
+    accessToken,
+  ];
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey,
     queryFn: () =>
       getWorkloadsByKind(
         "CronJob",
-        { clusterId: clusterId || undefined, keyword: keyword.trim() || undefined, namespace: namespace.trim() || undefined, page: pagination.pageIndex + 1, pageSize: pagination.pageSize },
+        {
+          clusterId: clusterId || undefined,
+          keyword: keyword.trim() || undefined,
+          namespace: namespace.trim() || undefined,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
+        },
         accessToken || undefined,
     ),
     enabled: !isInitializing && Boolean(accessToken),
@@ -132,7 +153,6 @@ export default function CronJobsPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
     [clusterMap, data?.items, mergedFilters],
@@ -271,14 +291,17 @@ export default function CronJobsPage() {
         ) : (
           name
         ),
+      ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "clusterId", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: CronJobItem) => getClusterDisplayName(clusterMap, row.clusterId) },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
+    { title: "集群", dataIndex: "clusterId", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: CronJobItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
+    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
     {
       title: "调度表达式",
       key: "schedule",
       width: TABLE_COL_WIDTH.schedule,
       render: (_: unknown, record: CronJobItem) => record.spec?.schedule ?? "-",
+      sorter: (a, b) => (a.spec?.schedule ?? "").localeCompare(b.spec?.schedule ?? ""),
+      sortDirections: ["ascend", "descend", null],
     },
     {
       title: "最近执行",
@@ -288,6 +311,8 @@ export default function CronJobsPage() {
         const t = record.spec?.lastScheduleTime;
         return <ResourceTimeCell value={t} now={now} mode="relative" />;
       },
+      sorter: (a, b) => (a.spec?.lastScheduleTime ?? "").localeCompare(b.spec?.lastScheduleTime ?? ""),
+      sortDirections: ["ascend", "descend", null],
     },
     {
       title: "状态",
@@ -295,6 +320,7 @@ export default function CronJobsPage() {
       key: "state",
       width: TABLE_COL_WIDTH.status,
       render: (value: string) => stateTag(value),
+      ...getSortableColumnProps("state"),
     },
     {
       title: "创建时间",
@@ -302,6 +328,7 @@ export default function CronJobsPage() {
       key: "createdAt",
       width: TABLE_COL_WIDTH.time,
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      ...getSortableColumnProps("createdAt"),
     },
     {
       title: "操作",

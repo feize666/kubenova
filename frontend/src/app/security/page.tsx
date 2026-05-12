@@ -33,7 +33,7 @@ import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { buildTablePagination } from "@/lib/table/pagination";
 import {
   type AuditLogRecord,
@@ -50,6 +50,14 @@ function formatTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function compareText(left: string | undefined, right: string | undefined): number {
+  return (left ?? "").localeCompare(right ?? "", "zh-CN", { sensitivity: "base" });
+}
+
+function compareTime(left: string | undefined, right: string | undefined): number {
+  return (Date.parse(left ?? "") || 0) - (Date.parse(right ?? "") || 0);
 }
 
 function SeverityTag({ severity }: { severity: string }) {
@@ -109,8 +117,12 @@ function SecurityEventsTab() {
 
   const [severityFilter, setSeverityFilter] = useState<string | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [clusterId, setClusterId] = useState("");
+  const [namespace, setNamespace] = useState("");
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState<string>("");
+  const [sortOrder, setSortOrder] = useState<"ascend" | "descend" | null>(null);
 
   const enabled = !isInitializing && Boolean(accessToken);
   const clustersQuery = useQuery({
@@ -122,17 +134,42 @@ function SecurityEventsTab() {
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
     [clustersQuery.data?.items],
   );
+  const clusterOptions = useMemo(
+    () => [{ label: "全部集群", value: "" }, ...(clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id }))],
+    [clustersQuery.data?.items],
+  );
+  const clusterNameToIdMap = useMemo(
+    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.name, item.id])),
+    [clustersQuery.data?.items],
+  );
 
   const { data, isLoading } = useQuery({
-    queryKey: ["security", "events", severityFilter, statusFilter, page],
+    queryKey: ["security", "events", severityFilter, statusFilter, clusterId, namespace, page],
     queryFn: () =>
       getSecurityEvents(
-        { severity: severityFilter, status: statusFilter, page, pageSize: PAGE_SIZE },
+        {
+          severity: severityFilter,
+          status: statusFilter,
+          page,
+          pageSize: PAGE_SIZE,
+        },
         accessToken || undefined,
       ),
     enabled,
     refetchInterval: 30_000,
   });
+
+  const namespaceOptions = useMemo(() => {
+    const raw = data?.items ?? [];
+    const values = Array.from(
+      new Set(
+        raw
+          .map((item) => item.namespace?.trim())
+          .filter((item): item is string => Boolean(item)),
+      ),
+    );
+    return [{ label: "全部名称空间", value: "" }, ...values.map((item) => ({ label: item, value: item }))];
+  }, [data?.items]);
 
   const resolveMutation = useMutation({
     mutationFn: (id: string) => resolveSecurityEvent(id, accessToken || undefined),
@@ -148,17 +185,52 @@ function SecurityEventsTab() {
 
   const filteredItems = useMemo(() => {
     const raw = data?.items ?? [];
-    const known = raw.filter((item) => hasKnownCluster(clusterMap, item.cluster));
-    if (!keyword.trim()) return known;
+    const scoped = raw.filter((item) => {
+      if (clusterId) {
+        const itemClusterId = clusterNameToIdMap[item.cluster] ?? item.cluster;
+        if (itemClusterId !== clusterId) return false;
+      }
+      if (namespace && (item.namespace ?? "") !== namespace) return false;
+      return true;
+    });
+    if (!keyword.trim()) return scoped;
     const kw = keyword.trim().toLowerCase();
-    return known.filter(
+    const withKeyword = scoped.filter(
       (item) =>
         item.title.toLowerCase().includes(kw) ||
         item.type.toLowerCase().includes(kw) ||
         item.resourceName.toLowerCase().includes(kw) ||
         item.cluster.toLowerCase().includes(kw),
     );
-  }, [clusterMap, data?.items, keyword]);
+    return withKeyword;
+  }, [clusterId, clusterNameToIdMap, data?.items, keyword, namespace]);
+
+  const sortedItems = useMemo(() => {
+    const list = [...filteredItems];
+    if (!sortBy || !sortOrder) return list;
+    const direction = sortOrder === "ascend" ? 1 : -1;
+    list.sort((left, right) => {
+      switch (sortBy) {
+        case "severity":
+          return direction * compareText(left.severity, right.severity);
+        case "title":
+          return direction * compareText(left.title, right.title);
+        case "type":
+          return direction * compareText(left.type, right.type);
+        case "resourceName":
+          return direction * compareText(left.resourceName, right.resourceName);
+        case "cluster":
+          return direction * compareText(left.cluster, right.cluster);
+        case "occurredAt":
+          return direction * compareTime(left.occurredAt, right.occurredAt);
+        case "status":
+          return direction * compareText(left.status, right.status);
+        default:
+          return 0;
+      }
+    });
+    return list;
+  }, [filteredItems, sortBy, sortOrder]);
 
   const handleRefreshEvents = async () => {
     setRefreshingEvents(true);
@@ -175,12 +247,16 @@ function SecurityEventsTab() {
       dataIndex: "severity",
       key: "severity",
       width: 90,
+      sorter: true,
+      sortOrder: sortBy === "severity" ? sortOrder : null,
       render: (v: string) => <SeverityTag severity={v} />,
     },
     {
       title: "事件标题",
       dataIndex: "title",
       key: "title",
+      sorter: true,
+      sortOrder: sortBy === "title" ? sortOrder : null,
       ellipsis: true,
       render: (v: string, record) => (
         <Tooltip title={`类型: ${record.type}`}>
@@ -193,6 +269,8 @@ function SecurityEventsTab() {
       dataIndex: "type",
       key: "type",
       width: 180,
+      sorter: true,
+      sortOrder: sortBy === "type" ? sortOrder : null,
       render: (v: string) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {v}
@@ -204,6 +282,8 @@ function SecurityEventsTab() {
       dataIndex: "resourceName",
       key: "resourceName",
       width: 160,
+      sorter: true,
+      sortOrder: sortBy === "resourceName" ? sortOrder : null,
       render: (v: string) => (
         <Typography.Text code style={{ fontSize: 12 }}>
           {v}
@@ -215,6 +295,8 @@ function SecurityEventsTab() {
       dataIndex: "cluster",
       key: "cluster",
       width: 140,
+      sorter: true,
+      sortOrder: sortBy === "cluster" ? sortOrder : null,
       render: (v: string) => <Tag>{getClusterDisplayName(clusterMap, v)}</Tag>,
     },
     {
@@ -222,6 +304,8 @@ function SecurityEventsTab() {
       dataIndex: "occurredAt",
       key: "occurredAt",
       width: 155,
+      sorter: true,
+      sortOrder: sortBy === "occurredAt" ? sortOrder : null,
       render: (v: string) => (
         <Typography.Text style={{ fontSize: 12 }}>{formatTime(v)}</Typography.Text>
       ),
@@ -231,6 +315,8 @@ function SecurityEventsTab() {
       dataIndex: "status",
       key: "status",
       width: 100,
+      sorter: true,
+      sortOrder: sortBy === "status" ? sortOrder : null,
       render: (v: string) => <EventStatusTag status={v} />,
     },
     {
@@ -263,6 +349,28 @@ function SecurityEventsTab() {
     <>
       {contextHolder}
       <Space wrap style={{ marginBottom: 16 }}>
+        <Select
+          placeholder="集群"
+          style={{ width: 200 }}
+          value={clusterId}
+          options={clusterOptions}
+          loading={clustersQuery.isLoading}
+          onChange={(v) => {
+            setClusterId(v);
+            setNamespace("");
+            setPage(1);
+          }}
+        />
+        <Select
+          placeholder="名称空间"
+          style={{ width: 180 }}
+          value={namespace}
+          options={namespaceOptions}
+          onChange={(v) => {
+            setNamespace(v);
+            setPage(1);
+          }}
+        />
         <Select
           placeholder="严重程度"
           allowClear
@@ -312,19 +420,27 @@ function SecurityEventsTab() {
         </Button>
       </Space>
 
-      <Table<SecurityEvent>
-        rowKey="id"
-        columns={columns}
-        dataSource={filteredItems}
-        loading={isLoading}
-        size="small"
-        scroll={{ x: 1000 }}
-        pagination={buildTablePagination({
-          current: page,
-          pageSize: PAGE_SIZE,
-          total: data?.total ?? 0,
-          onChange: (p) => setPage(p),
-        })}
+        <Table<SecurityEvent>
+          rowKey="id"
+          columns={columns}
+          dataSource={sortedItems}
+          loading={isLoading}
+          size="small"
+          scroll={{ x: 1000 }}
+          onChange={(_pagination, _filters, sorter) => {
+            if (Array.isArray(sorter)) return;
+            const nextSortBy = typeof sorter.columnKey === "string" ? sorter.columnKey : "";
+            const nextSortOrder = sorter.order ?? null;
+            setSortBy(nextSortBy);
+            setSortOrder(nextSortOrder);
+            setPage(1);
+          }}
+          pagination={buildTablePagination({
+            current: page,
+            pageSize: PAGE_SIZE,
+            total: keyword.trim() || clusterId || namespace || sortBy ? sortedItems.length : (data?.total ?? 0),
+            onChange: (p) => setPage(p),
+          })}
         rowClassName={(record) =>
           record.severity === "critical" && record.status === "open"
             ? "ant-table-row-danger"
@@ -344,6 +460,8 @@ function AuditLogsTab() {
   const [resultFilter, setResultFilter] = useState<string | undefined>(undefined);
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState<string>("");
+  const [sortOrder, setSortOrder] = useState<"ascend" | "descend" | null>(null);
 
   const enabled = !isInitializing && Boolean(accessToken);
 
@@ -369,6 +487,33 @@ function AuditLogsTab() {
     );
   }, [data?.items, keyword]);
 
+  const sortedItems = useMemo(() => {
+    const list = [...filteredItems];
+    if (!sortBy || !sortOrder) return list;
+    const direction = sortOrder === "ascend" ? 1 : -1;
+    list.sort((left, right) => {
+      switch (sortBy) {
+        case "actor":
+          return direction * compareText(left.actor, right.actor);
+        case "role":
+          return direction * compareText(left.role, right.role);
+        case "action":
+          return direction * compareText(left.action, right.action);
+        case "resourceType":
+          return direction * compareText(left.resourceType, right.resourceType);
+        case "resourceId":
+          return direction * compareText(left.resourceId, right.resourceId);
+        case "result":
+          return direction * compareText(left.result, right.result);
+        case "timestamp":
+          return direction * compareTime(left.timestamp, right.timestamp);
+        default:
+          return 0;
+      }
+    });
+    return list;
+  }, [filteredItems, sortBy, sortOrder]);
+
   const handleRefreshAuditLogs = async () => {
     setRefreshingAuditLogs(true);
     try {
@@ -384,6 +529,8 @@ function AuditLogsTab() {
       dataIndex: "actor",
       key: "actor",
       width: 130,
+      sorter: true,
+      sortOrder: sortBy === "actor" ? sortOrder : null,
       render: (v: string) => (
         <Space size={4}>
           <Typography.Text strong style={{ fontSize: 13 }}>
@@ -397,6 +544,8 @@ function AuditLogsTab() {
       dataIndex: "role",
       key: "role",
       width: 140,
+      sorter: true,
+      sortOrder: sortBy === "role" ? sortOrder : null,
       render: (v: string) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {v}
@@ -408,6 +557,8 @@ function AuditLogsTab() {
       dataIndex: "action",
       key: "action",
       width: 100,
+      sorter: true,
+      sortOrder: sortBy === "action" ? sortOrder : null,
       render: (v: string) => <ActionTag action={v} />,
     },
     {
@@ -415,6 +566,8 @@ function AuditLogsTab() {
       dataIndex: "resourceType",
       key: "resourceType",
       width: 160,
+      sorter: true,
+      sortOrder: sortBy === "resourceType" ? sortOrder : null,
       render: (v: string) => (
         <Tag style={{ margin: 0 }}>{v}</Tag>
       ),
@@ -423,6 +576,8 @@ function AuditLogsTab() {
       title: "资源名称",
       dataIndex: "resourceId",
       key: "resourceId",
+      sorter: true,
+      sortOrder: sortBy === "resourceId" ? sortOrder : null,
       ellipsis: true,
       render: (v: string) => (
         <Typography.Text code style={{ fontSize: 12 }}>
@@ -435,6 +590,8 @@ function AuditLogsTab() {
       dataIndex: "result",
       key: "result",
       width: 80,
+      sorter: true,
+      sortOrder: sortBy === "result" ? sortOrder : null,
       render: (v: string) => <ResultTag result={v} />,
     },
     {
@@ -442,6 +599,8 @@ function AuditLogsTab() {
       dataIndex: "timestamp",
       key: "timestamp",
       width: 155,
+      sorter: true,
+      sortOrder: sortBy === "timestamp" ? sortOrder : null,
       render: (v: string) => (
         <Typography.Text style={{ fontSize: 12 }}>{formatTime(v)}</Typography.Text>
       ),
@@ -505,14 +664,22 @@ function AuditLogsTab() {
       <Table<AuditLogRecord>
         rowKey="id"
         columns={columns}
-        dataSource={filteredItems}
+        dataSource={sortedItems}
         loading={isLoading}
         size="small"
         scroll={{ x: 900 }}
+        onChange={(_pagination, _filters, sorter) => {
+          if (Array.isArray(sorter)) return;
+          const nextSortBy = typeof sorter.columnKey === "string" ? sorter.columnKey : "";
+          const nextSortOrder = sorter.order ?? null;
+          setSortBy(nextSortBy);
+          setSortOrder(nextSortOrder);
+          setPage(1);
+        }}
         pagination={buildTablePagination({
           current: page,
           pageSize: PAGE_SIZE,
-          total: data?.total ?? 0,
+          total: keyword.trim() || sortBy ? sortedItems.length : (data?.total ?? 0),
           onChange: (p) => setPage(p),
         })}
       />

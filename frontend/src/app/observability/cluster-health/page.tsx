@@ -31,8 +31,8 @@ import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { useAntdTableSortPagination } from "@/lib/table";
 import {
   getClusterHealthDetail,
   getClusterHealthList,
@@ -99,8 +99,11 @@ export default function ClusterHealthCenterPage() {
   const [provider, setProvider] = useState("");
   const [lifecycleState, setLifecycleState] = useState<"" | "active" | "disabled" | "deleted">("");
   const [runtimeStatus, setRuntimeStatus] = useState<"" | RuntimeStatus>("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
+    useAntdTableSortPagination<ClusterHealthListItem>({
+      defaultPageSize: 10,
+      allowedSortBy: ["clusterName", "runtimeStatus", "checkedAt", "latencyMs"],
+    });
   const [detailClusterId, setDetailClusterId] = useState<string>("");
   const clusterMap = useMemo(
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
@@ -109,13 +112,17 @@ export default function ClusterHealthCenterPage() {
   const healthQuery = useQuery({
     queryKey: [
       "cluster-health",
-      keyword,
-      environment,
-      provider,
-      lifecycleState,
-      runtimeStatus,
-      page,
-      pageSize,
+      {
+        keyword,
+        environment,
+        provider,
+        lifecycleState,
+        runtimeStatus,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
+      },
       accessToken,
     ],
     queryFn: () =>
@@ -126,16 +133,16 @@ export default function ClusterHealthCenterPage() {
           provider: provider || undefined,
           lifecycleState: lifecycleState || undefined,
           runtimeStatus: runtimeStatus || undefined,
-          page,
-          pageSize,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
         },
         accessToken || undefined,
       ),
     enabled,
     refetchInterval: 30_000,
   });
-  const effectivePageSize = healthQuery.data?.pageSize ?? pageSize;
-
   const detailQuery = useQuery({
     queryKey: ["cluster-health-detail", detailClusterId, accessToken],
     queryFn: () => getClusterHealthDetail(detailClusterId, accessToken || undefined),
@@ -161,8 +168,8 @@ export default function ClusterHealthCenterPage() {
   });
 
   const items = useMemo(
-    () => (healthQuery.data?.items ?? []).filter((item) => hasKnownCluster(clusterMap, item.clusterId)),
-    [clusterMap, healthQuery.data?.items],
+    () => healthQuery.data?.items ?? [],
+    [healthQuery.data?.items],
   );
   const stats = useMemo(() => {
     const total = items.length;
@@ -177,6 +184,7 @@ export default function ClusterHealthCenterPage() {
       title: "集群",
       dataIndex: "clusterName",
       key: "clusterName",
+      ...getSortableColumnProps("clusterName", healthQuery.isLoading),
       render: (value: string, record) => (
         <Space orientation="vertical" size={0}>
           <Typography.Text strong>{getClusterDisplayName(clusterMap, record.clusterId, value)}</Typography.Text>
@@ -195,6 +203,7 @@ export default function ClusterHealthCenterPage() {
       dataIndex: "runtimeStatus",
       key: "runtimeStatus",
       width: 140,
+      ...getSortableColumnProps("runtimeStatus", healthQuery.isLoading),
       render: (value: RuntimeStatus) => runtimeStatusTag(value),
     },
     {
@@ -202,6 +211,7 @@ export default function ClusterHealthCenterPage() {
       dataIndex: "latencyMs",
       key: "latencyMs",
       width: 100,
+      ...getSortableColumnProps("latencyMs", healthQuery.isLoading),
       render: (value: number | null) => (value === null ? "-" : `${value}ms`),
     },
     {
@@ -209,6 +219,7 @@ export default function ClusterHealthCenterPage() {
       dataIndex: "checkedAt",
       key: "checkedAt",
       width: 190,
+      ...getSortableColumnProps("checkedAt", healthQuery.isLoading),
       render: (value: string | null, record) =>
         value ? (
           <Tooltip title={record.isStale ? "结果已过期" : "结果新鲜"}>
@@ -312,7 +323,7 @@ export default function ClusterHealthCenterPage() {
               placeholder="关键字（集群名/ID）"
               onChange={(e) => setKeywordInput(e.target.value)}
               onPressEnter={() => {
-                setPage(1);
+                resetPage();
                 setKeyword(keywordInput);
               }}
             />
@@ -323,7 +334,7 @@ export default function ClusterHealthCenterPage() {
               value={environment}
               placeholder="环境"
               onChange={(e) => {
-                setPage(1);
+                resetPage();
                 setEnvironment(e.target.value);
               }}
             />
@@ -334,7 +345,7 @@ export default function ClusterHealthCenterPage() {
               value={provider}
               placeholder="供应商"
               onChange={(e) => {
-                setPage(1);
+                resetPage();
                 setProvider(e.target.value);
               }}
             />
@@ -344,7 +355,7 @@ export default function ClusterHealthCenterPage() {
               style={{ width: "100%" }}
               value={lifecycleState}
               onChange={(value) => {
-                setPage(1);
+                resetPage();
                 setLifecycleState(value);
               }}
               options={[
@@ -360,7 +371,7 @@ export default function ClusterHealthCenterPage() {
               style={{ width: "100%" }}
               value={runtimeStatus}
               onChange={(value) => {
-                setPage(1);
+                resetPage();
                 setRuntimeStatus(value);
               }}
               options={[
@@ -379,7 +390,7 @@ export default function ClusterHealthCenterPage() {
                 type="primary"
                 icon={<SearchOutlined />}
                 onClick={() => {
-                  setPage(1);
+                  resetPage();
                   setKeyword(keywordInput);
                 }}
               >
@@ -394,7 +405,7 @@ export default function ClusterHealthCenterPage() {
                   setProvider("");
                   setLifecycleState("");
                   setRuntimeStatus("");
-                  setPage(1);
+                  resetPage();
                   void healthQuery.refetch();
                 }}
               >
@@ -421,20 +432,10 @@ export default function ClusterHealthCenterPage() {
           columns={columns}
           dataSource={items}
           loading={healthQuery.isLoading}
-          pagination={buildTablePagination({
-            current: healthQuery.data?.page ?? page,
-            pageSize: effectivePageSize,
-            total: healthQuery.data?.total ?? 0,
-            disabled: healthQuery.isLoading,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== effectivePageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, healthQuery.isLoading)
+          }
+          pagination={getPaginationConfig(healthQuery.data?.total ?? 0, healthQuery.isLoading)}
         />
       </Card>
 

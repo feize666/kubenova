@@ -36,6 +36,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { useModuleTableState } from "@/components/module-page";
 import { buildTablePagination } from "@/lib/table/pagination";
+import { usePersistentTableSortState } from "@/lib/table/use-persistent-table-sort-state";
 import {
   createRbac,
   deleteRbac,
@@ -507,6 +508,17 @@ export default function RbacPage() {
   const [actionTargetId, setActionTargetId] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
   const tableState = useModuleTableState(10);
+  const {
+    sortBy,
+    sortOrder,
+    getSortableColumnProps,
+    handleTableChange,
+  } = usePersistentTableSortState<RbacTableRecord>({
+    storageKey: "users.rbac.sort",
+    allowedSortBy: ["name", "kind", "namespace", "subject", "state", "updatedAt"],
+    defaultSortBy: "updatedAt",
+    defaultSortOrder: "desc",
+  });
 
   const query = useQuery({
     queryKey: [...RBAC_QUERY_KEY, accessToken],
@@ -575,10 +587,25 @@ export default function RbacPage() {
     });
   }, [sourceItems, tableState.keyword, tableState.namespace, kindFilter]);
 
+  const sorted = useMemo(() => {
+    const list = [...filtered];
+    if (!sortBy || !sortOrder) return list;
+    const direction = sortOrder === "asc" ? 1 : -1;
+    list.sort((left, right) => {
+      const leftValue = String((left as Record<string, unknown>)[sortBy] ?? "");
+      const rightValue = String((right as Record<string, unknown>)[sortBy] ?? "");
+      if (sortBy === "updatedAt") {
+        return direction * ((Date.parse(leftValue) || 0) - (Date.parse(rightValue) || 0));
+      }
+      return direction * leftValue.localeCompare(rightValue, "zh-CN", { sensitivity: "base" });
+    });
+    return list;
+  }, [filtered, sortBy, sortOrder]);
+
   const paged = useMemo(() => {
     const start = (tableState.page - 1) * tableState.pageSize;
-    return filtered.slice(start, start + tableState.pageSize);
-  }, [filtered, tableState.page, tableState.pageSize]);
+    return sorted.slice(start, start + tableState.pageSize);
+  }, [sorted, tableState.page, tableState.pageSize]);
 
   const rows = useMemo<RbacTableRecord[]>(() => paged.map((item) => ({ ...item, key: item.id })), [paged]);
 
@@ -595,6 +622,7 @@ export default function RbacPage() {
       title: "策略名 / 角色",
       dataIndex: "name",
       key: "name",
+      ...getSortableColumnProps("name", query.isLoading && !query.data),
       render: (value: string) => {
         const preset = ROLE_DEFINITIONS.find((r) => r.name === value);
         return (
@@ -616,12 +644,14 @@ export default function RbacPage() {
       title: "绑定类型",
       dataIndex: "kind",
       key: "kind",
+      ...getSortableColumnProps("kind", query.isLoading && !query.data),
       render: (value: string) => kindTag(value),
     },
     {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      ...getSortableColumnProps("namespace", query.isLoading && !query.data),
       render: (value: string) =>
         value ? (
           <Tag style={{ fontFamily: "monospace" }}>{value}</Tag>
@@ -635,6 +665,7 @@ export default function RbacPage() {
       title: "绑定主体",
       dataIndex: "subject",
       key: "subject",
+      ...getSortableColumnProps("subject", query.isLoading && !query.data),
       render: (value: string, row) => (
         <Space size={4}>
           <UserOutlined style={{ color: "#8c8c8c" }} />
@@ -649,12 +680,14 @@ export default function RbacPage() {
       title: "状态",
       dataIndex: "state",
       key: "state",
+      ...getSortableColumnProps("state", query.isLoading && !query.data),
       render: (value: RbacState) => stateTag(value),
     },
     {
       title: "更新时间",
       dataIndex: "updatedAt",
       key: "updatedAt",
+      ...getSortableColumnProps("updatedAt", query.isLoading && !query.data),
       render: (value: string) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {value ? new Date(value).toLocaleString("zh-CN") : "-"}
@@ -835,10 +868,19 @@ export default function RbacPage() {
           columns={columns}
           dataSource={rows}
           loading={{ spinning: query.isLoading, description: "RBAC 数据加载中..." }}
+          onChange={(pagination, filters, sorter, extra) => {
+            handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
+            if (pagination.current && pagination.current !== tableState.page) {
+              tableState.setPage(pagination.current);
+            }
+            if (pagination.pageSize && pagination.pageSize !== tableState.pageSize) {
+              tableState.setPageSize(pagination.pageSize);
+            }
+          }}
           pagination={buildTablePagination({
             current: tableState.page,
             pageSize: tableState.pageSize,
-            total: filtered.length,
+            total: sorted.length,
             onChange: (nextPage, nextPageSize) => {
               if (nextPageSize !== tableState.pageSize) {
                 tableState.setPageSize(nextPageSize);

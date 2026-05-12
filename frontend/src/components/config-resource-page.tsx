@@ -10,7 +10,7 @@ import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
 import { getConfigs, type ConfigKind, type ConfigResourceItem } from "@/lib/api/configs";
 import { adaptRequestError } from "@/lib/api/helpers";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { queryKeys } from "@/lib/query";
 import { buildTablePagination } from "@/lib/table/pagination";
 
@@ -83,13 +83,6 @@ export function ConfigResourcePage({ kind, title, description, keyCountTitle }: 
     () => Array.from(new Set((query.data?.items ?? []).map((item) => item.namespace))).sort(),
     [query.data?.items],
   );
-  const filteredDataSource = useMemo(
-    () =>
-      dataSource.filter((item) =>
-        hasKnownCluster(clusterMap, typeof item.clusterId === "string" ? item.clusterId : undefined),
-      ),
-    [clusterMap, dataSource],
-  );
   const errorMessage = query.error ? adaptRequestError(query.error).message : undefined;
 
   const columns = useMemo<TableProps<ModuleRecord>["columns"]>(
@@ -118,12 +111,11 @@ export function ConfigResourcePage({ kind, title, description, keyCountTitle }: 
       title={title}
       description={description}
       columns={columns}
-      dataSource={filteredDataSource}
+      dataSource={dataSource}
       namespaceOptions={namespaceOptions}
       loading={query.isLoading}
       hasInitialData={Boolean(query.data)}
       error={errorMessage}
-      clusterMap={clusterMap}
       filterState={{
         keyword,
         namespace,

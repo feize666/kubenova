@@ -303,11 +303,18 @@ export class HelmService {
     const records = clusterId
       ? await this.mergeRepositoryInventory(clusterId)
       : await this.listAllRepositoryInventory();
+    const sorted = this.sortRepositoryRecords(
+      records,
+      query.sortBy,
+      query.sortOrder,
+    );
 
-    const total = records.length;
+    const total = sorted.length;
     const start = (page - 1) * pageSize;
     return {
-      items: records.slice(start, start + pageSize).map((item) => this.toRepositoryItem(item)),
+      items: sorted
+        .slice(start, start + pageSize)
+        .map((item) => this.toRepositoryItem(item)),
       total,
       page,
       pageSize,
@@ -652,12 +659,17 @@ export class HelmService {
           return name.includes(keyword) || chart.includes(keyword);
         })
       : releases;
+    const sorted = this.sortReleaseRecords(
+      filtered,
+      query.sortBy,
+      query.sortOrder,
+    );
 
-    const total = filtered.length;
+    const total = sorted.length;
     const start = (page - 1) * pageSize;
 
     return {
-      items: filtered.slice(start, start + pageSize),
+      items: sorted.slice(start, start + pageSize),
       total,
       page,
       pageSize,
@@ -2124,12 +2136,33 @@ export class HelmService {
     return clusters.items.filter((item) => item.hasKubeconfig !== false);
   }
 
-  private sortReleaseRecords(records: HelmReleaseItem[]): HelmReleaseItem[] {
+  private sortReleaseRecords(
+    records: HelmReleaseItem[],
+    sortBy?: string,
+    sortOrder?: 'asc' | 'desc',
+  ): HelmReleaseItem[] {
+    const order = sortOrder === 'asc' ? 1 : -1;
+    const field = (sortBy ?? '').trim();
     return [...records].sort((left, right) => {
-      const leftUpdated = this.toSortableTime(left.updated);
-      const rightUpdated = this.toSortableTime(right.updated);
-      if (leftUpdated !== rightUpdated) {
-        return rightUpdated - leftUpdated;
+      if (field === 'name') {
+        const cmp = (left.name ?? '').localeCompare(right.name ?? '');
+        if (cmp !== 0) return cmp * order;
+      }
+      if (field === 'clusterId') {
+        const cmp = (left.clusterId ?? '').localeCompare(right.clusterId ?? '');
+        if (cmp !== 0) return cmp * order;
+      }
+      if (field === 'namespace') {
+        const cmp = (left.namespace ?? '').localeCompare(right.namespace ?? '');
+        if (cmp !== 0) return cmp * order;
+      }
+      const shouldSortByUpdated = field === 'updatedAt' || field === '' || field === 'createdAt';
+      if (shouldSortByUpdated) {
+        const leftUpdated = this.toSortableTime(left.updated);
+        const rightUpdated = this.toSortableTime(right.updated);
+        if (leftUpdated !== rightUpdated) {
+          return (leftUpdated - rightUpdated) * order;
+        }
       }
       const leftKey = `${left.clusterId ?? ''}/${left.namespace}/${left.name}`;
       const rightKey = `${right.clusterId ?? ''}/${right.namespace}/${right.name}`;
@@ -2139,12 +2172,27 @@ export class HelmService {
 
   private sortRepositoryRecords(
     records: HelmRepositoryRecord[],
+    sortBy?: string,
+    sortOrder?: 'asc' | 'desc',
   ): HelmRepositoryRecord[] {
+    const order = sortOrder === 'asc' ? 1 : -1;
+    const field = (sortBy ?? '').trim();
     return [...records].sort((left, right) => {
-      const leftTime = this.toSortableTime(left.updatedAt);
-      const rightTime = this.toSortableTime(right.updatedAt);
-      if (leftTime !== rightTime) {
-        return rightTime - leftTime;
+      if (field === 'name') {
+        const cmp = left.name.localeCompare(right.name);
+        if (cmp !== 0) return cmp * order;
+      }
+      if (field === 'clusterId') {
+        const cmp = left.clusterId.localeCompare(right.clusterId);
+        if (cmp !== 0) return cmp * order;
+      }
+      const shouldSortByUpdated = field === 'updatedAt' || field === '' || field === 'createdAt';
+      if (shouldSortByUpdated) {
+        const leftTime = this.toSortableTime(left.updatedAt);
+        const rightTime = this.toSortableTime(right.updatedAt);
+        if (leftTime !== rightTime) {
+          return (leftTime - rightTime) * order;
+        }
       }
       const leftKey = `${left.clusterId}/${left.name}`;
       const rightKey = `${right.clusterId}/${right.name}`;

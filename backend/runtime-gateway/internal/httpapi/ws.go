@@ -52,6 +52,9 @@ type runtimeTokenPayload struct {
 	Keyword   string `json:"keyword,omitempty"`
 	TailLines int64  `json:"tailLines,omitempty"`
 	SinceSecs int64  `json:"sinceSeconds,omitempty"`
+	Follow    *bool  `json:"follow,omitempty"`
+	Previous  *bool  `json:"previous,omitempty"`
+	Timestamp *bool  `json:"timestamps,omitempty"`
 	Path      string `json:"path"`
 	Exp       int64  `json:"exp"`
 }
@@ -113,6 +116,9 @@ type logStreamOptions struct {
 	Keyword      string `json:"keyword,omitempty"`
 	TailLines    int64  `json:"tailLines,omitempty"`
 	SinceSeconds int64  `json:"sinceSeconds,omitempty"`
+	Follow       *bool  `json:"follow,omitempty"`
+	Previous     *bool  `json:"previous,omitempty"`
+	Timestamps   *bool  `json:"timestamps,omitempty"`
 }
 
 type terminalClientEnvelope struct {
@@ -356,7 +362,7 @@ func validateRuntimeToken(token string, requestPath string, queryValues map[stri
 	if payload.Level != "" && payload.Level != "INFO" && payload.Level != "WARN" && payload.Level != "ERROR" {
 		return runtimeTokenPayload{}, "RUNTIME_TOKEN_LOG_LEVEL_INVALID", "runtimeToken log level claim is invalid"
 	}
-	if payload.TailLines < 0 {
+	if payload.TailLines < -1 {
 		return runtimeTokenPayload{}, "RUNTIME_TOKEN_TAIL_LINES_INVALID", "runtimeToken tailLines claim is invalid"
 	}
 	if payload.SinceSecs < 0 {
@@ -648,6 +654,15 @@ func streamPodLogs(
 		Timestamps: true,
 	}
 	if bootstrap.LogStreamOptions != nil {
+		if bootstrap.LogStreamOptions.Follow != nil {
+			options.Follow = *bootstrap.LogStreamOptions.Follow
+		}
+		if bootstrap.LogStreamOptions.Previous != nil {
+			options.Previous = *bootstrap.LogStreamOptions.Previous
+		}
+		if bootstrap.LogStreamOptions.Timestamps != nil {
+			options.Timestamps = *bootstrap.LogStreamOptions.Timestamps
+		}
 		if bootstrap.LogStreamOptions.TailLines > 0 {
 			options.TailLines = &bootstrap.LogStreamOptions.TailLines
 		}
@@ -740,6 +755,15 @@ func describeLogStreamOptions(options *logStreamOptions) string {
 	}
 	if options.SinceSeconds > 0 {
 		parts = append(parts, fmt.Sprintf("sinceSeconds=%d", options.SinceSeconds))
+	}
+	if options.Follow != nil {
+		parts = append(parts, fmt.Sprintf("follow=%t", *options.Follow))
+	}
+	if options.Previous != nil {
+		parts = append(parts, fmt.Sprintf("previous=%t", *options.Previous))
+	}
+	if options.Timestamps != nil {
+		parts = append(parts, fmt.Sprintf("timestamps=%t", *options.Timestamps))
 	}
 	if len(parts) == 0 {
 		return "默认实时日志"

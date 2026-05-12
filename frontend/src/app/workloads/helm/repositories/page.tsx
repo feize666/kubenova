@@ -22,7 +22,7 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ClusterSelect } from "@/components/cluster-select";
 import { getClusters } from "@/lib/api/clusters";
 import { ApiError } from "@/lib/api/client";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
   createHelmRepository,
   deleteHelmRepository,
@@ -37,7 +37,7 @@ import {
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 
 interface RepositoryFormValues {
   clusterId: string;
@@ -71,8 +71,17 @@ export default function HelmRepositoriesPage() {
   const [presetOpen, setPresetOpen] = useState(false);
   const [presetNames, setPresetNames] = useState<string[]>([]);
   const [importWithSync, setImportWithSync] = useState(true);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<HelmRepositoryItem>({
+    defaultPageSize: 20,
+  });
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [editingRepository, setEditingRepository] = useState<HelmRepositoryItem | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
@@ -271,10 +280,25 @@ export default function HelmRepositoriesPage() {
     [clustersQuery.data?.items],
   );
   const repositoriesQuery = useQuery({
-    queryKey: ["helm", "repositories", clusterId, page, pageSize, accessToken],
+    queryKey: [
+      "helm",
+      "repositories",
+      clusterId,
+      pagination.pageIndex + 1,
+      pagination.pageSize,
+      sortBy,
+      sortOrder,
+      accessToken,
+    ],
     queryFn: () =>
       getHelmRepositories(
-        { clusterId: clusterId || undefined, page, pageSize },
+        {
+          clusterId: clusterId || undefined,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
+        },
         accessToken ?? undefined,
       ),
     enabled: Boolean(accessToken),
@@ -293,15 +317,8 @@ export default function HelmRepositoriesPage() {
   );
 
   const rows = useMemo(
-    () =>
-      (repositoriesQuery.data?.items ?? []).filter((row) => {
-        if (!hasKnownCluster(clusterMap, row.clusterId)) {
-          return false;
-        }
-        const cluster = clustersQuery.data?.items?.find((item) => item.id === row.clusterId);
-        return cluster?.hasKubeconfig !== false;
-      }),
-    [clusterMap, clustersQuery.data?.items, repositoriesQuery.data?.items],
+    () => repositoriesQuery.data?.items ?? [],
+    [repositoriesQuery.data?.items],
   );
   const presetOptions = useMemo(
     () =>
@@ -375,6 +392,7 @@ export default function HelmRepositoriesPage() {
       key: "name",
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name"),
       render: (name: string, row: HelmRepositoryItem) => (
         <Typography.Link
           onClick={() =>
@@ -392,12 +410,14 @@ export default function HelmRepositoriesPage() {
       title: "集群",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId"),
       render: (_: unknown, row: HelmRepositoryItem) => getClusterDisplayName(clusterMap, row.clusterId),
     },
     {
       title: "名称空间",
       key: "namespace",
       width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace"),
       render: () => "-",
     },
     { title: "仓库地址", dataIndex: "url", key: "url", width: TABLE_COL_WIDTH.url },
@@ -413,6 +433,7 @@ export default function HelmRepositoriesPage() {
       dataIndex: "lastSyncAt",
       key: "lastSyncAt",
       width: TABLE_COL_WIDTH.time,
+      ...getSortableColumnProps("updatedAt"),
       render: (value?: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     { title: "状态消息", dataIndex: "message", key: "message" },
@@ -470,7 +491,10 @@ export default function HelmRepositoriesPage() {
           <Col xs={24} sm={12} md={6} lg={4}>
             <ClusterSelect
               value={clusterId}
-              onChange={(v) => setClusterId(v)}
+              onChange={(v) => {
+                setClusterId(v);
+                resetPage();
+              }}
               options={repositoryClusterOptions}
             />
           </Col>
@@ -501,19 +525,19 @@ export default function HelmRepositoriesPage() {
           columns={columns}
           dataSource={rows}
           loading={repositoriesQuery.isLoading && rows.length === 0}
-          pagination={buildTablePagination({
-            current: repositoriesQuery.data?.page ?? page,
-            pageSize: repositoriesQuery.data?.pageSize ?? pageSize,
-            total: repositoriesQuery.data?.total ?? 0,
-            disabled: repositoriesQuery.isLoading && rows.length === 0,
-            onChange: (nextPage, nextPageSize) => {
-              setPage(nextPage);
-              if (nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-              }
-            },
-          })}
+          onChange={(paginationInfo, filters, sorter, extra) =>
+            handleTableChange(
+              paginationInfo,
+              filters,
+              sorter,
+              extra,
+              repositoriesQuery.isLoading && rows.length === 0,
+            )
+          }
+          pagination={getPaginationConfig(
+            repositoriesQuery.data?.total ?? 0,
+            repositoriesQuery.isLoading && rows.length === 0,
+          )}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

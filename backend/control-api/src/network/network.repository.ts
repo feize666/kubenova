@@ -33,6 +33,8 @@ export interface NetworkListParams {
   keyword?: string;
   page?: number;
   pageSize?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface NetworkListResult {
@@ -90,11 +92,12 @@ export class NetworkRepository {
     if (params.keyword) {
       where.name = { contains: params.keyword, mode: 'insensitive' };
     }
+    const orderBy = this.resolveOrderBy(params.sortBy, params.sortOrder);
 
     const [rows, total] = await Promise.all([
       this.prisma.networkResource.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        orderBy,
         skip,
         take: pageSize,
       }),
@@ -186,6 +189,27 @@ export class NetworkRepository {
       data: { state },
     });
     return this.toRecord(row);
+  }
+
+  private resolveOrderBy(
+    sortBy?: string,
+    sortOrder?: 'asc' | 'desc',
+  ): Prisma.NetworkResourceOrderByWithRelationInput[] {
+    const order: Prisma.SortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
+    const field = (sortBy ?? '').trim();
+    if (field === 'name') {
+      return [{ name: order }, { id: 'asc' }];
+    }
+    if (field === 'namespace') {
+      return [{ namespace: order }, { id: 'asc' }];
+    }
+    if (field === 'clusterId') {
+      return [{ clusterId: order }, { id: 'asc' }];
+    }
+    if (field === 'createdAt') {
+      return [{ createdAt: order }, { id: 'asc' }];
+    }
+    return [{ createdAt: 'desc' }, { id: 'asc' }];
   }
 
   private toRecord(row: {

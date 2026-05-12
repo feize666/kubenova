@@ -14,12 +14,18 @@ export interface NamespaceListItem {
 export interface NamespaceListResponse {
   items: NamespaceListItem[];
   total: number;
+  page?: number;
+  pageSize?: number;
   timestamp: string;
 }
 
 export interface NamespaceQueryParams {
   clusterId?: string;
   keyword?: string;
+  page?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
 export interface CreateNamespacePayload {
@@ -39,6 +45,18 @@ export function getNamespaces(params: NamespaceQueryParams = {}, token?: string)
   }
   if (params.keyword) {
     query.keyword = params.keyword;
+  }
+  if (typeof params.page === "number") {
+    query.page = String(params.page);
+  }
+  if (typeof params.pageSize === "number") {
+    query.pageSize = String(params.pageSize);
+  }
+  if (params.sortBy) {
+    query.sortBy = params.sortBy;
+  }
+  if (params.sortOrder) {
+    query.sortOrder = params.sortOrder;
   }
   return apiRequest<NamespaceListResponse>("/api/namespaces", { query, token });
 }

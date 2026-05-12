@@ -29,9 +29,9 @@ import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 import {
   createNetworkResource,
   deleteNetworkResource,
@@ -82,12 +82,21 @@ export default function IngressRoutePage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<IngressRouteFormValues>();
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<IngressRouteResource>({
+    defaultPageSize: 10,
+  });
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -101,7 +110,20 @@ export default function IngressRoutePage() {
   }, [clusterId, keyword, namespace, router]);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["network", "IngressRoute", { clusterId, namespace, keyword, page, pageSize }, accessToken],
+    queryKey: [
+      "network",
+      "IngressRoute",
+      {
+        clusterId,
+        namespace,
+        keyword,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
+      },
+      accessToken,
+    ],
     queryFn: () =>
       getNetworkResources(
         {
@@ -109,8 +131,10 @@ export default function IngressRoutePage() {
           clusterId: clusterId || undefined,
           namespace: namespace.trim() || undefined,
           keyword: keyword.trim() || undefined,
-          page,
-          pageSize,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
         },
         accessToken || undefined,
     ),
@@ -135,8 +159,7 @@ export default function IngressRoutePage() {
       setModalOpen(false);
       form.resetFields();
       await queryClient.invalidateQueries({
-        queryKey: ["network", "IngressRoute", { clusterId, namespace, keyword, page, pageSize }, accessToken],
-        exact: true,
+        queryKey: ["network", "IngressRoute"],
       });
     },
     onError: (err) => {
@@ -149,8 +172,7 @@ export default function IngressRoutePage() {
     onSuccess: async () => {
       void message.success("IngressRoute 删除成功");
       await queryClient.invalidateQueries({
-        queryKey: ["network", "IngressRoute", { clusterId, namespace, keyword, page, pageSize }, accessToken],
-        exact: true,
+        queryKey: ["network", "IngressRoute"],
       });
     },
     onError: (err) => {
@@ -198,7 +220,6 @@ export default function IngressRoutePage() {
 
   const clusterOptions = (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id }));
   const clusterMap = Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]));
-  const effectivePageSize = data?.pageSize ?? pageSize;
   const knownNamespaces = useMemo(
     () => Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean))),
     [data?.items],
@@ -207,10 +228,9 @@ export default function IngressRoutePage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -218,14 +238,14 @@ export default function IngressRoutePage() {
   );
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
 
   const handleFilterSearch = (raw: string) => {
     const parsed = parseResourceSearchInput(raw);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
@@ -237,6 +257,7 @@ export default function IngressRoutePage() {
       key: "name",
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: IngressRouteResource) =>
         row.id ? (
           <Typography.Link onClick={() => setDetailTarget({ kind: "IngressRoute", id: row.id })}>
@@ -250,9 +271,16 @@ export default function IngressRoutePage() {
       title: "集群",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, record: IngressRouteResource) => getClusterDisplayName(clusterMap, record.clusterId),
     },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace", isLoading && !data),
+    },
     {
       title: "入口点",
       key: "entryPoints",
@@ -319,6 +347,7 @@ export default function IngressRoutePage() {
       dataIndex: "createdAt",
       key: "createdAt",
       width: TABLE_COL_WIDTH.time,
+      ...getSortableColumnProps("createdAt", isLoading && !data),
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     {
@@ -367,11 +396,11 @@ export default function IngressRoutePage() {
           namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
             onClusterChange(value);
-            setPage(1);
+            resetPage();
           }}
           onNamespaceChange={(value) => {
             onNamespaceChange(value);
-            setPage(1);
+            resetPage();
           }}
           onKeywordInputChange={(value) => {
             setKeywordInput(value);
@@ -404,20 +433,10 @@ export default function IngressRoutePage() {
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize: effectivePageSize,
-            total: data?.total ?? 0,
-            disabled: isLoading && !data,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== effectivePageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

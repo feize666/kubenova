@@ -4,12 +4,16 @@ export interface HelmListQuery {
   keyword?: string;
   page?: string;
   pageSize?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface HelmRepositoryQuery {
   clusterId?: string;
   page?: string;
   pageSize?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface HelmRepositoryCreateRequest {

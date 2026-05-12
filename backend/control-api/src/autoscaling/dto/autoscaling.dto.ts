@@ -20,6 +20,10 @@ export interface AutoscalingListQuery {
   type?: AutoscalingType;
   state?: PolicyState;
   keyword?: string;
+  page?: string;
+  pageSize?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface HpaPolicyConfig {

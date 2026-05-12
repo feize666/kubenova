@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import type { SortOrder } from '@/lib/contracts/common';
 
 export interface NetworkResource {
   id: string;
@@ -28,6 +29,8 @@ export interface NetworkListParams {
   keyword?: string;
   page?: number;
   pageSize?: number;
+  sortBy?: string;
+  sortOrder?: SortOrder;
 }
 
 export interface CreateNetworkResourcePayload {
@@ -46,6 +49,8 @@ export function getNetworkResources(params: NetworkListParams = {}, token?: stri
   if (params.keyword) query.keyword = params.keyword;
   if (params.page) query.page = params.page;
   if (params.pageSize) query.pageSize = params.pageSize;
+  if (params.sortBy) query.sortBy = params.sortBy;
+  if (params.sortOrder) query.sortOrder = params.sortOrder;
   return apiRequest<NetworkListResponse>('/api/network', { query, token });
 }
 

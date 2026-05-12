@@ -44,6 +44,8 @@ export interface ClusterHealthListQuery {
   runtimeStatus?: RuntimeStatus;
   page?: string;
   pageSize?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface ClusterHealthListItem {
@@ -134,6 +136,8 @@ export class ClusterHealthService {
       state: query.lifecycleState,
       page: query.page,
       pageSize: query.pageSize,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
     });
 
     const clusterIds = list.items.map((item) => item.id);
@@ -145,7 +149,7 @@ export class ClusterHealthService {
         : [];
 
     const snapshotMap = new Map(snapshots.map((row) => [row.clusterId, row]));
-    const items = list.items
+    const filteredItems = list.items
       .map((cluster) => {
         const snapshot = snapshotMap.get(cluster.id);
         const runtimeStatus = this.resolveRuntimeStatus({
@@ -173,6 +177,11 @@ export class ClusterHealthService {
       .filter((item) =>
         query.runtimeStatus ? item.runtimeStatus === query.runtimeStatus : true,
       );
+    const items = this.sortHealthItems(
+      filteredItems,
+      query.sortBy,
+      query.sortOrder,
+    );
 
     return {
       items,
@@ -181,6 +190,36 @@ export class ClusterHealthService {
       total: items.length,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private sortHealthItems(
+    items: ClusterHealthListItem[],
+    sortBy?: string,
+    sortOrder?: 'asc' | 'desc',
+  ): ClusterHealthListItem[] {
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    const field = (sortBy ?? '').trim();
+    return [...items].sort((left, right) => {
+      if (field === 'clusterName' || field === 'name') {
+        const cmp = left.clusterName.localeCompare(right.clusterName);
+        if (cmp !== 0) return cmp * direction;
+      }
+      if (field === 'runtimeStatus') {
+        const cmp = left.runtimeStatus.localeCompare(right.runtimeStatus);
+        if (cmp !== 0) return cmp * direction;
+      }
+      if (field === 'checkedAt' || field === 'updatedAt') {
+        const leftTime = left.checkedAt ? Date.parse(left.checkedAt) : 0;
+        const rightTime = right.checkedAt ? Date.parse(right.checkedAt) : 0;
+        if (leftTime !== rightTime) return (leftTime - rightTime) * direction;
+      }
+      if (field === 'latencyMs') {
+        const leftMs = left.latencyMs ?? Number.MAX_SAFE_INTEGER;
+        const rightMs = right.latencyMs ?? Number.MAX_SAFE_INTEGER;
+        if (leftMs !== rightMs) return (leftMs - rightMs) * direction;
+      }
+      return left.clusterName.localeCompare(right.clusterName);
+    });
   }
 
   async getClusterHealthDetail(
@@ -314,16 +353,17 @@ export class ClusterHealthService {
   }
 
   async listReadableClusterIdsForResourceRead(): Promise<string[]> {
-    const selectableClusterIds =
-      await this.listSelectableClusterIdsForResourceRead();
-    return selectableClusterIds;
+    return this.listSelectableClusterIdsForResourceRead();
   }
 
   async listSelectableClusterIdsForResourceRead(): Promise<string[]> {
-    const clusters = await this.listAllActiveClusters();
-    return clusters
-      .filter((item) => item.state === 'active' && item.hasKubeconfig)
-      .map((item) => item.id);
+    const health = await this.listClusterHealth({
+      lifecycleState: 'active',
+      runtimeStatus: 'running',
+      page: '1',
+      pageSize: '500',
+    });
+    return health.items.map((item) => item.clusterId);
   }
 
   async listClustersNeedingBackgroundProbe(

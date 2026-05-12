@@ -62,7 +62,7 @@ import {
 } from "@/lib/api/cluster-health";
 import type { Cluster } from "@/lib/api/types";
 import { queryKeys } from "@/lib/query/keys";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 
 export type ClusterTableRecord = Cluster & { key: string };
 
@@ -172,8 +172,11 @@ export default function ClustersPage() {
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [environment, setEnvironment] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
+    useAntdTableSortPagination<ClusterTableRecord>({
+      defaultPageSize: 10,
+      allowedSortBy: ["name", "environment", "provider", "updatedAt"],
+    });
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState<ClusterTableRecord | null>(null);
 
@@ -190,8 +193,10 @@ export default function ClustersPage() {
   const queryKey = queryKeys.clusters.list({
     keyword: keyword.trim(),
     environment: environment || undefined,
-    page,
-    pageSize,
+    page: pagination.pageIndex + 1,
+    pageSize: pagination.pageSize,
+    sortBy,
+    sortOrder,
     token: accessToken,
   });
 
@@ -202,8 +207,10 @@ export default function ClustersPage() {
         {
           keyword: keyword.trim(),
           environment: environment || undefined,
-          page,
-          pageSize,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
         },
         accessToken,
       ),
@@ -222,7 +229,7 @@ export default function ClustersPage() {
   }, [tableData]);
 
   const handleSearch = () => {
-    setPage(1);
+    resetPage();
     setKeyword(keywordInput);
   };
 
@@ -262,8 +269,8 @@ export default function ClustersPage() {
             environment: environment || undefined,
             lifecycleState: undefined,
             runtimeStatus: undefined,
-            page,
-            pageSize,
+            page: 1,
+            pageSize: 500,
           },
           accessToken,
         );
@@ -290,7 +297,7 @@ export default function ClustersPage() {
       }
 
     },
-    [accessToken, environment, keyword, page, pageSize],
+    [accessToken, environment, keyword],
   );
 
   useEffect(() => {
@@ -394,6 +401,7 @@ export default function ClustersPage() {
       dataIndex: "name",
       key: "name",
       width: getAdaptiveNameWidth((query.data?.items ?? []).map((item) => item.name)),
+      ...getSortableColumnProps("name", query.isLoading),
       ellipsis: true,
       render: (name: string, row) => (
         <Space orientation="vertical" size={2}>
@@ -420,8 +428,8 @@ export default function ClustersPage() {
         </Space>
       ),
     },
-    { title: "环境", dataIndex: "environment", key: "environment", width: 120 },
-    { title: "供应商", dataIndex: "provider", key: "provider", width: 150 },
+    { title: "环境", dataIndex: "environment", key: "environment", width: 120, ...getSortableColumnProps("environment", query.isLoading) },
+    { title: "供应商", dataIndex: "provider", key: "provider", width: 150, ...getSortableColumnProps("provider", query.isLoading) },
     { title: "K8s 版本", dataIndex: "kubernetesVersion", key: "kubernetesVersion", width: 120 },
     {
       title: "资源使用率",
@@ -603,7 +611,10 @@ export default function ClustersPage() {
               className="resource-filter-select"
               style={{ width: "100%" }}
               value={environment}
-              onChange={(value) => { setPage(1); setEnvironment(value); }}
+              onChange={(value) => {
+                resetPage();
+                setEnvironment(value);
+              }}
               options={[
                 { label: "全部环境", value: "" },
                 { label: "公有云", value: "公有云" },
@@ -642,18 +653,10 @@ export default function ClustersPage() {
           dataSource={visibleTableData}
           loading={{ spinning: query.isLoading, description: "集群数据加载中..." }}
           scroll={{ x: getTableScrollX(columns) }}
-          pagination={buildTablePagination({
-            current: query.data?.page ?? page,
-            pageSize: query.data?.pageSize ?? pageSize,
-            total: query.data?.total ?? visibleTableData.length,
-            onChange: (nextPage, nextPageSize) => {
-              setPage(nextPage);
-              if (nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-              }
-            },
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, query.isLoading)
+          }
+          pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, query.isLoading)}
           locale={{
             emptyText:
               query.isLoading ? "正在加载..." : <Empty description="暂无符合条件的集群数据" />,

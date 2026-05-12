@@ -11,6 +11,7 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { useModuleTableState } from "@/components/module-page";
 import { buildTablePagination } from "@/lib/table/pagination";
+import { usePersistentTableSortState } from "@/lib/table/use-persistent-table-sort-state";
 import {
   createUser,
   deleteUser,
@@ -245,10 +246,30 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editRecord, setEditRecord] = useState<UserTableRecord | null>(null);
   const tableState = useModuleTableState(10);
+  const {
+    sortBy,
+    sortOrder,
+    getSortableColumnProps,
+    handleTableChange,
+  } = usePersistentTableSortState<UserTableRecord>({
+    storageKey: "users.list.sort",
+    allowedSortBy: ["username", "role", "createdAt", "updatedAt"],
+    defaultSortBy: "createdAt",
+    defaultSortOrder: "desc",
+  });
 
   const query = useQuery({
-    queryKey: [...USERS_QUERY_KEY, accessToken],
-    queryFn: () => getUsers({}, accessToken!),
+    queryKey: [...USERS_QUERY_KEY, accessToken, tableState.page, tableState.pageSize, sortBy, sortOrder],
+    queryFn: () =>
+      getUsers(
+        {
+          page: tableState.page,
+          pageSize: tableState.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
+        },
+        accessToken!,
+      ),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
@@ -298,10 +319,7 @@ export default function UsersPage() {
     });
   }, [sourceItems, tableState.keyword, status]);
 
-  const paged = useMemo(() => {
-    const start = (tableState.page - 1) * tableState.pageSize;
-    return filtered.slice(start, start + tableState.pageSize);
-  }, [filtered, tableState.page, tableState.pageSize]);
+  const paged = useMemo(() => filtered, [filtered]);
 
   const rows = useMemo<UserTableRecord[]>(
     () => paged.map((item) => ({ ...item, key: item.id })),
@@ -348,6 +366,7 @@ export default function UsersPage() {
       title: "角色",
       dataIndex: "role",
       key: "role",
+      ...getSortableColumnProps("role", query.isLoading && !query.data),
       render: (role: string) =>
         role === "admin" ? (
           <Tag icon={<CrownOutlined />} color="gold">管理员</Tag>
@@ -369,6 +388,7 @@ export default function UsersPage() {
       title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
+      ...getSortableColumnProps("createdAt", query.isLoading && !query.data),
       render: (v: string) => new Date(v).toLocaleDateString("zh-CN"),
     },
     {
@@ -485,10 +505,19 @@ export default function UsersPage() {
           columns={columns}
           dataSource={rows}
           loading={{ spinning: query.isLoading, description: "用户数据加载中..." }}
+          onChange={(pagination, filters, sorter, extra) => {
+            handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
+            if (pagination.current && pagination.current !== tableState.page) {
+              tableState.setPage(pagination.current);
+            }
+            if (pagination.pageSize && pagination.pageSize !== tableState.pageSize) {
+              tableState.setPageSize(pagination.pageSize);
+            }
+          }}
           pagination={buildTablePagination({
             current: tableState.page,
             pageSize: tableState.pageSize,
-            total: filtered.length,
+            total: query.data?.total ?? filtered.length,
             onChange: (nextPage, nextPageSize) => {
               if (nextPageSize !== tableState.pageSize) {
                 tableState.setPageSize(nextPageSize);

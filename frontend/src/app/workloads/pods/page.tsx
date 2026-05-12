@@ -49,7 +49,7 @@ import type { WorkloadListItem, WorkloadKindParam } from "@/lib/api/workloads";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { buildTerminalRoute } from "@/lib/workloads/terminal";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
@@ -430,7 +430,7 @@ export default function PodsPage() {
 
   // Client-side filtering only applies to labels on the current backend page.
   const tableData = useMemo<PodRow[]>(() => {
-    let nextRows = rows.filter((row) => hasKnownCluster(clusterMap, row.clusterId));
+    let nextRows = [...rows];
     if (phaseFilter) {
       nextRows = nextRows.filter((row) => row.phase === phaseFilter);
     }
@@ -444,7 +444,7 @@ export default function PodsPage() {
       });
     }
     return nextRows;
-  }, [clusterMap, mergedFilters, phaseFilter, rows]);
+  }, [mergedFilters, phaseFilter, rows]);
   const displayedRows = useMemo<PodRow[]>(() => {
     const rowsToSort = [...tableData];
     if (!sortBy || !sortOrder) {
@@ -515,6 +515,7 @@ export default function PodsPage() {
       clusterName: getClusterDisplayName(clusterMap, row.clusterId),
       namespace: row.namespace,
       pod: row.name,
+      containerNames: row.containerNames,
       resourceKind: "Pod",
       resourceName: row.name,
       resourceId: row.id,
@@ -616,11 +617,11 @@ export default function PodsPage() {
             onClick={() => setDetailTarget({ kind: "Pod", id: row.id })}
             style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}
           >
-            {name}
+            {row.name}
           </Typography.Link>
         ) : (
           <Typography.Text code style={{ fontSize: 12 }}>
-            {name}
+            {row.name}
           </Typography.Text>
         ),
     } as unknown as ColumnType<PodRow>,
@@ -679,10 +680,10 @@ export default function PodsPage() {
       render: (_: unknown, row: PodRow) => renderUsageCell(row.memoryUsage ?? row.memoryUsagePercent, row, "memory"),
     } as unknown as ColumnType<PodRow>,
     {
-      title: "重启次数",
+      title: <span style={{ whiteSpace: "nowrap" }}>重启次数</span>,
       dataIndex: "restartCount",
       key: "restartCount",
-      width: TABLE_COL_WIDTH.replicas,
+      width: 116,
       align: "left",
       ...getSortableColumnProps("restartCount"),
     } as unknown as ColumnType<PodRow>,

@@ -61,6 +61,10 @@ export interface ListAutoscalingPoliciesParams {
   kind?: string;
   type?: AutoscalingType;
   keyword?: string;
+  page?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
 export interface CreateAutoscalingPolicyPayload {
@@ -118,6 +122,10 @@ export async function listAutoscalingPolicies(
       kind: params.kind,
       type: params.type,
       keyword: params.keyword,
+      page: params.page,
+      pageSize: params.pageSize,
+      sortBy: params.sortBy,
+      sortOrder: params.sortOrder,
     },
     token,
   });

@@ -50,7 +50,7 @@ import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-n
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 interface KVPair {
@@ -74,20 +74,43 @@ export default function ConfigMapsPage() {
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const { sortBy, sortOrder, pagination, resetPage, getPaginationConfig, handleTableChange } =
+    useAntdTableSortPagination<ConfigResourceItem>({
+      defaultPageSize: 10,
+    });
 
   const [modalOpen, setModalOpen] = useState(false);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<ConfigMapFormValues>();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["configs", "configmaps", { clusterId, namespace, keyword, page, pageSize }, accessToken],
+    queryKey: [
+      "configs",
+      "configmaps",
+      {
+        clusterId,
+        namespace,
+        keyword,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
+      },
+      accessToken,
+    ],
     queryFn: () =>
       getConfigs(
         "configmaps",
-        { clusterId: clusterId || undefined, namespace: namespace.trim() || undefined, keyword: keyword.trim() || undefined, page, pageSize },
+        {
+          clusterId: clusterId || undefined,
+          namespace: namespace.trim() || undefined,
+          keyword: keyword.trim() || undefined,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
+        },
         accessToken!,
       ),
     enabled: !isInitializing && Boolean(accessToken),
@@ -150,8 +173,6 @@ export default function ConfigMapsPage() {
   const clusterMap = Object.fromEntries(
     (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
   );
-  const effectivePageSize = data?.pageSize ?? pageSize;
-
   // Extract known namespaces from loaded data
   const knownNamespaces = useMemo(
     () =>
@@ -184,7 +205,7 @@ export default function ConfigMapsPage() {
 
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
@@ -324,11 +345,11 @@ export default function ConfigMapsPage() {
           namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
             onClusterChange(value);
-            setPage(1);
+            resetPage();
           }}
           onNamespaceChange={(value) => {
             onNamespaceChange(value);
-            setPage(1);
+            resetPage();
           }}
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
@@ -361,20 +382,10 @@ export default function ConfigMapsPage() {
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize: effectivePageSize,
-            total: data?.total ?? 0,
-            disabled: isLoading && !data,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== effectivePageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

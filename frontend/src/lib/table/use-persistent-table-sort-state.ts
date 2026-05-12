@@ -107,7 +107,7 @@ export function usePersistentTableSortState<T extends object>(options: Persisten
       onHeaderCell: () => ({
         style: {
           cursor: busy ? "not-allowed" : "pointer",
-          pointerEvents: busy ? "none" : undefined,
+          pointerEvents: busy ? ("none" as const) : undefined,
         },
       }),
     };

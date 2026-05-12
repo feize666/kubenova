@@ -48,7 +48,7 @@ import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-n
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
 function normalizePhase(value?: string) {
@@ -102,8 +102,17 @@ export default function PvPage() {
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<StorageResource>({
+    defaultPageSize: 10,
+  });
 
   const [modalOpen, setModalOpen] = useState(false);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -111,10 +120,30 @@ export default function PvPage() {
   const [form] = Form.useForm<PvFormValues>();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["storage", "PV", { clusterId, keyword, page, pageSize }, accessToken],
+    queryKey: [
+      "storage",
+      "PV",
+      {
+        clusterId,
+        keyword,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
+      },
+      accessToken,
+    ],
     queryFn: () =>
       getStorageResources(
-        { kind: "PV", clusterId: clusterId || undefined, keyword: keyword.trim() || undefined, page, pageSize },
+        {
+          kind: "PV",
+          clusterId: clusterId || undefined,
+          keyword: keyword.trim() || undefined,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
+        },
         accessToken || undefined,
       ),
     enabled: !isInitializing && Boolean(accessToken),
@@ -184,7 +213,6 @@ export default function PvPage() {
   const clusterMap = Object.fromEntries(
     (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
   );
-  const effectivePageSize = data?.pageSize ?? pageSize;
 
   const tableData = useMemo(
     () =>
@@ -202,7 +230,7 @@ export default function PvPage() {
 
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
@@ -214,6 +242,7 @@ export default function PvPage() {
       key: "name",
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: StorageResource) =>
         row.id ? (
           <Typography.Link onClick={() => setDetailTarget({ kind: "PersistentVolume", id: row.id })}>
@@ -227,6 +256,7 @@ export default function PvPage() {
       title: "集群",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, record: StorageResource) =>
         getClusterDisplayName(clusterMap, record.clusterId),
     },
@@ -235,6 +265,7 @@ export default function PvPage() {
       dataIndex: "capacity",
       key: "capacity",
       width: TABLE_COL_WIDTH.capacity,
+      ...getSortableColumnProps("capacity", isLoading && !data),
       render: (v: string | undefined) => v ?? "-",
     },
     {
@@ -256,6 +287,7 @@ export default function PvPage() {
       dataIndex: "storageClass",
       key: "storageClass",
       width: TABLE_COL_WIDTH.storageClass,
+      ...getSortableColumnProps("storageClass", isLoading && !data),
       render: (v: string | undefined) => v ?? "-",
     },
     {
@@ -269,6 +301,7 @@ export default function PvPage() {
       dataIndex: "createdAt",
       key: "createdAt",
       width: TABLE_COL_WIDTH.time,
+      ...getSortableColumnProps("createdAt", isLoading && !data),
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     {
@@ -361,7 +394,7 @@ export default function PvPage() {
           namespaceVisible={false}
           onClusterChange={(value) => {
             onClusterChange(value);
-            setPage(1);
+            resetPage();
           }}
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
@@ -394,20 +427,10 @@ export default function PvPage() {
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize: effectivePageSize,
-            total: data?.total ?? 0,
-            disabled: isLoading && !data,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== effectivePageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

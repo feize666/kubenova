@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import type { SortOrder } from '@/lib/contracts/common';
 
 export interface StorageResource {
   id: string;
@@ -32,6 +33,8 @@ export interface StorageListParams {
   keyword?: string;
   page?: number;
   pageSize?: number;
+  sortBy?: string;
+  sortOrder?: SortOrder;
 }
 
 export interface CreateStorageResourcePayload {
@@ -54,6 +57,8 @@ export function getStorageResources(params: StorageListParams = {}, token?: stri
   if (params.keyword) query.keyword = params.keyword;
   if (params.page) query.page = params.page;
   if (params.pageSize) query.pageSize = params.pageSize;
+  if (params.sortBy) query.sortBy = params.sortBy;
+  if (params.sortOrder) query.sortOrder = params.sortOrder;
   return apiRequest<StorageListResponse>('/api/storage', { query, token });
 }
 

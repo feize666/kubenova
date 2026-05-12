@@ -23,6 +23,7 @@ import type { ColumnsType } from "antd/es/table";
 import type { Dayjs } from "dayjs";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { NamespaceSelect } from "@/components/namespace-select";
 import { getClusters } from "@/lib/api/clusters";
 import { buildTablePagination } from "@/lib/table/pagination";
 import {
@@ -81,6 +82,7 @@ function capabilityStatusTag(status: CapabilityBaselineStatus) {
 export default function InspectionPage() {
   const { accessToken, isInitializing } = useAuth();
   const [clusterId, setClusterId] = useState("");
+  const [namespace, setNamespace] = useState("");
   const [exportFormat, setExportFormat] = useState<InspectionExportFormat>("xlsx");
   const [activeResult, setActiveResult] = useState<InspectionActionResult | null>(null);
   const [refreshingInspection, setRefreshingInspection] = useState(false);
@@ -132,6 +134,17 @@ export default function InspectionPage() {
   const clusterOptions = useMemo(
     () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
     [clustersQuery.data],
+  );
+  const knownNamespaces = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (reportQuery.data?.items ?? [])
+            .map((item) => item.namespace?.trim() ?? "")
+            .filter((item) => item.length > 0),
+        ),
+      ),
+    [reportQuery.data?.items],
   );
 
   const actionMutation = useMutation({
@@ -349,10 +362,14 @@ export default function InspectionPage() {
   }, [capabilityItems, capabilityPage, capabilityPageSize]);
 
   const issueItems = useMemo(() => reportQuery.data?.items ?? [], [reportQuery.data?.items]);
+  const issueItemsFiltered = useMemo(() => {
+    if (!namespace.trim()) return issueItems;
+    return issueItems.filter((item) => (item.namespace ?? "").trim() === namespace.trim());
+  }, [issueItems, namespace]);
   const issuePagedItems = useMemo(() => {
     const start = (issuePage - 1) * issuePageSize;
-    return issueItems.slice(start, start + issuePageSize);
-  }, [issueItems, issuePage, issuePageSize]);
+    return issueItemsFiltered.slice(start, start + issuePageSize);
+  }, [issueItemsFiltered, issuePage, issuePageSize]);
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -371,9 +388,24 @@ export default function InspectionPage() {
               <Select
                 style={{ width: 220 }}
                 value={clusterId}
-                onChange={(value) => setClusterId(value)}
+                onChange={(value) => {
+                  setClusterId(value);
+                  setNamespace("");
+                  setIssuePage(1);
+                }}
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
+              />
+              <NamespaceSelect
+                style={{ width: 180 }}
+                value={namespace}
+                onChange={(value) => {
+                  setNamespace(value);
+                  setIssuePage(1);
+                }}
+                clusterId={clusterId}
+                knownNamespaces={knownNamespaces}
+                disabled={!clusterId}
               />
               <Select
                 style={{ width: 120 }}
@@ -531,7 +563,7 @@ export default function InspectionPage() {
           pagination={buildTablePagination({
             current: issuePage,
             pageSize: issuePageSize,
-            total: issueItems.length,
+            total: issueItemsFiltered.length,
             onChange: (nextPage, nextPageSize) => {
               if (nextPageSize !== issuePageSize) {
                 setIssuePageSize(nextPageSize);

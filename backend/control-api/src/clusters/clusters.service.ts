@@ -22,6 +22,8 @@ export interface ClustersListQuery {
   state?: ClusterState;
   page?: string;
   pageSize?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
   // Keep compatibility for existing frontend filters.
   environment?: string;
   status?: string;
@@ -283,6 +285,8 @@ export class ClustersService implements OnModuleInit {
       provider: query.provider?.trim() || undefined,
       environment: query.environment?.trim() || undefined,
       status: query.status?.trim() || undefined,
+      sortBy: query.sortBy?.trim() || undefined,
+      sortOrder: query.sortOrder,
       state: targetState,
       page,
       pageSize,

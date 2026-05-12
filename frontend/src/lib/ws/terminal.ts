@@ -34,6 +34,19 @@ function resolveDefaultWsBase(): string {
 }
 
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+const DEFAULT_WS_CONNECT_TIMEOUT_MS = 5000;
+const SENSITIVE_QUERY_KEYS = new Set([
+  "runtimetoken",
+  "token",
+  "authorization",
+  "auth",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "jwt",
+  "signature",
+  "sig",
+]);
 
 function normalizeToWsProtocol(raw: string): string {
   if (raw.startsWith("http://")) return `ws://${raw.slice("http://".length)}`;
@@ -113,6 +126,13 @@ export function buildGatewayWsCandidates(gatewayWsUrl: string): string[] {
     addCandidate(protocolFallback);
   }
 
+  const sameOriginPathFallback = new URL(parsed.toString());
+  sameOriginPathFallback.protocol = browserWsProtocol;
+  sameOriginPathFallback.host = browserHost;
+  sameOriginPathFallback.hostname = window.location.hostname;
+  sameOriginPathFallback.port = window.location.port;
+  addCandidate(sameOriginPathFallback);
+
   if (browserHostname && !isBrowserLoopback && loopbackHosts.has(parsed.hostname)) {
     const directHostFallback = new URL(parsed.toString());
     directHostFallback.hostname = browserHostname;
@@ -147,18 +167,27 @@ export function buildGatewayWsCandidates(gatewayWsUrl: string): string[] {
   };
 
   if (typeof window !== "undefined") {
+    const parsedIsLoopback = loopbackHosts.has(parsed.hostname);
     const browserPreferred = new URL(parsed.toString());
     browserPreferred.protocol = browserWsProtocol;
-    pushOrdered(browserPreferred);
 
-    if (browserHostname && !isBrowserLoopback && loopbackHosts.has(parsed.hostname)) {
+    if (browserHost) {
+      const sameOrigin = new URL(parsed.toString());
+      sameOrigin.protocol = browserWsProtocol;
+      sameOrigin.host = browserHost;
+      pushOrdered(sameOrigin);
+    }
+
+    // Remote browser + loopback gateway URL:
+    // always try non-loopback host first, keep loopback last fallback.
+    if (browserHostname && !isBrowserLoopback && parsedIsLoopback) {
       const remoteHostWithGatewayPort = new URL(parsed.toString());
       remoteHostWithGatewayPort.protocol = browserWsProtocol;
       remoteHostWithGatewayPort.hostname = browserHostname;
       pushOrdered(remoteHostWithGatewayPort);
     }
 
-    if (browserHost && !isBrowserLoopback && loopbackHosts.has(parsed.hostname)) {
+    if (browserHost && !isBrowserLoopback && parsedIsLoopback) {
       const sameHostWithPagePort = new URL(parsed.toString());
       sameHostWithPagePort.protocol = browserWsProtocol;
       sameHostWithPagePort.host = browserHost;
@@ -171,12 +200,189 @@ export function buildGatewayWsCandidates(gatewayWsUrl: string): string[] {
       sameOrigin.host = browserHost;
       pushOrdered(sameOrigin);
     }
+
+    if (!parsedIsLoopback || isBrowserLoopback) {
+      pushOrdered(browserPreferred);
+    }
+
+    if (parsedIsLoopback && !isBrowserLoopback) {
+      pushOrdered(browserPreferred);
+    }
   }
 
   for (const leftover of candidates) {
     ordered.push(leftover);
   }
   return ordered;
+}
+
+export function redactGatewayWsDisplay(input: string): string {
+  const normalizedInput = normalizeToWsProtocol(input.trim());
+  if (!normalizedInput) {
+    return "";
+  }
+  try {
+    const wsUrl = new URL(normalizedInput);
+    const host = loopbackHosts.has(wsUrl.hostname) ? "<loopback>" : wsUrl.host;
+    return `${wsUrl.protocol}//${host}${wsUrl.pathname}`;
+  } catch {
+    return "runtime-gateway";
+  }
+}
+
+export async function connectWsWithCandidates(
+  candidates: string[],
+  onSocketReady: (socket: WebSocket) => void,
+): Promise<WebSocket> {
+  if (candidates.length === 0) {
+    throw new Error("未找到可用的 WebSocket 地址");
+  }
+
+  let lastError: unknown = null;
+  for (const candidate of candidates) {
+    try {
+      const socket = await connectSingleWsCandidate(candidate, onSocketReady);
+      return socket;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("创建 WebSocket 连接失败");
+}
+
+function connectSingleWsCandidate(
+  candidate: string,
+  onSocketReady: (socket: WebSocket) => void,
+): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (result: { socket?: WebSocket; error?: Error }) => {
+      if (settled) return;
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (result.socket) {
+        resolve(result.socket);
+      } else {
+        reject(result.error ?? new Error("WebSocket 连接失败"));
+      }
+    };
+
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(candidate);
+    } catch (error) {
+      finish({
+        error: error instanceof Error ? error : new Error("创建 WebSocket 连接失败"),
+      });
+      return;
+    }
+
+    onSocketReady(socket);
+
+    timer = setTimeout(() => {
+      if (settled) return;
+      try {
+        socket.close(4000, "connect-timeout");
+      } catch {
+        // noop
+      }
+      finish({
+        error: new Error(`WebSocket 连接超时：${sanitizeWsUrlForDisplay(candidate)}`),
+      });
+    }, DEFAULT_WS_CONNECT_TIMEOUT_MS);
+
+    socket.onopen = () => {
+      finish({ socket });
+    };
+
+    socket.onerror = () => {
+      if (settled) {
+        return;
+      }
+      finish({
+        error: new Error(`WebSocket 连接失败：${sanitizeWsUrlForDisplay(candidate)}`),
+      });
+      try {
+        socket.close();
+      } catch {
+        // noop
+      }
+    };
+
+    socket.onclose = (event) => {
+      if (settled) {
+        return;
+      }
+      finish({
+        error: new Error(
+          `WebSocket 已关闭（code=${event.code}）：${sanitizeWsUrlForDisplay(candidate)}`,
+        ),
+      });
+    };
+  });
+}
+
+function maskSensitiveValue(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return "***";
+  }
+  if (trimmed.length <= 12) {
+    return "***";
+  }
+  return `${trimmed.slice(0, 4)}...${trimmed.slice(-3)}`;
+}
+
+export function sanitizeWsUrlForDisplay(input: string, maxLength = 180): string {
+  const raw = input.trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    parsed.searchParams.forEach((value, key) => {
+      const lowerKey = key.toLowerCase();
+      if (SENSITIVE_QUERY_KEYS.has(lowerKey) || value.length > 32) {
+        parsed.searchParams.set(key, maskSensitiveValue(value));
+      }
+    });
+    const next = parsed.toString();
+    if (next.length <= maxLength) {
+      return next;
+    }
+    return `${next.slice(0, Math.max(0, maxLength - 3))}...`;
+  } catch {
+    if (raw.length <= maxLength) {
+      return raw;
+    }
+    return `${raw.slice(0, Math.max(0, maxLength - 3))}...`;
+  }
+}
+
+export function sanitizeSensitiveMessage(input: string, maxLength = 220): string {
+  const raw = input.trim();
+  if (!raw) {
+    return "";
+  }
+  const withUrlMasked = raw.replace(/wss?:\/\/[^\s)]+/gi, (segment) =>
+    sanitizeWsUrlForDisplay(segment, 200),
+  );
+  const withTokenMasked = withUrlMasked
+    .replace(
+      /([?&](?:runtimeToken|token|authorization|access_token|refresh_token|id_token)=)([^&\s]+)/gi,
+      (_all, prefix: string, value: string) =>
+        `${prefix}${maskSensitiveValue(value)}`,
+    )
+    .replace(/\b([A-Za-z0-9._-]{64,})\b/g, (token) => maskSensitiveValue(token));
+  if (withTokenMasked.length <= maxLength) {
+    return withTokenMasked;
+  }
+  return `${withTokenMasked.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
 function stringifyUnknown(value: unknown): string {

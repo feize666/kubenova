@@ -35,7 +35,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { getNamespaces } from "@/lib/api/namespaces";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { Dropdown } from "antd";
 import {
@@ -98,8 +98,10 @@ export default function ServiceAccountsPage() {
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const { sortBy, sortOrder, pagination, resetPage, getPaginationConfig, handleTableChange } =
+    useAntdTableSortPagination<ServiceAccountRecord>({
+      defaultPageSize: 10,
+    });
 
   const [yamlOpen, setYamlOpen] = useState(false);
   const [yamlValue, setYamlValue] = useState("");
@@ -126,7 +128,7 @@ export default function ServiceAccountsPage() {
 
   const namespacesQuery = useQuery({
     queryKey: ["serviceaccounts", "namespaces", clusterId || "all", accessToken],
-    queryFn: () => getNamespaces({ clusterId: clusterId || undefined }, accessToken ?? undefined),
+    queryFn: () => getNamespaces({ clusterId: clusterId || undefined, page: 1, pageSize: 500 }, accessToken ?? undefined),
     enabled: Boolean(accessToken) && Boolean(clusterId),
   });
 
@@ -137,8 +139,10 @@ export default function ServiceAccountsPage() {
       clusterId || "all",
       namespace,
       keyword,
-      page,
-      pageSize,
+      pagination.pageIndex + 1,
+      pagination.pageSize,
+      sortBy,
+      sortOrder,
       accessToken,
     ],
     queryFn: () =>
@@ -150,8 +154,10 @@ export default function ServiceAccountsPage() {
           resource: "serviceaccounts",
           namespace: namespace || undefined,
           keyword: keyword || undefined,
-          page,
-          pageSize,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
         },
         accessToken ?? undefined,
       ),
@@ -251,8 +257,6 @@ export default function ServiceAccountsPage() {
   });
 
   const rowsRaw = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
-  const effectivePageSize = listQuery.data?.pageSize ?? pageSize;
-
   const knownNamespaces = useMemo(
     () => Array.from(new Set(rowsRaw.map((item) => item.namespace).filter(Boolean))).sort(),
     [rowsRaw],
@@ -285,7 +289,7 @@ export default function ServiceAccountsPage() {
 
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
@@ -525,11 +529,11 @@ export default function ServiceAccountsPage() {
           namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
             onClusterChange(value);
-            setPage(1);
+            resetPage();
           }}
           onNamespaceChange={(value) => {
             onNamespaceChange(value);
-            setPage(1);
+            resetPage();
           }}
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
@@ -557,6 +561,9 @@ export default function ServiceAccountsPage() {
           columns={columns}
           dataSource={tableData}
           loading={listQuery.isLoading}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
+          }
           onRow={(record) => ({
             onClick: () => {
               if (record.id) {
@@ -564,20 +571,7 @@ export default function ServiceAccountsPage() {
               }
             },
           })}
-          pagination={buildTablePagination({
-            current: listQuery.data?.page ?? page,
-            pageSize: effectivePageSize,
-            total: listQuery.data?.total ?? 0,
-            disabled: listQuery.isLoading && !listQuery.data,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== effectivePageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-          })}
+          pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

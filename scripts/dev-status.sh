@@ -12,6 +12,15 @@ FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-4000}"
 RUNTIME_GATEWAY_PORT="${RUNTIME_GATEWAY_PORT:-4100}"
 
+stream_match() {
+  local pattern="$1"
+  if command -v rg >/dev/null 2>&1; then
+    rg -q -- "$pattern"
+  else
+    grep -Eq -- "$pattern"
+  fi
+}
+
 service_session_name() {
   local name="$1"
   echo "aiops-${name}"
@@ -80,7 +89,7 @@ service_is_starting() {
   if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
     return 1
   fi
-  if [[ -n "$port" ]] && ss -ltnp "( sport = :$port )" 2>/dev/null | rg -q "pid=$pid"; then
+  if [[ -n "$port" ]] && ss -ltnp "( sport = :$port )" 2>/dev/null | stream_match "pid=$pid"; then
     return 1
   fi
   local stat

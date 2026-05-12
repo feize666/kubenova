@@ -65,7 +65,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
   runScaleConvergence,
   type ScaleConvergenceRound,
@@ -347,7 +347,6 @@ export default function StatefulSetsPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
     [clusterMap, data?.items, mergedFilters],
@@ -595,8 +594,9 @@ export default function StatefulSetsPage() {
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
       render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId),
+      ...getSortableColumnProps("clusterId"),
     },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
+    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
     { title: "期望副本", dataIndex: "replicas", key: "replicas", width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
     { title: "就绪副本", dataIndex: "readyReplicas", key: "readyReplicas", width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
     {
@@ -605,6 +605,7 @@ export default function StatefulSetsPage() {
       key: "state",
       width: TABLE_COL_WIDTH.status,
       render: (value: string) => stateTag(value),
+      ...getSortableColumnProps("state"),
     },
     {
       title: "创建时间",

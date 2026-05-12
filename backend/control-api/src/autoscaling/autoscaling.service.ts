@@ -78,14 +78,22 @@ export class AutoscalingService {
   async list(query: AutoscalingListQuery): Promise<{
     items: AutoscalingPolicyItem[];
     total: number;
+    page: number;
+    pageSize: number;
     overview: AutoscalingOverview;
   }> {
     try {
+      const page = this.parsePositiveInt(query.page, 1);
+      const pageSize = this.parsePositiveInt(query.pageSize, 20);
+      const sortBy = query.sortBy?.trim();
+      const sortOrder = query.sortOrder === 'asc' ? 'asc' : 'desc';
       const clusterIds = await this.resolveClusterIds(query.clusterId);
       if (clusterIds.length === 0) {
         return {
           items: [],
           total: 0,
+          page,
+          pageSize,
           overview: {
             totalPolicies: 0,
             enabledPolicies: 0,
@@ -133,7 +141,7 @@ export class AutoscalingService {
       const items = summaries
         .filter((item) => (query.type ? item.type === query.type : true))
         .filter((item) => (query.state ? item.state === query.state : true))
-        .sort((a, b) => this.compareTimestamps(b.updatedAt, a.updatedAt));
+        .sort((a, b) => this.compareAutoscalingItems(a, b, sortBy, sortOrder));
 
       const overview: AutoscalingOverview = {
         totalPolicies: items.length,
@@ -145,9 +153,13 @@ export class AutoscalingService {
         uncoveredWorkloads: 0,
       };
 
+      const total = items.length;
+      const start = (page - 1) * pageSize;
       return {
-        items,
-        total: items.length,
+        items: items.slice(start, start + pageSize),
+        total,
+        page,
+        pageSize,
         overview,
       };
     } catch (error) {
@@ -1285,6 +1297,41 @@ export class AutoscalingService {
     const safeLeft = Number.isNaN(leftTime) ? 0 : leftTime;
     const safeRight = Number.isNaN(rightTime) ? 0 : rightTime;
     return safeLeft - safeRight;
+  }
+
+  private parsePositiveInt(raw: string | undefined, fallback: number): number {
+    if (!raw) return fallback;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
+  }
+
+  private compareAutoscalingItems(
+    left: AutoscalingResourceSummary,
+    right: AutoscalingResourceSummary,
+    sortBy: string | undefined,
+    sortOrder: 'asc' | 'desc',
+  ): number {
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    const field = sortBy ?? 'updatedAt';
+    if (field === 'name' || field === 'workloadName') {
+      const cmp = left.workloadName.localeCompare(right.workloadName);
+      if (cmp !== 0) return cmp * direction;
+    }
+    if (field === 'namespace') {
+      const cmp = left.namespace.localeCompare(right.namespace);
+      if (cmp !== 0) return cmp * direction;
+    }
+    if (field === 'clusterId') {
+      const cmp = left.clusterId.localeCompare(right.clusterId);
+      if (cmp !== 0) return cmp * direction;
+    }
+    if (field === 'updatedAt' || field === 'createdAt') {
+      const cmp = this.compareTimestamps(left.updatedAt, right.updatedAt);
+      if (cmp !== 0) return cmp * direction;
+    }
+    const leftKey = `${left.clusterId}/${left.namespace}/${left.workloadName}`;
+    const rightKey = `${right.clusterId}/${right.namespace}/${right.workloadName}`;
+    return leftKey.localeCompare(rightKey);
   }
 
   private readVpaResourceLimit(

@@ -141,6 +141,29 @@ describe('ClusterHealthService', () => {
     });
   });
 
+  it('listSelectableClusterIdsForResourceRead keeps only running clusters', async () => {
+    const service = createService() as any;
+    service.clustersService.list = jest.fn().mockResolvedValue({
+      items: [
+        { id: 'running-1', state: 'active', hasKubeconfig: true },
+        { id: 'offline-1', state: 'active', hasKubeconfig: true },
+        { id: 'offline-mode-1', state: 'active', hasKubeconfig: false },
+      ],
+      page: 1,
+      pageSize: 500,
+      total: 3,
+      timestamp: new Date().toISOString(),
+    });
+    service.prisma.clusterHealthSnapshot.findMany = jest.fn().mockResolvedValue([
+      { clusterId: 'running-1', ok: true, checkedAt: new Date() },
+      { clusterId: 'offline-1', ok: false, checkedAt: new Date() },
+    ]);
+
+    const result = await service.listSelectableClusterIdsForResourceRead();
+
+    expect(result).toEqual(['running-1']);
+  });
+
   it('getLegacyHealthResult uses fresh snapshot without probing', async () => {
     const service = createService() as any;
     service.requireCluster = jest.fn().mockResolvedValue({

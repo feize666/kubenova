@@ -28,6 +28,8 @@ export interface NetworkListQuery {
   keyword?: string;
   page?: string;
   pageSize?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface NetworkListResult {
@@ -149,6 +151,8 @@ export class NetworkService {
       keyword: query.keyword,
       page,
       pageSize,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
     };
     const result = await this.networkRepository.list(params);
     return {

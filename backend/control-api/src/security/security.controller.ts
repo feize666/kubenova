@@ -51,12 +51,16 @@ export class SecurityController {
   getEvents(
     @Query('severity') severity?: string,
     @Query('status') status?: string,
+    @Query('clusterId') clusterId?: string,
+    @Query('namespace') namespace?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ): SecurityEventsResponse {
     return this.securityService.getEvents({
       severity,
       status,
+      clusterId,
+      namespace,
       page: page ? parseInt(page, 10) : undefined,
       pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
     });

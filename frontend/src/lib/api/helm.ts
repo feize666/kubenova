@@ -11,12 +11,16 @@ export interface HelmListQueryParams {
   status?: string;
   page?: number;
   pageSize?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
 export interface HelmRepositoryListQueryParams {
   clusterId?: string;
   page?: number;
   pageSize?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
 export interface HelmRepositoryMutationPayload {
@@ -288,6 +292,8 @@ export async function getHelmReleases(params: HelmListQueryParams = {}, token?: 
     keyword: params.keyword,
     page: params.page,
     pageSize: params.pageSize,
+    sortBy: params.sortBy,
+    sortOrder: params.sortOrder,
   });
   const payload = await apiRequest<BackendHelmListResponse>("/api/helm/releases", {
     method: "GET",
@@ -316,6 +322,8 @@ export async function getHelmRepositories(
       clusterId: params.clusterId,
       page: params.page,
       pageSize: params.pageSize,
+      sortBy: params.sortBy,
+      sortOrder: params.sortOrder,
     }),
     token,
   });

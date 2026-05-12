@@ -47,6 +47,7 @@ export interface SecurityEvent {
   type: string;
   resourceName: string;
   cluster: string;
+  namespace?: string | null;
   occurredAt: string;
   status: EventStatus;
   resolvedAt?: string;
@@ -98,7 +99,14 @@ export async function getSecurityStats(token?: string): Promise<SecurityStatsRes
 }
 
 export async function getSecurityEvents(
-  params: { severity?: string; status?: string; page?: number; pageSize?: number } = {},
+  params: {
+    severity?: string;
+    status?: string;
+    clusterId?: string;
+    namespace?: string;
+    page?: number;
+    pageSize?: number;
+  } = {},
   token?: string,
 ): Promise<SecurityEventsResponse> {
   return apiRequest<SecurityEventsResponse>("/api/security/events", {
@@ -106,6 +114,8 @@ export async function getSecurityEvents(
     query: {
       severity: params.severity,
       status: params.status,
+      clusterId: params.clusterId,
+      namespace: params.namespace,
       page: params.page,
       pageSize: params.pageSize,
     },

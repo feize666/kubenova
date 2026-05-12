@@ -39,7 +39,12 @@ describe('NamespacesService list online gate', () => {
 
     const result = await service.list({});
 
-    expect(result).toEqual([]);
+    expect(result).toEqual({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 20,
+    });
     expect(prisma.namespaceRecord.findMany).not.toHaveBeenCalled();
   });
 

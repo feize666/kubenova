@@ -45,6 +45,7 @@ export interface SecurityEvent {
   type: string;
   resourceName: string;
   cluster: string;
+  namespace?: string | null;
   occurredAt: string;
   status: EventStatus;
   resolvedAt?: string;
@@ -168,6 +169,7 @@ const MOCK_SECURITY_EVENTS: SecurityEvent[] = [
     type: 'VulnerabilityScan',
     resourceName: 'checkout:v2.1.0',
     cluster: 'prod-cluster',
+    namespace: 'prod',
     occurredAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
     status: 'open',
   },
@@ -178,6 +180,7 @@ const MOCK_SECURITY_EVENTS: SecurityEvent[] = [
     type: 'PrivilegeEscalation',
     resourceName: 'ops-toolbox',
     cluster: 'ops-cluster',
+    namespace: 'ops',
     occurredAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
     status: 'open',
   },
@@ -188,6 +191,7 @@ const MOCK_SECURITY_EVENTS: SecurityEvent[] = [
     type: 'AuthenticationFailure',
     resourceName: 'admin-user',
     cluster: 'platform-cluster',
+    namespace: 'platform',
     occurredAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
     status: 'open',
   },
@@ -198,6 +202,7 @@ const MOCK_SECURITY_EVENTS: SecurityEvent[] = [
     type: 'NetworkPolicyViolation',
     resourceName: 'frontend-svc',
     cluster: 'prod-cluster',
+    namespace: 'prod',
     occurredAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
     status: 'resolved',
     resolvedAt: new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString(),
@@ -209,6 +214,7 @@ const MOCK_SECURITY_EVENTS: SecurityEvent[] = [
     type: 'PolicyViolation',
     resourceName: 'batch-worker',
     cluster: 'staging-cluster',
+    namespace: 'staging',
     occurredAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
     status: 'resolved',
     resolvedAt: new Date(Date.now() - 40 * 60 * 60 * 1000).toISOString(),
@@ -220,6 +226,7 @@ const MOCK_SECURITY_EVENTS: SecurityEvent[] = [
     type: 'SecretExposure',
     resourceName: 'app-config',
     cluster: 'prod-cluster',
+    namespace: 'prod',
     occurredAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     status: 'open',
   },
@@ -230,6 +237,7 @@ const MOCK_SECURITY_EVENTS: SecurityEvent[] = [
     type: 'RBACViolation',
     resourceName: 'dev-serviceaccount',
     cluster: 'dev-cluster',
+    namespace: 'dev',
     occurredAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
     status: 'open',
   },
@@ -326,6 +334,8 @@ export class SecurityService {
   getEvents(filters: {
     severity?: string;
     status?: string;
+    clusterId?: string;
+    namespace?: string;
     page?: number;
     pageSize?: number;
   }): SecurityEventsResponse {
@@ -344,6 +354,14 @@ export class SecurityService {
     }
     if (filters.status) {
       filtered = filtered.filter((e) => e.status === filters.status);
+    }
+    if (filters.clusterId) {
+      filtered = filtered.filter((e) => e.cluster === filters.clusterId);
+    }
+    if (filters.namespace) {
+      filtered = filtered.filter(
+        (e) => (e.namespace ?? '') === filters.namespace,
+      );
     }
 
     const start = (page - 1) * pageSize;

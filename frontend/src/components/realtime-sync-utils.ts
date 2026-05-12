@@ -137,17 +137,17 @@ export function getRealtimeQueryPrefixes(event: RealtimeEvent): QueryPrefix[] {
     case "pods":
       return [["workloads", "pods"]];
     case "deployments":
-      return [["workloads", "deployments"], ["workloads", "pods"]];
+      return [["workloads", "deployments"]];
     case "statefulsets":
-      return [["workloads", "StatefulSet"], ["workloads", "statefulsets"], ["workloads", "pods"]];
+      return [["workloads", "StatefulSet"], ["workloads", "statefulsets"]];
     case "daemonsets":
-      return [["workloads", "DaemonSet"], ["workloads", "daemonsets"], ["workloads", "pods"]];
+      return [["workloads", "DaemonSet"], ["workloads", "daemonsets"]];
     case "replicasets":
-      return [["workloads", "ReplicaSet"], ["workloads", "replicasets"], ["workloads", "pods"]];
+      return [["workloads", "ReplicaSet"], ["workloads", "replicasets"]];
     case "jobs":
-      return [["workloads", "Job"], ["workloads", "jobs"], ["workloads", "pods"]];
+      return [["workloads", "Job"], ["workloads", "jobs"]];
     case "cronjobs":
-      return [["workloads", "CronJob"], ["workloads", "cronjobs"], ["workloads", "pods"]];
+      return [["workloads", "CronJob"], ["workloads", "cronjobs"]];
     case "Service":
       return [["network", "Service"]];
     case "Endpoints":
@@ -280,9 +280,19 @@ function matchesIdentity(item: ListPatchCandidate, event: RealtimeEvent): boolea
 }
 
 function mergeCandidate<T extends ListPatchCandidate>(item: T, event: RealtimeEvent): T {
+  const resourceKind = getEventResourceKind(event);
   const nextCluster = normalize(event.clusterId) || item.clusterId || item.clusterName || item.集群;
-  const nextNamespace = event.resource?.namespace ?? item.namespace ?? item.名称空间;
-  const nextName = event.resource?.name ?? item.name ?? item.名称;
+  const currentNamespace = item.namespace ?? item.名称空间;
+  const currentName = item.name ?? item.名称;
+  // namespace 事件允许更新 namespace 相关字段；其它资源事件只在提供明确字段时更新，避免把 Pod 名称覆盖成命名空间。
+  const nextNamespace =
+    resourceKind === "namespaces"
+      ? event.resource?.namespace ?? event.resource?.name ?? currentNamespace
+      : event.resource?.namespace ?? currentNamespace;
+  const nextName =
+    resourceKind === "namespaces"
+      ? event.resource?.name ?? event.resource?.namespace ?? currentName
+      : event.resource?.name ?? currentName;
   const nextState =
     event.action === "delete"
       ? "deleted"

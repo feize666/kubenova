@@ -109,6 +109,20 @@ function normalizePath(path: string): string {
     return path;
   }
 
+  // In browser, prefer same-origin /api when the configured control-api base is loopback.
+  // This lets Next rewrites preserve the page host for runtime session URL generation.
+  if (typeof window !== "undefined") {
+    try {
+      const parsed = new URL(configuredBase);
+      const hostname = parsed.hostname.toLowerCase();
+      if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+        return path;
+      }
+    } catch {
+      return path;
+    }
+  }
+
   return `${configuredBase}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 

@@ -30,6 +30,8 @@ export interface StorageListParams {
   keyword?: string;
   page?: number;
   pageSize?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface StorageListResult {
@@ -94,10 +96,11 @@ export class StorageRepository {
       where.name = { contains: params.keyword, mode: 'insensitive' };
     }
 
+    const orderBy = this.resolveOrderBy(params.sortBy, params.sortOrder);
     const [rows, total] = await Promise.all([
       this.prisma.storageResource.findMany({
         where,
-        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        orderBy,
         skip,
         take: pageSize,
       }),
@@ -200,6 +203,30 @@ export class StorageRepository {
       data: { state },
     });
     return this.toRecord(row);
+  }
+
+  private resolveOrderBy(
+    sortBy?: string,
+    sortOrder?: 'asc' | 'desc',
+  ): Prisma.StorageResourceOrderByWithRelationInput[] {
+    const order: Prisma.SortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
+    const field = (sortBy ?? '').trim();
+    if (field === 'name') {
+      return [{ name: order }, { id: 'asc' }];
+    }
+    if (field === 'namespace') {
+      return [{ namespace: order }, { id: 'asc' }];
+    }
+    if (field === 'clusterId') {
+      return [{ clusterId: order }, { id: 'asc' }];
+    }
+    if (field === 'createdAt') {
+      return [{ createdAt: order }, { id: 'asc' }];
+    }
+    if (field === 'updatedAt') {
+      return [{ updatedAt: order }, { id: 'asc' }];
+    }
+    return [{ createdAt: 'desc' }, { id: 'asc' }];
   }
 
   private toRecord(row: {

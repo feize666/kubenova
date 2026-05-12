@@ -11,7 +11,7 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { getClusters } from "@/lib/api/clusters";
 import { getNamespaces } from "@/lib/api/namespaces";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
@@ -25,7 +25,7 @@ import {
   type DynamicResourceItem,
 } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 
@@ -107,14 +107,23 @@ export default function GatewayApiPage() {
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
   const [kind, setKind] = useState<GatewayKindKey>("gatewayclass");
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm<GatewayFormValues & HttpRouteFormValues>();
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<GatewayRow>({
+    defaultPageSize: 10,
+  });
 
   const kindMeta = GATEWAY_KIND_META[kind];
   const canCreate = Boolean(clusterId);
@@ -135,12 +144,23 @@ export default function GatewayApiPage() {
   );
   const namespacesQuery = useQuery({
     queryKey: ["gateway-api", "namespaces", clusterId || "all", accessToken],
-    queryFn: () => getNamespaces({ clusterId: clusterId || undefined }, accessToken ?? undefined),
+    queryFn: () => getNamespaces({ clusterId: clusterId || undefined, page: 1, pageSize: 500 }, accessToken ?? undefined),
     enabled: Boolean(accessToken) && Boolean(clusterId),
   });
 
   const listQuery = useQuery({
-    queryKey: ["gateway-api", kind, clusterId || "all", namespace, keyword, page, pageSize, accessToken],
+    queryKey: [
+      "gateway-api",
+      kind,
+      clusterId || "all",
+      namespace,
+      keyword,
+      pagination.pageIndex + 1,
+      pagination.pageSize,
+      sortBy,
+      sortOrder,
+      accessToken,
+    ],
     queryFn: () =>
       // TODO: backend must accept omitted clusterId for the all-clusters default view.
       getDynamicResources(
@@ -151,8 +171,10 @@ export default function GatewayApiPage() {
           resource: kindMeta.resource,
           namespace: namespace || undefined,
           keyword: keyword || undefined,
-          page,
-          pageSize,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
         },
         accessToken ?? undefined,
       ),
@@ -239,7 +261,6 @@ export default function GatewayApiPage() {
   });
 
   const rows = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
-  const effectivePageSize = listQuery.data?.pageSize ?? pageSize;
   const knownNamespaces = useMemo(
     () =>
       Array.from(
@@ -254,7 +275,6 @@ export default function GatewayApiPage() {
     () =>
       rows.filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           (mergedFilters.length === 0
             ? true
             : mergedFilters.every((filter) =>
@@ -263,7 +283,7 @@ export default function GatewayApiPage() {
                 ),
               )),
       ),
-    [clusterMap, rows, mergedFilters],
+    [rows, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -275,7 +295,7 @@ export default function GatewayApiPage() {
       .split(/\s+/)
       .map((item) => item.trim())
       .filter(Boolean);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed);
     setKeyword(parsed.filter((item) => !item.includes("=")).join(" "));
   };
@@ -428,6 +448,7 @@ export default function GatewayApiPage() {
       key: "name",
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name", listQuery.isLoading),
       render: (value: string, row) =>
         row.id ? (
           <Typography.Link onClick={() => setDetailTarget({ kind, id: row.id })}>
@@ -441,6 +462,7 @@ export default function GatewayApiPage() {
       title: "集群",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId", listQuery.isLoading),
       render: (_: unknown, row) => getClusterDisplayName(clusterMap, row.clusterId),
     },
     {
@@ -448,6 +470,7 @@ export default function GatewayApiPage() {
       dataIndex: "namespace",
       key: "namespace",
       width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace", listQuery.isLoading),
       render: (value: string) => value || "-",
     },
     {
@@ -471,6 +494,7 @@ export default function GatewayApiPage() {
       dataIndex: "updatedAt",
       key: "updatedAt",
       width: TABLE_COL_WIDTH.updateTime,
+      ...getSortableColumnProps("updatedAt", listQuery.isLoading),
       render: (value?: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     {
@@ -543,7 +567,7 @@ export default function GatewayApiPage() {
               style={{ width: "100%" }}
               onChange={(value) => {
                 setKind(value as GatewayKindKey);
-                setPage(1);
+                resetPage();
                 setKeyword("");
                 setKeywordInput("");
               }}
@@ -561,11 +585,11 @@ export default function GatewayApiPage() {
           namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
             onClusterChange(value);
-            setPage(1);
+            resetPage();
           }}
           onNamespaceChange={(value) => {
             onNamespaceChange(value);
-            setPage(1);
+            resetPage();
           }}
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
@@ -593,19 +617,10 @@ export default function GatewayApiPage() {
           columns={columns}
           dataSource={tableData}
           loading={listQuery.isLoading}
-          pagination={buildTablePagination({
-            current: listQuery.data?.page ?? page,
-            pageSize: effectivePageSize,
-            total: listQuery.data?.total ?? 0,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== effectivePageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading)
+          }
+          pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading)}
           scroll={{ x: getTableScrollX(columns) }}
           onRow={(record) => ({
             onClick: () => {

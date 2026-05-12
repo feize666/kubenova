@@ -27,6 +27,8 @@ export interface StorageListQuery {
   keyword?: string;
   page?: string;
   pageSize?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
   sync?: string;
 }
 
@@ -114,6 +116,8 @@ export class StorageService {
       keyword: query.keyword,
       page: this.parsePositiveInt(query.page, 1),
       pageSize: this.parsePositiveInt(query.pageSize, 20),
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
     };
     const result = await this.storageRepository.list(params);
     void this.refreshStorageSyncState(

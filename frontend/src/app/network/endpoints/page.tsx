@@ -30,9 +30,9 @@ import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
-import { buildTablePagination } from "@/lib/table/pagination";
+import { useAntdTableSortPagination } from "@/lib/table";
 import {
   createNetworkResource,
   deleteNetworkResource,
@@ -151,15 +151,37 @@ export default function EndpointsPage() {
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm<EndpointsFormValues>();
-  const [pageSize, setPageSize] = useState(10);
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<EndpointsResource>({
+    defaultPageSize: 10,
+  });
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["network", "Endpoints", { clusterId, namespace, keyword, page, pageSize }, accessToken],
+    queryKey: [
+      "network",
+      "Endpoints",
+      {
+        clusterId,
+        namespace,
+        keyword,
+        page: pagination.pageIndex + 1,
+        pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
+      },
+      accessToken,
+    ],
     queryFn: () =>
       getNetworkResources(
         {
@@ -167,8 +189,10 @@ export default function EndpointsPage() {
           clusterId: clusterId || undefined,
           namespace: namespace.trim() || undefined,
           keyword: keyword.trim() || undefined,
-          page,
-          pageSize,
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
         },
         accessToken || undefined,
     ),
@@ -195,7 +219,6 @@ export default function EndpointsPage() {
   }));
 
   const clusterMap = Object.fromEntries((clustersQuery.data?.items ?? []).map((cluster) => [cluster.id, cluster.name]));
-  const effectivePageSize = data?.pageSize ?? pageSize;
 
   const createMutation = useMutation({
     mutationFn: (payload: EndpointsCreatePayload) =>
@@ -205,8 +228,7 @@ export default function EndpointsPage() {
       setModalOpen(false);
       form.resetFields();
       await queryClient.invalidateQueries({
-        queryKey: ["network", "Endpoints", { clusterId, namespace, keyword, page, pageSize }, accessToken],
-        exact: true,
+        queryKey: ["network", "Endpoints"],
       });
     },
     onError: (err) => {
@@ -219,8 +241,7 @@ export default function EndpointsPage() {
     onSuccess: async () => {
       void message.success("Endpoints 删除成功");
       await queryClient.invalidateQueries({
-        queryKey: ["network", "Endpoints", { clusterId, namespace, keyword, page, pageSize }, accessToken],
-        exact: true,
+        queryKey: ["network", "Endpoints"],
       });
       await refetch();
     },
@@ -238,10 +259,9 @@ export default function EndpointsPage() {
     () =>
       ((data?.items ?? []) as EndpointsResource[]).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -250,7 +270,7 @@ export default function EndpointsPage() {
 
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
-    setPage(1);
+    resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
@@ -295,6 +315,7 @@ export default function EndpointsPage() {
       key: "name",
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: EndpointsResource) =>
         row.id ? (
           <Typography.Link onClick={() => setDetailTarget({ kind: "Endpoints", id: row.id })}>
@@ -308,9 +329,16 @@ export default function EndpointsPage() {
       title: "集群",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, row: EndpointsResource) => getClusterDisplayName(clusterMap, row.clusterId),
     },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace", isLoading && !data),
+    },
     {
       title: "关联 Service",
       key: "service",
@@ -361,6 +389,7 @@ export default function EndpointsPage() {
       dataIndex: "createdAt",
       key: "createdAt",
       width: TABLE_COL_WIDTH.time,
+      ...getSortableColumnProps("createdAt", isLoading && !data),
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     {
@@ -409,11 +438,11 @@ export default function EndpointsPage() {
           namespacePlaceholder={namespacePlaceholder}
           onClusterChange={(value) => {
             onClusterChange(value);
-            setPage(1);
+            resetPage();
           }}
           onNamespaceChange={(value) => {
             onNamespaceChange(value);
-            setPage(1);
+            resetPage();
           }}
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
@@ -441,20 +470,10 @@ export default function EndpointsPage() {
           columns={columns}
           dataSource={tableData}
           loading={isLoading && !data}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize: effectivePageSize,
-            total: data?.total ?? 0,
-            disabled: isLoading && !data,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== effectivePageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-          })}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
           scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>

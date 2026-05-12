@@ -77,7 +77,7 @@ service_is_starting() {
   if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
     return 1
   fi
-  if [[ -n "$port" ]] && ss -ltnp "( sport = :$port )" 2>/dev/null | rg -q "pid=$pid"; then
+  if [[ -n "$port" ]] && ss -ltnp "( sport = :$port )" 2>/dev/null | grep -Eq "pid=$pid"; then
     return 1
   fi
   local stat

@@ -12,7 +12,8 @@ CONTROL_API_DIR="$ROOT_DIR/backend/control-api"
 RUNTIME_GATEWAY_DIR="$ROOT_DIR/backend/runtime-gateway"
 RUN_DIR="$ROOT_DIR/.run"
 LOG_DIR="$RUN_DIR/logs"
-mkdir -p "$LOG_DIR"
+CACHE_DIR="$RUN_DIR/cache"
+mkdir -p "$LOG_DIR" "$CACHE_DIR"
 
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-4000}"
@@ -22,6 +23,16 @@ RUNTIME_GATEWAY_GOPROXY="${RUNTIME_GATEWAY_GOPROXY:-https://goproxy.cn,direct}"
 START_GATEWAY="${START_GATEWAY:-true}"
 USE_TMUX="${USE_TMUX:-false}"
 FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-dev}"
+RUNTIME_GATEWAY_DEPS_STAMP="$CACHE_DIR/runtime-gateway-go-mod.download.stamp"
+
+stream_match() {
+  local pattern="$1"
+  if command -v rg >/dev/null 2>&1; then
+    rg -q -- "$pattern"
+  else
+    grep -Eq -- "$pattern"
+  fi
+}
 
 service_health_url() {
   local name="$1" port="$2"
@@ -73,12 +84,19 @@ prepare_runtime_gateway() {
   if [[ "$START_GATEWAY" != "true" ]]; then
     return
   fi
+  local mod_file="$RUNTIME_GATEWAY_DIR/go.mod"
+  local sum_file="$RUNTIME_GATEWAY_DIR/go.sum"
+  if [[ -f "$RUNTIME_GATEWAY_DEPS_STAMP" ]] && [[ ! "$RUNTIME_GATEWAY_DEPS_STAMP" -ot "$mod_file" ]] && [[ ! "$RUNTIME_GATEWAY_DEPS_STAMP" -ot "$sum_file" ]]; then
+    echo "[预检] runtime-gateway 依赖缓存命中，跳过 go mod download"
+    return
+  fi
   echo "[预检] 正在检查 runtime-gateway 的 Go 依赖..."
   if ! (cd "$RUNTIME_GATEWAY_DIR" && GOPROXY="$RUNTIME_GATEWAY_GOPROXY" go mod download); then
     echo "[错误] runtime-gateway 依赖下载失败，请检查网络或代理后重试。" >&2
     echo "        已尝试 GOPROXY=$RUNTIME_GATEWAY_GOPROXY" >&2
     exit 1
   fi
+  touch "$RUNTIME_GATEWAY_DEPS_STAMP"
   echo "[预检] runtime-gateway 依赖正常"
 }
 
@@ -101,9 +119,20 @@ clean_frontend_dev_cache() {
     return
   fi
 
-  if [[ -d "$FRONTEND_DIR/.next/dev" ]]; then
-    echo "[预检] 清理前端 dev 缓存..."
-    rm -rf "$FRONTEND_DIR/.next/dev"
+  local log_file="$LOG_DIR/frontend.log"
+  local dev_dir="$FRONTEND_DIR/.next/dev"
+  local manifest="$dev_dir/server/app/page/build-manifest.json"
+  if [[ -d "$dev_dir" && ! -f "$manifest" ]]; then
+    echo "[预检] 检测到前端 dev 缓存缺失构建清单，正在清理..."
+    rm -rf "$dev_dir"
+    return
+  fi
+
+  if [[ -f "$log_file" ]] && tail -n 200 "$log_file" 2>/dev/null | grep -Eq 'build-manifest\.json|Persisting failed:|Compaction failed:|ENOENT: no such file or directory, open .*/\.next/dev/'; then
+    if [[ -d "$dev_dir" ]]; then
+      echo "[预检] 检测到前端 dev 缓存异常，正在清理..."
+      rm -rf "$dev_dir"
+    fi
   fi
 }
 
@@ -311,7 +340,7 @@ service_is_starting() {
   if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
     return 1
   fi
-  if [[ -n "$port" ]] && ss -ltnp "( sport = :$port )" 2>/dev/null | rg -q "pid=$pid"; then
+  if [[ -n "$port" ]] && ss -ltnp "( sport = :$port )" 2>/dev/null | stream_match "pid=$pid"; then
     return 1
   fi
   local stat
@@ -549,7 +578,7 @@ start_if_not_running "frontend" \
 start_if_not_running "control-api" \
   "$CONTROL_API_DIR" \
   "$CONTROL_API_PORT" \
-  "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=ws://127.0.0.1:$RUNTIME_GATEWAY_PORT RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} npx --no-install nest start --watch"
+  "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} npx --no-install nest start --watch"
 
 if [[ "$START_GATEWAY" == "true" ]]; then
   start_if_not_running "runtime-gateway" \

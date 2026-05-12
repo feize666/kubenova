@@ -22,7 +22,11 @@ import {
   buildTerminalPingPayload,
   buildTerminalResizePayload,
   buildGatewayWsCandidates,
+  connectWsWithCandidates,
   parseTerminalMessagePayload,
+  redactGatewayWsDisplay,
+  sanitizeSensitiveMessage,
+  sanitizeWsUrlForDisplay,
   type TerminalConnectionStatus,
   type TerminalParsedMessage,
 } from "@/lib/ws/terminal";
@@ -122,6 +126,7 @@ function mapCloseError(input: {
   expiresAtMs?: number;
 }): { text: string; blockReconnect: boolean } {
   const { code, reason, targetWsUrl, expiresAtMs } = input;
+  const safeWsUrl = redactGatewayWsDisplay(targetWsUrl);
 
   if (reason?.trim()) {
     const mapped = normalizeRuntimeError(reason, reason);
@@ -134,7 +139,7 @@ function mapCloseError(input: {
   }
   if (code === 1006) {
     return {
-      text: `WebSocket 握手失败（1006），请检查浏览器到 runtime-gateway 的连通性。目标地址：${targetWsUrl}`,
+      text: `WebSocket 握手失败（1006），请检查浏览器到 runtime-gateway 的连通性。目标地址：${safeWsUrl}`,
       blockReconnect: false,
     };
   }
@@ -307,22 +312,7 @@ export default function TerminalPage() {
     onSocketReady: (socket: WebSocket) => void,
   ): Promise<WebSocket> => {
     const candidates = buildGatewayWsCandidates(gatewayWsUrl);
-    if (candidates.length === 0) {
-      throw new Error("未找到可用的 WebSocket 地址");
-    }
-
-    let lastError: unknown = null;
-    for (const candidate of candidates) {
-      try {
-        const socket = new WebSocket(candidate);
-        onSocketReady(socket);
-        return socket;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error("创建 WebSocket 连接失败");
+    return connectWsWithCandidates(candidates, onSocketReady);
   };
 
   const sessionAlmostExpired = (expiresAtMs?: number) => {
@@ -415,14 +405,14 @@ export default function TerminalPage() {
 
   const explainCreateError = (error: unknown): RuntimeConnectError => {
     if (error instanceof ApiError) {
-      const mapped = normalizeRuntimeError(error.code, error.message || "创建运行时会话失败");
+      const mapped = normalizeRuntimeError(error.code, sanitizeSensitiveMessage(error.message || "创建运行时会话失败"));
       return new RuntimeConnectError(mapped.text, mapped.blockReconnect);
     }
     if (error instanceof RuntimeConnectError) {
       return error;
     }
     if (error instanceof Error && error.message) {
-      return new RuntimeConnectError(error.message);
+      return new RuntimeConnectError(sanitizeSensitiveMessage(error.message));
     }
     return new RuntimeConnectError("创建运行时会话失败，请稍后重试");
   };
@@ -539,7 +529,10 @@ export default function TerminalPage() {
         socket.close(4000, "connect-timeout");
       }, CONNECT_TIMEOUT_MS);
 
-      socket.onopen = () => {
+      let openHandled = false;
+      const handleOpen = () => {
+        if (openHandled) return;
+        openHandled = true;
         if (!isCurrent()) return;
         clearConnectTimeout();
         clearReconnectTimer();
@@ -556,6 +549,10 @@ export default function TerminalPage() {
         focusTerminal();
         requestAnimationFrame(() => fitTerminal());
       };
+      socket.onopen = handleOpen;
+      if (socket.readyState === WebSocket.OPEN) {
+        handleOpen();
+      }
 
       socket.onmessage = (event) => {
         if (!isCurrent()) return;
@@ -576,7 +573,8 @@ export default function TerminalPage() {
       socket.onerror = () => {
         if (!isCurrent()) return;
         clearConnectTimeout();
-        setLastWarning(`连接发生错误，等待关闭事件确认失败原因。目标地址：${socket.url || session.gatewayWsUrl}`);
+        const safeWsUrl = redactGatewayWsDisplay(socket.url || session.gatewayWsUrl);
+        setLastWarning(`连接发生错误，等待关闭事件确认失败原因。目标地址：${safeWsUrl}`);
       };
 
       socket.onclose = (event) => {
@@ -619,10 +617,11 @@ export default function TerminalPage() {
       wsRef.current = null;
       sessionCacheRef.current = null;
       const explained = explainCreateError(error);
-      setLastWarning(explained.message);
-      writeSystemLine(explained.message);
+      const safeMessage = sanitizeSensitiveMessage(explained.message);
+      setLastWarning(safeMessage);
+      writeSystemLine(safeMessage);
       if (userInitiated) {
-        toastOnce(`create-error-${explained.message}`, "error", explained.message);
+        toastOnce(`create-error-${safeMessage}`, "error", safeMessage);
       }
       connectingRef.current = false;
       if (explained.blockReconnect) {
@@ -845,7 +844,7 @@ export default function TerminalPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Tag variant="filled">Cluster {clusterDisplayName}</Tag>
             <Tag variant="filled">Container {selectedContainer || "-"}</Tag>
-            <Tooltip title={sessionInfo?.gatewayWsUrl || "未创建"}>
+            <Tooltip title={sessionInfo?.gatewayWsUrl ? sanitizeWsUrlForDisplay(sessionInfo.gatewayWsUrl) : "未创建"}>
               <Tag variant="filled" color="blue">Gateway {sessionInfo?.sessionId ? "已绑定" : "未创建"}</Tag>
             </Tooltip>
             <Tag variant="filled">TTL {formatExpiry(sessionInfo?.expiresAtMs)}</Tag>

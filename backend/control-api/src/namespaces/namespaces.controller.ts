@@ -30,14 +30,24 @@ export class NamespacesController {
   async list(
     @Query('clusterId') clusterId?: string,
     @Query('keyword') keyword?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
   ) {
-    const items = await this.namespacesService.list({
+    const result = await this.namespacesService.list({
       clusterId: clusterId?.trim() || undefined,
       keyword: keyword?.trim() || undefined,
+      page: page?.trim() || undefined,
+      pageSize: pageSize?.trim() || undefined,
+      sortBy: sortBy?.trim() || undefined,
+      sortOrder,
     });
     return {
-      items,
-      total: items.length,
+      items: result.items,
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
       timestamp: new Date().toISOString(),
     };
   }
