@@ -275,7 +275,7 @@ export default function ServicesPage() {
           embedded
           description="管理集群 Service 访问策略、端口映射与服务暴露方式。"
           style={{ marginBottom: 8 }}
-          titleSuffix={<ResourceAddButton title="新增资源" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建Service" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}

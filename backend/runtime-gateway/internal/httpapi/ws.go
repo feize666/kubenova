@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -535,7 +536,7 @@ func LogsWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = streamPodLogs(ctx, bootstrap, writer); err != nil {
+	if err = streamPodLogs(ctx, bootstrap, writer, parsePreviousFlag(r)); err != nil {
 		log.Printf(
 			"logs ws stream failed: sessionId=%s ns=%s pod=%s container=%s err=%v",
 			bootstrap.SessionID,
@@ -636,6 +637,7 @@ func streamPodLogs(
 	ctx context.Context,
 	bootstrap *internalBootstrapResponse,
 	writer *terminalWSWriter,
+	previous bool,
 ) error {
 	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(bootstrap.Kubeconfig))
 	if err != nil {
@@ -652,6 +654,7 @@ func streamPodLogs(
 		Container:  bootstrap.Container,
 		Follow:     true,
 		Timestamps: true,
+		Previous:   previous,
 	}
 	if bootstrap.LogStreamOptions != nil {
 		if bootstrap.LogStreamOptions.Follow != nil {
@@ -676,6 +679,24 @@ func streamPodLogs(
 		GetLogs(bootstrap.Pod, options).
 		Stream(ctx)
 	if err != nil {
+		if previous && isPreviousLogUnavailableError(err) {
+			_ = writer.writeFrame(WSFrame{
+				Type:    "system",
+				State:   "warning",
+				Code:    "RUNTIME_PREVIOUS_LOG_NOT_FOUND",
+				Content: "未找到 previous terminated 容器日志，已自动切换到当前容器实时日志。",
+			})
+			options.Previous = false
+			stream, err = clientset.CoreV1().
+				Pods(bootstrap.Namespace).
+				GetLogs(bootstrap.Pod, options).
+				Stream(ctx)
+		}
+	}
+	if err != nil {
+		if isExpectedCancellationError(err) {
+			return nil
+		}
 		return fmt.Errorf("failed to open pod log stream: %w", err)
 	}
 	defer stream.Close()
@@ -703,6 +724,9 @@ func streamPodLogs(
 		}
 	}
 	if scanErr := scanner.Err(); scanErr != nil && ctx.Err() == nil {
+		if isExpectedCancellationError(scanErr) {
+			return nil
+		}
 		return fmt.Errorf("log stream interrupted: %w", scanErr)
 	}
 	_ = writer.writeFrame(WSFrame{Type: "system", State: "disconnected", Content: "日志流已结束"})
@@ -1055,6 +1079,14 @@ func pumpLogsClientMessages(
 
 		messageType, payload, err := conn.ReadMessage()
 		if err != nil {
+			if websocket.IsCloseError(
+				err,
+				websocket.CloseNormalClosure,
+				websocket.CloseGoingAway,
+				websocket.CloseNoStatusReceived,
+			) || isExpectedCancellationError(err) {
+				return
+			}
 			cancel()
 			return
 		}
@@ -1074,6 +1106,40 @@ func pumpLogsClientMessages(
 			continue
 		}
 	}
+}
+
+func parsePreviousFlag(r *http.Request) bool {
+	raw := strings.TrimSpace(r.URL.Query().Get("previous"))
+	if raw == "" {
+		return false
+	}
+	parsed, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false
+	}
+	return parsed
+}
+
+func isExpectedCancellationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "context canceled") ||
+		strings.Contains(lower, "use of closed network connection") ||
+		strings.Contains(lower, "close sent")
+}
+
+func isPreviousLogUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "previous terminated container") &&
+		strings.Contains(lower, "not found")
 }
 
 func handleTerminalEnvelope(

@@ -656,16 +656,6 @@ export default function HelmPage() {
           />
         ) : null}
 
-        {!selectedClusterId ? (
-          <Alert
-            type="info"
-            showIcon
-            message="当前显示全部集群的 Helm Release。"
-            description="列表会自动隐藏未知集群与未配置 kubeconfig 的集群。"
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
-
         {!releasesQuery.isError && selectedCluster && selectedCluster.hasKubeconfig === false ? (
           <Alert
             type="warning"

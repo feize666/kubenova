@@ -330,7 +330,7 @@ export default function ConfigMapsPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/configs/configmaps"
-        titleSuffix={<ResourceAddButton title="新增资源" onClick={handleOpenCreate} />}
+        titleSuffix={<ResourceAddButton title="创建ConfigMap" onClick={handleOpenCreate} />}
       />
 
       <Card>

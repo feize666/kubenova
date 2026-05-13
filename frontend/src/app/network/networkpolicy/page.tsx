@@ -329,7 +329,7 @@ export default function NetworkPolicyPage() {
           embedded
           description="管理 Kubernetes NetworkPolicy 访问控制策略。"
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="新增资源" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建NetworkPolicy" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}

@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   Input,
+  Popover,
   Select,
   Space,
   Switch,
@@ -19,7 +20,6 @@ import {
 import {
   ArrowLeftOutlined,
   ClearOutlined,
-  CopyOutlined,
   DownloadOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -222,6 +222,14 @@ function mapHistoryRecordsToRuntimeLogs(records: LogRecord[]): RuntimeLogItem[] 
   }));
 }
 
+function isPreviousLogNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const text = error.message.toLowerCase();
+  return text.includes("previous terminated container") && text.includes("not found");
+}
+
 function formatConnectionTag(status: LogsConnectionStatus): { color: string; text: string } {
   if (status === "已连接") return { color: "green", text: "已连接" };
   if (status === "连接中") return { color: "blue", text: "连接中" };
@@ -278,6 +286,7 @@ export default function LogsPage() {
   const [searchRegex, setSearchRegex] = useState(false);
   const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
   const [searchVisible, setSearchVisible] = useState(false);
+  const [previousUnavailable, setPreviousUnavailable] = useState(false);
 
   const socketRef = useRef<RuntimeLogsSocket | null>(null);
   const streamGenerationRef = useRef(0);
@@ -302,6 +311,7 @@ export default function LogsPage() {
     setStreamStatus("未连接");
     setStreamError("");
     setReconnectState(null);
+    setPreviousUnavailable(false);
     streamGenerationRef.current += 1;
     socketRef.current?.disconnect();
     socketRef.current = null;
@@ -329,42 +339,7 @@ export default function LogsPage() {
     () => getClusterDisplayName(clusterMap, clusterId, clusterNameHint),
     [clusterMap, clusterId, clusterNameHint],
   );
-
-  const historySeedQuery = useQuery({
-    queryKey: [
-      "logs",
-      "seed",
-      clusterId,
-      namespace,
-      pod,
-      container,
-      tailLines,
-      sinceSeconds,
-      previous,
-      timestamps,
-      accessToken,
-    ],
-    queryFn: () =>
-      getLogs(
-        {
-          clusterId: clusterId || undefined,
-          namespace: namespace || undefined,
-          pod: pod || undefined,
-          container: container || undefined,
-          tailLines: tailLines > 0 ? tailLines : undefined,
-          sinceSeconds,
-          previous,
-          timestamps,
-          page: 1,
-          pageSize: tailLines > 0 ? Math.min(Math.max(tailLines, 100), 2500) : 2500,
-        },
-        accessToken,
-      ),
-    enabled:
-      !isInitializing &&
-      Boolean(accessToken) &&
-      Boolean(clusterId && namespace && pod && container),
-  });
+  const effectivePrevious = previous && !previousUnavailable;
 
   const containerOptions = useMemo(() => {
     const names = new Set<string>();
@@ -459,6 +434,33 @@ export default function LogsPage() {
     [renderOptions, searchCaseSensitive, searchRegex, searchText, severity],
   );
 
+  const syncRuntimeQueryToUrl = useCallback(
+    (next: {
+      container?: string;
+      tailLines?: number;
+      sinceSeconds?: number;
+      follow?: boolean;
+      previous?: boolean;
+      timestamps?: boolean;
+    }) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (typeof next.container === "string") params.set("container", next.container);
+      if (typeof next.tailLines === "number") params.set("tailLines", String(next.tailLines));
+      if (typeof next.sinceSeconds === "number") params.set("sinceSeconds", String(next.sinceSeconds));
+      if (typeof next.follow === "boolean") params.set("follow", String(next.follow));
+      if (typeof next.previous === "boolean") params.set("previous", String(next.previous));
+      if (typeof next.timestamps === "boolean") params.set("timestamps", String(next.timestamps));
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
+
+  const fallbackFromPrevious = useCallback(() => {
+    setPreviousUnavailable(true);
+    setPrevious(false);
+    syncRuntimeQueryToUrl({ previous: false });
+  }, [syncRuntimeQueryToUrl]);
+
   const connectStream = useCallback(
     async (options?: { resetLines?: boolean; preloadHistory?: boolean }) => {
       if (isInitializing || !accessToken || !clusterId || !namespace || !pod || !container) {
@@ -478,41 +480,99 @@ export default function LogsPage() {
       const currentGeneration = streamGenerationRef.current;
       try {
         if (options?.preloadHistory) {
-          const seed = await getLogs(
-            {
-              clusterId,
-              namespace,
-              pod,
-              container,
-              tailLines: tailLines > 0 ? tailLines : undefined,
-              sinceSeconds,
-              previous,
-              timestamps,
-              page: 1,
-              pageSize: tailLines > 0 ? Math.min(Math.max(tailLines, 100), 2500) : 2500,
-            },
-            accessToken,
-          );
+          let seed;
+          try {
+            seed = await getLogs(
+              {
+                clusterId,
+                namespace,
+                pod,
+                container,
+                tailLines: tailLines > 0 ? tailLines : undefined,
+                sinceSeconds,
+                previous: effectivePrevious,
+                timestamps,
+                page: 1,
+                pageSize: tailLines > 0 ? Math.min(Math.max(tailLines, 100), 2500) : 2500,
+              },
+              accessToken,
+            );
+          } catch (error) {
+            if (effectivePrevious && isPreviousLogNotFoundError(error)) {
+              fallbackFromPrevious();
+              seed = await getLogs(
+                {
+                  clusterId,
+                  namespace,
+                  pod,
+                  container,
+                  tailLines: tailLines > 0 ? tailLines : undefined,
+                  sinceSeconds,
+                  previous: false,
+                  timestamps,
+                  page: 1,
+                  pageSize: tailLines > 0 ? Math.min(Math.max(tailLines, 100), 2500) : 2500,
+                },
+                accessToken,
+              );
+            } else {
+              throw error;
+            }
+          }
           if (currentGeneration !== streamGenerationRef.current) return;
           const seedLines = mapHistoryRecordsToRuntimeLogs(seed.items);
           setRawLines(seedLines);
           replayToTerminal(seedLines);
         }
 
-        const session = await createLogsStreamSession(
-          {
-            clusterId,
-            namespace,
-            pod,
-            container,
-            tailLines,
-            sinceSeconds,
-            follow,
-            previous,
-            timestamps,
-          },
-          accessToken,
-        );
+        // "上一个实例" 只应展示上一实例的历史日志，不进入实时流/重连循环。
+        if (effectivePrevious) {
+          if (currentGeneration !== streamGenerationRef.current) {
+            return;
+          }
+          setStreamStatus("已连接");
+          setStreamError("");
+          setReconnectState(null);
+          return;
+        }
+
+        let session;
+        try {
+          session = await createLogsStreamSession(
+            {
+              clusterId,
+              namespace,
+              pod,
+              container,
+              tailLines,
+              sinceSeconds,
+              follow,
+              previous: effectivePrevious,
+              timestamps,
+            },
+            accessToken,
+          );
+        } catch (error) {
+          if (effectivePrevious && isPreviousLogNotFoundError(error)) {
+            fallbackFromPrevious();
+            session = await createLogsStreamSession(
+              {
+                clusterId,
+                namespace,
+                pod,
+                container,
+                tailLines,
+                sinceSeconds,
+                follow,
+                previous: false,
+                timestamps,
+              },
+              accessToken,
+            );
+          } else {
+            throw error;
+          }
+        }
         if (currentGeneration !== streamGenerationRef.current) {
           return;
         }
@@ -584,7 +644,8 @@ export default function LogsPage() {
       tailLines,
       sinceSeconds,
       follow,
-      previous,
+      effectivePrevious,
+      fallbackFromPrevious,
       timestamps,
       replayToTerminal,
       severity,
@@ -610,7 +671,7 @@ export default function LogsPage() {
     tailLines,
     sinceSeconds,
     follow,
-    previous,
+    effectivePrevious,
     timestamps,
     clearStreamSocket,
     connectStream,
@@ -619,27 +680,6 @@ export default function LogsPage() {
   useEffect(() => {
     replayToTerminal(rawLines);
   }, [rawLines, severity, renderOptions, replayToTerminal]);
-
-  const syncRuntimeQueryToUrl = useCallback(
-    (next: {
-      container?: string;
-      tailLines?: number;
-      sinceSeconds?: number;
-      follow?: boolean;
-      previous?: boolean;
-      timestamps?: boolean;
-    }) => {
-      const params = new URLSearchParams(searchParams.toString());
-      if (typeof next.container === "string") params.set("container", next.container);
-      if (typeof next.tailLines === "number") params.set("tailLines", String(next.tailLines));
-      if (typeof next.sinceSeconds === "number") params.set("sinceSeconds", String(next.sinceSeconds));
-      if (typeof next.follow === "boolean") params.set("follow", String(next.follow));
-      if (typeof next.previous === "boolean") params.set("previous", String(next.previous));
-      if (typeof next.timestamps === "boolean") params.set("timestamps", String(next.timestamps));
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-    },
-    [pathname, router, searchParams],
-  );
 
   const reconnectNow = () => {
     void connectStream({ resetLines: false, preloadHistory: false });
@@ -664,16 +704,6 @@ export default function LogsPage() {
     anchor.download = `${namespace}-${pod}-${container || "container"}-logs.txt`;
     anchor.click();
     URL.revokeObjectURL(url);
-  };
-
-  const copyLogs = async () => {
-    const content = toDownloadText(applySeverityFilter(rawLines, severity), renderOptions);
-    if (!content) return;
-    try {
-      await navigator.clipboard.writeText(content);
-    } catch {
-      // ignore
-    }
   };
 
   const runSearch = (direction: "next" | "prev") => {
@@ -729,9 +759,11 @@ export default function LogsPage() {
                 </Typography.Text>
               </div>
               <Space wrap>
-                <Button icon={<ReloadOutlined />} onClick={hardRefresh} loading={isConnecting}>
-                  刷新
-                </Button>
+                <Tooltip title="重新加载日志">
+                  <Button icon={<ReloadOutlined />} onClick={hardRefresh} loading={isConnecting}>
+                    刷新
+                  </Button>
+                </Tooltip>
                 <Button icon={<ArrowLeftOutlined />} danger onClick={exitBack}>
                   退出
                 </Button>
@@ -782,6 +814,7 @@ export default function LogsPage() {
                 <Switch
                   checked={previous}
                   onChange={(checked) => {
+                    setPreviousUnavailable(false);
                     setPrevious(checked);
                     syncRuntimeQueryToUrl({ previous: checked });
                   }}
@@ -848,17 +881,66 @@ export default function LogsPage() {
 
               <div className="headlamp-log-actions">
                 <Tooltip title="查找">
-                  <Button
-                    type="text"
-                    icon={<SearchOutlined />}
-                    onClick={() => setSearchVisible((current) => !current)}
-                  />
+                  <Popover
+                    trigger="click"
+                    placement="bottomRight"
+                    open={searchVisible}
+                    onOpenChange={setSearchVisible}
+                    content={
+                      <div className="headlamp-search-popover">
+                        <Input
+                          className="headlamp-log-search-input"
+                          value={searchText}
+                          onChange={(event) => setSearchText(event.target.value)}
+                          placeholder="查找"
+                          allowClear
+                          style={{ width: 220 }}
+                          onPressEnter={() => runSearch("next")}
+                        />
+                        <Tooltip title="区分大小写">
+                          <button
+                            type="button"
+                            className={`headlamp-search-flag${searchCaseSensitive ? " active" : ""}`}
+                            onClick={() => setSearchCaseSensitive((value) => !value)}
+                          >
+                            Aa
+                          </button>
+                        </Tooltip>
+                        <Tooltip title="使用正则表达式">
+                          <button
+                            type="button"
+                            className={`headlamp-search-flag${searchRegex ? " active" : ""}`}
+                            onClick={() => setSearchRegex((value) => !value)}
+                          >
+                            .*
+                          </button>
+                        </Tooltip>
+                        <Tooltip title="上一个匹配">
+                          <button type="button" className="headlamp-search-icon" onClick={() => runSearch("prev")}>
+                            ↑
+                          </button>
+                        </Tooltip>
+                        <Tooltip title="下一个匹配">
+                          <button type="button" className="headlamp-search-icon" onClick={() => runSearch("next")}>
+                            ↓
+                          </button>
+                        </Tooltip>
+                        <Tooltip title="关闭查找">
+                          <button type="button" className="headlamp-search-icon" onClick={() => setSearchVisible(false)}>
+                            ×
+                          </button>
+                        </Tooltip>
+                      </div>
+                    }
+                  >
+                    <Button
+                      type="text"
+                      icon={<SearchOutlined />}
+                    />
+                  </Popover>
                 </Tooltip>
                 <Tooltip title="清除">
                   <Button type="text" icon={<ClearOutlined />} onClick={clearAll} />
-                </Tooltip>
-                <Tooltip title="复制">
-                  <Button type="text" icon={<CopyOutlined />} onClick={copyLogs} />
                 </Tooltip>
                 <Tooltip title="下载">
                   <Button type="text" icon={<DownloadOutlined />} onClick={downloadLogs} />
@@ -874,36 +956,11 @@ export default function LogsPage() {
               </div>
             </div>
 
-            {searchVisible ? (
-              <div className="headlamp-log-searchbar">
-                <Input
-                  value={searchText}
-                  onChange={(event) => setSearchText(event.target.value)}
-                  placeholder="查找日志..."
-                  allowClear
-                  prefix={<SearchOutlined />}
-                  style={{ width: 260 }}
-                  onPressEnter={() => runSearch("next")}
-                />
-                <Button onClick={() => runSearch("prev")}>上一个</Button>
-                <Button onClick={() => runSearch("next")}>下一个</Button>
-                <Space size={4}>
-                  <Switch checked={searchRegex} onChange={setSearchRegex} size="small" />
-                  <span>正则</span>
-                </Space>
-                <Space size={4}>
-                  <Switch
-                    checked={searchCaseSensitive}
-                    onChange={setSearchCaseSensitive}
-                    size="small"
-                  />
-                  <span>区分大小写</span>
-                </Space>
-              </div>
-            ) : null}
-
             <Space wrap size={8}>
               <Tag color="blue">{follow ? "实时跟随" : "跟随已暂停"}</Tag>
+              {previousUnavailable ? (
+                <Tag color="orange">上一个实例不存在，已回退到当前实例</Tag>
+              ) : null}
               {reconnectState ? (
                 <Tag color="gold">
                   重连 {reconnectState.attempt}/{reconnectState.maxAttempts}
@@ -918,9 +975,6 @@ export default function LogsPage() {
                 message="实时流提示"
                 description={streamError}
               />
-            ) : null}
-            {historySeedQuery.error instanceof Error ? (
-              <Alert type="warning" showIcon message="历史日志预加载失败" description={historySeedQuery.error.message} />
             ) : null}
           </Space>
         </Card>
@@ -1004,12 +1058,44 @@ export default function LogsPage() {
           flex: 0 0 auto;
         }
 
-        .headlamp-log-searchbar {
+        .headlamp-search-popover {
           display: flex;
           align-items: center;
           gap: 8px;
-          flex-wrap: wrap;
-          padding-top: 2px;
+          min-width: 420px;
+          color: #111827;
+        }
+
+        .headlamp-search-flag,
+        .headlamp-search-icon {
+          border: 0;
+          background: transparent;
+          color: #111827;
+          cursor: pointer;
+          font: inherit;
+          padding: 0 4px;
+        }
+
+        .headlamp-search-flag:hover,
+        .headlamp-search-flag:focus,
+        .headlamp-search-flag.active,
+        .headlamp-search-icon:hover,
+        .headlamp-search-icon:focus,
+        .headlamp-search-icon:active {
+          color: #2563eb;
+        }
+
+        .headlamp-search-popover :global(.headlamp-log-search-input .ant-input) {
+          color: #111827;
+        }
+
+        .headlamp-search-popover :global(.headlamp-log-search-input .ant-input::placeholder) {
+          color: #475569;
+        }
+
+        .headlamp-search-popover :global(.headlamp-log-search-input .ant-input-prefix),
+        .headlamp-search-popover :global(.headlamp-log-search-input .ant-input-clear-icon) {
+          color: #475569;
         }
 
         .logs-terminal-titlebar {
@@ -1090,6 +1176,11 @@ export default function LogsPage() {
 
           .headlamp-log-actions {
             margin-left: 0;
+          }
+
+          .headlamp-search-popover {
+            min-width: 300px;
+            flex-wrap: wrap;
           }
 
           .logs-terminal-host {

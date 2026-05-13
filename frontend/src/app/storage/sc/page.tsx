@@ -381,7 +381,7 @@ export default function StorageClassPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/storage/sc"
-        titleSuffix={<ResourceAddButton title="新增资源" onClick={() => setModalOpen(true)} />}
+        titleSuffix={<ResourceAddButton title="创建StorageClass" onClick={() => setModalOpen(true)} />}
       />
 
       <Card>

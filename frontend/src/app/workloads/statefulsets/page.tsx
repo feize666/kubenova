@@ -647,7 +647,7 @@ export default function StatefulSetsPage() {
           path="/workloads/statefulsets"
           embedded
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=StatefulSet")} aria-label="新增资源" />}
+          titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=StatefulSet")} aria-label="创建StatefulSet" />}
         />
 
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>

@@ -22,13 +22,13 @@ export interface CreateRuntimeSessionRequest {
   namespace: string;
   pod: string;
   container: string;
+  previous?: boolean;
   level?: 'INFO' | 'WARN' | 'ERROR';
   keyword?: string;
   command?: string;
   tailLines?: number;
   sinceSeconds?: number;
   follow?: boolean;
-  previous?: boolean;
   timestamps?: boolean;
 }
 
@@ -269,6 +269,9 @@ export class RuntimeService {
     ) {
       throw new BadRequestException('level 必须为 INFO、WARN 或 ERROR');
     }
+    if (input.previous !== undefined && typeof input.previous !== 'boolean') {
+      throw new BadRequestException('previous 必须为 boolean');
+    }
 
     this.assertTailLines(input.tailLines, 'tailLines');
     this.assertPositiveInt(input.sinceSeconds, 'sinceSeconds');
@@ -427,6 +430,9 @@ export class RuntimeService {
       }
       if (input.sinceSeconds) {
         query.set('sinceSeconds', String(input.sinceSeconds));
+      }
+      if (input.previous) {
+        query.set('previous', 'true');
       }
       if (typeof input.follow === 'boolean') {
         query.set('follow', String(input.follow));

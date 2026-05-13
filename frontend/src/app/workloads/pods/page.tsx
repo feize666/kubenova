@@ -773,7 +773,7 @@ export default function PodsPage() {
           titleSuffix={
             <ResourceAddButton
               onClick={() => router.push("/workloads/create?kind=Pod")}
-              aria-label="新增 Pod"
+              aria-label="创建Pod"
             />
           }
         />

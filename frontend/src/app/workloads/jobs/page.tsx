@@ -333,7 +333,7 @@ export default function JobsPage() {
           path="/workloads/jobs"
           embedded
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton onClick={openAddModal} aria-label="新增资源" />}
+          titleSuffix={<ResourceAddButton onClick={openAddModal} aria-label="创建Job" />}
         />
 
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>

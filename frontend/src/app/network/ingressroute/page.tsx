@@ -383,7 +383,7 @@ export default function IngressRoutePage() {
           embedded
           description="管理 Traefik IngressRoute 入口规则、匹配表达式与中间件。"
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="新增资源" onClick={() => { form.resetFields(); form.setFieldsValue({ entryPoints: "web", match: "Host(`example.local`)", servicePort: 80 }); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建IngressRoute" onClick={() => { form.resetFields(); form.setFieldsValue({ entryPoints: "web", match: "Host(`example.local`)", servicePort: 80 }); setModalOpen(true); }} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}

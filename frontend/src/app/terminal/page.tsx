@@ -901,7 +901,7 @@ export default function TerminalPage() {
             </Space>
           </div>
 
-          <div style={{ minHeight: "calc(72vh - 58px)", display: "grid" }}>
+          <div style={{ height: "72vh", maxHeight: "72vh", overflow: "hidden" }}>
             <div ref={terminalHostRef} className="terminal-xterm-host" />
           </div>
         </div>

@@ -410,7 +410,7 @@ export default function IngressPage() {
           embedded
           description="管理集群 Ingress 入口规则与域名路由。"
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="新增资源" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建Ingress" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}

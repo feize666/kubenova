@@ -32,6 +32,7 @@ import {
 import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { NamespaceSelect } from "@/components/namespace-select";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { buildTablePagination } from "@/lib/table/pagination";
@@ -159,17 +160,17 @@ function SecurityEventsTab() {
     refetchInterval: 30_000,
   });
 
-  const namespaceOptions = useMemo(() => {
-    const raw = data?.items ?? [];
-    const values = Array.from(
-      new Set(
-        raw
-          .map((item) => item.namespace?.trim())
-          .filter((item): item is string => Boolean(item)),
+  const knownNamespaces = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (data?.items ?? [])
+            .map((item) => item.namespace?.trim() ?? "")
+            .filter((item) => item.length > 0),
+        ),
       ),
-    );
-    return [{ label: "全部名称空间", value: "" }, ...values.map((item) => ({ label: item, value: item }))];
-  }, [data?.items]);
+    [data?.items],
+  );
 
   const resolveMutation = useMutation({
     mutationFn: (id: string) => resolveSecurityEvent(id, accessToken || undefined),
@@ -361,15 +362,16 @@ function SecurityEventsTab() {
             setPage(1);
           }}
         />
-        <Select
-          placeholder="名称空间"
+        <NamespaceSelect
           style={{ width: 180 }}
           value={namespace}
-          options={namespaceOptions}
           onChange={(v) => {
             setNamespace(v);
             setPage(1);
           }}
+          clusterId={clusterId}
+          knownNamespaces={knownNamespaces}
+          disabled={!clusterId}
         />
         <Select
           placeholder="严重程度"

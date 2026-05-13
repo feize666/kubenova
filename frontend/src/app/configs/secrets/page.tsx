@@ -297,7 +297,7 @@ export default function SecretsPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/configs/secrets"
-        titleSuffix={<ResourceAddButton title="新增资源" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+        titleSuffix={<ResourceAddButton title="创建Secret" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
       />
 
       <Card>

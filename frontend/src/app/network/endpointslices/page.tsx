@@ -449,7 +449,7 @@ export default function EndpointSlicesPage() {
           embedded
           description="查看 Kubernetes EndpointSlice 分片、地址状态与端口分布。"
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="新增资源" onClick={() => { form.resetFields(); form.setFieldsValue({ addressType: "IPv4", ports: "http:80/TCP" }); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建EndpointSlice" onClick={() => { form.resetFields(); form.setFieldsValue({ addressType: "IPv4", ports: "http:80/TCP" }); setModalOpen(true); }} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}

@@ -585,7 +585,7 @@ export default function ClustersPage() {
                 </Typography.Title>
               </Col>
               <Col style={{ paddingBottom: 4 }}>
-                <ResourceAddButton onClick={openAddModal} aria-label="新增集群" />
+                <ResourceAddButton onClick={openAddModal} aria-label="创建集群" />
               </Col>
             </Row>
             <Typography.Text type="secondary">

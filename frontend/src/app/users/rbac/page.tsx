@@ -34,6 +34,7 @@ import {
 import type { TableProps } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { NamespaceSelect } from "@/components/namespace-select";
 import { useModuleTableState } from "@/components/module-page";
 import { buildTablePagination } from "@/lib/table/pagination";
 import { usePersistentTableSortState } from "@/lib/table/use-persistent-table-sort-state";
@@ -571,10 +572,10 @@ export default function RbacPage() {
 
   const sourceItems = useMemo(() => query.data?.items ?? [], [query.data?.items]);
 
-  const namespaceOptions = useMemo(() => {
-    const namespaces = Array.from(new Set(sourceItems.map((item) => item.namespace).filter(Boolean)));
-    return namespaces.map((item) => ({ label: item || "(集群级)", value: item }));
-  }, [sourceItems]);
+  const knownNamespaces = useMemo(
+    () => Array.from(new Set(sourceItems.map((item) => item.namespace).filter(Boolean))),
+    [sourceItems],
+  );
 
   const filtered = useMemo(() => {
     const keyword = tableState.keyword.toLowerCase();
@@ -781,11 +782,12 @@ export default function RbacPage() {
             />
           </Col>
           <Col xs={24} sm={12} md={6} lg={5}>
-            <Select
+            <NamespaceSelect
               style={{ width: "100%" }}
               value={tableState.namespace}
               onChange={tableState.setNamespace}
-              options={[{ label: "全部名称空间", value: "" }, ...namespaceOptions]}
+              knownNamespaces={knownNamespaces}
+              clusterId="rbac-scope"
               placeholder="筛选名称空间"
             />
           </Col>

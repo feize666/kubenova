@@ -366,7 +366,7 @@ export default function PvcPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/storage/pvc"
-        titleSuffix={<ResourceAddButton title="新增资源" onClick={handleOpenCreate} />}
+        titleSuffix={<ResourceAddButton title="创建PVC" onClick={handleOpenCreate} />}
       />
 
       <Card>

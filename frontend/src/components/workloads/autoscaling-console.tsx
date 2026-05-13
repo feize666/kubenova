@@ -816,7 +816,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path={defaultType === "VPA" ? "/workloads/autoscaling/vpa" : "/workloads/autoscaling/hpa"}
-        titleSuffix={<ResourceAddButton onClick={openCreatePolicyModal} />}
+        titleSuffix={<ResourceAddButton onClick={openCreatePolicyModal} aria-label="创建伸缩策略" />}
         description={pageDescription}
       />
 

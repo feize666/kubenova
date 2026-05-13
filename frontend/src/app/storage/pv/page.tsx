@@ -382,7 +382,7 @@ export default function PvPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/storage/pv"
-        titleSuffix={<ResourceAddButton title="新增资源" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+        titleSuffix={<ResourceAddButton title="创建PV" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
       />
 
       <Card>

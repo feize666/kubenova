@@ -461,7 +461,7 @@ export default function ReplicaSetsPage() {
           path="/workloads/replicasets"
           embedded
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=ReplicaSet")} aria-label="新增资源" />}
+          titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=ReplicaSet")} aria-label="创建ReplicaSet" />}
         />
 
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>

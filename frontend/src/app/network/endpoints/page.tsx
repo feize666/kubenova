@@ -425,7 +425,7 @@ export default function EndpointsPage() {
           embedded
           description="查看 Service 后端地址集合、端口与实际连通目标。"
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="新增资源" onClick={() => { form.resetFields(); form.setFieldsValue({ ports: "http:80/TCP" }); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建Endpoints" onClick={() => { form.resetFields(); form.setFieldsValue({ ports: "http:80/TCP" }); setModalOpen(true); }} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}

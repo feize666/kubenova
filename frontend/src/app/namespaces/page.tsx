@@ -290,7 +290,7 @@ export default function NamespacesPage() {
                 form.resetFields();
                 setOpen(true);
               }}
-              aria-label="新增名称空间"
+              aria-label="创建名称空间"
             />
           }
         />

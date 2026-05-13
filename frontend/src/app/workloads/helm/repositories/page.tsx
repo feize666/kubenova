@@ -481,7 +481,7 @@ export default function HelmRepositoriesPage() {
               });
               setFormOpen(true);
             }}
-            aria-label="新增仓库"
+            aria-label="创建 Helm 仓库"
           />
         }
       />

@@ -586,7 +586,7 @@ export default function DaemonSetsPage() {
           path="/workloads/daemonsets"
           embedded
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=DaemonSet")} aria-label="新增资源" />}
+          titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=DaemonSet")} aria-label="创建DaemonSet" />}
         />
 
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>

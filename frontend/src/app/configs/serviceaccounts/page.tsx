@@ -52,6 +52,7 @@ import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter"
 type ServiceAccountRecord = DynamicResourceItem;
 
 type CreateSaFormValues = {
+  clusterId: string;
   name: string;
   namespace: string;
 };
@@ -109,6 +110,7 @@ export default function ServiceAccountsPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm<CreateSaFormValues>();
+  const createClusterId = Form.useWatch("clusterId", createForm);
 
   const [tokenModalOpen, setTokenModalOpen] = useState(false);
   const [tokenRows, setTokenRows] = useState<SecretTokenRow[]>([]);
@@ -126,10 +128,11 @@ export default function ServiceAccountsPage() {
     [clustersQuery.data?.items],
   );
 
-  const namespacesQuery = useQuery({
-    queryKey: ["serviceaccounts", "namespaces", clusterId || "all", accessToken],
-    queryFn: () => getNamespaces({ clusterId: clusterId || undefined, page: 1, pageSize: 500 }, accessToken ?? undefined),
-    enabled: Boolean(accessToken) && Boolean(clusterId),
+  const createNamespacesQuery = useQuery({
+    queryKey: ["serviceaccounts", "create-namespaces", createClusterId || "all", accessToken],
+    queryFn: () =>
+      getNamespaces({ clusterId: createClusterId || undefined, page: 1, pageSize: 500 }, accessToken ?? undefined),
+    enabled: Boolean(accessToken) && Boolean(createClusterId),
   });
 
   const listQuery = useQuery({
@@ -229,12 +232,13 @@ export default function ServiceAccountsPage() {
 
   const createMutation = useMutation({
     mutationFn: async (values: CreateSaFormValues) => {
+      const targetClusterId = values.clusterId.trim();
       const name = values.name.trim();
       const ns = values.namespace.trim();
       const yaml = buildServiceAccountYaml(name, ns);
       return updateDynamicResourceYaml(
         {
-          clusterId,
+          clusterId: targetClusterId,
           group: "",
           version: "v1",
           resource: "serviceaccounts",
@@ -504,13 +508,9 @@ export default function ServiceAccountsPage() {
         path="/configs/serviceaccounts"
         titleSuffix={
           <ResourceAddButton
-            title="新增资源"
-            disabled={!clusterId}
+            title="创建ServiceAccount"
             onClick={() => {
-              if (!clusterId) {
-                void message.error("请先选择集群后再新增资源");
-                return;
-              }
+              createForm.resetFields();
               setCreateOpen(true);
             }}
           />
@@ -614,6 +614,22 @@ export default function ServiceAccountsPage() {
       >
         <Form form={createForm} layout="vertical" requiredMark>
           <Form.Item
+            name="clusterId"
+            label="集群"
+            rules={[{ required: true, message: "请选择集群" }]}
+          >
+            <Select
+              showSearch
+              placeholder="请选择集群"
+              options={clusterOptions}
+              loading={clustersQuery.isLoading}
+              filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+              onChange={() => {
+                createForm.setFieldValue("namespace", undefined);
+              }}
+            />
+          </Form.Item>
+          <Form.Item
             name="name"
             label="名称"
             rules={[
@@ -631,8 +647,10 @@ export default function ServiceAccountsPage() {
             <Select
               showSearch
               allowClear
-              placeholder="选择名称空间"
-              options={(namespacesQuery.data?.items ?? []).map((item) => ({
+              placeholder={createClusterId ? "选择名称空间" : "请先选择集群"}
+              disabled={!createClusterId}
+              loading={createNamespacesQuery.isLoading}
+              options={(createNamespacesQuery.data?.items ?? []).map((item) => ({
                 label: item.namespace,
                 value: item.namespace,
               }))}

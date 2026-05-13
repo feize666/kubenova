@@ -749,7 +749,7 @@ export default function DeploymentsPage() {
           path="/workloads/deployments"
           embedded
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton onClick={openAddModal} aria-label="新增资源" />}
+          titleSuffix={<ResourceAddButton onClick={openAddModal} aria-label="创建Deployment" />}
         />
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
           <Row gutter={[12, 12]} align="middle">
