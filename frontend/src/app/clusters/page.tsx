@@ -480,7 +480,7 @@ export default function ClustersPage() {
             </Tag>
           </Tooltip>
         ) : (
-          <Tooltip title="未配置 kubeconfig，资源为手动录入模式">
+          <Tooltip title="当前未接入实时工作负载数据">
             <Tag color="default" icon={<DisconnectOutlined />}>
               离线模式
             </Tag>
@@ -683,12 +683,9 @@ export default function ClustersPage() {
         destroyOnHidden
         width={600}
       >
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16, marginTop: 8 }}
-          message="填写 KubeConfig 后平台将使用它连接真实集群，获取实时资源数据。不填写时集群以离线模式管理。"
-        />
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 16, marginTop: 8 }}>
+          填写 KubeConfig 后平台将使用它连接真实集群，获取实时资源数据。不填写时集群以离线模式管理。
+        </Typography.Paragraph>
         <Form form={form} layout="vertical">
           <Form.Item
             label="集群名称"

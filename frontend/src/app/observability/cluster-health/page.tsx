@@ -28,7 +28,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
@@ -40,6 +40,12 @@ import {
   type ClusterHealthListItem,
   type RuntimeStatus,
 } from "@/lib/api/cluster-health";
+
+function lifecycleLabel(state: ClusterHealthListItem["lifecycleState"]) {
+  if (state === "active") return "启用";
+  if (state === "disabled") return "已停用";
+  return "已删除";
+}
 
 function runtimeStatusTag(status: RuntimeStatus) {
   if (status === "running") {
@@ -72,16 +78,21 @@ function runtimeStatusTag(status: RuntimeStatus) {
 }
 
 function lifecycleTag(state: ClusterHealthListItem["lifecycleState"]) {
-  if (state === "active") return <Tag color="green">active</Tag>;
-  if (state === "disabled") return <Tag color="orange">disabled</Tag>;
-  return <Tag>deleted</Tag>;
+  if (state === "active") return <Tag color="green">{lifecycleLabel(state)}</Tag>;
+  if (state === "disabled") return <Tag color="orange">{lifecycleLabel(state)}</Tag>;
+  return <Tag>{lifecycleLabel(state)}</Tag>;
 }
 
 function sourceTag(source: ClusterHealthListItem["source"]) {
-  if (!source) return <Tag>none</Tag>;
-  if (source === "manual") return <Tag color="purple">manual</Tag>;
-  if (source === "event") return <Tag color="gold">event</Tag>;
-  return <Tag color="cyan">auto</Tag>;
+  if (!source) return <Tag>未记录</Tag>;
+  if (source === "manual") return <Tag color="purple">手动触发</Tag>;
+  if (source === "event") return <Tag color="gold">事件触发</Tag>;
+  return <Tag color="cyan">自动探测</Tag>;
+}
+
+function resolveProbeFailureReason(reason?: string | null) {
+  const normalizedReason = reason?.trim();
+  return normalizedReason ? normalizedReason : "暂未返回失败原因";
 }
 
 export default function ClusterHealthCenterPage() {
@@ -99,7 +110,16 @@ export default function ClusterHealthCenterPage() {
   const [provider, setProvider] = useState("");
   const [lifecycleState, setLifecycleState] = useState<"" | "active" | "disabled" | "deleted">("");
   const [runtimeStatus, setRuntimeStatus] = useState<"" | RuntimeStatus>("");
-  const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    setPagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } =
     useAntdTableSortPagination<ClusterHealthListItem>({
       defaultPageSize: 10,
       allowedSortBy: ["clusterName", "runtimeStatus", "checkedAt", "latencyMs"],
@@ -155,7 +175,7 @@ export default function ClusterHealthCenterPage() {
       void message.success(
         result.ok
           ? `探测成功，耗时 ${result.latencyMs ?? 0}ms`
-          : `探测失败：${result.reason ?? "unknown"}`,
+          : `探测失败：${resolveProbeFailureReason(result.reason)}`,
       );
       void healthQuery.refetch();
       if (detailClusterId) {
@@ -178,6 +198,19 @@ export default function ClusterHealthCenterPage() {
     const checking = items.filter((item) => item.runtimeStatus === "checking").length;
     return { total, running, offline, checking };
   }, [items]);
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil((healthQuery.data?.total ?? 0) / pagination.pageSize)),
+    [healthQuery.data?.total, pagination.pageSize],
+  );
+
+  useEffect(() => {
+    setPagination((prev) => {
+      if (prev.pageIndex + 1 <= totalPages) {
+        return prev;
+      }
+      return { ...prev, pageIndex: totalPages - 1 };
+    });
+  }, [setPagination, totalPages]);
 
   const columns: ColumnsType<ClusterHealthListItem> = [
     {
@@ -360,9 +393,9 @@ export default function ClusterHealthCenterPage() {
               }}
               options={[
                 { label: "全部生命周期", value: "" },
-                { label: "active", value: "active" },
-                { label: "disabled", value: "disabled" },
-                { label: "deleted", value: "deleted" },
+                { label: lifecycleLabel("active"), value: "active" },
+                { label: lifecycleLabel("disabled"), value: "disabled" },
+                { label: lifecycleLabel("deleted"), value: "deleted" },
               ]}
             />
           </Col>
@@ -421,7 +454,7 @@ export default function ClusterHealthCenterPage() {
           type="error"
           showIcon
           message="健康列表加载失败"
-          description={healthQuery.error instanceof Error ? healthQuery.error.message : "unknown"}
+          description={healthQuery.error instanceof Error ? healthQuery.error.message : "请求失败，请稍后重试"}
         />
       ) : null}
 
@@ -457,7 +490,7 @@ export default function ClusterHealthCenterPage() {
             type="error"
             showIcon
             message="详情加载失败"
-            description={detailQuery.error instanceof Error ? detailQuery.error.message : "unknown"}
+            description={detailQuery.error instanceof Error ? detailQuery.error.message : "请求失败，请稍后重试"}
           />
         ) : null}
         {detailQuery.data ? (

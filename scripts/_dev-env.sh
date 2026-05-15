@@ -28,7 +28,7 @@ load_dev_env_defaults() {
     done <"$file"
   done
 
-  : "${DATABASE_URL:=postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops}"
+  : "${DATABASE_URL:=postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops?connection_limit=20&pool_timeout=30}"
   : "${REDIS_URL:=redis://localhost:6379}"
   : "${JWT_SECRET:=dev-secret-please-change-in-production}"
   : "${JWT_EXPIRES_IN:=15m}"

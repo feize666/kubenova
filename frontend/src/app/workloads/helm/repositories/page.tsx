@@ -380,7 +380,7 @@ export default function HelmRepositoriesPage() {
 
   const buildRowActions = (): MenuProps["items"] =>
     buildResourceActionMenuItems([
-      { key: "edit", label: "YAML", icon: <FileTextOutlined /> },
+      { key: "edit", label: "编辑", icon: <FileTextOutlined /> },
       { key: "sync", label: "同步" },
       { key: "delete", label: "删除", icon: <DeleteOutlined />, danger: true },
     ]);

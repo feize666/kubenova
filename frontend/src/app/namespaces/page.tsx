@@ -318,14 +318,14 @@ export default function NamespacesPage() {
       </Card>
 
       {!isInitializing && !accessToken ? (
-        <Alert type="warning" showIcon message="请先登录后访问 Namespace 管理。" />
+        <Alert type="warning" showIcon title="请先登录后访问 Namespace 管理。" />
       ) : null}
 
       {namespacesQuery.isError ? (
         <Alert
           type="error"
           showIcon
-          message="Namespace 加载失败"
+          title="Namespace 加载失败"
           description={namespacesQuery.error instanceof Error ? namespacesQuery.error.message : "请求失败"}
         />
       ) : null}

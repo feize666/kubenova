@@ -31,7 +31,7 @@ export function BootstrapScreen({
           padding: 28,
         }}
       >
-        <Space direction="vertical" size={18} style={{ width: "100%" }}>
+        <Space orientation="vertical" size={18} style={{ width: "100%" }}>
           <div>
             <Typography.Title level={3} style={{ margin: 0, color: "var(--surface-text)" }}>
               {title}

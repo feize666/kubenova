@@ -42,7 +42,7 @@ import {
   type LogsReconnectState,
   type RuntimeLogItem,
 } from "@/lib/ws/logs";
-import { buildGatewayWsCandidates } from "@/lib/ws/terminal";
+import { buildGatewayWsCandidates, sanitizeSensitiveMessage } from "@/lib/ws/terminal";
 
 type SeverityFilter = "INFO" | "WARN" | "ERROR";
 
@@ -230,6 +230,27 @@ function isPreviousLogNotFoundError(error: unknown): boolean {
   return text.includes("previous terminated container") && text.includes("not found");
 }
 
+function normalizeLogError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error || "");
+  const lowered = message.toLowerCase();
+  if (lowered.includes("pods") && lowered.includes("not found")) {
+    return "目标 Pod 不存在或已重建，请回到资源页重新进入日志。";
+  }
+  if (lowered.includes("previous terminated container") && lowered.includes("not found")) {
+    return "上一个实例不存在，已回退到当前实例。";
+  }
+  if (lowered.includes("unauthorized") || lowered.includes("forbidden") || lowered.includes("鉴权")) {
+    return "日志读取权限不足，请检查登录状态与资源权限。";
+  }
+  if (lowered.includes("http-code: 400") || lowered.includes("badrequest")) {
+    return "日志读取请求无效，请刷新后重试。";
+  }
+  if (lowered.includes("http-code: 404") || lowered.includes("notfound")) {
+    return "目标日志资源不存在或已重建，请返回资源页重新进入。";
+  }
+  return sanitizeSensitiveMessage(message || "日志连接失败");
+}
+
 function formatConnectionTag(status: LogsConnectionStatus): { color: string; text: string } {
   if (status === "已连接") return { color: "green", text: "已连接" };
   if (status === "连接中") return { color: "blue", text: "连接中" };
@@ -286,10 +307,12 @@ export default function LogsPage() {
   const [searchRegex, setSearchRegex] = useState(false);
   const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
   const [searchVisible, setSearchVisible] = useState(false);
+  const [searchResultText, setSearchResultText] = useState("输入关键字后开始查找");
   const [previousUnavailable, setPreviousUnavailable] = useState(false);
 
   const socketRef = useRef<RuntimeLogsSocket | null>(null);
   const streamGenerationRef = useRef(0);
+  const preloadRequestKeyRef = useRef("");
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -425,14 +448,63 @@ export default function LogsPage() {
       writeTerminalBatch(terminal, filtered, renderOptions);
       fitAddonRef.current?.fit();
       if (searchText.trim()) {
-        searchAddonRef.current?.findNext(searchText, {
+        const found = searchAddonRef.current?.findNext(searchText, {
           regex: searchRegex,
           caseSensitive: searchCaseSensitive,
         });
+        setSearchResultText(found ? "已定位到匹配项" : "暂无结果");
+      } else {
+        setSearchResultText("输入关键字后开始查找");
       }
     },
     [renderOptions, searchCaseSensitive, searchRegex, searchText, severity],
   );
+
+  useEffect(() => {
+    if (!searchVisible) {
+      return;
+    }
+    const query = searchText.trim();
+    if (!query) {
+      setSearchResultText("输入关键字后开始查找");
+      return;
+    }
+    const addon = searchAddonRef.current;
+    if (!addon) {
+      setSearchResultText("查找组件未就绪");
+      return;
+    }
+    const found = addon.findNext(query, {
+      regex: searchRegex,
+      caseSensitive: searchCaseSensitive,
+    });
+    setSearchResultText(found ? "已定位到匹配项" : "暂无结果");
+  }, [searchVisible, searchText, searchRegex, searchCaseSensitive, rawLines]);
+
+  useEffect(() => {
+    const host = terminalHostRef.current;
+    if (!host) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const isCopy = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c";
+      if (!isCopy) {
+        return;
+      }
+      const selection = terminalRef.current?.getSelection()?.trim() || "";
+      if (!selection) {
+        return;
+      }
+      event.preventDefault();
+      void navigator.clipboard.writeText(selection).catch(() => undefined);
+    };
+
+    host.addEventListener("keydown", handleKeyDown);
+    return () => {
+      host.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   const syncRuntimeQueryToUrl = useCallback(
     (next: {
@@ -443,14 +515,19 @@ export default function LogsPage() {
       previous?: boolean;
       timestamps?: boolean;
     }) => {
-      const params = new URLSearchParams(searchParams.toString());
+      const currentQuery = searchParams.toString();
+      const params = new URLSearchParams(currentQuery);
       if (typeof next.container === "string") params.set("container", next.container);
       if (typeof next.tailLines === "number") params.set("tailLines", String(next.tailLines));
       if (typeof next.sinceSeconds === "number") params.set("sinceSeconds", String(next.sinceSeconds));
       if (typeof next.follow === "boolean") params.set("follow", String(next.follow));
       if (typeof next.previous === "boolean") params.set("previous", String(next.previous));
       if (typeof next.timestamps === "boolean") params.set("timestamps", String(next.timestamps));
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      const nextQuery = params.toString();
+      if (nextQuery === currentQuery) {
+        return;
+      }
+      router.replace(`${pathname}?${nextQuery}`, { scroll: false });
     },
     [pathname, router, searchParams],
   );
@@ -480,6 +557,20 @@ export default function LogsPage() {
       const currentGeneration = streamGenerationRef.current;
       try {
         if (options?.preloadHistory) {
+          const preloadKey = JSON.stringify({
+            clusterId,
+            namespace,
+            pod,
+            container,
+            tailLines,
+            sinceSeconds,
+            previous: effectivePrevious,
+            timestamps,
+          });
+          if (preloadRequestKeyRef.current === preloadKey) {
+            return;
+          }
+          preloadRequestKeyRef.current = preloadKey;
           let seed;
           try {
             seed = await getLogs(
@@ -523,6 +614,7 @@ export default function LogsPage() {
           const seedLines = mapHistoryRecordsToRuntimeLogs(seed.items);
           setRawLines(seedLines);
           replayToTerminal(seedLines);
+          preloadRequestKeyRef.current = "";
         }
 
         // "上一个实例" 只应展示上一实例的历史日志，不进入实时流/重连循环。
@@ -622,12 +714,16 @@ export default function LogsPage() {
         socketRef.current = socket;
         socket.connect();
       } catch (error) {
+        preloadRequestKeyRef.current = "";
         if (currentGeneration !== streamGenerationRef.current) {
           return;
         }
         setStreamStatus("连接异常");
-        setStreamError(error instanceof Error ? error.message : "日志连接失败");
+        setStreamError(normalizeLogError(error));
       } finally {
+        if (!options?.preloadHistory) {
+          preloadRequestKeyRef.current = "";
+        }
         if (currentGeneration === streamGenerationRef.current) {
           setIsConnecting(false);
         }
@@ -716,15 +812,17 @@ export default function LogsPage() {
       return;
     }
     if (direction === "next") {
-      addon.findNext(query, {
+      const found = addon.findNext(query, {
         regex: searchRegex,
         caseSensitive: searchCaseSensitive,
       });
+      setSearchResultText(found ? "已定位到匹配项" : "暂无结果");
     } else {
-      addon.findPrevious(query, {
+      const found = addon.findPrevious(query, {
         regex: searchRegex,
         caseSensitive: searchCaseSensitive,
       });
+      setSearchResultText(found ? "已定位到匹配项" : "暂无结果");
     }
   };
 
@@ -930,6 +1028,7 @@ export default function LogsPage() {
                             ×
                           </button>
                         </Tooltip>
+                        <span className="headlamp-search-status">{searchResultText}</span>
                       </div>
                     }
                   >
@@ -957,7 +1056,9 @@ export default function LogsPage() {
             </div>
 
             <Space wrap size={8}>
-              <Tag color="blue">{follow ? "实时跟随" : "跟随已暂停"}</Tag>
+              <Tag color={effectivePrevious ? "purple" : "blue"}>
+                {effectivePrevious ? "上一个实例" : follow ? "实时跟随" : "跟随已暂停"}
+              </Tag>
               {previousUnavailable ? (
                 <Tag color="orange">上一个实例不存在，已回退到当前实例</Tag>
               ) : null}
@@ -972,7 +1073,7 @@ export default function LogsPage() {
               <Alert
                 type={streamStatus === "连接异常" ? "error" : "warning"}
                 showIcon
-                message="实时流提示"
+                title="实时流提示"
                 description={streamError}
               />
             ) : null}
@@ -1062,8 +1163,15 @@ export default function LogsPage() {
           display: flex;
           align-items: center;
           gap: 8px;
-          min-width: 420px;
+          min-width: 520px;
           color: #111827;
+        }
+
+        .headlamp-search-status {
+          color: #111827;
+          font-size: 13px;
+          white-space: nowrap;
+          margin-left: 8px;
         }
 
         .headlamp-search-flag,
@@ -1181,6 +1289,11 @@ export default function LogsPage() {
           .headlamp-search-popover {
             min-width: 300px;
             flex-wrap: wrap;
+          }
+
+          .headlamp-search-status {
+            width: 100%;
+            margin-left: 0;
           }
 
           .logs-terminal-host {

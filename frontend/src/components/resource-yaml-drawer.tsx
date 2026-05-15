@@ -1,15 +1,9 @@
 "use client";
 
+import { DownloadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Drawer, Input, Space, Typography } from "antd";
 import { useMutation, useQuery } from "@tanstack/react-query";
-//import {
-//  getClusters,
-//  getResourceYaml,
-//  updateResourceYaml,
-//  type ResourceIdentity,
-//} from "@/lib/api/resources";
-
 import {
   getResourceYaml,
   updateResourceYaml,
@@ -26,6 +20,30 @@ interface ResourceYamlDrawerProps {
   token?: string;
   identity: ResourceIdentity | null;
   onUpdated?: () => void;
+}
+
+function sanitizeFilenameSegment(value: string, fallback: string): string {
+  const normalized = value.trim().replace(/[\\/:*?"<>|\s]+/g, "-");
+  return normalized || fallback;
+}
+
+function buildYamlFilename(identity: ResourceIdentity): string {
+  const namespace = identity.namespace ? sanitizeFilenameSegment(identity.namespace, "default") : "cluster";
+  const kind = sanitizeFilenameSegment(identity.kind, "resource");
+  const name = sanitizeFilenameSegment(identity.name, "item");
+  return `${namespace}-${kind}-${name}.yaml`;
+}
+
+function downloadTextFile(content: string, filename: string) {
+  const blob = new Blob([content], { type: "application/x-yaml;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export function ResourceYamlDrawer({
@@ -106,6 +124,7 @@ export function ResourceYamlDrawer({
       : mutation.error instanceof Error
       ? mutation.error.message
       : null);
+  const downloadDisabled = query.isLoading || !identity || !yamlText.trim();
 
   return (
     <Drawer
@@ -113,6 +132,7 @@ export function ResourceYamlDrawer({
       size="large"
       open={open}
       destroyOnHidden
+      styles={{ body: { padding: 24 } }}
       onClose={() => {
         mutation.reset();
         setLocalError(null);
@@ -120,6 +140,18 @@ export function ResourceYamlDrawer({
       }}
       extra={
         <Space>
+          <Button
+            icon={<DownloadOutlined />}
+            disabled={downloadDisabled}
+            onClick={() => {
+              if (!identity || !yamlText.trim()) {
+                return;
+              }
+              downloadTextFile(yamlText, buildYamlFilename(identity));
+            }}
+          >
+            下载 YAML
+          </Button>
           <Button onClick={() => void query.refetch()} loading={query.isFetching}>
             重新加载
           </Button>

@@ -439,6 +439,13 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("kubenova:navigation-metric", handler);
   }, []);
 
+  useEffect(() => {
+    if (isLoginPage || isInitializing || isAuthenticated) {
+      return;
+    }
+    window.location.replace(buildLoginRoute(currentReturnTo));
+  }, [currentReturnTo, isAuthenticated, isInitializing, isLoginPage]);
+
   if (isLoginPage) {
     return <>{children}</>;
   }
@@ -448,7 +455,6 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAuthenticated) {
-    window.location.replace(buildLoginRoute(currentReturnTo));
     return <BootstrapScreen description="正在跳转到登录页..." />;
   }
 

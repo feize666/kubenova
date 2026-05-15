@@ -19,7 +19,6 @@ import {
   Col,
   Dropdown,
   Empty,
-  Form,
   Input,
   InputNumber,
   Modal,
@@ -31,8 +30,6 @@ import {
 } from "antd";
 import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { ColumnDef } from "@tanstack/react-table";
-import { getCoreRowModel, getFilteredRowModel, getSortedRowModel, useReactTable } from "@tanstack/react-table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
@@ -55,7 +52,6 @@ import {
   disableWorkload,
   enableWorkload,
   getWorkloads,
-  patchWorkloadById,
   type WorkloadItem,
   type WorkloadsListResponse,
   type WorkloadState,
@@ -163,13 +159,6 @@ function mapItemToRow(item: WorkloadItem): DeploymentRow {
   };
 }
 
-interface DeploymentFormValues {
-  name: string;
-  namespace: string;
-  clusterId: string;
-  replicas: number;
-}
-
 interface ScaleConvergenceViewState {
   workloadName: string;
   round: ScaleConvergenceRound;
@@ -208,15 +197,9 @@ export default function DeploymentsPage() {
   });
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [扩缩容行, set扩缩容行] = useState<DeploymentRow | null>(null);
-  const editingRow = 扩缩容行;
   const [目标副本, set目标副本] = useState<number>(1);
   const [scaleConvergence, setScaleConvergence] = useState<ScaleConvergenceViewState | null>(null);
   const [yaml目标, setYaml目标] = useState<ResourceIdentity | null>(null);
-
-  // CRUD Modal state
-  const [modalOpen, setModalOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [form] = Form.useForm<DeploymentFormValues>();
 
   const workloadsKey = ["workloads", "deployments", clusterId, 关键字, namespace, pagination.pageIndex + 1, pagination.pageSize, sortBy, sortOrder, accessToken];
 
@@ -253,12 +236,6 @@ export default function DeploymentsPage() {
   );
   const clusterMap = useMemo(
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name])),
-    [clustersQuery.data],
-  );
-
-  // Modal 中仅显示不带"全部集群"的选项
-  const clusterSelectOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
 
@@ -445,23 +422,6 @@ export default function DeploymentsPage() {
     },
   });
 
-  const tanstack列 = useMemo<ColumnDef<DeploymentRow>[]>(
-    () => [
-      { accessorKey: "名称" },
-      { accessorKey: "名称空间" },
-      { accessorKey: "集群" },
-      { accessorKey: "副本数" },
-      { accessorKey: "就绪数" },
-      { accessorKey: "可用数" },
-      { accessorKey: "策略" },
-      { accessorKey: "修订版本" },
-      { accessorKey: "状态" },
-      { accessorKey: "启用状态" },
-      { accessorKey: "创建时间" },
-    ],
-    [],
-  );
-
   const sourceItems = useMemo(
     () => query.data?.items ?? [],
     [query.data?.items],
@@ -480,28 +440,9 @@ export default function DeploymentsPage() {
     [全量数据, mergedFilters],
   );
 
-  const table = useReactTable({
-    data: 表格前数据,
-    columns: tanstack列,
-    state: { globalFilter: 关键字 },
-    onGlobalFilterChange: set关键字,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    globalFilterFn: (row, _columnId, filterValue) => {
-      const keyword = String(filterValue).trim().toLowerCase();
-      if (!keyword) {
-        return true;
-      }
-      // Search by name only (as requested)
-      return row.original.名称.toLowerCase().includes(keyword);
-    },
-  });
-
-  const 表格数据 = table.getRowModel().rows.map((row) => row.original);
   const 名称列宽度 = useMemo(
-    () => getAdaptiveNameWidth(表格数据.map((row) => row.名称), { max: 340 }),
-    [表格数据],
+    () => getAdaptiveNameWidth(表格前数据.map((row) => row.名称), { max: 340 }),
+    [表格前数据],
   );
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
@@ -551,39 +492,6 @@ export default function DeploymentsPage() {
   // CRUD handlers
   const openAddModal = () => {
     router.push("/workloads/create?kind=Deployment");
-  };
-
-  const handleModalCancel = () => {
-    setModalOpen(false);
-    form.resetFields();
-  };
-
-  const handleModalSubmit = async () => {
-    let values: DeploymentFormValues;
-    try {
-      values = await form.validateFields();
-    } catch {
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      if (editingRow?.id) {
-        await patchWorkloadById(
-          editingRow.id,
-          { namespace: values.namespace, replicas: values.replicas },
-          accessToken!,
-        );
-      }
-      void message.success("Deployment 更新成功");
-      setModalOpen(false);
-      form.resetFields();
-      void refreshDeploymentSnapshots(editingRow?.id);
-    } catch (err) {
-      void message.error(err instanceof Error ? err.message : "操作失败，请重试");
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   const handleDelete = async (row: DeploymentRow) => {
@@ -669,11 +577,7 @@ export default function DeploymentsPage() {
       key: "status",
       width: TABLE_COL_WIDTH.status,
       render: (value: DeploymentStatus) => <Tag color={状态颜色[value]}>{value}</Tag>,
-      sorter: (a, b) => {
-        const rank = (value: DeploymentStatus) => (value === "运行中" ? 2 : value === "收敛中" ? 1 : 0);
-        return rank(a.状态) - rank(b.状态) || a.名称.localeCompare(b.名称);
-      },
-      sortDirections: ["ascend", "descend", null],
+      ...getSortableColumnProps("status"),
     },
     {
       title: "启用状态",
@@ -690,24 +594,21 @@ export default function DeploymentsPage() {
       dataIndex: "可用数",
       key: "availableReplicas",
       width: TABLE_COL_WIDTH.available,
-      sorter: (a, b) => a.可用数 - b.可用数 || a.名称.localeCompare(b.名称),
-      sortDirections: ["ascend", "descend", null],
+      ...getSortableColumnProps("availableReplicas"),
     },
     {
       title: "策略",
       dataIndex: "策略",
       key: "strategy",
       width: TABLE_COL_WIDTH.strategy,
-      sorter: (a, b) => a.策略.localeCompare(b.策略),
-      sortDirections: ["ascend", "descend", null],
+      ...getSortableColumnProps("strategy"),
     },
     {
       title: "修订版本",
       dataIndex: "修订版本",
       key: "revision",
       width: TABLE_COL_WIDTH.revision,
-      sorter: (a, b) => a.修订版本 - b.修订版本,
-      sortDirections: ["ascend", "descend", null],
+      ...getSortableColumnProps("revision"),
     },
     {
       title: "创建时间",
@@ -839,7 +740,7 @@ export default function DeploymentsPage() {
             bordered
             rowKey="key"
             columns={antd列}
-            dataSource={表格数据}
+            dataSource={表格前数据}
             loading={(query.isLoading && !query.data) || actionMutation.isPending}
             onChange={(paginationInfo, filters, sorter, extra) =>
               handleTableChange(paginationInfo, filters, sorter, extra, (query.isLoading && !query.data) || actionMutation.isPending)
@@ -871,54 +772,8 @@ export default function DeploymentsPage() {
             部署：<Typography.Text strong>{扩缩容行?.名称 ?? "-"}</Typography.Text>
           </Typography.Text>
           <Typography.Text>目标副本数：</Typography.Text>
-          <InputNumber min={0} value={目标副本} onChange={(value) => set目标副本(value ?? 0)} style={{ width: 220 }} />
+          <InputNumber min={0} value={目标副本} onChange={(value: number | null) => set目标副本(value ?? 0)} style={{ width: 220 }} />
         </Space>
-      </Modal>
-
-      {/* 添加 / 编辑 Deployment Modal */}
-      <Modal
-        title="编辑 Deployment"
-        open={modalOpen}
-        onOk={() => void handleModalSubmit()}
-        onCancel={handleModalCancel}
-        okText="保存"
-        cancelText="取消"
-        confirmLoading={submitting}
-        destroyOnHidden
-      >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="名称"
-            name="name"
-            rules={[{ required: true, message: "请输入 Deployment 名称" }]}
-          >
-            <Input placeholder="例如：my-app" disabled />
-          </Form.Item>
-          <Form.Item
-            label="名称空间"
-            name="namespace"
-            rules={[{ required: true, message: "请输入名称空间" }]}
-          >
-            <Input placeholder="例如：default" />
-          </Form.Item>
-          <Form.Item label="集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
-            <ClusterSelect
-              value={form.getFieldValue("clusterId")}
-              onChange={(value) => form.setFieldValue("clusterId", value)}
-              options={clusterSelectOptions}
-              loading={clustersQuery.isLoading}
-              allowClear={false}
-              placeholder="请选择集群"
-            />
-          </Form.Item>
-          <Form.Item
-            label="副本数"
-            name="replicas"
-            rules={[{ required: true, message: "请输入副本数" }]}
-          >
-            <InputNumber min={0} style={{ width: "100%" }} placeholder="默认 1" />
-          </Form.Item>
-        </Form>
       </Modal>
       <ResourceYamlDrawer
         open={Boolean(yaml目标)}

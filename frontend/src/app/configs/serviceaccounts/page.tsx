@@ -1,6 +1,6 @@
 "use client";
 
-import { CopyOutlined } from "@ant-design/icons";
+import { CopyOutlined, DownloadOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Alert,
@@ -88,6 +88,23 @@ function maskToken(value?: string): string {
   if (!value) return "-";
   if (value.length <= 14) return `${value.slice(0, 4)}...${value.slice(-2)}`;
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function sanitizeFilenameSegment(value: string, fallback: string): string {
+  const normalized = value.trim().replace(/[\\/:*?"<>|\s]+/g, "-");
+  return normalized || fallback;
+}
+
+function downloadTextFile(content: string, filename: string) {
+  const blob = new Blob([content], { type: "application/x-yaml;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export default function ServiceAccountsPage() {
@@ -392,6 +409,16 @@ export default function ServiceAccountsPage() {
     });
   };
 
+  const handleDownloadYaml = () => {
+    if (!yamlTarget || !yamlValue.trim()) {
+      return;
+    }
+    const namespace = yamlTarget.namespace ? sanitizeFilenameSegment(yamlTarget.namespace, "default") : "cluster";
+    const resource = sanitizeFilenameSegment(yamlTarget.resource, "serviceaccount");
+    const name = sanitizeFilenameSegment(yamlTarget.name, "item");
+    downloadTextFile(yamlValue, `${namespace}-${resource}-${name}.yaml`);
+  };
+
   const handleOpenSecretTokenForRow = (row: ServiceAccountRecord) => {
     if (!row.id) {
       return;
@@ -588,6 +615,15 @@ export default function ServiceAccountsPage() {
         cancelText="取消"
         width={860}
         confirmLoading={applyYamlMutation.isPending}
+        footer={(_, { OkBtn, CancelBtn }) => (
+          <Space>
+            <Button icon={<DownloadOutlined />} disabled={!yamlTarget || !yamlValue.trim()} onClick={handleDownloadYaml}>
+              下载 YAML
+            </Button>
+            <CancelBtn />
+            <OkBtn />
+          </Space>
+        )}
       >
         <Input.TextArea
           value={yamlValue}
@@ -671,7 +707,7 @@ export default function ServiceAccountsPage() {
           dataSource={tokenRows}
           loading={tokenLoading}
           pagination={false}
-          locale={{ emptyText: "未发现可用的 ServiceAccount Token Secret（可能集群使用投影令牌）" }}
+          locale={{ emptyText: "未发现可用的 ServiceAccount Token Secret" }}
           columns={[
             { title: "Secret", dataIndex: "secretName", key: "secretName" },
             {

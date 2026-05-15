@@ -35,6 +35,7 @@ function resolveDefaultWsBase(): string {
 
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1"]);
 const DEFAULT_WS_CONNECT_TIMEOUT_MS = 5000;
+const DEFAULT_RUNTIME_GATEWAY_PORT = "4100";
 const SENSITIVE_QUERY_KEYS = new Set([
   "runtimetoken",
   "token",
@@ -176,6 +177,16 @@ export function buildGatewayWsCandidates(gatewayWsUrl: string): string[] {
       sameOrigin.protocol = browserWsProtocol;
       sameOrigin.host = browserHost;
       pushOrdered(sameOrigin);
+    }
+
+    // Local dev: Next websocket rewrite may not be active or stable.
+    // When page runs on localhost/127.0.0.1, always keep direct gateway :4100 fallback.
+    if (parsedIsLoopback && isBrowserLoopback) {
+      const directGateway = new URL(parsed.toString());
+      directGateway.protocol = browserWsProtocol;
+      directGateway.hostname = browserHostname;
+      directGateway.port = DEFAULT_RUNTIME_GATEWAY_PORT;
+      pushOrdered(directGateway);
     }
 
     // Remote browser + loopback gateway URL:

@@ -5,6 +5,14 @@ import { buildListQuery, withQuery } from "./query";
 export const CONTROL_API_BASE = process.env.NEXT_PUBLIC_CONTROL_API_BASE ?? "";
 export const AUTH_EXPIRED_EVENT = "aiops:auth-expired";
 export const AUTH_EXPIRED_MESSAGE = "访问令牌无效或已过期，请重新登录";
+const AUTH_EXPIRED_CODES = new Set([
+  "AUTH_EXPIRED",
+  "TOKEN_EXPIRED",
+  "ACCESS_TOKEN_EXPIRED",
+  "REFRESH_TOKEN_EXPIRED",
+  "UNAUTHORIZED",
+  "INVALID_TOKEN",
+]);
 
 interface ApiErrorLike {
   code?: string;
@@ -247,7 +255,11 @@ export async function apiRequest<TResponse, TBody = unknown>(
       errorInfo.message.startsWith("Request failed") && parsed.textPreview
         ? `${errorInfo.message}. Response(${parsed.contentType}): ${parsed.textPreview}`
         : errorInfo.message;
-    if (response.status === 401 && !suppressAuthExpiryBroadcast) {
+    if (
+      response.status === 401 &&
+      !suppressAuthExpiryBroadcast &&
+      AUTH_EXPIRED_CODES.has(String(errorInfo.code || "").trim().toUpperCase())
+    ) {
       broadcastAuthExpired({
         message: AUTH_EXPIRED_MESSAGE,
         code: errorInfo.code,

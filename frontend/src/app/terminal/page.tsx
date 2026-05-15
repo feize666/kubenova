@@ -107,13 +107,13 @@ function normalizeRuntimeError(code?: string, fallback?: string): { text: string
     return { text: "目标 Pod 不存在或已重建，请回到资源页重新进入终端。", blockReconnect: true };
   }
   if (lowered.includes("kubeconfig_invalid") || (lowered.includes("kubeconfig") && lowered.includes("invalid"))) {
-    return { text: "集群 kubeconfig 无效，请修复集群凭据后再重试终端连接。", blockReconnect: true };
+    return { text: "集群接入凭据无效，请修复后再重试终端连接。", blockReconnect: true };
   }
   if (lowered.includes("auth") || lowered.includes("token") || lowered.includes("unauthorized")) {
     return { text: "终端鉴权失败，请重新登录并重新创建终端会话。", blockReconnect: true };
   }
   if (normalized === "RUNTIME_GATEWAY_BOOTSTRAP_FAILED") {
-    return { text: "runtime-gateway 引导失败，请检查 runtime-gateway 与 control-api。", blockReconnect: false };
+    return { text: "终端服务初始化失败，请稍后重试。", blockReconnect: false };
   }
 
   return { text: fallback || "终端连接失败，请稍后重试。", blockReconnect: false };
@@ -139,7 +139,7 @@ function mapCloseError(input: {
   }
   if (code === 1006) {
     return {
-      text: `WebSocket 握手失败（1006），请检查浏览器到 runtime-gateway 的连通性。目标地址：${safeWsUrl}`,
+      text: `终端连接超时，请检查网络后重试。目标地址：${safeWsUrl}`,
       blockReconnect: false,
     };
   }
@@ -147,10 +147,10 @@ function mapCloseError(input: {
     return { text: "终端鉴权失败（1008），请重新登录后重试。", blockReconnect: true };
   }
   if (code === 1013) {
-    return { text: "runtime-gateway 当前不可用（1013），请检查网关健康状态。", blockReconnect: false };
+    return { text: "终端服务暂不可用，请稍后重试。", blockReconnect: false };
   }
 
-  return { text: `连接断开（code=${code}），请检查 runtime-gateway 日志。`, blockReconnect: false };
+  return { text: `终端连接已断开（code=${code}），请重新连接。`, blockReconnect: false };
 }
 
 export default function TerminalPage() {
@@ -168,7 +168,6 @@ export default function TerminalPage() {
   const [status, setStatus] = useState<TerminalConnectionStatus>("disconnected");
   const [sessionInfo, setSessionInfo] = useState<RuntimeSessionView | null>(null);
   const [selectedContainer, setSelectedContainer] = useState(searchParams.get("container")?.trim() || "");
-  const [lastNotice, setLastNotice] = useState<string>("");
   const [lastWarning, setLastWarning] = useState<string>("");
 
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -366,13 +365,11 @@ export default function TerminalPage() {
     if (manualDisconnectRef.current || blockReconnectRef.current) return;
     if (reconnectCountRef.current >= MAX_RECONNECTS) {
       setLastWarning("自动重连已达到上限，请手动重新连接。");
-      setLastNotice("自动重连失败，请手动点击“新建会话”重试。");
       return;
     }
     const attempt = reconnectCountRef.current + 1;
     reconnectCountRef.current = attempt;
     const delayMs = INITIAL_RECONNECT_DELAY_MS * 2 ** (attempt - 1);
-    setLastNotice(`将在 ${Math.floor(delayMs / 1000)} 秒后进行第 ${attempt} 次自动重连...`);
     clearReconnectTimer();
     reconnectTimerRef.current = setTimeout(() => {
       void connectTerminal({ isAutoReconnect: true, userInitiated: false });
@@ -390,7 +387,6 @@ export default function TerminalPage() {
     closeSocketSilently(wsRef.current);
     wsRef.current = null;
     setStatus("disconnected");
-    setLastNotice("终端已手动断开。");
     if (showToast) {
       message.info("终端已断开");
     }
@@ -440,7 +436,6 @@ export default function TerminalPage() {
         return;
       }
       if (parsed.text) {
-        setLastNotice(parsed.text);
         writeSystemLine(parsed.text);
       }
       return;
@@ -511,7 +506,6 @@ export default function TerminalPage() {
       wsRef.current = null;
       setStatus("connecting");
       setLastWarning("");
-      setLastNotice(isAutoReconnect ? "正在执行自动重连..." : "正在准备运行时会话...");
       writeSystemLine(isAutoReconnect ? "正在执行自动重连..." : "正在准备运行时会话...");
 
       const session = await readSession(forceNewSession);
@@ -539,8 +533,7 @@ export default function TerminalPage() {
         reconnectCountRef.current = 0;
         setStatus("connected");
         connectingRef.current = false;
-        setLastNotice("WebSocket 已建立，等待容器 shell 输出。");
-        writeSystemLine("WebSocket 已建立，等待容器 shell 输出。");
+        writeSystemLine("终端连接已建立，等待容器输出。");
         if (allowConnectedToastRef.current && !hasConnectedNoticeRef.current) {
           hasConnectedNoticeRef.current = true;
           allowConnectedToastRef.current = false;
@@ -732,7 +725,6 @@ export default function TerminalPage() {
     setStatus("disconnected");
     setSessionInfo(null);
     setLastWarning("");
-    setLastNotice("");
     hasConnectedNoticeRef.current = false;
     terminalRef.current?.clear();
     terminalRef.current?.writeln("正在准备运行时会话...");
@@ -823,21 +815,31 @@ export default function TerminalPage() {
                 options={availableContainers.map((container) => ({ label: container, value: container }))}
                 onChange={(value) => setSelectedContainer(value)}
               />
-              <Button icon={<ReloadOutlined />} onClick={() => void connectTerminal({ forceNewSession: true, userInitiated: true })} disabled={status === "connecting" || missingParams.length > 0}>
-                新建会话
-              </Button>
-              <Button onClick={() => disconnectTerminal(true)}>
-                断开
-              </Button>
-              <Button danger icon={<ArrowLeftOutlined />} onClick={() => handleDisconnectAndReturn()}>
-                退出
-              </Button>
-              <Button icon={<ColumnWidthOutlined />} onClick={clearTerminal}>
-                清屏
-              </Button>
-              <Button icon={<CopyOutlined />} onClick={copyTerminal}>
-                复制
-              </Button>
+              <Tooltip title="新建会话">
+                <Button icon={<ReloadOutlined />} onClick={() => void connectTerminal({ forceNewSession: true, userInitiated: true })} disabled={status === "connecting" || missingParams.length > 0}>
+                  新建会话
+                </Button>
+              </Tooltip>
+              <Tooltip title="断开终端连接">
+                <Button onClick={() => disconnectTerminal(true)}>
+                  断开
+                </Button>
+              </Tooltip>
+              <Tooltip title="退出终端">
+                <Button danger icon={<ArrowLeftOutlined />} onClick={() => handleDisconnectAndReturn()}>
+                  退出
+                </Button>
+              </Tooltip>
+              <Tooltip title="清屏">
+                <Button icon={<ColumnWidthOutlined />} onClick={clearTerminal}>
+                  清屏
+                </Button>
+              </Tooltip>
+              <Tooltip title="复制终端内容">
+                <Button icon={<CopyOutlined />} onClick={copyTerminal}>
+                  复制
+                </Button>
+              </Tooltip>
             </Space>
           </div>
 
@@ -905,11 +907,6 @@ export default function TerminalPage() {
             <div ref={terminalHostRef} className="terminal-xterm-host" />
           </div>
         </div>
-
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          点击终端区域后直接输入命令。方向键、删除键、粘贴与 shell 内部行编辑均在终端内完成，切换容器将自动重建终端会话。
-          {lastNotice ? ` 当前状态：${lastNotice}` : ""}
-        </Typography.Text>
       </div>
     </Card>
   );

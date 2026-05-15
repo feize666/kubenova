@@ -33,7 +33,7 @@ export function AiDeleteSessionDialog({
       cancelText="取消"
       okButtonProps={{ danger: true }}
       confirmLoading={loading}
-      maskClosable={false}
+      mask={{ closable: false }}
       width={520}
     >
       <div
@@ -50,7 +50,7 @@ export function AiDeleteSessionDialog({
         <WarningOutlined style={{ color: "#faad14", fontSize: 18, marginTop: 2 }} />
         <div style={{ flex: 1 }}>
           <Typography.Text strong>此操作会永久删除该会话的对话记录。</Typography.Text>
-          <Typography.Paragraph style={{ margin: "6px 0 0", color: "rgba(0,0,0,0.65)" }}>
+          <Typography.Paragraph style={{ margin: "6px 0 0", color: "var(--surface-subtle)" }}>
             删除后无法恢复。建议仅删除已结束或无价值的会话。
           </Typography.Paragraph>
         </div>
@@ -76,4 +76,3 @@ export function AiDeleteSessionDialog({
     </Modal>
   );
 }
-

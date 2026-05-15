@@ -864,7 +864,7 @@ export default function PodsPage() {
               podsQuery.isLoading && !podsQuery.data ? (
                 "正在加载..."
               ) : (
-                <Empty description="暂无 Pod 数据。如已配置集群 kubeconfig，平台将自动同步 Pod 信息。" />
+                <Empty description="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。" />
               ),
           }}
         />

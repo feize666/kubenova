@@ -21,8 +21,9 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { Dayjs } from "dayjs";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { getClusters } from "@/lib/api/clusters";
 import { buildTablePagination } from "@/lib/table/pagination";
@@ -77,6 +78,28 @@ function capabilityStatusTag(status: CapabilityBaselineStatus) {
   if (status === "blocked") return <Tag color="red">阻塞</Tag>;
   if (status === "gap") return <Tag color="warning">待补齐</Tag>;
   return <Tag>未知</Tag>;
+}
+
+function inspectionActionLabel(action: InspectionActionType) {
+  if (action === "create-hpa-draft") return "生成 HPA 草案";
+  return "生成修复 YAML";
+}
+
+function sanitizeFilenameSegment(value: string, fallback: string) {
+  const normalized = value.trim().replace(/[\\/:*?"<>|\s]+/g, "-");
+  return normalized || fallback;
+}
+
+function downloadTextFile(content: string, filename: string) {
+  const blob = new Blob([content], { type: "application/x-yaml;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export default function InspectionPage() {
@@ -366,10 +389,30 @@ export default function InspectionPage() {
     if (!namespace.trim()) return issueItems;
     return issueItems.filter((item) => (item.namespace ?? "").trim() === namespace.trim());
   }, [issueItems, namespace]);
+  const capabilityMaxPage = useMemo(
+    () => Math.max(1, Math.ceil(capabilityItems.length / capabilityPageSize)),
+    [capabilityItems.length, capabilityPageSize],
+  );
+  const issueMaxPage = useMemo(
+    () => Math.max(1, Math.ceil(issueItemsFiltered.length / issuePageSize)),
+    [issueItemsFiltered.length, issuePageSize],
+  );
   const issuePagedItems = useMemo(() => {
     const start = (issuePage - 1) * issuePageSize;
     return issueItemsFiltered.slice(start, start + issuePageSize);
   }, [issueItemsFiltered, issuePage, issuePageSize]);
+
+  useEffect(() => {
+    setCapabilityPage((prev) => Math.min(prev, capabilityMaxPage));
+  }, [capabilityMaxPage]);
+
+  useEffect(() => {
+    setIssuePage(1);
+  }, [timeQuery.from, timeQuery.range, timeQuery.to]);
+
+  useEffect(() => {
+    setIssuePage((prev) => Math.min(prev, issueMaxPage));
+  }, [issueMaxPage]);
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -385,7 +428,7 @@ export default function InspectionPage() {
           </Col>
           <Col>
             <Space>
-              <Select
+              <ClusterSelect
                 style={{ width: 220 }}
                 value={clusterId}
                 onChange={(value) => {
@@ -395,6 +438,7 @@ export default function InspectionPage() {
                 }}
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
+                showAllOption
               />
               <NamespaceSelect
                 style={{ width: 180 }}
@@ -406,6 +450,7 @@ export default function InspectionPage() {
                 clusterId={clusterId}
                 knownNamespaces={knownNamespaces}
                 disabled={!clusterId}
+                placeholder="请先选择集群后再筛选名称空间"
               />
               <Select
                 style={{ width: 120 }}
@@ -466,12 +511,12 @@ export default function InspectionPage() {
         </Col>
         <Col xs={24} md={6}>
           <Card>
-            <Statistic title="严重问题" value={reportQuery.data?.summary.critical ?? 0} valueStyle={{ color: "#cf1322" }} />
+            <Statistic title="严重问题" value={reportQuery.data?.summary.critical ?? 0} styles={{ content: { color: "#cf1322" } }} />
           </Card>
         </Col>
         <Col xs={24} md={6}>
           <Card>
-            <Statistic title="警告问题" value={reportQuery.data?.summary.warning ?? 0} valueStyle={{ color: "#d48806" }} />
+            <Statistic title="警告问题" value={reportQuery.data?.summary.warning ?? 0} styles={{ content: { color: "#d48806" } }} />
           </Card>
         </Col>
       </Row>
@@ -480,7 +525,7 @@ export default function InspectionPage() {
         <Alert
           type="warning"
           showIcon
-          message="能力基线矩阵加载失败"
+          title="能力基线矩阵加载失败"
           description={capabilityQuery.error instanceof Error ? capabilityQuery.error.message : "请求失败"}
         />
       ) : null}
@@ -489,7 +534,7 @@ export default function InspectionPage() {
         <Alert
           type="warning"
           showIcon
-          message="能力基线存在数据完整性问题"
+          title="能力基线存在数据完整性问题"
           description={
             <ul style={{ margin: 0, paddingInlineStart: 18 }}>
               {capabilityQuery.data.integrityIssues.map((issue) => (
@@ -513,13 +558,13 @@ export default function InspectionPage() {
             <Statistic title="能力项总数" value={capabilityStats.total} />
           </Col>
           <Col xs={24} md={6}>
-            <Statistic title="已实现" value={capabilityStats.implemented} valueStyle={{ color: "#389e0d" }} />
+            <Statistic title="已实现" value={capabilityStats.implemented} styles={{ content: { color: "#389e0d" } }} />
           </Col>
           <Col xs={24} md={6}>
-            <Statistic title="规划中" value={capabilityStats.planned} valueStyle={{ color: "#1677ff" }} />
+            <Statistic title="规划中" value={capabilityStats.planned} styles={{ content: { color: "#1677ff" } }} />
           </Col>
           <Col xs={24} md={6}>
-            <Statistic title="待补齐" value={capabilityStats.gap} valueStyle={{ color: "#d48806" }} />
+            <Statistic title="待补齐" value={capabilityStats.gap} styles={{ content: { color: "#d48806" } }} />
           </Col>
         </Row>
 
@@ -549,7 +594,7 @@ export default function InspectionPage() {
         <Alert
           type="error"
           showIcon
-          message="巡检失败"
+          title="巡检失败"
           description={reportQuery.error instanceof Error ? reportQuery.error.message : "请求失败"}
         />
       ) : null}
@@ -582,17 +627,34 @@ export default function InspectionPage() {
         title={activeResult?.action === "create-hpa-draft" ? "HPA 草案" : "修复 YAML"}
         onCancel={() => setActiveResult(null)}
         footer={
-          <Button onClick={() => setActiveResult(null)} type="primary">
-            关闭
-          </Button>
+          <Space>
+            <Button
+              icon={<DownloadOutlined />}
+              disabled={!activeResult?.generatedYaml?.trim()}
+              onClick={() => {
+                if (!activeResult?.generatedYaml?.trim()) {
+                  return;
+                }
+                const target = activeResult.target;
+                const kind = sanitizeFilenameSegment(target?.kind ?? "resource", "resource");
+                const name = sanitizeFilenameSegment(target?.name ?? activeResult.issueId, "item");
+                downloadTextFile(activeResult.generatedYaml, `${kind}-${name}.yaml`);
+              }}
+            >
+              下载 YAML
+            </Button>
+            <Button onClick={() => setActiveResult(null)} type="primary">
+              关闭
+            </Button>
+          </Space>
         }
       >
         {activeResult ? (
           <Space orientation="vertical" size={12} style={{ width: "100%" }}>
             <Alert type={activeResult.success ? "success" : "error"} showIcon message={activeResult.message} />
             <Descriptions size="small" bordered column={1}>
-              <Descriptions.Item label="Issue ID">{activeResult.issueId}</Descriptions.Item>
-              <Descriptions.Item label="动作">{activeResult.action}</Descriptions.Item>
+              <Descriptions.Item label="问题编号">{activeResult.issueId}</Descriptions.Item>
+              <Descriptions.Item label="处理方式">{inspectionActionLabel(activeResult.action)}</Descriptions.Item>
               <Descriptions.Item label="目标资源">
                 {activeResult.target
                   ? `${activeResult.target.kind}/${activeResult.target.namespace ?? "-"}/${activeResult.target.name ?? "-"}`

@@ -1,6 +1,6 @@
 "use client";
 
-import { SearchOutlined } from "@ant-design/icons";
+import { DownloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
@@ -73,6 +73,23 @@ interface InstallFormValues {
 
 interface RollbackFormValues {
   revision: number;
+}
+
+function sanitizeFilenameSegment(value: string, fallback: string) {
+  const normalized = value.trim().replace(/[\\/:*?"<>|\s]+/g, "-");
+  return normalized || fallback;
+}
+
+function downloadTextFile(content: string, filename: string) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export default function HelmPage() {
@@ -311,7 +328,7 @@ export default function HelmPage() {
   const installClusterOptions = useMemo(
     () =>
       (clustersQuery.data?.items ?? []).map((c) => ({
-        label: c.hasKubeconfig === false ? `${c.name}（未配置 kubeconfig）` : c.name,
+        label: c.hasKubeconfig === false ? `${c.name}（未接入实时数据）` : c.name,
         value: c.id,
       })),
     [clustersQuery.data?.items],
@@ -641,7 +658,7 @@ export default function HelmPage() {
           <Alert
             type="warning"
             showIcon
-            message="未检测到登录状态，请先登录后再操作。"
+            title="未检测到登录状态，请先登录后再操作。"
             style={{ marginBottom: 16 }}
           />
         ) : null}
@@ -650,7 +667,7 @@ export default function HelmPage() {
           <Alert
             type="error"
             showIcon
-            message="Helm Release 列表加载失败"
+            title="Helm Release 列表加载失败"
             description={releasesQuery.error instanceof Error ? releasesQuery.error.message : "请求失败"}
             style={{ marginBottom: 16 }}
           />
@@ -660,8 +677,8 @@ export default function HelmPage() {
           <Alert
             type="warning"
             showIcon
-            message="当前集群未配置 kubeconfig，无法读取 Helm 数据。"
-            description="请先到集群管理补充 kubeconfig 后再执行 Helm 查询与操作。"
+            title="当前集群暂不可读取 Helm 数据。"
+            description="请先确认该集群已完成接入后再执行 Helm 查询与操作。"
             style={{ marginBottom: 16 }}
           />
         ) : null}
@@ -705,24 +722,54 @@ export default function HelmPage() {
                 key: "values",
                 label: "Values",
                 children: (
-                  <Input.TextArea
-                    readOnly
-                    autoSize={{ minRows: 14, maxRows: 24 }}
-                    value={valuesQuery.data?.values ?? ""}
-                    placeholder={valuesQuery.isLoading ? "加载中..." : "暂无 Values"}
-                  />
+                  <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+                    <Button
+                      icon={<DownloadOutlined />}
+                      disabled={!valuesQuery.data?.values?.trim()}
+                      onClick={() => {
+                        if (!activeDetailRelease || !valuesQuery.data?.values?.trim()) {
+                          return;
+                        }
+                        const release = sanitizeFilenameSegment(activeDetailRelease.name, "release");
+                        downloadTextFile(valuesQuery.data.values, `${release}-values.yaml`);
+                      }}
+                    >
+                      下载 Values
+                    </Button>
+                    <Input.TextArea
+                      readOnly
+                      autoSize={{ minRows: 14, maxRows: 24 }}
+                      value={valuesQuery.data?.values ?? ""}
+                      placeholder={valuesQuery.isLoading ? "加载中..." : "暂无 Values"}
+                    />
+                  </Space>
                 ),
               },
               {
                 key: "manifest",
                 label: "Manifest",
                 children: (
-                  <Input.TextArea
-                    readOnly
-                    autoSize={{ minRows: 14, maxRows: 24 }}
-                    value={manifestQuery.data?.manifest ?? ""}
-                    placeholder={manifestQuery.isLoading ? "加载中..." : "暂无 Manifest"}
-                  />
+                  <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+                    <Button
+                      icon={<DownloadOutlined />}
+                      disabled={!manifestQuery.data?.manifest?.trim()}
+                      onClick={() => {
+                        if (!activeDetailRelease || !manifestQuery.data?.manifest?.trim()) {
+                          return;
+                        }
+                        const release = sanitizeFilenameSegment(activeDetailRelease.name, "release");
+                        downloadTextFile(manifestQuery.data.manifest, `${release}-manifest.yaml`);
+                      }}
+                    >
+                      下载 Manifest
+                    </Button>
+                    <Input.TextArea
+                      readOnly
+                      autoSize={{ minRows: 14, maxRows: 24 }}
+                      value={manifestQuery.data?.manifest ?? ""}
+                      placeholder={manifestQuery.isLoading ? "加载中..." : "暂无 Manifest"}
+                    />
+                  </Space>
                 ),
               },
               {
@@ -853,7 +900,7 @@ export default function HelmPage() {
             type="error"
             showIcon
             style={{ marginTop: 8 }}
-            message="仓库列表加载失败"
+            title="仓库列表加载失败"
             description={repositoriesQuery.error instanceof Error ? repositoriesQuery.error.message : "请求失败"}
           />
         ) : null}
@@ -878,7 +925,7 @@ export default function HelmPage() {
             type="info"
             showIcon
             style={{ marginTop: 8 }}
-            message="未检索到可用 Chart"
+            title="未检索到可用 Chart"
             description={
               installChartKeyword
                 ? `当前模式 ${chartSearchMode} 下，关键词「${installChartKeyword}」无结果，请更换关键词或搜索模式。`
@@ -891,7 +938,7 @@ export default function HelmPage() {
             type="error"
             showIcon
             style={{ marginTop: 8 }}
-            message="Chart 列表加载失败"
+            title="Chart 列表加载失败"
             description={chartsQuery.error instanceof Error ? chartsQuery.error.message : "请求失败"}
           />
         ) : null}

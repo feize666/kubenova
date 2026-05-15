@@ -280,6 +280,486 @@ function renderNetworkEndpointList(
   );
 }
 
+function dedupeStrings(items: Array<string | undefined | null>) {
+  return Array.from(
+    new Set(
+      items
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean),
+    ),
+  );
+}
+
+function getIngressRouteEntryPoints(items: ResourceDetailNetworkEndpoint[]) {
+  return dedupeStrings(
+    items.flatMap((item) =>
+      typeof item.host === "string"
+        ? item.host
+            .split(",")
+            .map((entryPoint) => entryPoint.trim())
+            .filter(Boolean)
+        : [],
+    ),
+  );
+}
+
+function formatEndpointPortLabel(port: { port: number; protocol?: string; targetPort?: string }) {
+  return `${port.protocol ?? "TCP"} ${port.port}${port.targetPort ? ` -> ${port.targetPort}` : ""}`;
+}
+
+function EndpointHighlightsSection({ detail, onNavigateRequest }: ResourceDetailRendererProps) {
+  const kind = normalizeKind(detail.descriptor.resourceKind || detail.overview.kind);
+  if (!["endpoints", "endpointslice"].includes(kind)) {
+    return null;
+  }
+
+  const sourceKind = kind === "endpointslice" ? "EndpointSlice" : "Endpoints";
+  const serviceAssociationType = kind === "endpointslice" ? "service-endpointslice" : "service-endpoints";
+  const endpointItems = detail.network.endpoints.filter((item) => item.sourceKind === sourceKind);
+  const serviceAssociations = detail.associations.filter(
+    (item) => item.kind === "Service" && item.associationType === serviceAssociationType,
+  );
+  const addressLabels = dedupeStrings(endpointItems.map((item) => item.ip ?? item.name));
+  const hostnameLabels = dedupeStrings(endpointItems.map((item) => item.hostname));
+  const portLabels = dedupeStrings(
+    endpointItems.flatMap((item) => (item.ports ?? []).map((port) => formatEndpointPortLabel(port))),
+  );
+  const topologyLabels = dedupeStrings([
+    ...detail.network.nodeNames.map((item) => `节点 ${item}`),
+    ...Object.entries(detail.metadata.labels)
+      .filter(([key]) =>
+        [
+          "kubernetes.io/service-name",
+          "endpointslice.kubernetes.io/managed-by",
+          "topology.kubernetes.io/zone",
+          "topology.kubernetes.io/region",
+          "kubernetes.io/hostname",
+        ].includes(key),
+      )
+      .map(([key, value]) => `${key}=${value}`),
+    ...Object.entries(detail.metadata.annotations)
+      .filter(([key]) => key.includes("topology") || key.includes("node") || key.includes("hints"))
+      .map(([key, value]) => `${key}=${value}`),
+  ]);
+
+  const groupingMap = new Map<
+    string,
+    { key: string; label: string; addresses: string[]; hostnames: string[]; size: number }
+  >();
+  endpointItems.forEach((item, index) => {
+    const label = dedupeStrings((item.ports ?? []).map((port) => formatEndpointPortLabel(port))).join(" · ") || "未声明端口";
+    const entry = groupingMap.get(label) ?? {
+      key: `${sourceKind}-${index}`,
+      label,
+      addresses: [],
+      hostnames: [],
+      size: 0,
+    };
+    if (item.ip) {
+      entry.addresses.push(item.ip);
+    }
+    if (item.hostname) {
+      entry.hostnames.push(item.hostname);
+    }
+    entry.size += 1;
+    groupingMap.set(label, entry);
+  });
+  const groupedEndpoints = Array.from(groupingMap.values()).map((item) => ({
+    ...item,
+    addresses: dedupeStrings(item.addresses),
+    hostnames: dedupeStrings(item.hostnames),
+  }));
+
+  const readyHint =
+    kind === "endpointslice"
+      ? "当前详情未下发 endpoint.conditions.ready / serving / terminating，无法精确区分 ready backends。"
+      : "当前详情已将 addresses 与 notReadyAddresses 合并，无法精确区分 ready / notReady backends。";
+
+  return (
+    <DetailSection
+      title={kind === "endpointslice" ? "EndpointSlice 高频区" : "Endpoints 高频区"}
+      subtitle={
+        kind === "endpointslice"
+          ? "突出后端地址、端口定义、服务归属与可观测拓扑信号"
+          : "突出 addresses、subset 近似分组、端口定义与服务归属"
+      }
+    >
+      {endpointItems.length === 0 && serviceAssociations.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无端点高频信息" />
+      ) : (
+        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+          <DetailDescriptions
+            items={[
+              serviceAssociations.length > 0 ? { key: "services", label: "关联服务", value: serviceAssociations.length } : null,
+              addressLabels.length > 0 ? { key: "addresses", label: "后端地址", value: addressLabels.length } : null,
+              groupedEndpoints.length > 0
+                ? { key: "groups", label: kind === "endpointslice" ? "地址分组" : "Subset 近似组", value: groupedEndpoints.length }
+                : null,
+              portLabels.length > 0 ? { key: "ports", label: "端口定义", value: portLabels.length } : null,
+              hostnameLabels.length > 0 ? { key: "hostnames", label: "主机名", value: hostnameLabels.length } : null,
+              topologyLabels.length > 0 ? { key: "topology", label: "拓扑信号", value: topologyLabels.length } : null,
+            ].filter(Boolean) as Array<{ key: string; label: string; value: React.ReactNode }>}
+            emptyText="暂无端点摘要"
+          />
+
+          {serviceAssociations.length > 0 ? (
+            <div>
+              <Typography.Text strong>关联服务</Typography.Text>
+              <List
+                size="small"
+                dataSource={serviceAssociations}
+                renderItem={(item) => (
+                  <List.Item>
+                    <Space wrap size={8}>
+                      <Tag color="blue">Service</Tag>
+                      {item.id && onNavigateRequest ? (
+                        <Typography.Link strong onClick={() => emitNavigateRequest(onNavigateRequest, item.kind, item.id)}>
+                          {item.name}
+                        </Typography.Link>
+                      ) : (
+                        <Typography.Text strong>{item.name}</Typography.Text>
+                      )}
+                      {item.namespace ? <Typography.Text type="secondary">{item.namespace}</Typography.Text> : null}
+                    </Space>
+                  </List.Item>
+                )}
+              />
+            </div>
+          ) : null}
+
+          {portLabels.length > 0 ? (
+            <div>
+              <Typography.Text strong>端口视图</Typography.Text>
+              <div style={{ marginTop: 8 }}>
+                <TagList items={portLabels} color={kind === "endpointslice" ? "volcano" : "gold"} />
+              </div>
+            </div>
+          ) : null}
+
+          {groupedEndpoints.length > 0 ? (
+            <div>
+              <Typography.Text strong>{kind === "endpointslice" ? "地址分组" : "Subset 近似分组"}</Typography.Text>
+              <List
+                size="small"
+                dataSource={groupedEndpoints}
+                renderItem={(item) => (
+                  <List.Item>
+                    <Space orientation="vertical" size={4} style={{ width: "100%" }}>
+                      <Space wrap size={8}>
+                        <Tag color={kind === "endpointslice" ? "volcano" : "gold"}>
+                          {kind === "endpointslice" ? "EndpointSlice" : "Subset"}
+                        </Tag>
+                        <Typography.Text strong>{item.label}</Typography.Text>
+                        <Typography.Text type="secondary">{item.size} 个后端</Typography.Text>
+                      </Space>
+                      {item.addresses.length > 0 ? (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          地址: {item.addresses.join(", ")}
+                        </Typography.Text>
+                      ) : null}
+                      {item.hostnames.length > 0 ? (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          主机名: {item.hostnames.join(", ")}
+                        </Typography.Text>
+                      ) : null}
+                    </Space>
+                  </List.Item>
+                )}
+              />
+            </div>
+          ) : null}
+
+          {endpointItems.length > 0 ? (
+            <div>
+              <Typography.Text strong>后端地址视图</Typography.Text>
+              <List
+                size="small"
+                dataSource={endpointItems}
+                renderItem={(item, index) => (
+                  <List.Item>
+                    <Space orientation="vertical" size={4} style={{ width: "100%" }}>
+                      <Space wrap size={8}>
+                        <Tag color={kind === "endpointslice" ? "volcano" : "gold"}>{sourceKind}</Tag>
+                        <Typography.Text strong>{item.ip ?? item.hostname ?? `${detail.overview.name}-${index + 1}`}</Typography.Text>
+                        {item.hostname && item.hostname !== item.ip ? (
+                          <Typography.Text type="secondary">{item.hostname}</Typography.Text>
+                        ) : null}
+                      </Space>
+                      {item.ports && item.ports.length > 0 ? (
+                        <Space wrap size={[6, 6]}>
+                          {item.ports.map((port) => (
+                            <Tag key={`${item.ip ?? item.hostname ?? item.name}-${port.port}-${port.protocol ?? "tcp"}`}>
+                              {formatEndpointPortLabel(port)}
+                            </Tag>
+                          ))}
+                        </Space>
+                      ) : (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          未声明端口
+                        </Typography.Text>
+                      )}
+                    </Space>
+                  </List.Item>
+                )}
+              />
+            </div>
+          ) : null}
+
+          <div>
+            <Typography.Text strong>Ready 视图</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+              {readyHint}
+            </Typography.Paragraph>
+          </div>
+
+          {topologyLabels.length > 0 ? (
+            <div>
+              <Typography.Text strong>Topology 视图</Typography.Text>
+              <div style={{ marginTop: 8 }}>
+                <TagList items={topologyLabels} color="cyan" />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <Typography.Text strong>Topology 视图</Typography.Text>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+                当前详情仅能观测到 slice/资源级标签与主机名信号；若需节点级 topology，需后端补充 endpoint nodeName / zone 字段。
+              </Typography.Paragraph>
+            </div>
+          )}
+        </Space>
+      )}
+    </DetailSection>
+  );
+}
+
+function IngressHighlightsSection({ detail, onNavigateRequest }: ResourceDetailRendererProps) {
+  const kind = normalizeKind(detail.descriptor.resourceKind || detail.overview.kind);
+  if (!["ingress", "ingressroute"].includes(kind)) {
+    return null;
+  }
+
+  const sourceKind = kind === "ingressroute" ? "IngressRoute" : "Ingress";
+  const routeEndpoints = detail.network.endpoints.filter(
+    (item) =>
+      item.sourceKind === sourceKind &&
+      (Boolean(item.path) || Boolean(item.host) || Boolean(item.sourceId) || Boolean(item.ports?.length)),
+  );
+  const exposureEndpoints = detail.network.endpoints.filter(
+    (item) => item.sourceKind === sourceKind && !item.path && !item.host && (item.ip || item.hostname),
+  );
+  const backendRefs = detail.associations.filter((item) => item.associationType === "backend-service");
+  const tlsRefs = detail.associations.filter((item) => item.associationType === "tls-secret");
+  const middlewareRefs = detail.associations.filter((item) => item.associationType === "route-middleware");
+  const distinctHosts = dedupeStrings(routeEndpoints.map((item) => item.host));
+  const distinctPaths = dedupeStrings(routeEndpoints.map((item) => item.path));
+  const entryPoints = kind === "ingressroute" ? getIngressRouteEntryPoints(routeEndpoints) : [];
+
+  return (
+    <DetailSection
+      title={kind === "ingressroute" ? "IngressRoute 高频区" : "Ingress 高频区"}
+      subtitle={
+        kind === "ingressroute"
+          ? "突出入口点、匹配规则、后端服务、中间件与 TLS"
+          : "突出 Host/Path、后端服务与 TLS 配置"
+      }
+    >
+      <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+        <DetailDescriptions
+          items={[
+            kind === "ingress" && distinctHosts.length > 0
+              ? { key: "hosts", label: "Host", value: distinctHosts.length }
+              : null,
+            distinctPaths.length > 0
+              ? { key: "paths", label: kind === "ingressroute" ? "匹配规则" : "Path", value: distinctPaths.length }
+              : null,
+            kind === "ingressroute" && routeEndpoints.length > 0
+              ? { key: "routes", label: "路由条目", value: routeEndpoints.length }
+              : null,
+            entryPoints.length > 0 ? { key: "entryPoints", label: "Entrypoints", value: entryPoints.length } : null,
+            backendRefs.length > 0 ? { key: "backends", label: "后端服务", value: backendRefs.length } : null,
+            tlsRefs.length > 0 ? { key: "tls", label: "TLS", value: tlsRefs.length } : null,
+            middlewareRefs.length > 0 ? { key: "middlewares", label: "中间件", value: middlewareRefs.length } : null,
+          ].filter(Boolean) as Array<{ key: string; label: string; value: React.ReactNode }>}
+          emptyText={kind === "ingressroute" ? "暂无 IngressRoute 摘要" : "暂无 Ingress 摘要"}
+        />
+
+        {entryPoints.length > 0 ? (
+          <div>
+            <Typography.Text strong>Entrypoints</Typography.Text>
+            <div style={{ marginTop: 8 }}>
+              <TagList items={entryPoints} color="cyan" />
+            </div>
+          </div>
+        ) : null}
+
+        {routeEndpoints.length > 0 ? (
+          <div>
+            <Typography.Text strong>{kind === "ingressroute" ? "路由规则" : "转发规则"}</Typography.Text>
+            <List
+              size="small"
+              dataSource={routeEndpoints}
+              renderItem={(item, index) => {
+                const target = resolveNetworkEndpointNavigation(detail, item);
+                const endpointEntryPoints =
+                  kind === "ingressroute"
+                    ? (typeof item.host === "string"
+                        ? item.host
+                            .split(",")
+                            .map((entryPoint) => entryPoint.trim())
+                            .filter(Boolean)
+                        : [])
+                    : [];
+
+                return (
+                  <List.Item>
+                    <Space orientation="vertical" size={6} style={{ width: "100%" }}>
+                      <Space wrap size={[8, 8]}>
+                        {kind === "ingressroute" ? null : item.host ? <Tag color="green">{item.host}</Tag> : <Tag>默认 Host</Tag>}
+                        {item.path ? (
+                          <Typography.Text code>{item.path}</Typography.Text>
+                        ) : kind === "ingress" ? (
+                          <Typography.Text code>/</Typography.Text>
+                        ) : (
+                          <Typography.Text type="secondary">未声明匹配规则</Typography.Text>
+                        )}
+                        <Tag color="blue">Backend</Tag>
+                        {target && onNavigateRequest ? (
+                          <Typography.Link strong onClick={() => onNavigateRequest(target)}>
+                            {item.name}
+                          </Typography.Link>
+                        ) : (
+                          <Typography.Text strong>{item.name}</Typography.Text>
+                        )}
+                        {item.namespace ? <Typography.Text type="secondary">{item.namespace}</Typography.Text> : null}
+                      </Space>
+
+                      {endpointEntryPoints.length > 0 ? (
+                        <Space wrap size={[6, 6]}>
+                          {endpointEntryPoints.map((entryPoint) => (
+                            <Tag key={`${item.name}-${entryPoint}-${index}`} color="cyan">
+                              {entryPoint}
+                            </Tag>
+                          ))}
+                        </Space>
+                      ) : null}
+
+                      {item.ports && item.ports.length > 0 ? (
+                        <Space wrap size={[6, 6]}>
+                          {item.ports.map((port) => (
+                            <Tag key={`${item.name}-${port.port}-${port.protocol ?? "tcp"}`}>
+                              {port.protocol ?? "TCP"} {port.port}
+                              {port.targetPort ? ` -> ${port.targetPort}` : ""}
+                            </Tag>
+                          ))}
+                        </Space>
+                      ) : null}
+                    </Space>
+                  </List.Item>
+                );
+              }}
+            />
+          </div>
+        ) : null}
+
+        {backendRefs.length > 0 ? (
+          <div>
+            <Typography.Text strong>后端服务</Typography.Text>
+            <List
+              size="small"
+              dataSource={backendRefs}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Tag color="blue">{item.kind}</Tag>
+                    {item.id && onNavigateRequest ? (
+                      <Typography.Link strong onClick={() => emitNavigateRequest(onNavigateRequest, item.kind, item.id)}>
+                        {item.name}
+                      </Typography.Link>
+                    ) : (
+                      <Typography.Text strong>{item.name}</Typography.Text>
+                    )}
+                    {item.namespace ? <Typography.Text type="secondary">{item.namespace}</Typography.Text> : null}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+
+        {middlewareRefs.length > 0 ? (
+          <div>
+            <Typography.Text strong>中间件</Typography.Text>
+            <List
+              size="small"
+              dataSource={middlewareRefs}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Tag color="geekblue">{item.kind}</Tag>
+                    {item.id && onNavigateRequest ? (
+                      <Typography.Link strong onClick={() => emitNavigateRequest(onNavigateRequest, item.kind, item.id)}>
+                        {item.name}
+                      </Typography.Link>
+                    ) : (
+                      <Typography.Text strong>{item.name}</Typography.Text>
+                    )}
+                    {item.namespace ? <Typography.Text type="secondary">{item.namespace}</Typography.Text> : null}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+
+        {tlsRefs.length > 0 ? (
+          <div>
+            <Typography.Text strong>TLS</Typography.Text>
+            <List
+              size="small"
+              dataSource={tlsRefs}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Tag color="magenta">{item.kind}</Tag>
+                    {item.id && onNavigateRequest ? (
+                      <Typography.Link strong onClick={() => emitNavigateRequest(onNavigateRequest, item.kind, item.id)}>
+                        {item.name}
+                      </Typography.Link>
+                    ) : (
+                      <Typography.Text strong>{item.name}</Typography.Text>
+                    )}
+                    {item.namespace ? <Typography.Text type="secondary">{item.namespace}</Typography.Text> : null}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+
+        {exposureEndpoints.length > 0 ? (
+          <div>
+            <Typography.Text strong>对外地址</Typography.Text>
+            <List
+              size="small"
+              dataSource={exposureEndpoints}
+              renderItem={(item, index) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Tag color="green">{sourceKind}</Tag>
+                    <Typography.Text strong>{item.hostname ?? item.ip ?? `${detail.overview.name}-${index + 1}`}</Typography.Text>
+                    {item.hostname && item.ip ? <Typography.Text type="secondary">{item.ip}</Typography.Text> : null}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+      </Space>
+    </DetailSection>
+  );
+}
+
 function OverviewHeroSection({ detail }: ResourceDetailRendererProps) {
   const runtimeHighlights = [
     detail.runtime.phase ? { label: "阶段", value: renderFieldValue("phase", detail.runtime.phase) } : null,
@@ -1600,6 +2080,8 @@ export function ResourceDetailContent({ detail, onNavigateRequest }: ResourceDet
       <PodHighlightsSection detail={detail} onNavigateRequest={onNavigateRequest} />
       <WorkloadHighlightsSection detail={detail} onNavigateRequest={onNavigateRequest} />
       <ServiceHighlightsSection detail={detail} onNavigateRequest={onNavigateRequest} />
+      <EndpointHighlightsSection detail={detail} onNavigateRequest={onNavigateRequest} />
+      <IngressHighlightsSection detail={detail} onNavigateRequest={onNavigateRequest} />
       <NetworkPolicyHighlightsSection detail={detail} />
 
       <ServiceBackendsSection detail={detail} onNavigateRequest={onNavigateRequest} />

@@ -3,9 +3,8 @@
 import { LockOutlined, LoginOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Checkbox, Divider, Form, Input, Space, Tag, Typography } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { useThemeMode } from "@/components/theme-context";
 import { sanitizeInternalReturnTo } from "@/lib/login-return";
 
 type LoginForm = {
@@ -69,15 +68,12 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated, login, lastRequestId } = useAuth();
-  const { mode } = useThemeMode();
   const { message } = App.useApp();
-  const isDark = mode === "dark";
+  const isDark = false;
   const [submitting, setSubmitting] = useState(false);
   const [apiReachable, setApiReachable] = useState<boolean | null>(null);
   const [apiProbeFailures, setApiProbeFailures] = useState(0);
   const [isCompact, setIsCompact] = useState(false);
-  const apiProbeStartedAtRef = useRef<number>(Date.now());
-  const apiProbeGraceMs = 30_000;
   const returnTo = useMemo(
     () => sanitizeInternalReturnTo(searchParams.get("returnTo")),
     [searchParams],
@@ -235,7 +231,6 @@ export default function LoginPage() {
   const shouldShowApiWarning =
     apiReachable === false &&
     apiProbeFailures >= 3 &&
-    Date.now() - apiProbeStartedAtRef.current >= apiProbeGraceMs &&
     !submitting;
 
   return (
@@ -413,8 +408,8 @@ export default function LoginPage() {
                   type="warning"
                   showIcon
                   style={{ marginBottom: 16 }}
-                  message="控制面 API 暂不可达"
-                  description="后端或同源 /api 代理短暂不可用时会显示此提示，若持续存在请检查后端服务。"
+                  message="控制面服务暂不可达"
+                  description="当前无法连接控制面服务，请稍后重试。"
                 />
               ) : null}
 

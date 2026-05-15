@@ -215,8 +215,9 @@ prepare_frontend_standalone() {
 # ── 服务健康检查 ────────────────────────────────────────
 wait_for_postgres() {
   local db_url="${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops}"
+  local check_url="${db_url%%\?*}"
   echo "[预检] 正在检查 PostgreSQL..."
-  if ! psql "$db_url" -c "SELECT 1" &>/dev/null; then
+  if ! psql "$check_url" -c "SELECT 1" &>/dev/null; then
     echo "[错误] 无法连接 PostgreSQL：$db_url" >&2
     echo "  请确认 PostgreSQL 已启动且数据库已创建。" >&2
     echo "  可执行：bash scripts/db-init.sh" >&2

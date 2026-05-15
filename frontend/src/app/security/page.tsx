@@ -30,12 +30,14 @@ import {
   message,
 } from "antd";
 import type { TableProps } from "antd";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { NamespaceSelect } from "@/components/namespace-select";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { buildTablePagination } from "@/lib/table/pagination";
+import { usePersistentTableSortState } from "@/lib/table/use-persistent-table-sort-state";
 import {
   type AuditLogRecord,
   type SecurityEvent,
@@ -45,7 +47,8 @@ import {
   resolveSecurityEvent,
 } from "@/lib/api/security";
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
+const CLIENT_FETCH_SIZE = 500;
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -59,6 +62,49 @@ function compareText(left: string | undefined, right: string | undefined): numbe
 
 function compareTime(left: string | undefined, right: string | undefined): number {
   return (Date.parse(left ?? "") || 0) - (Date.parse(right ?? "") || 0);
+}
+
+function normalizeValue(value: string | undefined | null): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function matchesClusterSelection(cluster: string | undefined, selectedClusterId: string, clusterMap: Record<string, string>): boolean {
+  if (!selectedClusterId) return true;
+  const normalizedCluster = normalizeValue(cluster);
+  if (!normalizedCluster) return false;
+  return (
+    normalizedCluster === normalizeValue(selectedClusterId) ||
+    normalizedCluster === normalizeValue(clusterMap[selectedClusterId])
+  );
+}
+
+function getEventTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    VulnerabilityScan: "漏洞扫描",
+    PrivilegeEscalation: "权限提升",
+    AuthenticationFailure: "认证失败",
+    NetworkPolicyViolation: "网络策略违规",
+    PolicyViolation: "策略违规",
+    SecretExposure: "敏感信息暴露",
+    RBACViolation: "RBAC 权限违规",
+  };
+  return map[type] ?? type;
+}
+
+function getActionLabel(action: string): string {
+  const map: Record<string, string> = {
+    create: "创建",
+    update: "更新",
+    delete: "删除",
+    enable: "启用",
+    disable: "禁用",
+    batch: "批量操作",
+    scale: "扩缩容",
+    restart: "重启",
+    rollback: "回滚",
+    query: "查询",
+  };
+  return map[action] ?? action;
 }
 
 function SeverityTag({ severity }: { severity: string }) {
@@ -100,7 +146,7 @@ function ActionTag({ action }: { action: string }) {
     rollback: "magenta",
     query: "default",
   };
-  return <Tag color={map[action] ?? "default"}>{action}</Tag>;
+  return <Tag color={map[action] ?? "default"}>{getActionLabel(action)}</Tag>;
 }
 
 function ResultTag({ result }: { result: string }) {
@@ -118,14 +164,24 @@ function SecurityEventsTab() {
 
   const [severityFilter, setSeverityFilter] = useState<string | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter();
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
-  const [sortBy, setSortBy] = useState<string>("");
-  const [sortOrder, setSortOrder] = useState<"ascend" | "descend" | null>(null);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const enabled = !isInitializing && Boolean(accessToken);
+  const {
+    sortBy,
+    sortOrder,
+    getSortableColumnProps,
+    handleTableChange,
+  } = usePersistentTableSortState<SecurityEvent>({
+    storageKey: "security.events.sort",
+    allowedSortBy: ["severity", "title", "type", "resourceName", "cluster", "occurredAt", "status"],
+    defaultSortBy: "occurredAt",
+    defaultSortOrder: "desc",
+  });
   const clustersQuery = useQuery({
     queryKey: ["clusters", "security-events", accessToken],
     queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken),
@@ -139,20 +195,15 @@ function SecurityEventsTab() {
     () => [{ label: "全部集群", value: "" }, ...(clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id }))],
     [clustersQuery.data?.items],
   );
-  const clusterNameToIdMap = useMemo(
-    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.name, item.id])),
-    [clustersQuery.data?.items],
-  );
-
   const { data, isLoading } = useQuery({
-    queryKey: ["security", "events", severityFilter, statusFilter, clusterId, namespace, page],
+    queryKey: ["security", "events", severityFilter, statusFilter, accessToken],
     queryFn: () =>
       getSecurityEvents(
         {
           severity: severityFilter,
           status: statusFilter,
-          page,
-          pageSize: PAGE_SIZE,
+          page: 1,
+          pageSize: CLIENT_FETCH_SIZE,
         },
         accessToken || undefined,
       ),
@@ -165,11 +216,12 @@ function SecurityEventsTab() {
       Array.from(
         new Set(
           (data?.items ?? [])
+            .filter((item) => matchesClusterSelection(item.cluster, clusterId, clusterMap))
             .map((item) => item.namespace?.trim() ?? "")
             .filter((item) => item.length > 0),
         ),
       ),
-    [data?.items],
+    [clusterId, clusterMap, data?.items],
   );
 
   const resolveMutation = useMutation({
@@ -187,10 +239,7 @@ function SecurityEventsTab() {
   const filteredItems = useMemo(() => {
     const raw = data?.items ?? [];
     const scoped = raw.filter((item) => {
-      if (clusterId) {
-        const itemClusterId = clusterNameToIdMap[item.cluster] ?? item.cluster;
-        if (itemClusterId !== clusterId) return false;
-      }
+      if (!matchesClusterSelection(item.cluster, clusterId, clusterMap)) return false;
       if (namespace && (item.namespace ?? "") !== namespace) return false;
       return true;
     });
@@ -204,12 +253,12 @@ function SecurityEventsTab() {
         item.cluster.toLowerCase().includes(kw),
     );
     return withKeyword;
-  }, [clusterId, clusterNameToIdMap, data?.items, keyword, namespace]);
+  }, [clusterId, clusterMap, data?.items, keyword, namespace]);
 
   const sortedItems = useMemo(() => {
     const list = [...filteredItems];
     if (!sortBy || !sortOrder) return list;
-    const direction = sortOrder === "ascend" ? 1 : -1;
+    const direction = sortOrder === "asc" ? 1 : -1;
     list.sort((left, right) => {
       switch (sortBy) {
         case "severity":
@@ -233,6 +282,18 @@ function SecurityEventsTab() {
     return list;
   }, [filteredItems, sortBy, sortOrder]);
 
+  const pagedItems = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return sortedItems.slice(start, start + pageSize);
+  }, [page, pageSize, sortedItems]);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(sortedItems.length / pageSize));
+    if (page > maxPage) {
+      setPage(maxPage);
+    }
+  }, [page, pageSize, sortedItems.length]);
+
   const handleRefreshEvents = async () => {
     setRefreshingEvents(true);
     try {
@@ -248,19 +309,17 @@ function SecurityEventsTab() {
       dataIndex: "severity",
       key: "severity",
       width: 90,
-      sorter: true,
-      sortOrder: sortBy === "severity" ? sortOrder : null,
+      ...getSortableColumnProps("severity", isLoading && !data),
       render: (v: string) => <SeverityTag severity={v} />,
     },
     {
       title: "事件标题",
       dataIndex: "title",
       key: "title",
-      sorter: true,
-      sortOrder: sortBy === "title" ? sortOrder : null,
+      ...getSortableColumnProps("title", isLoading && !data),
       ellipsis: true,
       render: (v: string, record) => (
-        <Tooltip title={`类型: ${record.type}`}>
+        <Tooltip title={`事件类型: ${getEventTypeLabel(record.type)}`}>
           <span>{v}</span>
         </Tooltip>
       ),
@@ -270,11 +329,10 @@ function SecurityEventsTab() {
       dataIndex: "type",
       key: "type",
       width: 180,
-      sorter: true,
-      sortOrder: sortBy === "type" ? sortOrder : null,
+      ...getSortableColumnProps("type", isLoading && !data),
       render: (v: string) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {v}
+          {getEventTypeLabel(v)}
         </Typography.Text>
       ),
     },
@@ -283,8 +341,7 @@ function SecurityEventsTab() {
       dataIndex: "resourceName",
       key: "resourceName",
       width: 160,
-      sorter: true,
-      sortOrder: sortBy === "resourceName" ? sortOrder : null,
+      ...getSortableColumnProps("resourceName", isLoading && !data),
       render: (v: string) => (
         <Typography.Text code style={{ fontSize: 12 }}>
           {v}
@@ -296,8 +353,7 @@ function SecurityEventsTab() {
       dataIndex: "cluster",
       key: "cluster",
       width: 140,
-      sorter: true,
-      sortOrder: sortBy === "cluster" ? sortOrder : null,
+      ...getSortableColumnProps("cluster", isLoading && !data),
       render: (v: string) => <Tag>{getClusterDisplayName(clusterMap, v)}</Tag>,
     },
     {
@@ -305,8 +361,7 @@ function SecurityEventsTab() {
       dataIndex: "occurredAt",
       key: "occurredAt",
       width: 155,
-      sorter: true,
-      sortOrder: sortBy === "occurredAt" ? sortOrder : null,
+      ...getSortableColumnProps("occurredAt", isLoading && !data),
       render: (v: string) => (
         <Typography.Text style={{ fontSize: 12 }}>{formatTime(v)}</Typography.Text>
       ),
@@ -316,8 +371,7 @@ function SecurityEventsTab() {
       dataIndex: "status",
       key: "status",
       width: 100,
-      sorter: true,
-      sortOrder: sortBy === "status" ? sortOrder : null,
+      ...getSortableColumnProps("status", isLoading && !data),
       render: (v: string) => <EventStatusTag status={v} />,
     },
     {
@@ -357,8 +411,7 @@ function SecurityEventsTab() {
           options={clusterOptions}
           loading={clustersQuery.isLoading}
           onChange={(v) => {
-            setClusterId(v);
-            setNamespace("");
+            onClusterChange(v);
             setPage(1);
           }}
         />
@@ -366,12 +419,13 @@ function SecurityEventsTab() {
           style={{ width: 180 }}
           value={namespace}
           onChange={(v) => {
-            setNamespace(v);
+            onNamespaceChange(v);
             setPage(1);
           }}
           clusterId={clusterId}
           knownNamespaces={knownNamespaces}
-          disabled={!clusterId}
+          disabled={namespaceDisabled}
+          placeholder={namespacePlaceholder}
         />
         <Select
           placeholder="严重程度"
@@ -383,11 +437,11 @@ function SecurityEventsTab() {
             setPage(1);
           }}
           options={[
-            { label: "全部", value: undefined },
-            { label: "严重 (critical)", value: "critical" },
-            { label: "高危 (high)", value: "high" },
-            { label: "中危 (medium)", value: "medium" },
-            { label: "低危 (low)", value: "low" },
+            { label: "全部严重程度", value: undefined },
+            { label: "严重", value: "critical" },
+            { label: "高危", value: "high" },
+            { label: "中危", value: "medium" },
+            { label: "低危", value: "low" },
           ]}
         />
         <Select
@@ -400,9 +454,9 @@ function SecurityEventsTab() {
             setPage(1);
           }}
           options={[
-            { label: "全部", value: undefined },
-            { label: "待处理 (open)", value: "open" },
-            { label: "已解决 (resolved)", value: "resolved" },
+            { label: "全部状态", value: undefined },
+            { label: "待处理", value: "open" },
+            { label: "已解决", value: "resolved" },
           ]}
         />
         <Input
@@ -410,7 +464,10 @@ function SecurityEventsTab() {
           prefix={<SearchOutlined />}
           style={{ width: 280 }}
           value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
+          onChange={(e) => {
+            setKeyword(e.target.value);
+            setPage(1);
+          }}
           allowClear
         />
         <Button
@@ -425,23 +482,28 @@ function SecurityEventsTab() {
         <Table<SecurityEvent>
           rowKey="id"
           columns={columns}
-          dataSource={sortedItems}
+          dataSource={pagedItems}
           loading={isLoading}
           size="small"
           scroll={{ x: 1000 }}
-          onChange={(_pagination, _filters, sorter) => {
-            if (Array.isArray(sorter)) return;
-            const nextSortBy = typeof sorter.columnKey === "string" ? sorter.columnKey : "";
-            const nextSortOrder = sorter.order ?? null;
-            setSortBy(nextSortBy);
-            setSortOrder(nextSortOrder);
-            setPage(1);
+          onChange={(pagination, filters, sorter, extra) => {
+            handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
+            if (extra.action === "sort") {
+              setPage(1);
+            }
           }}
           pagination={buildTablePagination({
             current: page,
-            pageSize: PAGE_SIZE,
-            total: keyword.trim() || clusterId || namespace || sortBy ? sortedItems.length : (data?.total ?? 0),
-            onChange: (p) => setPage(p),
+            pageSize,
+            total: sortedItems.length,
+            onChange: (nextPage, nextPageSize) => {
+              if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+                return;
+              }
+              setPage(nextPage);
+            },
           })}
         rowClassName={(record) =>
           record.severity === "critical" && record.status === "open"
@@ -462,16 +524,26 @@ function AuditLogsTab() {
   const [resultFilter, setResultFilter] = useState<string | undefined>(undefined);
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
-  const [sortBy, setSortBy] = useState<string>("");
-  const [sortOrder, setSortOrder] = useState<"ascend" | "descend" | null>(null);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const enabled = !isInitializing && Boolean(accessToken);
+  const {
+    sortBy,
+    sortOrder,
+    getSortableColumnProps,
+    handleTableChange,
+  } = usePersistentTableSortState<AuditLogRecord>({
+    storageKey: "security.audit-logs.sort",
+    allowedSortBy: ["actor", "role", "action", "resourceType", "resourceId", "result", "timestamp"],
+    defaultSortBy: "timestamp",
+    defaultSortOrder: "desc",
+  });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["security", "audit-logs", actionFilter, resultFilter, page],
+    queryKey: ["security", "audit-logs", actionFilter, resultFilter, accessToken],
     queryFn: () =>
       getAuditLogs(
-        { action: actionFilter, result: resultFilter, page, pageSize: PAGE_SIZE },
+        { action: actionFilter, result: resultFilter, page: 1, pageSize: CLIENT_FETCH_SIZE },
         accessToken || undefined,
       ),
     enabled,
@@ -492,7 +564,7 @@ function AuditLogsTab() {
   const sortedItems = useMemo(() => {
     const list = [...filteredItems];
     if (!sortBy || !sortOrder) return list;
-    const direction = sortOrder === "ascend" ? 1 : -1;
+    const direction = sortOrder === "asc" ? 1 : -1;
     list.sort((left, right) => {
       switch (sortBy) {
         case "actor":
@@ -516,6 +588,18 @@ function AuditLogsTab() {
     return list;
   }, [filteredItems, sortBy, sortOrder]);
 
+  const pagedItems = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return sortedItems.slice(start, start + pageSize);
+  }, [page, pageSize, sortedItems]);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(sortedItems.length / pageSize));
+    if (page > maxPage) {
+      setPage(maxPage);
+    }
+  }, [page, pageSize, sortedItems.length]);
+
   const handleRefreshAuditLogs = async () => {
     setRefreshingAuditLogs(true);
     try {
@@ -531,8 +615,7 @@ function AuditLogsTab() {
       dataIndex: "actor",
       key: "actor",
       width: 130,
-      sorter: true,
-      sortOrder: sortBy === "actor" ? sortOrder : null,
+      ...getSortableColumnProps("actor", isLoading && !data),
       render: (v: string) => (
         <Space size={4}>
           <Typography.Text strong style={{ fontSize: 13 }}>
@@ -546,8 +629,7 @@ function AuditLogsTab() {
       dataIndex: "role",
       key: "role",
       width: 140,
-      sorter: true,
-      sortOrder: sortBy === "role" ? sortOrder : null,
+      ...getSortableColumnProps("role", isLoading && !data),
       render: (v: string) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {v}
@@ -559,8 +641,7 @@ function AuditLogsTab() {
       dataIndex: "action",
       key: "action",
       width: 100,
-      sorter: true,
-      sortOrder: sortBy === "action" ? sortOrder : null,
+      ...getSortableColumnProps("action", isLoading && !data),
       render: (v: string) => <ActionTag action={v} />,
     },
     {
@@ -568,8 +649,7 @@ function AuditLogsTab() {
       dataIndex: "resourceType",
       key: "resourceType",
       width: 160,
-      sorter: true,
-      sortOrder: sortBy === "resourceType" ? sortOrder : null,
+      ...getSortableColumnProps("resourceType", isLoading && !data),
       render: (v: string) => (
         <Tag style={{ margin: 0 }}>{v}</Tag>
       ),
@@ -578,8 +658,7 @@ function AuditLogsTab() {
       title: "资源名称",
       dataIndex: "resourceId",
       key: "resourceId",
-      sorter: true,
-      sortOrder: sortBy === "resourceId" ? sortOrder : null,
+      ...getSortableColumnProps("resourceId", isLoading && !data),
       ellipsis: true,
       render: (v: string) => (
         <Typography.Text code style={{ fontSize: 12 }}>
@@ -592,8 +671,7 @@ function AuditLogsTab() {
       dataIndex: "result",
       key: "result",
       width: 80,
-      sorter: true,
-      sortOrder: sortBy === "result" ? sortOrder : null,
+      ...getSortableColumnProps("result", isLoading && !data),
       render: (v: string) => <ResultTag result={v} />,
     },
     {
@@ -601,8 +679,7 @@ function AuditLogsTab() {
       dataIndex: "timestamp",
       key: "timestamp",
       width: 155,
-      sorter: true,
-      sortOrder: sortBy === "timestamp" ? sortOrder : null,
+      ...getSortableColumnProps("timestamp", isLoading && !data),
       render: (v: string) => (
         <Typography.Text style={{ fontSize: 12 }}>{formatTime(v)}</Typography.Text>
       ),
@@ -622,13 +699,13 @@ function AuditLogsTab() {
             setPage(1);
           }}
           options={[
-            { label: "全部", value: undefined },
-            { label: "创建 (create)", value: "create" },
-            { label: "更新 (update)", value: "update" },
-            { label: "删除 (delete)", value: "delete" },
-            { label: "启用 (enable)", value: "enable" },
-            { label: "禁用 (disable)", value: "disable" },
-            { label: "查询 (query)", value: "query" },
+            { label: "全部操作", value: undefined },
+            { label: "创建", value: "create" },
+            { label: "更新", value: "update" },
+            { label: "删除", value: "delete" },
+            { label: "启用", value: "enable" },
+            { label: "禁用", value: "disable" },
+            { label: "查询", value: "query" },
           ]}
         />
         <Select
@@ -641,9 +718,9 @@ function AuditLogsTab() {
             setPage(1);
           }}
           options={[
-            { label: "全部", value: undefined },
-            { label: "成功 (success)", value: "success" },
-            { label: "失败 (failure)", value: "failure" },
+            { label: "全部结果", value: undefined },
+            { label: "成功", value: "success" },
+            { label: "失败", value: "failure" },
           ]}
         />
         <Input
@@ -651,7 +728,10 @@ function AuditLogsTab() {
           prefix={<SearchOutlined />}
           style={{ width: 280 }}
           value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
+          onChange={(e) => {
+            setKeyword(e.target.value);
+            setPage(1);
+          }}
           allowClear
         />
         <Button
@@ -666,23 +746,28 @@ function AuditLogsTab() {
       <Table<AuditLogRecord>
         rowKey="id"
         columns={columns}
-        dataSource={sortedItems}
+        dataSource={pagedItems}
         loading={isLoading}
         size="small"
         scroll={{ x: 900 }}
-        onChange={(_pagination, _filters, sorter) => {
-          if (Array.isArray(sorter)) return;
-          const nextSortBy = typeof sorter.columnKey === "string" ? sorter.columnKey : "";
-          const nextSortOrder = sorter.order ?? null;
-          setSortBy(nextSortBy);
-          setSortOrder(nextSortOrder);
-          setPage(1);
+        onChange={(pagination, filters, sorter, extra) => {
+          handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
+          if (extra.action === "sort") {
+            setPage(1);
+          }
         }}
         pagination={buildTablePagination({
           current: page,
-          pageSize: PAGE_SIZE,
-          total: keyword.trim() || sortBy ? sortedItems.length : (data?.total ?? 0),
-          onChange: (p) => setPage(p),
+          pageSize,
+          total: sortedItems.length,
+          onChange: (nextPage, nextPageSize) => {
+            if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
+              setPageSize(nextPageSize);
+              setPage(1);
+              return;
+            }
+            setPage(nextPage);
+          },
         })}
       />
     </>
@@ -755,8 +840,10 @@ export default function SecurityPage() {
               <Statistic
                 title="高危漏洞数"
                 value={stats?.criticalVulnerabilities ?? 0}
-                valueStyle={{
-                  color: (stats?.criticalVulnerabilities ?? 0) > 0 ? "#ff4d4f" : undefined,
+                styles={{
+                  content: {
+                    color: (stats?.criticalVulnerabilities ?? 0) > 0 ? "#ff4d4f" : undefined,
+                  },
                 }}
                 prefix={<LockOutlined />}
                 suffix={
@@ -774,8 +861,10 @@ export default function SecurityPage() {
               <Statistic
                 title="待处理事件"
                 value={stats?.openEvents ?? 0}
-                valueStyle={{
-                  color: (stats?.openEvents ?? 0) > 0 ? "#faad14" : undefined,
+                styles={{
+                  content: {
+                    color: (stats?.openEvents ?? 0) > 0 ? "#faad14" : undefined,
+                  },
                 }}
                 prefix={<ExclamationCircleOutlined />}
               />
@@ -787,7 +876,7 @@ export default function SecurityPage() {
                 title="合规评分"
                 value={stats?.complianceScore ?? 0}
                 suffix="%"
-                valueStyle={{ color: complianceColor }}
+                styles={{ content: { color: complianceColor } }}
                 prefix={<SafetyCertificateOutlined />}
               />
             </Card>

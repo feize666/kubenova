@@ -32,7 +32,7 @@ export function buildTablePagination({
     pageSizeOptions: pageSizeOptions
       ? pageSizeOptions.map((value) => String(value))
       : [...DEFAULT_PAGE_SIZE_OPTIONS],
-    position: ["bottomRight"],
+    placement: ["bottomEnd"],
     showTotal: showTotal ?? ((count) => `共 ${count} 条`),
     onChange,
   };

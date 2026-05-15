@@ -17,6 +17,22 @@ type ThemeContextValue = {
 
 const ThemeModeContext = createContext<ThemeContextValue | null>(null);
 
+function getInitialThemeMode(): ThemeMode {
+  if (typeof document !== "undefined") {
+    const attr = document.documentElement.getAttribute("data-theme");
+    if (attr === "dark" || attr === "light") {
+      return attr;
+    }
+  }
+  if (typeof window !== "undefined") {
+    const saved = window.localStorage.getItem("kubenova-theme-mode");
+    if (saved === "dark" || saved === "light") {
+      return saved;
+    }
+  }
+  return "light";
+}
+
 export function useThemeMode() {
   const ctx = useContext(ThemeModeContext);
   if (!ctx) {
@@ -126,22 +142,11 @@ const lightTheme = {
 };
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setMode] = useState<ThemeMode>(() => {
-    if (typeof window !== "undefined") {
-      const saved = window.localStorage.getItem("kubenova-theme-mode");
-      if (saved === "dark" || saved === "light") {
-        return saved;
-      }
-    }
-    return "light";
-  });
+  const [mode, setMode] = useState<ThemeMode>(getInitialThemeMode);
 
-  // 切换时同步到 document.documentElement，让 CSS 变量选择器生效
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", mode);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("kubenova-theme-mode", mode);
-    }
+    window.localStorage.setItem("kubenova-theme-mode", mode);
   }, [mode]);
 
   const value = useMemo(
@@ -154,7 +159,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return (
     <ThemeModeContext.Provider value={value}>
       <ConfigProvider locale={zhCN} theme={themeConfig}>
-        <div data-theme={mode}>{children}</div>
+        {children}
       </ConfigProvider>
     </ThemeModeContext.Provider>
   );

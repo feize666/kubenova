@@ -335,7 +335,7 @@ function getFailureCopy(category: TopologyFailureCategory): { title: string; des
   if (category === "service-unavailable") {
     return {
       title: "集群服务暂不可达",
-      description: "后端服务返回 5xx，拓扑数据拉取失败。可稍后重试或检查 control-api / k8s 连接。",
+      description: "拓扑数据拉取失败。可稍后重试，或检查集群接入状态。",
     };
   }
   if (category === "network-timeout") {
@@ -346,7 +346,7 @@ function getFailureCopy(category: TopologyFailureCategory): { title: string; des
   }
   return {
     title: "拓扑数据不可用",
-    description: "无法获取当前集群拓扑数据，请重试或查看后端日志。",
+    description: "无法获取当前集群拓扑数据，请稍后重试。",
   };
 }
 
@@ -1749,19 +1749,19 @@ const TopoNode = memo(({ data, selected }: NodeProps<TopoNodeData>) => {
           ? "1px dashed rgba(191, 219, 254, 0.46)"
           : `1px ${isGroupNode && !isLaneNode ? "dashed" : "solid"} ${selected ? token.border : token.borderAlpha}`,
         background: isGroupPanelNode
-          ? "linear-gradient(180deg, rgba(255,255,255,0.48) 0%, rgba(248,250,252,0.42) 100%)"
+          ? "var(--topology-group-panel-bg)"
           : isLaneNode
-          ? "rgba(255,255,255,0.78)"
+          ? "var(--topology-lane-bg)"
           : selected
             ? token.bg
             : "var(--topology-card-bg)",
         boxShadow: isGroupPanelNode
-          ? "inset 0 1px 0 rgba(255,255,255,0.72)"
+          ? "var(--topology-group-panel-shadow)"
           : isLaneNode
-          ? "inset 0 1px 0 rgba(255,255,255,0.88)"
+          ? "var(--topology-lane-shadow)"
           : selected
             ? `0 0 0 1px ${token.border}33, 0 8px 18px rgba(15, 23, 42, 0.1)`
-            : "0 2px 8px rgba(15, 23, 42, 0.05)",
+            : "var(--topology-node-shadow)",
         overflow: "hidden",
         transition: "transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease",
         pointerEvents: isLaneNode || isGroupPanelNode ? "none" : "auto",
@@ -2325,11 +2325,11 @@ function TopologyCanvas({
 
       {clusterDataUnavailable ? (
         <div className="topology-canvas-overlay">
-          <Alert
-            type="warning"
-            showIcon
-            message={getFailureCopy(unavailableCategory).title}
-            description={
+        <Alert
+          type="warning"
+          showIcon
+          title={getFailureCopy(unavailableCategory).title}
+          description={
               <div style={{ display: "grid", gap: 8 }}>
                 <span>{getFailureCopy(unavailableCategory).description}</span>
                 <span style={{ color: "var(--topology-overview-subtle)" }}>{unavailableSummary}</span>
@@ -4035,9 +4035,9 @@ export default function NetworkTopologyPage() {
   const toolbarShellStyle: React.CSSProperties = {
     padding: "8px 10px",
     borderRadius: 18,
-    border: "1px solid rgba(203, 213, 225, 0.42)",
-    background: "linear-gradient(180deg, rgba(255,255,255,0.78) 0%, rgba(248,250,252,0.66) 100%)",
-    boxShadow: "0 10px 26px rgba(15, 23, 42, 0.045), inset 0 1px 0 rgba(255,255,255,0.68)",
+    border: "1px solid var(--topology-toolbar-shell-border)",
+    background: "var(--topology-toolbar-shell-bg)",
+    boxShadow: "var(--topology-toolbar-shell-shadow)",
     backdropFilter: "blur(14px)",
   };
   const toolbarPillBaseStyle: React.CSSProperties = {
@@ -4045,9 +4045,9 @@ export default function NetworkTopologyPage() {
     minWidth: 168,
     padding: "10px 14px",
     borderRadius: 16,
-    border: "1px solid rgba(191, 219, 254, 0.7)",
-    background: "linear-gradient(180deg, rgba(255,255,255,0.84) 0%, rgba(239,246,255,0.74) 100%)",
-    boxShadow: "0 8px 18px rgba(37, 99, 235, 0.06), inset 0 1px 0 rgba(255,255,255,0.84)",
+    border: "1px solid var(--topology-toolbar-pill-border)",
+    background: "var(--topology-toolbar-pill-bg)",
+    boxShadow: "var(--topology-toolbar-pill-shadow)",
   };
   const toolbarWidePillStyle: React.CSSProperties = {
     ...toolbarPillBaseStyle,
@@ -4056,7 +4056,7 @@ export default function NetworkTopologyPage() {
   const toolbarToggleStyle: React.CSSProperties = {
     ...toolbarPillBaseStyle,
     minWidth: 174,
-    background: "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.9) 100%)",
+    background: "var(--topology-toolbar-toggle-bg)",
   };
 
   const clusterPanel = (

@@ -223,7 +223,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<{ data: 
   } catch (error) {
     const detail = error instanceof Error ? error.message : "NetworkError";
     throw new AuthApiError(
-      `无法连接控制面 API（${CONTROL_API_BASE.trim() || "same-origin /api"}）。请确认后端已启动且同源代理可用。原始错误: ${detail}`,
+      `无法连接控制面服务，请确认服务已启动并稍后重试。原始错误: ${detail}`,
       0,
       "",
     );
@@ -237,7 +237,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<{ data: 
   } catch {
     const preview = rawText.trim().slice(0, 80);
     throw new AuthApiError(
-      `认证接口返回了非 JSON 响应，可能是同源代理或后端暂不可用（${preview || "empty"}）`,
+      `认证服务响应异常，请稍后重试（${preview || "empty"}）`,
       0,
       requestId,
     );
@@ -301,6 +301,10 @@ function isExpiringSoon(expiresAt: string | undefined): boolean {
   return timestamp - Date.now() <= REFRESH_SKEW_MS;
 }
 
+function isUnauthorizedAuthError(error: unknown): error is AuthApiError {
+  return error instanceof AuthApiError && error.status === 401;
+}
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function useAuth() {
@@ -348,13 +352,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error instanceof AuthApiError) {
           setLastRequestId(error.requestId);
         }
-        clearAuthState({
-          setAccessToken,
-          setRefreshToken,
-          setUsername,
-          setRole,
-          setExpiresAt,
-        });
+        if (isUnauthorizedAuthError(error)) {
+          clearAuthState({
+            setAccessToken,
+            setRefreshToken,
+            setUsername,
+            setRole,
+            setExpiresAt,
+          });
+        }
       } finally {
         setIsInitializing(false);
       }
@@ -367,38 +373,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!refreshToken || !expiresAt) {
       return;
     }
-    if (!isExpiringSoon(expiresAt)) {
-      const timeoutMs = Math.max(new Date(expiresAt).getTime() - Date.now() - REFRESH_SKEW_MS, 5_000);
-      const timer = window.setTimeout(async () => {
-        try {
-          const refreshed = await requestAuthJson<{
-            accessToken: string;
-            refreshToken: string;
-            user: AuthUser;
-            expiresAt?: string;
-          }>("refresh", {
-            method: "POST",
-            body: JSON.stringify({ refreshToken }),
-          });
-          const remember = Boolean(window.localStorage.getItem(LOCAL_ACCESS_KEY));
-          const nextSnapshot: AuthSnapshot = {
-            accessToken: refreshed.data.accessToken,
-            refreshToken: refreshed.data.refreshToken,
-            username: refreshed.data.user.username,
-            role: normalizeRole(refreshed.data.user.role),
-            expiresAt: refreshed.data.expiresAt,
-          };
-          persistAuth(nextSnapshot, remember);
-          setAccessToken(nextSnapshot.accessToken);
-          setRefreshToken(nextSnapshot.refreshToken);
-          setUsername(nextSnapshot.username);
-          setRole(nextSnapshot.role);
-          setExpiresAt(nextSnapshot.expiresAt ?? "");
-          setLastRequestId(refreshed.requestId);
-        } catch (error) {
-          if (error instanceof AuthApiError) {
-            setLastRequestId(error.requestId);
-          }
+    let cancelled = false;
+
+    const runRefresh = async () => {
+      try {
+        const refreshed = await requestAuthJson<{
+          accessToken: string;
+          refreshToken: string;
+          user: AuthUser;
+          expiresAt?: string;
+        }>("refresh", {
+          method: "POST",
+          body: JSON.stringify({ refreshToken }),
+        });
+        if (cancelled) {
+          return;
+        }
+        const remember = Boolean(window.localStorage.getItem(LOCAL_ACCESS_KEY));
+        const nextSnapshot: AuthSnapshot = {
+          accessToken: refreshed.data.accessToken,
+          refreshToken: refreshed.data.refreshToken,
+          username: refreshed.data.user.username,
+          role: normalizeRole(refreshed.data.user.role),
+          expiresAt: refreshed.data.expiresAt,
+        };
+        persistAuth(nextSnapshot, remember);
+        setAccessToken(nextSnapshot.accessToken);
+        setRefreshToken(nextSnapshot.refreshToken);
+        setUsername(nextSnapshot.username);
+        setRole(nextSnapshot.role);
+        setExpiresAt(nextSnapshot.expiresAt ?? "");
+        setLastRequestId(refreshed.requestId);
+      } catch (error) {
+        if (error instanceof AuthApiError) {
+          setLastRequestId(error.requestId);
+        }
+        if (!cancelled && isUnauthorizedAuthError(error)) {
           clearAuthState({
             setAccessToken,
             setRefreshToken,
@@ -407,10 +417,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setExpiresAt,
           });
         }
-      }, timeoutMs);
-      return () => window.clearTimeout(timer);
+      }
+    };
+
+    if (isExpiringSoon(expiresAt)) {
+      void runRefresh();
+      return () => {
+        cancelled = true;
+      };
     }
-    return;
+
+    const timeoutMs = Math.max(new Date(expiresAt).getTime() - Date.now() - REFRESH_SKEW_MS, 5_000);
+    const timer = window.setTimeout(() => {
+      void runRefresh();
+    }, timeoutMs);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [expiresAt, refreshToken]);
 
   useEffect(() => {
@@ -501,9 +525,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
             if (error.status === 0) {
               if (msg.includes("错误路由") || msg.includes("非 JSON")) {
-                msg = `${msg}。请检查前端同源代理配置。`;
+                msg = `${msg}。请稍后重试。`;
               } else {
-                msg = "登录请求未送达后端。请检查后端服务与前端同源代理配置。";
+                msg = "登录请求未送达控制面服务，请稍后重试。";
               }
             }
             if (error.requestId) {

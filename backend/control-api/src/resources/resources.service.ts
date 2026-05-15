@@ -582,6 +582,7 @@ export class ResourcesService {
       namespaced: false,
       scalable: false,
       imageMutable: false,
+      detailSource: 'namespace',
     },
     horizontalpodautoscaler: {
       kind: 'HorizontalPodAutoscaler',
@@ -2444,6 +2445,16 @@ export class ResourcesService {
       return this.mapConfigRow(row);
     }
 
+    if (detailSource === 'namespace') {
+      const row = await this.prisma.namespaceRecord.findUnique({
+        where: { id },
+      });
+      if (!row || row.state === 'deleted') {
+        return null;
+      }
+      return this.mapNamespaceRow(row);
+    }
+
     if (detailSource === 'autoscaling') {
       const liveResource = await this.findLiveAutoscalingDetailResource(
         meta,
@@ -2954,6 +2965,34 @@ export class ResourcesService {
       clusterId: row.clusterId,
       namespace: row.namespace,
       kind: row.kind,
+      name: row.name,
+      state: row.state,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      spec: null,
+      statusJson: null,
+      labels: row.labels,
+      annotations: null,
+      replicas: null,
+      readyReplicas: null,
+      storageClass: null,
+    };
+  }
+
+  private mapNamespaceRow(row: {
+    id: string;
+    clusterId: string;
+    name: string;
+    state: string;
+    labels: Prisma.JsonValue | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): DetailResourceRecord {
+    return {
+      id: row.id,
+      clusterId: row.clusterId,
+      namespace: row.name,
+      kind: 'Namespace',
       name: row.name,
       state: row.state,
       createdAt: row.createdAt,

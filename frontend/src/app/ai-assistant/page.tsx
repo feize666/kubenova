@@ -17,7 +17,6 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import {
-  Alert,
   Avatar,
   Button,
   Card,
@@ -155,7 +154,7 @@ function MarkdownContent({ content }: { content: string }) {
             return (
               <pre
                 style={{
-                  background: "rgba(0,0,0,0.06)",
+                  background: "var(--ai-chat-code-bg)",
                   borderRadius: 6,
                   padding: "8px 12px",
                   maxWidth: "100%",
@@ -176,7 +175,7 @@ function MarkdownContent({ content }: { content: string }) {
           return (
             <code
               style={{
-                background: "rgba(0,0,0,0.08)",
+                background: "var(--ai-chat-inline-code-bg)",
                 borderRadius: 3,
                 padding: "1px 5px",
                 fontSize: "0.88em",
@@ -229,14 +228,14 @@ function MessageBubble({
       <div style={{ maxWidth: "78%", minWidth: 0, display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start" }}>
         <div
           style={{
-            background: isUser ? "#1677ff" : "#fff",
-            color: isUser ? "#fff" : "inherit",
+            background: isUser ? "#1677ff" : "var(--ai-chat-assistant-bubble-bg)",
+            color: isUser ? "#fff" : "var(--surface-text)",
             borderRadius: isUser ? "16px 4px 16px 16px" : "4px 16px 16px 16px",
             padding: "10px 14px",
             fontSize: 14,
             lineHeight: 1.65,
-            border: isUser ? "none" : "1px solid rgba(0,0,0,0.08)",
-            boxShadow: isUser ? "none" : "0 2px 10px rgba(0,0,0,0.04)",
+            border: isUser ? "none" : "1px solid var(--ai-chat-assistant-bubble-border)",
+            boxShadow: isUser ? "none" : "var(--ai-chat-assistant-bubble-shadow)",
             maxWidth: "100%",
             overflowX: "hidden",
             maxHeight: MESSAGE_BUBBLE_MAX_HEIGHT,
@@ -260,7 +259,7 @@ function MessageBubble({
                 display: "block",
                 marginTop: 8,
                 fontSize: 12,
-                color: isUser ? "rgba(255,255,255,0.88)" : "rgba(0,0,0,0.65)",
+                color: isUser ? "rgba(255,255,255,0.88)" : "var(--ai-chat-assistant-muted)",
               }}
             >
               语音输入：{message.voiceInput.transcript}
@@ -389,23 +388,23 @@ function ModelSettingsDrawer({ open, onClose, token }: { open: boolean; onClose:
             rules={[{ required: true, message: "请输入中转站 Base URL" }]}
             extra="支持 OpenAI chat/completions 兼容地址，例如 https://xxx/v1"
           >
-            <Input placeholder="https://api.openai.com/v1" />
+            <Input id="ai-model-base-url" name="ai-model-base-url" placeholder="https://api.openai.com/v1" />
           </Form.Item>
 
           <Form.Item label="API Key" name="apiKey" extra="留空表示不修改当前 Key">
-            <Input.Password placeholder="sk-..." autoComplete="off" />
+            <Input.Password id="ai-model-api-key" name="ai-model-api-key" placeholder="sk-..." autoComplete="off" />
           </Form.Item>
 
           <Form.Item label="Model" name="modelName" rules={[{ required: true, message: "请输入模型名称" }]}>
-            <Input placeholder="gpt-4o-mini" />
+            <Input id="ai-model-name" name="ai-model-name" placeholder="gpt-4o-mini" />
           </Form.Item>
 
           <Form.Item label="最大 Tokens" name="maxTokens" rules={[{ required: true, message: "请输入最大 Tokens" }]}>
-            <InputNumber min={128} max={131072} step={256} style={{ width: "100%" }} />
+            <InputNumber id="ai-model-max-tokens" name="ai-model-max-tokens" min={128} max={131072} step={256} style={{ width: "100%" }} />
           </Form.Item>
 
           <Form.Item label="请求超时(ms)" name="timeoutMs" rules={[{ required: true, message: "请输入超时时间" }]}>
-            <InputNumber min={3000} max={180000} step={1000} style={{ width: "100%" }} />
+            <InputNumber id="ai-model-timeout" name="ai-model-timeout" min={3000} max={180000} step={1000} style={{ width: "100%" }} />
           </Form.Item>
 
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -1288,12 +1287,15 @@ export default function AiAssistantPage() {
   const alertSimulator = (
     <>
       <Input
+        id="alert-title"
+        name="alert-title"
         value={alertForm.title}
         onChange={(e) => setAlertForm((prev) => ({ ...prev, title: e.target.value }))}
         placeholder="告警标题"
       />
       <Space.Compact style={{ width: "100%" }}>
         <Select
+          id="alert-severity"
           value={alertForm.severity}
           style={{ width: "35%" }}
           options={[
@@ -1305,6 +1307,8 @@ export default function AiAssistantPage() {
           onChange={(value) => setAlertForm((prev) => ({ ...prev, severity: value }))}
         />
         <Input
+          id="alert-namespace"
+          name="alert-namespace"
           value={alertForm.namespace}
           onChange={(e) => setAlertForm((prev) => ({ ...prev, namespace: e.target.value }))}
           placeholder="namespace"
@@ -1312,18 +1316,23 @@ export default function AiAssistantPage() {
       </Space.Compact>
       <Space.Compact style={{ width: "100%" }}>
         <Select
+          id="alert-kind"
           value={alertForm.kind}
           style={{ width: "35%" }}
           options={["Pod", "Deployment", "StatefulSet", "Node"].map((v) => ({ label: v, value: v }))}
           onChange={(value) => setAlertForm((prev) => ({ ...prev, kind: value }))}
         />
         <Input
+          id="alert-source"
+          name="alert-source"
           value={alertForm.source}
           onChange={(e) => setAlertForm((prev) => ({ ...prev, source: e.target.value }))}
           placeholder="source"
         />
       </Space.Compact>
       <TextArea
+        id="alert-description"
+        name="alert-description"
         value={alertForm.description}
         onChange={(e) => setAlertForm((prev) => ({ ...prev, description: e.target.value }))}
         autoSize={{ minRows: 3, maxRows: 5 }}
@@ -1411,12 +1420,12 @@ export default function AiAssistantPage() {
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <Card size="small">
-              <Statistic title="严重告警" value={criticalCount} valueStyle={{ color: "#cf1322" }} />
+              <Statistic title="严重告警" value={criticalCount} styles={{ content: { color: "#cf1322" } }} />
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <Card size="small">
-              <Statistic title="高风险告警" value={highCount} valueStyle={{ color: "#d46b08" }} />
+              <Statistic title="高风险告警" value={highCount} styles={{ content: { color: "#d46b08" } }} />
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
@@ -1453,13 +1462,15 @@ export default function AiAssistantPage() {
                 display: "flex",
                 flexDirection: "column",
               }}
-              bodyStyle={{
-                flex: 1,
-                minHeight: 0,
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-                overflowY: "auto",
+              styles={{
+                body: {
+                  flex: 1,
+                  minHeight: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  overflowY: "auto",
+                },
               }}
             >
               {alertSimulator}
@@ -1490,14 +1501,14 @@ export default function AiAssistantPage() {
               flexDirection: "column",
               overflow: "hidden",
             }}
-            bodyStyle={{ padding: 0, flex: 1, minHeight: 0, minWidth: 0, display: "flex", overflow: "hidden" }}
+            styles={{ body: { padding: 0, flex: 1, minHeight: 0, minWidth: 0, display: "flex", overflow: "hidden" } }}
           >
             <Layout style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
               <Sider
                 width={240}
                 style={{
-                  background: "#fff",
-                  borderRight: "1px solid rgba(0,0,0,0.08)",
+                  background: "var(--ai-chat-sider-bg)",
+                  borderRight: "1px solid var(--ai-chat-sider-border)",
                   display: "flex",
                   flexDirection: "column",
                   minHeight: 0,
@@ -1578,11 +1589,12 @@ export default function AiAssistantPage() {
                 </div>
               </Sider>
 
-              <Content style={{ display: "flex", flexDirection: "column", background: "#f7f9fc", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
-                <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#fff", overflowX: "hidden" }}>
+              <Content style={{ display: "flex", flexDirection: "column", background: "var(--ai-chat-content-bg)", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+                <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid var(--ai-chat-header-border)", background: "var(--ai-chat-header-bg)", overflowX: "hidden" }}>
                   <Space size={8} wrap style={{ width: "100%" }}>
                     <Typography.Text type="secondary">执行上下文集群:</Typography.Text>
                     <Select
+                      id="ai-action-cluster"
                       style={{ width: 220, maxWidth: "100%" }}
                       value={actionClusterId || undefined}
                       onChange={setActionClusterId}
@@ -1635,7 +1647,7 @@ export default function AiAssistantPage() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                <div style={{ padding: "8px 12px", borderTop: "1px solid rgba(0,0,0,0.08)", background: "#fff", overflowX: "hidden" }}>
+                <div style={{ padding: "8px 12px", borderTop: "1px solid var(--ai-chat-composer-border)", background: "var(--ai-chat-composer-bg)", overflowX: "hidden" }}>
                   <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
                     {QUICK_PROMPTS.map((prompt) => (
                       <Button key={prompt} size="small" onClick={() => void handleSend(prompt)} disabled={loading || !accessToken}>
@@ -1645,6 +1657,8 @@ export default function AiAssistantPage() {
                   </Space>
 
                   <input
+                    id="ai-assistant-file-input"
+                    name="ai-assistant-file-input"
                     ref={fileInputRef}
                     type="file"
                     multiple
@@ -1700,6 +1714,8 @@ export default function AiAssistantPage() {
                       </Tooltip>
                     </Space>
                     <TextArea
+                      id="ai-assistant-input"
+                      name="ai-assistant-input"
                       ref={inputRef}
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
@@ -1748,7 +1764,7 @@ export default function AiAssistantPage() {
         open={!showAlertPanelInline && alertDrawerOpen}
         onClose={() => setAlertDrawerOpen(false)}
         size="default"
-        bodyStyle={{ padding: 12 }}
+        styles={{ body: { padding: 12 } }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {alertSimulator}
