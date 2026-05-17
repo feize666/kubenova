@@ -1,8 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Drawer, Empty, Skeleton, Space } from "antd";
-import { getClusterDetail } from "@/lib/api/clusters";
+import { useState } from "react";
+import { Alert, Button, Drawer, Empty, Modal, Skeleton, Space, message } from "antd";
+import { useAuth } from "@/components/auth-context";
+import { downloadClusterKubeconfig, getClusterDetail } from "@/lib/api/clusters";
 import type { ClusterTableRecord } from "@/app/clusters/page";
 import { DetailDescriptions, DetailSection } from "./resource-detail/section-primitives";
 import { StatusTag } from "./status-tag";
@@ -21,6 +23,17 @@ function buildNodeRoleLabel(role: string) {
   return role || "-";
 }
 
+function triggerBrowserDownload(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 export function ClusterDetailDrawer({
   open,
   onClose,
@@ -28,6 +41,8 @@ export function ClusterDetailDrawer({
   cluster,
   onRefreshRequest,
 }: ClusterDetailDrawerProps) {
+  const { role } = useAuth();
+  const [exporting, setExporting] = useState(false);
   const clusterId = cluster?.id ?? "";
   const query = useQuery({
     queryKey: ["clusters", "detail", clusterId, token],
@@ -36,6 +51,37 @@ export function ClusterDetailDrawer({
   });
 
   const nodeItems = query.data?.nodeSummary.items ?? [];
+  const canExportKubeconfig = cluster?.hasKubeconfig && role !== "read-only";
+
+  const handleExportKubeconfig = () => {
+    if (!clusterId || !token || exporting) return;
+    const displayName = query.data?.displayName || cluster?.name || "当前集群";
+
+    Modal.confirm({
+      title: "导出 kubeconfig",
+      content:
+        `将下载集群「${displayName}」当前接入凭据文件。该文件可能包含敏感令牌或证书，请仅在受控只读排查场景使用；系统不会自动降权源凭据权限。确认继续导出吗？`,
+      okText: "确认导出",
+      cancelText: "取消",
+      okButtonProps: {
+        danger: true,
+      },
+      onOk: async () => {
+        setExporting(true);
+        try {
+          const exported = await downloadClusterKubeconfig(clusterId, token);
+          triggerBrowserDownload(exported.blob, exported.filename);
+          void message.success("kubeconfig 已开始下载");
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "kubeconfig 导出失败";
+          void message.error(detail);
+          throw error;
+        } finally {
+          setExporting(false);
+        }
+      },
+    });
+  };
 
   return (
     <Drawer
@@ -62,6 +108,11 @@ export function ClusterDetailDrawer({
       }}
       extra={
         <Space>
+          {canExportKubeconfig ? (
+            <Button onClick={handleExportKubeconfig} loading={exporting} disabled={!clusterId || !token}>
+              导出 kubeconfig
+            </Button>
+          ) : null}
           <Button onClick={() => void query.refetch()} loading={query.isFetching} disabled={!clusterId}>
             刷新
           </Button>

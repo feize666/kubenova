@@ -509,7 +509,14 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
             ]}
           />
           <Space size={12}>
-            <Input allowClear prefix={<SearchOutlined />} placeholder="搜索资源、日志或告警" style={{ width: 280 }} />
+            <Input
+              id="shell-global-search"
+              name="shell-global-search"
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="搜索资源、日志或告警"
+              style={{ width: 280 }}
+            />
             <Button icon={<BellOutlined />}>通知中心</Button>
             <Button
               onClick={toggleTheme}

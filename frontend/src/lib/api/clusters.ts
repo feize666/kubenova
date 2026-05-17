@@ -1,4 +1,4 @@
-import { apiRequest } from "./client";
+import { ApiError, CONTROL_API_BASE, apiRequest, extractApiError } from "./client";
 import type { Cluster, ClusterListResponse, GetClustersParams, QueryParams } from "./types";
 import type { ClusterDetailModel } from "@/lib/contracts/domain";
 import { getClusterHealthList } from "./cluster-health";
@@ -142,4 +142,80 @@ export async function getClusterHealth(id: string, token: string): Promise<Clust
     method: "GET",
     token,
   });
+}
+
+function buildApiUrl(path: string): string {
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+
+  const configuredBase = CONTROL_API_BASE.trim().replace(/\/+$/, "");
+  if (!configuredBase || !/^https?:\/\//i.test(configuredBase)) {
+    return path;
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      const parsed = new URL(configuredBase);
+      const hostname = parsed.hostname.toLowerCase();
+      if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+        return path;
+      }
+    } catch {
+      return path;
+    }
+  }
+
+  return `${configuredBase}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+function parseDownloadFilename(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return fallback;
+    }
+  }
+
+  const asciiMatch = header.match(/filename=\"?([^\";]+)\"?/i);
+  return asciiMatch?.[1] || fallback;
+}
+
+async function readDownloadError(response: Response): Promise<Error> {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType.includes("application/json")) {
+    const payload = await response.json().catch(() => null);
+    const errorInfo = extractApiError(payload, response.status);
+    return new ApiError(errorInfo.message, response.status, errorInfo.code, errorInfo.details, errorInfo.requestId);
+  }
+
+  const text = (await response.text().catch(() => "")).trim();
+  return new Error(text || `Request failed with status ${response.status}`);
+}
+
+export async function downloadClusterKubeconfig(
+  id: string,
+  token: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const path = `/api/clusters/${encodeURIComponent(id)}/kubeconfig/export`;
+  const response = await fetch(buildApiUrl(path), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw await readDownloadError(response);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: parseDownloadFilename(response.headers.get("content-disposition"), `${id}-kubeconfig.yaml`),
+  };
 }

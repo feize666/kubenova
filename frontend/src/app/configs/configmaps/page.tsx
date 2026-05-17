@@ -296,7 +296,7 @@ export default function ConfigMapsPage() {
       dataIndex: "version",
       key: "version",
       width: TABLE_COL_WIDTH.version,
-      render: (v: number) => `v${v}`,
+      render: (v?: number) => (typeof v === "number" ? `v${v}` : "-"),
     },
     {
       title: "更新时间",

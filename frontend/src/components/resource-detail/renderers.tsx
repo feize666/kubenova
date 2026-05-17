@@ -1196,6 +1196,228 @@ function NetworkPolicyHighlightsSection({ detail }: ResourceDetailRendererProps)
   );
 }
 
+function StorageHighlightsSection({ detail }: ResourceDetailRendererProps) {
+  const kind = normalizeKind(detail.descriptor.resourceKind || detail.overview.kind);
+  if (!["persistentvolume", "persistentvolumeclaim", "storageclass"].includes(kind)) {
+    return null;
+  }
+
+  const pvc = detail.storage.persistentVolumeClaims[0];
+  const pv = detail.storage.persistentVolumes[0];
+  const storageClasses = detail.storage.storageClasses;
+
+  const summaryItems = [
+    kind === "persistentvolume" && pv
+      ? { key: "pvPhase", label: "卷状态", value: pv.phase ?? detail.overview.state }
+      : null,
+    kind === "persistentvolume" && pv?.storageClass
+      ? { key: "pvStorageClass", label: "StorageClass", value: pv.storageClass }
+      : null,
+    kind === "persistentvolumeclaim" && pvc
+      ? { key: "pvcPhase", label: "Claim 状态", value: pvc.phase ?? detail.overview.state }
+      : null,
+    kind === "persistentvolumeclaim" && pvc?.storageClass
+      ? { key: "pvcStorageClass", label: "StorageClass", value: pvc.storageClass }
+      : null,
+    kind === "persistentvolumeclaim" && pvc?.volumeName
+      ? { key: "boundPv", label: "绑定 PV", value: pvc.volumeName }
+      : null,
+    kind === "storageclass" && storageClasses.length > 0
+      ? { key: "scName", label: "StorageClass", value: storageClasses[0] }
+      : null,
+    detail.storage.volumes.length > 0 ? { key: "volumes", label: "卷定义", value: detail.storage.volumes.length } : null,
+    detail.storage.mounts.length > 0 ? { key: "mounts", label: "挂载点", value: detail.storage.mounts.length } : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; value: React.ReactNode }>;
+
+  return (
+    <DetailSection title="存储高频区" subtitle="先看绑定关系、StorageClass 与挂载">
+      <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+        <DetailDescriptions items={summaryItems} emptyText="暂无存储高频摘要" />
+
+        {detail.storage.persistentVolumeClaims.length > 0 ? (
+          <div>
+            <Typography.Text strong>PVC 绑定</Typography.Text>
+            <List
+              size="small"
+              dataSource={detail.storage.persistentVolumeClaims}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Tag color="cyan">PVC</Tag>
+                    <Typography.Text strong>{item.name}</Typography.Text>
+                    {item.namespace ? <Typography.Text type="secondary">{item.namespace}</Typography.Text> : null}
+                    {item.phase ? <Tag>{item.phase}</Tag> : null}
+                    {item.storageClass ? <Tag color="gold">{item.storageClass}</Tag> : null}
+                    {item.volumeName ? <Typography.Text type="secondary">PV {item.volumeName}</Typography.Text> : null}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+
+        {detail.storage.persistentVolumes.length > 0 ? (
+          <div>
+            <Typography.Text strong>PV 绑定</Typography.Text>
+            <List
+              size="small"
+              dataSource={detail.storage.persistentVolumes}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Tag color="blue">PV</Tag>
+                    <Typography.Text strong>{item.name}</Typography.Text>
+                    {item.phase ? <Tag>{item.phase}</Tag> : null}
+                    {item.storageClass ? <Tag color="gold">{item.storageClass}</Tag> : null}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+
+        {detail.storage.volumes.length > 0 ? (
+          <div>
+            <Typography.Text strong>卷定义</Typography.Text>
+            <List
+              size="small"
+              dataSource={detail.storage.volumes}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Typography.Text strong>{item.name}</Typography.Text>
+                    <Tag>{item.type}</Tag>
+                    {item.source ? <Typography.Text type="secondary">{item.source}</Typography.Text> : null}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+
+        {detail.storage.mounts.length > 0 ? (
+          <div>
+            <Typography.Text strong>挂载关系</Typography.Text>
+            <List
+              size="small"
+              dataSource={detail.storage.mounts}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Tag color="cyan">{item.container}</Tag>
+                    <Typography.Text strong>{item.volume}</Typography.Text>
+                    <Typography.Text>{item.mountPath}</Typography.Text>
+                    {item.readOnly ? <Tag>只读</Tag> : null}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+      </Space>
+    </DetailSection>
+  );
+}
+
+function ConfigHighlightsSection({ detail, onNavigateRequest }: ResourceDetailRendererProps) {
+  const kind = normalizeKind(detail.descriptor.resourceKind || detail.overview.kind);
+  if (!["configmap", "secret", "serviceaccount"].includes(kind)) {
+    return null;
+  }
+
+  const relatedConfigs = detail.associations.filter((item) =>
+    ["uses-configmap", "uses-secret", "secret-ref"].includes(item.associationType),
+  );
+  const ownedPods = detail.associations.filter((item) => item.associationType === "owned-pod");
+  const imagePullSecrets = Object.entries(detail.metadata.annotations).filter(([key]) =>
+    key.toLowerCase().includes("imagepullsecret"),
+  );
+
+  const summaryItems = [
+    kind === "configmap" ? { key: "kind", label: "类型", value: "ConfigMap" } : null,
+    kind === "secret" ? { key: "kind", label: "类型", value: "Secret" } : null,
+    kind === "serviceaccount" ? { key: "kind", label: "类型", value: "ServiceAccount" } : null,
+    { key: "labels", label: "标签数", value: Object.keys(detail.metadata.labels).length },
+    { key: "annotations", label: "注解数", value: Object.keys(detail.metadata.annotations).length },
+    relatedConfigs.length > 0 ? { key: "refs", label: "关联引用", value: relatedConfigs.length } : null,
+    ownedPods.length > 0 ? { key: "pods", label: "关联 Pod", value: ownedPods.length } : null,
+    imagePullSecrets.length > 0 ? { key: "pullSecrets", label: "拉取凭据", value: imagePullSecrets.length } : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; value: React.ReactNode }>;
+
+  return (
+    <DetailSection title="配置高频区" subtitle="先看引用关系、注解信号与关联工作负载">
+      <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+        <DetailDescriptions items={summaryItems} emptyText="暂无配置高频摘要" />
+
+        {relatedConfigs.length > 0 ? (
+          <div>
+            <Typography.Text strong>关联引用</Typography.Text>
+            <List
+              size="small"
+              dataSource={relatedConfigs}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Tag color={item.kind === "Secret" ? "magenta" : "blue"}>{item.kind}</Tag>
+                    {item.id && onNavigateRequest ? (
+                      <Typography.Link strong onClick={() => emitNavigateRequest(onNavigateRequest, item.kind, item.id)}>
+                        {item.name}
+                      </Typography.Link>
+                    ) : (
+                      <Typography.Text strong>{item.name}</Typography.Text>
+                    )}
+                    {item.namespace ? <Typography.Text type="secondary">{item.namespace}</Typography.Text> : null}
+                    <Typography.Text type="secondary">{ASSOCIATION_TYPE_META[item.associationType]?.label ?? item.associationType}</Typography.Text>
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+
+        {ownedPods.length > 0 ? (
+          <div>
+            <Typography.Text strong>关联 Pod</Typography.Text>
+            <List
+              size="small"
+              dataSource={ownedPods}
+              renderItem={(item) => (
+                <List.Item>
+                  <Space wrap size={8}>
+                    <Tag color="cyan">Pod</Tag>
+                    {item.id && onNavigateRequest ? (
+                      <Typography.Link strong onClick={() => emitNavigateRequest(onNavigateRequest, item.kind, item.id)}>
+                        {item.name}
+                      </Typography.Link>
+                    ) : (
+                      <Typography.Text strong>{item.name}</Typography.Text>
+                    )}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        ) : null}
+
+        {imagePullSecrets.length > 0 ? (
+          <div>
+            <Typography.Text strong>拉取凭据提示</Typography.Text>
+            <div style={{ marginTop: 8 }}>
+              <DetailDescriptions
+                items={imagePullSecrets.map(([key, value]) => ({
+                  key,
+                  label: key,
+                  value,
+                }))}
+              />
+            </div>
+          </div>
+        ) : null}
+      </Space>
+    </DetailSection>
+  );
+}
+
 function GatewayClassHighlightsSection({ detail, onNavigateRequest }: ResourceDetailRendererProps) {
   if (normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) !== "gatewayclass") {
     return null;
@@ -2083,6 +2305,8 @@ export function ResourceDetailContent({ detail, onNavigateRequest }: ResourceDet
       <EndpointHighlightsSection detail={detail} onNavigateRequest={onNavigateRequest} />
       <IngressHighlightsSection detail={detail} onNavigateRequest={onNavigateRequest} />
       <NetworkPolicyHighlightsSection detail={detail} />
+      <StorageHighlightsSection detail={detail} />
+      <ConfigHighlightsSection detail={detail} onNavigateRequest={onNavigateRequest} />
 
       <ServiceBackendsSection detail={detail} onNavigateRequest={onNavigateRequest} />
 

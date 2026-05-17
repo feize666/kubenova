@@ -1,6 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
 
+export interface ExportKubeconfigInput {
+  clusterName: string;
+  server: string;
+  caData?: string;
+  skipTLSVerify?: boolean;
+  userName: string;
+  contextName: string;
+  namespace?: string;
+  token: string;
+}
+
 @Injectable()
 export class K8sClientService {
   private readonly logger = new Logger(K8sClientService.name);
@@ -36,6 +47,14 @@ export class K8sClientService {
     return kc.makeApiClient(k8s.DiscoveryV1Api);
   }
 
+  /** 获取 RbacAuthorizationV1Api */
+  getRbacAuthorizationApi(
+    kubeconfigYaml: string,
+  ): k8s.RbacAuthorizationV1Api {
+    const kc = this.createClient(kubeconfigYaml);
+    return kc.makeApiClient(k8s.RbacAuthorizationV1Api);
+  }
+
   /** 获取 CustomObjectsApi */
   getCustomObjectsApi(kubeconfigYaml: string): k8s.CustomObjectsApi {
     const kc = this.createClient(kubeconfigYaml);
@@ -67,5 +86,36 @@ export class K8sClientService {
       this.logger.warn(`testConnection failed: ${(err as Error).message}`);
       return { ok: false, error: (err as Error).message };
     }
+  }
+
+  /** 构造仅含短期 token 的导出 kubeconfig */
+  exportKubeconfig(input: ExportKubeconfigInput): string {
+    const kc = new k8s.KubeConfig();
+    kc.loadFromOptions({
+      clusters: [
+        {
+          name: input.clusterName,
+          server: input.server,
+          skipTLSVerify: input.skipTLSVerify ?? false,
+          ...(input.caData ? { caData: input.caData } : {}),
+        },
+      ],
+      users: [
+        {
+          name: input.userName,
+          token: input.token,
+        },
+      ],
+      contexts: [
+        {
+          name: input.contextName,
+          cluster: input.clusterName,
+          user: input.userName,
+          ...(input.namespace ? { namespace: input.namespace } : {}),
+        },
+      ],
+      currentContext: input.contextName,
+    });
+    return k8s.dumpYaml(kc.exportConfig());
   }
 }

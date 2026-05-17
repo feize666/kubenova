@@ -131,6 +131,19 @@ export interface ClusterDetailResponse {
   };
 }
 
+export interface ClusterKubeconfigExportPayload {
+  name: string;
+  kubeconfig: string;
+}
+
+export interface ExportedClusterKubeconfig {
+  filename: string;
+  contentType: string;
+  content: string;
+  serviceAccountName: string;
+  expiresAt: string;
+}
+
 export interface ClustersListResponse {
   items: ClusterItemResponse[];
   page: number;
@@ -156,6 +169,12 @@ export interface BatchStateResponse {
 
 @Injectable()
 export class ClustersService implements OnModuleInit {
+  private static readonly EXPORT_NAMESPACE = 'default';
+  private static readonly EXPORT_TOKEN_EXPIRATION_SECONDS = 3600;
+  private static readonly EXPORT_CLUSTER_ROLE_NAME =
+    'aiops:kubeconfig-export:read-only';
+  private static readonly EXPORT_SERVICE_ACCOUNT_PREFIX =
+    'aiops-export-reader';
   private readonly repository: ClustersRepository;
   private readonly prisma: PrismaService;
   private readonly k8sClientService: K8sClientService;
@@ -262,6 +281,25 @@ export class ClustersService implements OnModuleInit {
     };
   }
 
+  async getExportableKubeconfig(
+    id: string,
+  ): Promise<ClusterKubeconfigExportPayload> {
+    const record = await this.mustFind(id);
+    if (record.state === 'deleted') {
+      throw new BadRequestException('已删除的集群不可导出 kubeconfig');
+    }
+
+    const kubeconfig = record.kubeconfig?.trim();
+    if (!kubeconfig) {
+      throw new BadRequestException('该集群未配置 kubeconfig，无法导出');
+    }
+
+    return {
+      name: record.name,
+      kubeconfig,
+    };
+  }
+
   /** 返回集群的 kubeconfig 原文（内部使用，不对外暴露） */
   async getKubeconfig(id: string): Promise<string | null> {
     const normalizedId = id?.trim();
@@ -271,6 +309,70 @@ export class ClustersService implements OnModuleInit {
       return null;
     }
     return record?.kubeconfig ?? null;
+  }
+
+  async exportReadonlyKubeconfig(
+    id: string,
+  ): Promise<ExportedClusterKubeconfig> {
+    const record = await this.mustFind(id);
+    if (record.state === 'deleted') {
+      throw new BadRequestException('已删除的集群不可导出 kubeconfig');
+    }
+
+    const sourceKubeconfig = await this.getKubeconfig(record.id);
+    if (!sourceKubeconfig) {
+      throw new BadRequestException('该集群未配置 kubeconfig，无法导出');
+    }
+
+    const sourceConfig = this.k8sClientService.createClient(sourceKubeconfig);
+    const currentCluster = sourceConfig.getCurrentCluster();
+    if (!currentCluster?.server?.trim()) {
+      throw new BadRequestException('kubeconfig 缺少当前集群 server 信息');
+    }
+
+    await this.ensureReadonlyExportRbac(sourceKubeconfig);
+
+    const namespace = ClustersService.EXPORT_NAMESPACE;
+    const serviceAccountName = this.buildExportServiceAccountName(record.id);
+    await this.ensureReadonlyExportServiceAccount(
+      sourceKubeconfig,
+      namespace,
+      serviceAccountName,
+    );
+
+    const tokenRequest = await this.createReadonlyExportToken(
+      sourceKubeconfig,
+      namespace,
+      serviceAccountName,
+    );
+    const token = tokenRequest.status?.token?.trim();
+    if (!token) {
+      throw new BadRequestException('生成只读导出 token 失败');
+    }
+
+    const exportedYaml = this.k8sClientService.exportKubeconfig({
+      clusterName: `cluster-${record.name}`,
+      server: currentCluster.server.trim(),
+      caData: currentCluster.caData ?? undefined,
+      skipTLSVerify: currentCluster.skipTLSVerify ?? false,
+      userName: `${serviceAccountName}-token`,
+      contextName: `${record.name}-readonly`,
+      namespace,
+      token,
+    });
+
+    return {
+      filename: `${record.name}-readonly.kubeconfig`,
+      contentType: 'application/yaml; charset=utf-8',
+      content: exportedYaml,
+      serviceAccountName,
+      expiresAt:
+        tokenRequest.status?.expirationTimestamp ??
+        new Date(
+          Date.now() +
+            ClustersService.EXPORT_TOKEN_EXPIRATION_SECONDS * 1000,
+        ).toISOString(),
+    };
   }
 
   async list(query: ClustersListQuery): Promise<ClustersListResponse> {
@@ -635,6 +737,124 @@ export class ClustersService implements OnModuleInit {
       return value;
     }
     throw new BadRequestException('state 仅支持 active、disabled、deleted');
+  }
+
+  private buildExportServiceAccountName(clusterId: string): string {
+    const safe = clusterId
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 36);
+    return `${ClustersService.EXPORT_SERVICE_ACCOUNT_PREFIX}-${safe || 'cluster'}`;
+  }
+
+  private async ensureReadonlyExportRbac(
+    kubeconfig: string,
+  ): Promise<void> {
+    const rbacApi = this.k8sClientService.getRbacAuthorizationApi(kubeconfig);
+    const clusterRoleName = ClustersService.EXPORT_CLUSTER_ROLE_NAME;
+    try {
+      await rbacApi.readClusterRole(clusterRoleName);
+    } catch {
+      await rbacApi.createClusterRole({
+        metadata: { name: clusterRoleName },
+        rules: [
+          {
+            apiGroups: [''],
+            resources: ['namespaces', 'nodes', 'pods', 'services', 'endpoints'],
+            verbs: ['get', 'list', 'watch'],
+          },
+          {
+            apiGroups: ['apps'],
+            resources: ['deployments', 'statefulsets', 'daemonsets', 'replicasets'],
+            verbs: ['get', 'list', 'watch'],
+          },
+          {
+            apiGroups: ['batch'],
+            resources: ['jobs', 'cronjobs'],
+            verbs: ['get', 'list', 'watch'],
+          },
+          {
+            apiGroups: ['networking.k8s.io'],
+            resources: ['ingresses', 'networkpolicies'],
+            verbs: ['get', 'list', 'watch'],
+          },
+          {
+            apiGroups: ['storage.k8s.io'],
+            resources: ['storageclasses'],
+            verbs: ['get', 'list', 'watch'],
+          },
+        ],
+      });
+    }
+  }
+
+  private async ensureReadonlyExportServiceAccount(
+    kubeconfig: string,
+    namespace: string,
+    serviceAccountName: string,
+  ): Promise<void> {
+    const coreApi = this.k8sClientService.getCoreApi(kubeconfig);
+    const rbacApi = this.k8sClientService.getRbacAuthorizationApi(kubeconfig);
+    const bindingName = `${serviceAccountName}-binding`;
+
+    try {
+      await coreApi.readNamespacedServiceAccount(serviceAccountName, namespace);
+    } catch {
+      await coreApi.createNamespacedServiceAccount(namespace, {
+        metadata: { name: serviceAccountName },
+      });
+    }
+
+    try {
+      await rbacApi.readClusterRoleBinding(bindingName);
+    } catch {
+      await rbacApi.createClusterRoleBinding({
+        metadata: { name: bindingName },
+        roleRef: {
+          apiGroup: 'rbac.authorization.k8s.io',
+          kind: 'ClusterRole',
+          name: ClustersService.EXPORT_CLUSTER_ROLE_NAME,
+        },
+        subjects: [
+          {
+            kind: 'ServiceAccount',
+            name: serviceAccountName,
+            namespace,
+          },
+        ],
+      });
+    }
+  }
+
+  private async createReadonlyExportToken(
+    kubeconfig: string,
+    namespace: string,
+    serviceAccountName: string,
+  ): Promise<{
+    status?: {
+      token?: string;
+      expirationTimestamp?: string;
+    };
+  }> {
+    const coreApi = this.k8sClientService.getCoreApi(kubeconfig);
+    return coreApi.createNamespacedServiceAccountToken(
+      serviceAccountName,
+      namespace,
+      {
+        spec: {
+          expirationSeconds:
+            ClustersService.EXPORT_TOKEN_EXPIRATION_SECONDS,
+        },
+      },
+    ) as Promise<{
+      status?: {
+        token?: string;
+        expirationTimestamp?: string;
+      };
+    }>;
   }
 
   private validateCreate(

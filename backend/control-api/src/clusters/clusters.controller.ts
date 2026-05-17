@@ -145,6 +145,24 @@ export class ClustersController {
     return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
   }
 
+  private buildKubeconfigFilename(clusterName: string): {
+    ascii: string;
+    utf8: string;
+  } {
+    const base = clusterName.trim() || 'cluster';
+    const asciiBase =
+      base
+        .normalize('NFKD')
+        .replace(/[^\x20-\x7E]+/g, '')
+        .replace(/[^A-Za-z0-9._-]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'cluster';
+    const filename = `${base}-kubeconfig.yaml`;
+    return {
+      ascii: `${asciiBase}-kubeconfig.yaml`,
+      utf8: encodeURIComponent(filename),
+    };
+  }
+
   private async listAllClusters(
     query: ClusterListQueryWithSelectable,
   ): Promise<Awaited<ReturnType<ClustersService['list']>>['items']> {
@@ -253,6 +271,83 @@ export class ClustersController {
     const requestId = resolveRequestId(req, res);
     const detail = await this.clustersService.getDetail(id);
     return this.ok(detail, requestId, { action: 'detail' });
+  }
+
+  @Get(':id/kubeconfig/export')
+  async exportKubeconfig(
+    @Req() req: AuthenticatedRequest,
+    @Res() res: Response,
+    @Param('id') id: string,
+  ) {
+    const requestId = resolveRequestId(req, res);
+    const actor = req.user?.user;
+    assertWritePermission(actor);
+    const exported = await this.clustersService.getExportableKubeconfig(id);
+    const filename = this.buildKubeconfigFilename(exported.name);
+    const banner = [
+      '# Kubenova exported kubeconfig',
+      '# Sensitive credential. Store and transfer securely.',
+      '# Read-only troubleshooting use only. Source credential permissions are not downgraded by this export.',
+      '',
+    ].join('\n');
+    const body = exported.kubeconfig.endsWith('\n')
+      ? `${banner}${exported.kubeconfig}`
+      : `${banner}${exported.kubeconfig}\n`;
+
+    appendAudit({
+      actor: actor?.username ?? 'unknown',
+      role: actor?.role ?? 'read-only',
+      action: 'query',
+      resourceType: 'cluster',
+      resourceId: id,
+      result: 'success',
+      reason: this.buildAuditReason(requestId),
+    });
+
+    res.setHeader('Content-Type', 'application/yaml; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename.ascii}"; filename*=UTF-8''${filename.utf8}`,
+    );
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(body);
+  }
+
+  @Get(':id/kubeconfig/export')
+  async exportReadonlyKubeconfig(
+    @Req() req: AuthenticatedRequest,
+    @Res() res: Response,
+    @Param('id') id: string,
+  ): Promise<void> {
+    const requestId = resolveRequestId(req, res);
+    const actor = req.user?.user;
+    const exported = await this.clustersService.exportReadonlyKubeconfig(id);
+
+    appendAudit({
+      actor: actor?.username ?? 'unknown',
+      role: actor?.role ?? 'read-only',
+      action: 'query',
+      resourceType: 'cluster-kubeconfig-export',
+      resourceId: id,
+      result: 'success',
+      reason: this.buildAuditReason(
+        requestId,
+        `readonly export expiresAt=${exported.expiresAt}`,
+      ),
+    });
+
+    const encodedFilename = encodeURIComponent(exported.filename);
+    res.setHeader('Content-Type', exported.contentType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${exported.filename}"; filename*=UTF-8''${encodedFilename}`,
+    );
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-Kubeconfig-Mode', 'readonly-export');
+    res.send(exported.content);
   }
 
   @Post()
