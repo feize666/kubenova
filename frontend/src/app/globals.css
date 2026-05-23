@@ -235,50 +235,153 @@ body {
   background-size: 100% 100%, 32px 32px, 32px 32px;
 }
 
+.resource-table .ant-table-thead > tr > th,
+.resource-table .ant-table-tbody > tr > td,
 .pod-table .ant-table-thead > tr > th,
 .pod-table .ant-table-tbody > tr > td {
   text-align: left;
   vertical-align: middle;
 }
 
+.resource-table .ant-table-cell,
 .pod-table .ant-table-cell {
   vertical-align: middle !important;
 }
 
+.resource-table .ant-table-thead > tr > th,
 .pod-table .ant-table-thead > tr > th {
   padding: 12px 14px;
   line-height: 1.2;
 }
 
+.resource-table .ant-table-tbody > tr > td,
 .pod-table .ant-table-tbody > tr > td {
   padding: 12px 14px;
   line-height: 1.2;
 }
 
+.resource-table .ant-table-cell-fix-right,
 .pod-table .ant-table-cell-fix-right {
   vertical-align: middle !important;
 }
 
+.resource-table .ant-table-tbody > tr > td .ant-typography,
+.resource-table .ant-table-tbody > tr > td .ant-tag,
 .pod-table .ant-table-tbody > tr > td .ant-typography,
 .pod-table .ant-table-tbody > tr > td .ant-tag {
   margin-inline: 0;
 }
 
+.resource-table .ant-table-tbody > tr > td .ant-space,
 .pod-table .ant-table-tbody > tr > td .ant-space {
   justify-content: flex-start;
 }
 
+.resource-table .ant-table-tbody > tr:first-child > td,
 .pod-table .ant-table-tbody > tr:first-child > td {
   padding-top: 12px;
 }
 
+.resource-table .ant-pagination,
 .pod-table .ant-pagination {
   margin-top: 12px;
 }
 
+.resource-table .ant-pagination,
+.resource-table .ant-pagination *,
 .pod-table .ant-pagination,
 .pod-table .ant-pagination * {
   text-align: left;
+}
+
+.pod-action-trigger.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--pod-action-trigger-border);
+  background: var(--pod-action-trigger-bg);
+  color: var(--pod-action-trigger-text);
+  box-shadow: var(--pod-action-trigger-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.pod-action-trigger.ant-btn:hover,
+.pod-action-trigger.ant-btn:focus-visible {
+  border-color: var(--pod-action-trigger-border-hover);
+  background: var(--pod-action-trigger-bg-hover);
+  color: var(--pod-action-trigger-text-hover);
+  box-shadow:
+    var(--pod-action-trigger-shadow-hover),
+    0 0 0 4px var(--pod-action-trigger-ring),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.pod-action-trigger.ant-btn:hover {
+  transform: translateY(-1px);
+}
+
+.pod-action-trigger .ant-btn-icon .anticon {
+  color: var(--pod-action-trigger-icon);
+  font-size: 13px;
+}
+
+.pod-action-trigger .ant-btn-icon + span {
+  display: none;
+}
+
+.pod-actions-dropdown .ant-dropdown-menu {
+  min-width: 188px;
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--pod-actions-menu-border);
+  background: var(--pod-actions-menu-bg);
+  box-shadow: var(--pod-actions-menu-shadow);
+  backdrop-filter: blur(18px);
+}
+
+.pod-actions-dropdown .ant-dropdown-menu-item {
+  min-height: 38px;
+  margin: 2px 0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  color: var(--pod-actions-menu-item-text);
+  transition: background-color 0.18s ease, transform 0.18s ease;
+}
+
+.pod-actions-dropdown .ant-dropdown-menu-item:hover {
+  background: var(--pod-actions-menu-item-hover);
+  transform: translateX(1px);
+}
+
+.pod-actions-dropdown .ant-dropdown-menu-item-danger:hover {
+  background: var(--pod-actions-menu-item-danger-hover);
+}
+
+.pod-actions-dropdown .ant-dropdown-menu-item .ant-dropdown-menu-title-content {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pod-actions-dropdown .ant-dropdown-menu-item .anticon {
+  font-size: 14px;
+  color: var(--pod-actions-menu-item-icon);
+}
+
+.pod-actions-dropdown .ant-dropdown-menu-item-danger .anticon {
+  color: var(--pod-actions-menu-item-danger-icon);
+}
+
+.pod-actions-dropdown .ant-dropdown-menu-item-divider {
+  margin: 6px 4px;
+  border-color: rgba(148, 163, 184, 0.16);
 }
 
 /* ============================================================

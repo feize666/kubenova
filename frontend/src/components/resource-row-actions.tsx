@@ -1,14 +1,8 @@
 "use client";
 
-import { Dropdown } from "antd";
 import {
-  buildResourceActionMenuItems,
   type ResourceActionItem,
-  openResourceActionConfirm,
-  renderResourceActionTriggerButton,
-  renderPodLikeResourceActionStyles,
-  POD_ACTION_MENU_CLASS,
-  POD_ACTION_TRIGGER_CLASS,
+  ResourceActionDropdown,
 } from "@/components/resource-action-bar";
 
 type ResourceRowActionsProps = {
@@ -47,39 +41,7 @@ export function ResourceRowActions({
       },
     },
   ];
-  const items = buildResourceActionMenuItems(actions);
-
   return (
-    <>
-      <Dropdown
-        trigger={["click"]}
-        placement="bottomRight"
-        classNames={{ root: [className, POD_ACTION_MENU_CLASS].filter(Boolean).join(" ") }}
-        menu={{
-          items,
-          onClick: ({ key }) => {
-            const action = actions.find((item) => item.key === key);
-            if (!action || action.disabled) {
-              return;
-            }
-            if (action.confirm) {
-              if (!action.onClick) {
-                return;
-              }
-              openResourceActionConfirm(action.confirm, action.onClick);
-              return;
-            }
-            action.onClick?.();
-          },
-        }}
-      >
-        {renderResourceActionTriggerButton({ ariaLabel: "更多操作", baseClassName: POD_ACTION_TRIGGER_CLASS })}
-      </Dropdown>
-
-      {renderPodLikeResourceActionStyles({
-        triggerClassName: POD_ACTION_TRIGGER_CLASS,
-        menuClassName: POD_ACTION_MENU_CLASS,
-      })}
-    </>
+    <ResourceActionDropdown actions={actions} ariaLabel="更多操作" className={className} />
   );
 }

@@ -335,7 +335,7 @@ function getFailureCopy(category: TopologyFailureCategory): { title: string; des
   if (category === "service-unavailable") {
     return {
       title: "集群服务暂不可达",
-      description: "拓扑数据拉取失败。可稍后重试，或检查集群接入状态。",
+      description: "拓扑数据暂时不可用，请稍后重试。",
     };
   }
   if (category === "network-timeout") {

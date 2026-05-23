@@ -2,7 +2,7 @@
 
 import type { TablePaginationConfig } from "antd";
 import type { TableProps } from "antd/es/table";
-import { buildTablePagination, createPaginationChangeHandler } from "./pagination";
+import { buildResourceTablePagination, createPaginationChangeHandler } from "./pagination";
 import { useTableSortPaginationState, type TableSortPaginationOptions } from "./use-table-sort-pagination";
 
 export type UseAntdTableSortPaginationOptions = TableSortPaginationOptions;
@@ -52,7 +52,7 @@ export function useAntdTableSortPagination<T = unknown>(options: UseAntdTableSor
   }
 
   function getPaginationConfig(total: number, busy = false): TablePaginationConfig {
-    return buildTablePagination({
+    return buildResourceTablePagination({
       current: pagination.pageIndex + 1,
       pageSize: pagination.pageSize,
       total,

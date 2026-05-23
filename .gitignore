@@ -9,6 +9,9 @@ coverage/
 
 # 日志
 logs/
+/frontend/logs/
+/backend/control-api/logs/
+/backend/runtime-gateway/logs/
 !frontend/src/app/logs/
 !frontend/src/app/logs/**
 !backend/control-api/src/logs/

@@ -4,33 +4,20 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="$ROOT_DIR/.run"
 
-stop_pid_file() {
-  local name="$1"
-  local pid_file="$RUN_DIR/${name}.pid"
+RELEASE_ROOT="${RELEASE_ROOT:-/opt/k8s-aiops-manager/current}"
+FRONTEND_DIR="$RELEASE_ROOT/frontend"
+CONTROL_API_DIR="$RELEASE_ROOT/control-api"
+RUNTIME_GATEWAY_DIR="$RELEASE_ROOT/runtime-gateway"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+CONTROL_API_PORT="${CONTROL_API_PORT:-4000}"
+RUNTIME_GATEWAY_PORT="${RUNTIME_GATEWAY_PORT:-4100}"
+FRONTEND_BOOT_MODE="stable"
+USE_TMUX="false"
+SERVICE_PID_SUFFIX=".prod"
+SERVICE_LOG_SUFFIX="prod"
+source "$ROOT_DIR/scripts/_service-lib.sh"
+service_lib_init
 
-  if [[ ! -f "$pid_file" ]]; then
-    echo "[$name] 未运行（无 pid 文件）"
-    return
-  fi
-
-  local pid
-  pid="$(cat "$pid_file")"
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-    echo "[$name] 正在停止（pid=$pid）..."
-    kill "$pid" || true
-    sleep 1
-    if kill -0 "$pid" 2>/dev/null; then
-      echo "[$name] 正在强制终止（pid=$pid）..."
-      kill -9 "$pid" || true
-    fi
-    echo "[$name] 已停止"
-  else
-    echo "[$name] 旧 pid 文件（进程已退出）"
-  fi
-
-  rm -f "$pid_file"
-}
-
-stop_pid_file frontend
-stop_pid_file control-api
-stop_pid_file runtime-gateway
+stop_service frontend "$FRONTEND_PORT" "false"
+stop_service control-api "$CONTROL_API_PORT" "false"
+stop_service runtime-gateway "$RUNTIME_GATEWAY_PORT" "false"

@@ -45,6 +45,13 @@ npm run dev
 
 默认访问：`http://localhost:3000`（会自动跳转到 `/dashboard`）。
 
+前端在平台里通常有两种启动诉求：
+
+- 开发：`npm run dev`，适合改页面和联调接口。
+- 演示/稳定预览：`npm run build:stable && npm run start:stable`，或由 `bash scripts/dev-up.sh` 配合 `FRONTEND_BOOT_MODE=stable` 启动。
+
+不要用 dev 做演示：dev 会走源码直跑，Next 每次改动都要重新编译相关页面，首次启动和热更新都更重，页面切换时也更容易被重新构建或重启影响。
+
 ## 质量检查
 
 ```bash

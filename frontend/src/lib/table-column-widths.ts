@@ -22,6 +22,8 @@ export const TABLE_COL_WIDTH = {
   node: 140,
   replicas: 96,
   ready: 96,
+  restart: 116,
+  metric: 160,
   available: 96,
   chart: 220,
   release: 220,
@@ -177,7 +179,7 @@ function inferStandardWidth<T>(
   if (matchesAny(identity, ["namespace", "名称空间"])) {
     return TABLE_COL_WIDTH.namespace;
   }
-  if (matchesAny(identity, ["status", "状态"])) {
+  if (matchesAny(identity, ["status", "状态", "phase"])) {
     return TABLE_COL_WIDTH.status;
   }
   if (matchesAny(identity, ["state", "启用状态", "绑定状态"])) {
@@ -197,6 +199,18 @@ function inferStandardWidth<T>(
   }
   if (matchesAny(identity, ["node", "节点"])) {
     return TABLE_COL_WIDTH.node;
+  }
+  if (matchesAny(identity, ["ready", "就绪", "readyreplicas"])) {
+    return TABLE_COL_WIDTH.ready;
+  }
+  if (matchesAny(identity, ["replicas", "副本"])) {
+    return TABLE_COL_WIDTH.replicas;
+  }
+  if (matchesAny(identity, ["restart", "重启"])) {
+    return TABLE_COL_WIDTH.restart;
+  }
+  if (matchesAny(identity, ["cpu", "memory", "内存", "使用率"])) {
+    return TABLE_COL_WIDTH.metric;
   }
   if (matchesAny(identity, ["capacity", "容量"])) {
     return TABLE_COL_WIDTH.capacity;
@@ -222,7 +236,7 @@ function inferStandardWidth<T>(
   if (matchesAny(identity, ["strategy", "策略"])) {
     return TABLE_COL_WIDTH.strategy;
   }
-  if (matchesAny(identity, ["actions", "操作"])) {
+  if (matchesAny(identity, ["actions", "quick-actions", "操作"])) {
     return actionWidth;
   }
 

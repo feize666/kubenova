@@ -8,6 +8,16 @@ Kubernetes 集群 AI 运维管理平台。
 
 这是一套 Kubernetes 运维管理平台，主要用于把集群、工作负载、网络资源和存储资源统一纳管，并通过控制面 API 与实时网关连接集群侧能力。
 
+## 运行模式
+
+项目提供三种常用运行方式：
+
+- 开发：`bash scripts/dev-up.sh`
+- 演示：`FRONTEND_BOOT_MODE=stable bash scripts/dev-up.sh`
+- 生产：`bash scripts/prod-up.sh`
+
+说明见 [运行模式与日志规划](docs/runtime.md)。
+
 ### 核心能力
 
 - 多集群接入与管理

@@ -1,8 +1,10 @@
 import type { ColumnsType } from "antd/es/table";
+import { TABLE_COL_WIDTH } from "@/lib/table-column-widths";
 
 export type ResourceTableColumn<T> = NonNullable<ColumnsType<T>[number]>;
 
 type StandardColumnKey = "name" | "cluster" | "namespace" | "actions";
+type ResourceTableColumnAlign = NonNullable<ResourceTableColumn<unknown>["align"]>;
 
 export type StandardResourceTableColumns<T> = {
   name: ResourceTableColumn<T>;
@@ -33,6 +35,38 @@ export function buildResourceTableColumns<T>(
   }
 
   return columns;
+}
+
+export function withResourceTableColumnDefaults<T>(
+  column: ResourceTableColumn<T>,
+  defaults: {
+    align?: ResourceTableColumnAlign;
+    ellipsis?: boolean;
+  } = {},
+): ResourceTableColumn<T> {
+  return {
+    align: defaults.align ?? "left",
+    ellipsis: defaults.ellipsis ?? true,
+    ...column,
+  };
+}
+
+export function buildResourceTableActionsColumn<T>(
+  render: ResourceTableColumn<T>["render"],
+  options: {
+    title?: ResourceTableColumn<T>["title"];
+    key?: string;
+    width?: number;
+  } = {},
+): ResourceTableColumn<T> {
+  return {
+    title: options.title ?? "操作",
+    key: options.key ?? "actions",
+    width: options.width ?? TABLE_COL_WIDTH.actionCompact,
+    fixed: "right",
+    align: "left",
+    render,
+  };
 }
 
 export function buildResourceTableOrder(

@@ -730,7 +730,21 @@ export default function TerminalPage() {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
+    let rafId = 0;
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+              fitTerminal();
+            });
+          })
+        : null;
+    resizeObserver?.observe(host);
+
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      resizeObserver?.disconnect();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;

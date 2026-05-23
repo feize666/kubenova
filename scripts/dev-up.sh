@@ -11,9 +11,8 @@ FRONTEND_DIR="$ROOT_DIR/frontend"
 CONTROL_API_DIR="$ROOT_DIR/backend/control-api"
 RUNTIME_GATEWAY_DIR="$ROOT_DIR/backend/runtime-gateway"
 RUN_DIR="$ROOT_DIR/.run"
-LOG_DIR="$RUN_DIR/logs"
 CACHE_DIR="$RUN_DIR/cache"
-mkdir -p "$LOG_DIR" "$CACHE_DIR"
+mkdir -p "$CACHE_DIR"
 
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-4000}"
@@ -26,54 +25,9 @@ FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-dev}"
 FRONTEND_DEV_BUNDLER="${FRONTEND_DEV_BUNDLER:-webpack}"
 FRONTEND_NODE_OPTIONS="${FRONTEND_NODE_OPTIONS:---max-old-space-size=1536}"
 RUNTIME_GATEWAY_DEPS_STAMP="$CACHE_DIR/runtime-gateway-go-mod.download.stamp"
-
-stream_match() {
-  local pattern="$1"
-  if command -v rg >/dev/null 2>&1; then
-    rg -q -- "$pattern"
-  else
-    grep -Eq -- "$pattern"
-  fi
-}
-
-service_health_url() {
-  local name="$1" port="$2"
-  case "$name" in
-    frontend) echo "http://127.0.0.1:${port}/" ;;
-    control-api) echo "http://127.0.0.1:${port}/api/capabilities" ;;
-    runtime-gateway) echo "http://127.0.0.1:${port}/healthz" ;;
-    *) echo "" ;;
-  esac
-}
-
-service_session_name() {
-  local name="$1"
-  echo "aiops-${name}"
-}
-
-service_pid_file() {
-  local name="$1"
-  if [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" && "$USE_TMUX" != "true" ]]; then
-    echo "$RUN_DIR/${name}.supervisor.pid"
-  else
-    echo "$RUN_DIR/${name}.pid"
-  fi
-}
-
-service_child_pid_file() {
-  local name="$1"
-  echo "$RUN_DIR/${name}.pid"
-}
-
-service_uses_supervisor() {
-  local name="$1"
-  [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" && "$USE_TMUX" != "true" ]]
-}
-
-tmux_session_exists() {
-  local session="$1"
-  tmux has-session -t "$session" 2>/dev/null
-}
+SERVICE_LOG_SUFFIX="dev"
+source "$ROOT_DIR/scripts/_service-lib.sh"
+service_lib_init
 
 # 解析参数
 for arg in "$@"; do
@@ -81,15 +35,6 @@ for arg in "$@"; do
     --no-gateway) START_GATEWAY="false" ;;
   esac
 done
-
-# ── 依赖检查 ────────────────────────────────────────────
-check_dep() {
-  local cmd="$1" pkg="${2:-$1}"
-  if ! command -v "$cmd" &>/dev/null; then
-    echo "[错误] 未找到 '$cmd'，请先安装 $pkg。" >&2
-    exit 1
-  fi
-}
 
 check_dep node "Node.js (https://nodejs.org)"
 check_dep npm  "npm"
@@ -150,7 +95,8 @@ clean_frontend_dev_cache() {
     fi
   fi
 
-  local log_file="$LOG_DIR/frontend.log"
+  local log_file
+  log_file="$(service_log_file frontend)"
   local dev_dir="$FRONTEND_DIR/.next/dev"
   local manifest="$dev_dir/server/app/page/build-manifest.json"
   if [[ -d "$dev_dir" && ! -f "$manifest" ]]; then
@@ -279,37 +225,6 @@ clean_frontend_dev_cache
 prepare_frontend_standalone
 
 # ── 进程管理 ────────────────────────────────────────────
-listener_pid() {
-  local port="$1"
-  fuser -n tcp "$port" 2>/dev/null | awk '{print $1}'
-}
-
-wait_for_port_free() {
-  local port="$1"
-  local retries="${2:-10}"
-  for _ in $(seq 1 "$retries"); do
-    if ! listener_pid "$port" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
-}
-
-terminate_pid() {
-  local pid="$1"
-  [[ -n "$pid" ]] || return 0
-  if ! kill -0 "$pid" 2>/dev/null; then
-    return 0
-  fi
-
-  kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
-  sleep 1
-  if kill -0 "$pid" 2>/dev/null; then
-    kill -9 -- "-$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
-  fi
-}
-
 cleanup_orphan_processes() {
   local name="$1" port="$2"
   local pid_file
@@ -354,124 +269,6 @@ cleanup_orphan_processes() {
   done
 }
 
-resolve_managed_pid() {
-  local name="$1" port="$2" fallback_pid="${3:-}"
-  local bound_pid
-  bound_pid="$(listener_pid "$port" || true)"
-
-  if [[ -n "$bound_pid" ]]; then
-    case "$name" in
-      frontend)
-        if is_frontend_process "$bound_pid"; then
-          echo "$bound_pid"
-          return
-        fi
-        ;;
-      control-api)
-        if is_control_api_process "$bound_pid"; then
-          echo "$bound_pid"
-          return
-        fi
-        ;;
-      runtime-gateway)
-        if is_runtime_gateway_process "$bound_pid"; then
-          echo "$bound_pid"
-          return
-        fi
-        ;;
-    esac
-  fi
-
-  if [[ -n "$fallback_pid" ]]; then
-    echo "$fallback_pid"
-  fi
-}
-
-process_cmdline() {
-  local pid="$1"
-  ps -p "$pid" -o args= 2>/dev/null || true
-}
-
-process_cwd() {
-  local pid="$1"
-  readlink -f "/proc/$pid/cwd" 2>/dev/null || true
-}
-
-is_runtime_gateway_process() {
-  local pid="$1"
-  local cmdline
-  cmdline="$(process_cmdline "$pid")"
-  [[ "$cmdline" == *"runtime-gateway"* || "$cmdline" == *"cmd/runtime-gateway"* ]]
-}
-
-is_frontend_process() {
-  local pid="$1"
-  local cmdline
-  cmdline="$(process_cmdline "$pid")"
-  [[ "$cmdline" == *"dev-supervise.sh frontend"* || "$cmdline" == *"next-server"* || "$cmdline" == *"frontend/.next/standalone/server.js"* || "$cmdline" == *"next/dist/bin/next start"* || "$cmdline" == *"next/dist/bin/next dev"* ]]
-}
-
-is_frontend_standalone_process() {
-  local pid="$1"
-  local cwd
-  cwd="$(process_cwd "$pid")"
-  [[ "$cwd" == *"/frontend/.next/standalone" ]]
-}
-
-is_control_api_process() {
-  local pid="$1"
-  local cmdline
-  cmdline="$(process_cmdline "$pid")"
-  [[ "$cmdline" == *"/backend/control-api/dist/"* || "$cmdline" == *"dist/src/main.js"* || "$cmdline" == *"nestjs"* || "$cmdline" == *"start:dev"* ]]
-}
-
-service_is_starting() {
-  local pid="$1" port="$2"
-  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
-    return 1
-  fi
-  if [[ -n "$port" ]] && ss -ltnp "( sport = :$port )" 2>/dev/null | stream_match "pid=$pid"; then
-    return 1
-  fi
-  local stat
-  stat="$(ps -p "$pid" -o stat= 2>/dev/null | tr -d '[:space:]' || true)"
-  [[ -n "$stat" ]]
-}
-
-is_healthy() {
-  local url="$1"
-  if [[ -z "$url" ]]; then
-    return 0
-  fi
-  local code
-  code="$(curl -s -o /dev/null -m 2 -w "%{http_code}" "$url" || true)"
-  [[ "$code" =~ ^[234][0-9][0-9]$ ]]
-}
-
-wait_for_health() {
-  local url="$1" retries="${2:-12}"
-  if [[ -z "$url" ]]; then
-    return 0
-  fi
-  for _ in $(seq 1 "$retries"); do
-    if is_healthy "$url"; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
-}
-
-service_health_timeout() {
-  local name="$1"
-  case "$name" in
-    control-api) echo 180 ;;
-    frontend) echo 120 ;;
-    runtime-gateway) echo 120 ;;
-    *) echo 60 ;;
-  esac
-}
-
 start_if_not_running() {
   local name="$1"
   local workdir="$2"
@@ -481,7 +278,8 @@ start_if_not_running() {
   pid_file="$(service_pid_file "$name")"
   local child_pid_file
   child_pid_file="$(service_child_pid_file "$name")"
-  local log_file="$LOG_DIR/${name}.log"
+  local log_file
+  log_file="$(service_log_file "$name")"
   local session_name
   session_name="$(service_session_name "$name")"
   local health_url
@@ -588,6 +386,7 @@ start_if_not_running() {
   fi
 
   echo "[$name] 正在启动，端口 $port..."
+  ensure_service_log_dir "$name"
   : >"$log_file"
   if [[ "$USE_TMUX" == "true" ]] && command -v tmux >/dev/null 2>&1; then
     tmux new-session -d -s "$session_name" -c "$workdir" "exec bash -lc $(printf '%q' "$cmd")"
@@ -700,5 +499,5 @@ if [[ "$START_GATEWAY" == "true" ]]; then
   echo "  runtime-gateway: ws://localhost:$RUNTIME_GATEWAY_PORT"
 fi
 echo ""
-echo "日志目录: $LOG_DIR"
+service_log_dirs_summary
 echo "停止命令: bash scripts/dev-down.sh"

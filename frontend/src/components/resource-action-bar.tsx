@@ -1,7 +1,7 @@
 "use client";
 
 import { DeleteOutlined, EditOutlined, FileTextOutlined, MoreOutlined } from "@ant-design/icons";
-import { Button, Popconfirm, Space } from "antd";
+import { Button, Dropdown, Popconfirm, Space } from "antd";
 import type { MenuProps } from "antd";
 import { Modal } from "antd";
 import type { ReactNode } from "react";
@@ -79,6 +79,16 @@ export const RESOURCE_ACTION_MENU_CLASS = "resource-action-menu";
 export const POD_ACTION_TRIGGER_CLASS = "pod-action-trigger";
 export const POD_ACTION_MENU_CLASS = "pod-actions-dropdown";
 
+export interface ResourceActionDropdownProps {
+  actions: ResourceMenuItem[];
+  ariaLabel?: string;
+  className?: string;
+  triggerClassName?: string;
+  menuClassName?: string;
+  trigger?: ReactNode;
+  placement?: "bottomLeft" | "bottom" | "bottomRight" | "topLeft" | "top" | "topRight";
+}
+
 export function getResourceActionIcon(actionKey: string): ReactNode | null {
   switch (normalizeActionSlot(actionKey)) {
     case "edit":
@@ -122,6 +132,10 @@ export function openResourceActionConfirm(
   });
 }
 
+function isResourceActionItem(action: ResourceMenuItem): action is ResourceActionItem {
+  return !("type" in action && action.type === "divider");
+}
+
 export function renderResourceActionTriggerButton({
   className,
   ariaLabel = "更多操作",
@@ -150,98 +164,48 @@ export function renderPodLikeResourceActionStyles({
   triggerClassName?: string;
   menuClassName?: string;
 }) {
+  void triggerClassName;
+  void menuClassName;
+  return null;
+}
+
+export function ResourceActionDropdown({
+  actions,
+  ariaLabel = "更多操作",
+  className,
+  triggerClassName = POD_ACTION_TRIGGER_CLASS,
+  menuClassName = POD_ACTION_MENU_CLASS,
+  trigger,
+  placement = "bottomRight",
+}: ResourceActionDropdownProps) {
+  const items = buildResourceActionMenuItems(actions);
+  const itemActions = actions.filter(isResourceActionItem);
+
   return (
-    <style jsx global>{`
-      .${triggerClassName}.ant-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        height: 30px;
-        padding: 0 10px;
-        border-radius: 999px;
-        border: 1px solid var(--pod-action-trigger-border, rgba(99, 102, 241, 0.22));
-        background: var(--pod-action-trigger-bg, linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.88)));
-        color: var(--pod-action-trigger-text, rgba(248, 250, 252, 0.94));
-        box-shadow: var(--pod-action-trigger-shadow, 0 10px 24px rgba(15, 23, 42, 0.18)), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-        backdrop-filter: blur(14px);
-        transition:
-          transform 0.18s ease,
-          box-shadow 0.18s ease,
-          border-color 0.18s ease,
-          background 0.18s ease;
-      }
-
-      .${triggerClassName}.ant-btn:hover,
-      .${triggerClassName}.ant-btn:focus-visible {
-        border-color: var(--pod-action-trigger-border-hover, rgba(129, 140, 248, 0.48));
-        background: var(--pod-action-trigger-bg-hover, linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.92)));
-        color: var(--pod-action-trigger-text-hover, #ffffff);
-        box-shadow:
-          var(--pod-action-trigger-shadow-hover, 0 14px 28px rgba(15, 23, 42, 0.24)),
-          0 0 0 4px var(--pod-action-trigger-ring, rgba(99, 102, 241, 0.12)),
-          inset 0 1px 0 rgba(255, 255, 255, 0.1);
-      }
-
-      .${triggerClassName}.ant-btn:hover {
-        transform: translateY(-1px);
-      }
-
-      .${triggerClassName} .ant-btn-icon .anticon {
-        color: var(--pod-action-trigger-icon, #93c5fd);
-        font-size: 13px;
-      }
-
-      .${triggerClassName} .ant-btn-icon + span {
-        display: none;
-      }
-
-      .${menuClassName} .ant-dropdown-menu {
-        min-width: 188px;
-        padding: 8px;
-        border-radius: 16px;
-        border: 1px solid var(--pod-actions-menu-border, rgba(148, 163, 184, 0.18));
-        background: var(--pod-actions-menu-bg, linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.92)));
-        box-shadow: var(--pod-actions-menu-shadow, 0 18px 38px rgba(15, 23, 42, 0.28));
-        backdrop-filter: blur(18px);
-      }
-
-      .${menuClassName} .ant-dropdown-menu-item {
-        min-height: 38px;
-        margin: 2px 0;
-        padding: 8px 12px;
-        border-radius: 12px;
-        color: var(--pod-actions-menu-item-text, rgba(229, 231, 235, 0.98));
-        transition: background-color 0.18s ease, transform 0.18s ease;
-      }
-
-      .${menuClassName} .ant-dropdown-menu-item:hover {
-        background: var(--pod-actions-menu-item-hover, rgba(59, 130, 246, 0.14));
-        transform: translateX(1px);
-      }
-
-      .${menuClassName} .ant-dropdown-menu-item-danger:hover {
-        background: var(--pod-actions-menu-item-danger-hover, rgba(239, 68, 68, 0.14));
-      }
-
-      .${menuClassName} .ant-dropdown-menu-item .ant-dropdown-menu-title-content {
-        font-size: 13px;
-        font-weight: 500;
-      }
-
-      .${menuClassName} .ant-dropdown-menu-item .anticon {
-        font-size: 14px;
-        color: var(--pod-actions-menu-item-icon, var(--pod-action-trigger-icon, #93c5fd));
-      }
-
-      .${menuClassName} .ant-dropdown-menu-item-danger .anticon {
-        color: var(--pod-actions-menu-item-danger-icon, #f87171);
-      }
-
-      .${menuClassName} .ant-dropdown-menu-item-divider {
-        margin: 6px 4px;
-        border-color: var(--pod-actions-menu-border, rgba(148, 163, 184, 0.16));
-      }
-    `}</style>
+    <Dropdown
+      trigger={["click"]}
+      placement={placement}
+      classNames={{ root: [className, menuClassName].filter(Boolean).join(" ") }}
+      menu={{
+        items,
+        onClick: ({ key }) => {
+          const action = itemActions.find((item) => item.key === key);
+          if (!action || action.disabled) {
+            return;
+          }
+          if (action.confirm) {
+            if (!action.onClick) {
+              return;
+            }
+            openResourceActionConfirm(action.confirm, action.onClick);
+            return;
+          }
+          action.onClick?.();
+        },
+      }}
+    >
+      {trigger ?? renderResourceActionTriggerButton({ ariaLabel, baseClassName: triggerClassName })}
+    </Dropdown>
   );
 }
 
