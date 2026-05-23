@@ -18,13 +18,11 @@ import {
   Card,
   Col,
   Dropdown,
-  Empty,
   Input,
   InputNumber,
   Modal,
   Row,
   Space,
-  Table,
   Tag,
   Typography,
 } from "antd";
@@ -33,6 +31,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import {
   matchLabelExpressions,
   parseResourceSearchInput,
@@ -62,7 +61,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -747,8 +746,7 @@ export default function DeploymentsPage() {
               }
             />
           ) : null}
-          <Table<DeploymentRow>
-            className="pod-table"
+          <ResourceTable<DeploymentRow>
             bordered
             rowKey="key"
             columns={antd列}
@@ -758,8 +756,7 @@ export default function DeploymentsPage() {
               handleTableChange(paginationInfo, filters, sorter, extra, (query.isLoading && !query.data) || actionMutation.isPending)
             }
             pagination={getPaginationConfig(query.data?.total ?? 0, (query.isLoading && !query.data) || actionMutation.isPending)}
-            scroll={{ x: getTableScrollX(antd列) }}
-            locale={{ emptyText: query.isLoading ? "正在加载..." : <Empty description="暂无数据" /> }}
+            emptyDescription="暂无数据"
           />
         </Space>
       </Card>

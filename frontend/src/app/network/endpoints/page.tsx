@@ -8,7 +8,6 @@ import {
   Input,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
   Modal,
@@ -27,12 +26,13 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import {
   createNetworkResource,
@@ -474,9 +474,7 @@ export default function EndpointsPage() {
           />
         ) : null}
 
-        <Table<EndpointsResource>
-          className="pod-table"
-          bordered
+        <ResourceTable<EndpointsResource>
           rowKey="id"
           columns={columns}
           dataSource={tableData}
@@ -485,7 +483,6 @@ export default function EndpointsPage() {
             handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
 

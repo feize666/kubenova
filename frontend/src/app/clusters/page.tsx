@@ -20,7 +20,6 @@ import {
   Card,
   Col,
   Dropdown,
-  Empty,
   Form,
   Input,
   Modal,
@@ -28,18 +27,18 @@ import {
   Row,
   Select,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
   message,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { TableProps } from "antd";
+import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterDetailDrawer } from "@/components/cluster-detail-drawer";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { ResourceTable } from "@/components/resource-table";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import {
   POD_ACTION_MENU_CLASS,
@@ -395,7 +394,7 @@ export default function ClustersPage() {
     }
   };
 
-  const columns: TableProps<ClusterTableRecord>["columns"] = [
+  const columns: ColumnsType<ClusterTableRecord> = [
     {
       title: "集群名称",
       dataIndex: "name",
@@ -647,20 +646,16 @@ export default function ClustersPage() {
       ) : null}
 
       <Card>
-        <Table<ClusterTableRecord>
+        <ResourceTable<ClusterTableRecord>
           rowKey="key"
           columns={columns}
           dataSource={visibleTableData}
           loading={{ spinning: query.isLoading, description: "集群数据加载中..." }}
-          scroll={{ x: getTableScrollX(columns) }}
           onChange={(nextPagination, filters, sorter, extra) =>
             handleTableChange(nextPagination, filters, sorter, extra, query.isLoading)
           }
           pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, query.isLoading)}
-          locale={{
-            emptyText:
-              query.isLoading ? "正在加载..." : <Empty description="暂无符合条件的集群数据" />,
-          }}
+          emptyDescription="暂无符合条件的集群数据"
         />
       </Card>
 

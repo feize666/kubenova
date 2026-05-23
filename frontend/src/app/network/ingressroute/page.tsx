@@ -9,7 +9,6 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
   message,
@@ -24,13 +23,14 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
+import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import {
   createNetworkResource,
@@ -423,9 +423,7 @@ export default function IngressRoutePage() {
           />
         ) : null}
 
-        <Table<IngressRouteResource>
-          className="pod-table"
-          bordered
+        <ResourceTable<IngressRouteResource>
           rowKey="id"
           columns={columns}
           dataSource={tableData}
@@ -434,7 +432,6 @@ export default function IngressRoutePage() {
             handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
 

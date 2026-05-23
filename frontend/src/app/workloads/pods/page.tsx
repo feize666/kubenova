@@ -15,14 +15,12 @@ import {
   Button,
   Card,
   Col,
-  Empty,
   Input,
   Dropdown,
   Modal,
   Row,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
   message,
@@ -32,6 +30,7 @@ import type { ColumnsType, ColumnType } from "antd/es/table";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
@@ -51,7 +50,7 @@ import { NamespaceSelect } from "@/components/namespace-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { buildTerminalRoute } from "@/lib/workloads/terminal";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
@@ -852,26 +851,17 @@ export default function PodsPage() {
           />
         ) : null}
 
-        <Table<PodRow>
+        <ResourceTable<PodRow>
           rowKey="key"
           bordered
           columns={columns}
           dataSource={displayedRows}
           loading={{ spinning: podsQuery.isLoading && !podsQuery.data, description: "Pod 数据加载中..." }}
-          scroll={{ x: getTableScrollX(columns) }}
-          className="pod-table"
           onChange={(paginationInfo, filters, sorter, extra) =>
             handleTableChange(paginationInfo, filters, sorter, extra, tableBusy)
           }
           pagination={getPaginationConfig(displayedTotal, tableBusy)}
-          locale={{
-            emptyText:
-              podsQuery.isLoading && !podsQuery.data ? (
-                "正在加载..."
-              ) : (
-                <Empty description="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。" />
-              ),
-          }}
+          emptyDescription="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。"
         />
       </Card>
 

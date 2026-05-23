@@ -15,7 +15,6 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
   message,
@@ -24,6 +23,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import {
   buildResourceActionMenuItems,
   matchLabelExpressions,
@@ -51,7 +51,7 @@ import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resource
 import { getClusters } from "@/lib/api/clusters";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -425,17 +425,17 @@ export default function StorageClassPage() {
       ) : null}
 
       <Card>
-          <Table<StorageResource>
-            className="pod-table"
+          <ResourceTable<StorageResource>
             rowKey="id"
             columns={columns}
             dataSource={tableData}
+            bordered={false}
+            layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
             loading={isLoading && !data}
             onChange={(nextPagination, filters, sorter, extra) =>
               handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
             }
             pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-            scroll={{ x: getTableScrollX(columns) }}
           />
       </Card>
 

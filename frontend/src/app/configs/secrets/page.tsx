@@ -13,7 +13,6 @@ import {
   Row,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
   message,
@@ -22,6 +21,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import {
   matchLabelExpressions,
   parseResourceSearchInput,
@@ -43,7 +43,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
@@ -354,18 +354,16 @@ export default function SecretsPage() {
           />
         ) : null}
 
-        <Table<ConfigResourceItem>
-          className="pod-table"
-          bordered
+        <ResourceTable<ConfigResourceItem>
           rowKey="id"
           columns={columns}
           dataSource={tableData}
+          layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
           loading={isLoading && !data}
           onChange={(nextPagination, filters, sorter, extra) =>
             handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
 

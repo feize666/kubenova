@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth-context";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -25,7 +26,7 @@ import {
   type DynamicResourceIdentity,
   type DynamicResourceItem,
 } from "@/lib/api/resources";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -621,9 +622,7 @@ export default function GatewayApiPage() {
           />
         ) : null}
 
-        <Table<GatewayRow>
-          className="pod-table"
-          bordered
+        <ResourceTable<GatewayRow>
           rowKey="id"
           columns={columns}
           dataSource={tableData}
@@ -632,7 +631,6 @@ export default function GatewayApiPage() {
             handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading)
           }
           pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading)}
-          scroll={{ x: getTableScrollX(columns) }}
           onRow={(record) => ({
             onClick: () => {
               if (record.id) {

@@ -21,7 +21,6 @@ import {
   Select,
   Space,
   Statistic,
-  Table,
   Tag,
   Tooltip,
   Typography,
@@ -30,6 +29,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { useAntdTableSortPagination } from "@/lib/table";
@@ -459,8 +459,7 @@ export default function ClusterHealthCenterPage() {
       ) : null}
 
       <Card>
-        <Table<ClusterHealthListItem>
-          className="pod-table"
+        <ResourceTable<ClusterHealthListItem>
           rowKey="clusterId"
           columns={columns}
           dataSource={items}

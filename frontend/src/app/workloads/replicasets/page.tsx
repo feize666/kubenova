@@ -16,7 +16,6 @@ import {
   Row,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
 } from "antd";
@@ -25,6 +24,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import {
   buildResourceActionMenuItems,
   matchLabelExpressions,
@@ -59,7 +59,7 @@ import {
   type ScaleConvergenceRound,
 } from "@/lib/workloads/scale-convergence";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 
 function stateTag(state: string) {
@@ -543,8 +543,7 @@ export default function ReplicaSetsPage() {
             />
           ) : null}
 
-          <Table<WorkloadListItem>
-            className="pod-table"
+          <ResourceTable<WorkloadListItem>
             bordered
             rowKey="id"
             columns={columns}
@@ -554,7 +553,6 @@ export default function ReplicaSetsPage() {
               handleTableChange(paginationInfo, filters, sorter, extra, (isLoading && !data) || actionMutation.isPending)
             }
             pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
-            scroll={{ x: getTableScrollX(columns) }}
           />
         </Space>
       </Card>

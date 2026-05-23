@@ -13,7 +13,6 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
 } from "antd";
@@ -25,6 +24,7 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ResourceTable } from "@/components/resource-table";
 import {
   POD_ACTION_MENU_CLASS,
   POD_ACTION_TRIGGER_CLASS,
@@ -45,7 +45,7 @@ import {
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { useAntdTableSortPagination } from "@/lib/table";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 
 interface FormValues {
   clusterId: string;
@@ -341,7 +341,7 @@ export default function NamespacesPage() {
       ) : null}
 
       <Card className="cyber-panel">
-        <Table<NamespaceListItem>
+        <ResourceTable<NamespaceListItem>
           rowKey="id"
           columns={columns}
           dataSource={namespacesQuery.data?.items ?? []}
@@ -353,7 +353,6 @@ export default function NamespacesPage() {
             namespacesQuery.data?.total ?? namespacesQuery.data?.items?.length ?? 0,
             namespacesQuery.isLoading && !namespacesQuery.data,
           )}
-          scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
 

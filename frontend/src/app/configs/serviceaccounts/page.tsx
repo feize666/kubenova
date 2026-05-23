@@ -19,6 +19,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -35,7 +36,7 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { getClusters } from "@/lib/api/clusters";
 import { getNamespaces } from "@/lib/api/namespaces";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { Dropdown } from "antd";
@@ -592,12 +593,11 @@ export default function ServiceAccountsPage() {
           />
         ) : null}
 
-        <Table<ServiceAccountRecord>
-          className="pod-table"
-          bordered
+        <ResourceTable<ServiceAccountRecord>
           rowKey="id"
           columns={columns}
           dataSource={tableData}
+          layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
           loading={listQuery.isLoading}
           onChange={(nextPagination, filters, sorter, extra) =>
             handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
@@ -610,7 +610,6 @@ export default function ServiceAccountsPage() {
             },
           })}
           pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
-          scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
 

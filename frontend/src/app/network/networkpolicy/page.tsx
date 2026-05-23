@@ -1,13 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Card, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Card, Form, Input, Modal, Select, Space, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
@@ -17,7 +18,7 @@ import { matchLabelExpressions, parseResourceSearchInput } from "@/components/re
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { createNetworkResource, deleteNetworkResource, getNetworkResources, type CreateNetworkResourcePayload, type NetworkResource } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
@@ -384,9 +385,7 @@ export default function NetworkPolicyPage() {
           />
         ) : null}
 
-        <Table<NetworkPolicyResource>
-          className="pod-table"
-          bordered
+        <ResourceTable<NetworkPolicyResource>
           rowKey="id"
           columns={columns}
           dataSource={tableData}
@@ -395,7 +394,6 @@ export default function NetworkPolicyPage() {
             handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
 

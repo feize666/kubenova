@@ -2,11 +2,12 @@
 
 import { DeleteOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Dropdown, Form, Input, Modal, Row, Select, Space, Switch, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Col, Dropdown, Form, Input, Modal, Row, Select, Space, Switch, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { MenuProps } from "antd";
 import { useMemo, useState } from "react";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
+import { ResourceTable } from "@/components/resource-table";
 import {
   buildResourceActionMenuItems,
   POD_ACTION_MENU_CLASS,
@@ -36,7 +37,7 @@ import {
 } from "@/lib/api/helm";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 
 interface RepositoryFormValues {
@@ -519,7 +520,7 @@ export default function HelmRepositoriesPage() {
           />
         ) : null}
 
-        <Table<HelmRepositoryItem>
+        <ResourceTable<HelmRepositoryItem>
           bordered
           rowKey={(row) => `${row.clusterId}/${row.name}`}
           columns={columns}
@@ -538,7 +539,6 @@ export default function HelmRepositoriesPage() {
             repositoriesQuery.data?.total ?? 0,
             repositoriesQuery.isLoading && rows.length === 0,
           )}
-          scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
 

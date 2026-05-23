@@ -15,7 +15,6 @@ import {
   Row,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
 } from "antd";
@@ -24,6 +23,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import {
   buildResourceActionMenuItems,
   matchLabelExpressions,
@@ -53,7 +53,7 @@ import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } fro
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 
 function stateTag(state: string) {
@@ -417,8 +417,7 @@ export default function CronJobsPage() {
             />
           ) : null}
 
-          <Table<CronJobItem>
-            className="pod-table"
+          <ResourceTable<CronJobItem>
             bordered
             rowKey="id"
             columns={columns}
@@ -428,7 +427,6 @@ export default function CronJobsPage() {
               handleTableChange(paginationInfo, filters, sorter, extra, isLoading && !data)
             }
             pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-            scroll={{ x: getTableScrollX(columns) }}
           />
         </Space>
       </Card>

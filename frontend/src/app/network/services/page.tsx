@@ -9,7 +9,6 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
   message,
@@ -23,6 +22,7 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
+import { ResourceTable } from "@/components/resource-table";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import {
@@ -38,7 +38,7 @@ import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { buildResourceTableColumns } from "@/lib/table/resource-table-schema";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -325,9 +325,7 @@ export default function ServicesPage() {
           />
         ) : null}
 
-        <Table<NetworkResource>
-          className="pod-table"
-          bordered
+        <ResourceTable<NetworkResource>
           rowKey="id"
           columns={columns}
           dataSource={tableData}
@@ -336,7 +334,6 @@ export default function ServicesPage() {
             handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
 

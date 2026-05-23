@@ -25,6 +25,7 @@ import type { MenuProps } from "antd";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import {
@@ -46,7 +47,7 @@ import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } fro
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import {
   executeHelmAction,
@@ -698,8 +699,7 @@ export default function HelmPage() {
           />
         ) : null}
 
-        <Table<HelmReleaseItem>
-          className="pod-table"
+        <ResourceTable<HelmReleaseItem>
           bordered
           rowKey="id"
           columns={columns}
@@ -715,7 +715,6 @@ export default function HelmPage() {
             handleTableChange(paginationInfo, filters, sorter, extra, releasesQuery.isLoading);
           }}
           pagination={getPaginationConfig(releasesQuery.data?.total ?? 0, releasesQuery.isLoading)}
-          scroll={{ x: getTableScrollX(columns) }}
         />
       </Card>
 
