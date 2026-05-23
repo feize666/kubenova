@@ -54,6 +54,7 @@ export interface CapabilityBaselineResponse {
 export async function listCapabilities(token?: string): Promise<CapabilityDescriptor[]> {
   return apiRequest<CapabilityDescriptor[]>("/api/capabilities", {
     token,
+    suppressAuthExpiryBroadcast: true,
   });
 }
 

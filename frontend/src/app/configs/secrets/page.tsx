@@ -19,6 +19,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
@@ -45,6 +46,7 @@ import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 const SECRET_TYPE_OPTIONS = [
   { label: "Opaque", value: "Opaque" },
@@ -67,13 +69,16 @@ interface SecretFormValues {
 }
 
 export default function SecretsPage() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
-    useClusterNamespaceFilter();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const { sortBy, sortOrder, pagination, resetPage, getPaginationConfig, handleTableChange } =
@@ -223,6 +228,12 @@ export default function SecretsPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/configs/secrets",
+  });
 
   const columns: ColumnsType<ConfigResourceItem> = [
     {
@@ -464,6 +475,7 @@ export default function SecretsPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken ?? undefined}
       />
       <ResourceYamlDrawer

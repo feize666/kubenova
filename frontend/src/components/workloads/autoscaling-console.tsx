@@ -22,6 +22,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
 import { useAuth } from "@/components/auth-context";
@@ -49,6 +50,8 @@ import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { getTableScrollX } from "@/lib/table-column-widths";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import {
   buildResourceActionMenuItems,
   POD_ACTION_MENU_CLASS,
@@ -310,15 +313,18 @@ function buildHpaBehavior(value: HpaBehaviorFormItem | undefined): HpaPolicyConf
 
 export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
   const { message } = App.useApp();
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const queryEnabled = !isInitializing && Boolean(accessToken);
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [kind, setKind] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
-  const [keyword, setKeyword] = useState("");
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [typeFilter, setTypeFilter] = useState<AutoscalingType | "">(defaultType ?? "");
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<AutoscalingPolicyItem>({
@@ -414,6 +420,8 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       ),
     [policiesQuery.data],
   );
+
+  useSyncResourceFilterUrlState({ clusterId, namespace, keyword });
 
   const eventsQuery = useQuery({
     queryKey: [
@@ -828,7 +836,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
               options={clusterOptions}
               loading={clustersQuery.isLoading}
               onChange={(value) => {
-                setClusterId(value);
+                onClusterChange(value);
                 resetPage();
               }}
             />
@@ -837,10 +845,13 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             <NamespaceSelect
               value={namespace}
               onChange={(value) => {
-                setNamespace(value);
+                onNamespaceChange(value);
                 resetPage();
               }}
               knownNamespaces={knownNamespaces}
+              clusterId={clusterId}
+              disabled={namespaceDisabled}
+              placeholder={namespacePlaceholder}
               style={{ width: "100%" }}
             />
           </Col>

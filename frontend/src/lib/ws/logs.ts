@@ -459,6 +459,11 @@ export const RUNTIME_LOGS_WS_URL = resolveDefaultLogsWsUrl();
 export function createRuntimeLogsSubscribePayload(input: {
   tailLines?: number;
   sinceSeconds?: number;
+  sinceTime?: string;
+  untilTime?: string;
+  timeMode?: string;
+  from?: string;
+  to?: string;
   keyword?: string;
   level?: string;
 }): string {
@@ -468,6 +473,21 @@ export function createRuntimeLogsSubscribePayload(input: {
   }
   if (typeof input.sinceSeconds === "number" && Number.isFinite(input.sinceSeconds) && input.sinceSeconds > 0) {
     payload.sinceSeconds = Math.floor(input.sinceSeconds);
+  }
+  if (typeof input.sinceTime === "string" && input.sinceTime.trim()) {
+    payload.sinceTime = input.sinceTime.trim();
+  }
+  if (typeof input.untilTime === "string" && input.untilTime.trim()) {
+    payload.untilTime = input.untilTime.trim();
+  }
+  if (typeof input.timeMode === "string" && input.timeMode.trim()) {
+    payload.timeMode = input.timeMode.trim();
+  }
+  if (typeof input.from === "string" && input.from.trim()) {
+    payload.from = input.from.trim();
+  }
+  if (typeof input.to === "string" && input.to.trim()) {
+    payload.to = input.to.trim();
   }
   if (typeof input.keyword === "string" && input.keyword.trim()) {
     payload.keyword = input.keyword.trim();

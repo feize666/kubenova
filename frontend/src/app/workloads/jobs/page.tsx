@@ -1,6 +1,6 @@
 "use client";
 
-import { DeleteOutlined, EyeOutlined, FileTextOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EyeOutlined, FileTextOutlined, SearchOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import {
   Alert,
@@ -23,6 +23,7 @@ import {
 import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import {
   buildResourceActionMenuItems,
@@ -48,6 +49,8 @@ import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resource
 import { getClusters } from "@/lib/api/clusters";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
@@ -69,14 +72,17 @@ interface FormValues {
 
 export default function JobsPage() {
   const { message } = App.useApp();
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const {
     sortBy,
     sortOrder,
@@ -153,7 +159,7 @@ export default function JobsPage() {
         (item) =>
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -165,6 +171,7 @@ export default function JobsPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({ clusterId, namespace, keyword });
 
   const openAddModal = () => {
     setEditingItem(null);
@@ -341,7 +348,7 @@ export default function JobsPage() {
             <Col xs={24} sm={12} md={6} lg={4}>
               <ClusterSelect
                 value={clusterId}
-                onChange={(v) => { setClusterId(v); resetPage(); }}
+                onChange={(v) => { onClusterChange(v); resetPage(); }}
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
               />
@@ -349,9 +356,11 @@ export default function JobsPage() {
             <Col xs={24} sm={12} md={5} lg={4}>
               <NamespaceSelect
                 value={namespace}
-                onChange={(v) => { setNamespace(v); resetPage(); }}
+                onChange={(v) => { onNamespaceChange(v); resetPage(); }}
                 knownNamespaces={knownNamespaces}
                 clusterId={clusterId}
+                disabled={namespaceDisabled}
+                placeholder={namespacePlaceholder}
               />
             </Col>
             <Col xs={24} sm={16} md={7} lg={6}>
@@ -458,6 +467,7 @@ export default function JobsPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken ?? undefined}
       />
       <ResourceYamlDrawer

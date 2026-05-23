@@ -145,7 +145,7 @@ export class RuntimeGateway implements OnGatewayConnection {
         event: 'logs.subscribe',
         code: 'RUNTIME_BAD_REQUEST',
         message:
-          'logs.subscribe 参数无效，tailLines/sinceSeconds 必须为正整数，level 必须为 INFO/WARN/ERROR',
+          'logs.subscribe 参数无效，tailLines/sinceSeconds 必须为正整数，refreshIntervalSeconds 必须为 0 或不小于 2，时间必须为 ISO/RFC3339 且不能晚于当前时间，level 必须为 INFO/WARN/ERROR',
       });
       return;
     }
@@ -236,6 +236,9 @@ export class RuntimeGateway implements OnGatewayConnection {
   private parseLogsSubscribe(data: unknown): {
     tailLines?: number;
     sinceSeconds?: number;
+    sinceTime?: string;
+    untilTime?: string;
+    refreshIntervalSeconds?: number;
     level?: 'INFO' | 'WARN' | 'ERROR';
     keyword?: string;
   } | null {
@@ -246,6 +249,9 @@ export class RuntimeGateway implements OnGatewayConnection {
     const payload = data as {
       tailLines?: unknown;
       sinceSeconds?: unknown;
+      sinceTime?: unknown;
+      untilTime?: unknown;
+      refreshIntervalSeconds?: unknown;
       level?: unknown;
       keyword?: unknown;
     };
@@ -253,6 +259,9 @@ export class RuntimeGateway implements OnGatewayConnection {
     const parsed: {
       tailLines?: number;
       sinceSeconds?: number;
+      sinceTime?: string;
+      untilTime?: string;
+      refreshIntervalSeconds?: number;
       level?: 'INFO' | 'WARN' | 'ERROR';
       keyword?: string;
     } = {};
@@ -279,6 +288,51 @@ export class RuntimeGateway implements OnGatewayConnection {
       parsed.sinceSeconds = payload.sinceSeconds;
     }
 
+    if (payload.sinceTime !== undefined) {
+      if (typeof payload.sinceTime !== 'string') {
+        return null;
+      }
+      const parsedSinceTime = this.parseRfc3339(payload.sinceTime);
+      if (!parsedSinceTime || parsedSinceTime.getTime() > Date.now()) {
+        return null;
+      }
+      parsed.sinceTime = parsedSinceTime.toISOString();
+      delete parsed.sinceSeconds;
+    }
+
+    if (payload.untilTime !== undefined) {
+      if (typeof payload.untilTime !== 'string') {
+        return null;
+      }
+      const parsedUntilTime = this.parseRfc3339(payload.untilTime);
+      if (!parsedUntilTime || parsedUntilTime.getTime() > Date.now()) {
+        return null;
+      }
+      parsed.untilTime = parsedUntilTime.toISOString();
+    }
+
+    if (
+      parsed.sinceTime &&
+      parsed.untilTime &&
+      Date.parse(parsed.sinceTime) > Date.parse(parsed.untilTime)
+    ) {
+      return null;
+    }
+
+    if (payload.refreshIntervalSeconds !== undefined) {
+      if (
+        typeof payload.refreshIntervalSeconds !== 'number' ||
+        !Number.isInteger(payload.refreshIntervalSeconds) ||
+        (payload.refreshIntervalSeconds !== 0 &&
+          payload.refreshIntervalSeconds < 2)
+      ) {
+        return null;
+      }
+      if (payload.refreshIntervalSeconds > 0) {
+        parsed.refreshIntervalSeconds = payload.refreshIntervalSeconds;
+      }
+    }
+
     if (payload.level !== undefined) {
       if (
         payload.level !== 'INFO' &&
@@ -300,6 +354,20 @@ export class RuntimeGateway implements OnGatewayConnection {
       parsed.keyword = payload.keyword;
     }
 
+    return parsed;
+  }
+
+  private parseRfc3339(raw: string): Date | null {
+    const trimmed = raw.trim();
+    const rfc3339Pattern =
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+    if (!rfc3339Pattern.test(trimmed)) {
+      return null;
+    }
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
     return parsed;
   }
 

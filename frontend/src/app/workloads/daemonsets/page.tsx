@@ -66,6 +66,8 @@ import {
 import { getClusters } from "@/lib/api/clusters";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
@@ -255,14 +257,16 @@ export default function DaemonSetsPage() {
   const { message } = App.useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const {
     sortBy,
     sortOrder,
@@ -276,7 +280,7 @@ export default function DaemonSetsPage() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<WorkloadListItem | null>(null);
+  const [editingItem] = useState<WorkloadListItem | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<FormValues>();
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -336,7 +340,7 @@ export default function DaemonSetsPage() {
         (item) =>
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [data?.items, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -348,17 +352,12 @@ export default function DaemonSetsPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
-
-  const openEditModal = (item: WorkloadListItem) => {
-    setEditingItem(item);
-    form.setFieldsValue({
-      name: item.name,
-      namespace: item.namespace,
-      clusterId: item.clusterId,
-      replicas: item.replicas,
-    });
-    setModalOpen(true);
-  };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/workloads/daemonsets",
+  });
 
   const handleModalCancel = () => {
     setModalOpen(false);
@@ -594,7 +593,7 @@ export default function DaemonSetsPage() {
             <Col xs={24} sm={12} md={6} lg={4}>
               <ClusterSelect
                 value={clusterId}
-                onChange={(v) => { setClusterId(v); resetPage(); }}
+                onChange={(v) => { onClusterChange(v); resetPage(); }}
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
               />
@@ -602,9 +601,11 @@ export default function DaemonSetsPage() {
             <Col xs={24} sm={12} md={5} lg={4}>
               <NamespaceSelect
                 value={namespace}
-                onChange={(v) => { setNamespace(v); resetPage(); }}
+                onChange={(v) => { onNamespaceChange(v); resetPage(); }}
                 knownNamespaces={knownNamespaces}
                 clusterId={clusterId}
+                disabled={namespaceDisabled}
+                placeholder={namespacePlaceholder}
               />
             </Col>
             <Col xs={24} sm={16} md={7} lg={6}>
@@ -933,6 +934,7 @@ export default function DaemonSetsPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken ?? undefined}
       />
 

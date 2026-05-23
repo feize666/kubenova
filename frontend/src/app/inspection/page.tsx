@@ -21,10 +21,12 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { Dayjs } from "dayjs";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { ClusterSelect } from "@/components/cluster-select";
-import { NamespaceSelect } from "@/components/namespace-select";
+import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
 import { buildTablePagination } from "@/lib/table/pagination";
 import {
@@ -103,9 +105,14 @@ function downloadTextFile(content: string, filename: string) {
 }
 
 export default function InspectionPage() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [exportFormat, setExportFormat] = useState<InspectionExportFormat>("xlsx");
   const [activeResult, setActiveResult] = useState<InspectionActionResult | null>(null);
   const [refreshingInspection, setRefreshingInspection] = useState(false);
@@ -116,6 +123,12 @@ export default function InspectionPage() {
   const [issuePage, setIssuePage] = useState(1);
   const [issuePageSize, setIssuePageSize] = useState(12);
   const enabled = !isInitializing && Boolean(accessToken);
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/inspection",
+  });
   const timeQuery = useMemo(() => {
     if (timePreset !== "custom") {
       return { range: timePreset };
@@ -136,10 +149,11 @@ export default function InspectionPage() {
   });
 
   const reportQuery = useQuery({
-    queryKey: ["monitoring", "inspection", clusterId, timeQuery.range, timeQuery.from, timeQuery.to, accessToken],
+    queryKey: ["monitoring", "inspection", clusterId, namespace, timeQuery.range, timeQuery.from, timeQuery.to, accessToken],
     queryFn: () =>
       getClusterInspection({
         clusterId: clusterId || undefined,
+        namespace: namespace || undefined,
         ...timeQuery,
         token: accessToken || undefined,
       }),
@@ -386,9 +400,20 @@ export default function InspectionPage() {
 
   const issueItems = useMemo(() => reportQuery.data?.items ?? [], [reportQuery.data?.items]);
   const issueItemsFiltered = useMemo(() => {
-    if (!namespace.trim()) return issueItems;
-    return issueItems.filter((item) => (item.namespace ?? "").trim() === namespace.trim());
-  }, [issueItems, namespace]);
+    const byNamespace = namespace.trim()
+      ? issueItems.filter((item) => (item.namespace ?? "").trim() === namespace.trim())
+      : issueItems;
+    if (!keyword.trim()) {
+      return byNamespace;
+    }
+    const loweredKeyword = keyword.trim().toLowerCase();
+    return byNamespace.filter((item) =>
+      [item.title, item.resourceRef, item.evidence ?? "", item.suggestion]
+        .join(" ")
+        .toLowerCase()
+        .includes(loweredKeyword),
+    );
+  }, [issueItems, keyword, namespace]);
   const capabilityMaxPage = useMemo(
     () => Math.max(1, Math.ceil(capabilityItems.length / capabilityPageSize)),
     [capabilityItems.length, capabilityPageSize],
@@ -426,32 +451,35 @@ export default function InspectionPage() {
               参考主流 Kubernetes 平台，统一巡检集群、名称空间、工作负载、网络、存储、配置与活跃告警。
             </Typography.Text>
           </Col>
-          <Col>
-            <Space>
-              <ClusterSelect
-                style={{ width: 220 }}
-                value={clusterId}
-                onChange={(value) => {
-                  setClusterId(value);
-                  setNamespace("");
-                  setIssuePage(1);
-                }}
-                options={clusterOptions}
-                loading={clustersQuery.isLoading}
-                showAllOption
-              />
-              <NamespaceSelect
-                style={{ width: 180 }}
-                value={namespace}
-                onChange={(value) => {
-                  setNamespace(value);
-                  setIssuePage(1);
-                }}
-                clusterId={clusterId}
-                knownNamespaces={knownNamespaces}
-                disabled={!clusterId}
-                placeholder="请先选择集群后再筛选名称空间"
-              />
+        </Row>
+      </Card>
+
+      <Card>
+        <ResourceClusterNamespaceFilters
+          clusterId={clusterId}
+          namespace={namespace}
+          keywordInput={keywordInput}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onClusterChange={(value) => {
+            onClusterChange(value);
+            setIssuePage(1);
+          }}
+          onNamespaceChange={(value) => {
+            onNamespaceChange(value);
+            setIssuePage(1);
+          }}
+          onKeywordInputChange={setKeywordInput}
+          onSearch={() => {
+            setKeyword(keywordInput.trim());
+            setIssuePage(1);
+          }}
+          keywordPlaceholder="搜索问题 / 资源 / 证据 / 修复建议"
+          extraFilters={
+            <Space wrap>
               <Select
                 style={{ width: 120 }}
                 value={timePreset}
@@ -488,12 +516,13 @@ export default function InspectionPage() {
               >
                 导出报告
               </Button>
+              <Typography.Text type="secondary">
+                最后更新时间：{reportQuery.dataUpdatedAt ? new Date(reportQuery.dataUpdatedAt).toLocaleString("zh-CN") : "-"}
+              </Typography.Text>
             </Space>
-            <Typography.Text type="secondary" style={{ marginLeft: 12 }}>
-              最后更新时间：{reportQuery.dataUpdatedAt ? new Date(reportQuery.dataUpdatedAt).toLocaleString("zh-CN") : "-"}
-            </Typography.Text>
-          </Col>
-        </Row>
+          }
+          marginBottom={0}
+        />
       </Card>
 
       {!enabled ? <Alert type="warning" showIcon message="请先登录后再执行资源巡检。" /> : null}

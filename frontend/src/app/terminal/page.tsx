@@ -60,10 +60,13 @@ const STATUS_COLOR: Record<TerminalConnectionStatus, string> = {
   disconnected: "default",
 };
 
-const MAX_RECONNECTS = 5;
+const MAX_RECONNECTS = 12;
 const INITIAL_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 30000;
+const RECONNECT_JITTER_RATIO = 0.2;
 const CONNECT_TIMEOUT_MS = 10000;
 const SESSION_RENEW_WINDOW_MS = 60000;
+const HEARTBEAT_INTERVAL_MS = 20000;
 
 class RuntimeConnectError extends Error {
   readonly blockReconnect: boolean;
@@ -182,6 +185,7 @@ export default function TerminalPage() {
   const reconnectCountRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const connectTerminalRef = useRef<((options?: { forceNewSession?: boolean; isAutoReconnect?: boolean; userInitiated?: boolean }) => Promise<void>) | null>(null);
   const lastToastAtRef = useRef<Record<string, number>>({});
   const hasConnectedNoticeRef = useRef(false);
@@ -295,6 +299,22 @@ export default function TerminalPage() {
     }
   };
 
+  const clearHeartbeatTimer = () => {
+    if (heartbeatTimerRef.current) {
+      clearInterval(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = null;
+    }
+  };
+
+  const startHeartbeat = () => {
+    clearHeartbeatTimer();
+    heartbeatTimerRef.current = setInterval(() => {
+      const socket = wsRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      socket.send(buildTerminalPingPayload());
+    }, HEARTBEAT_INTERVAL_MS);
+  };
+
   const closeSocketSilently = (socket: WebSocket | null) => {
     if (!socket) return;
     socket.onopen = null;
@@ -369,7 +389,9 @@ export default function TerminalPage() {
     }
     const attempt = reconnectCountRef.current + 1;
     reconnectCountRef.current = attempt;
-    const delayMs = INITIAL_RECONNECT_DELAY_MS * 2 ** (attempt - 1);
+    const baseDelayMs = Math.min(MAX_RECONNECT_DELAY_MS, INITIAL_RECONNECT_DELAY_MS * 2 ** (attempt - 1));
+    const jitterFactor = 1 + (Math.random() * 2 - 1) * RECONNECT_JITTER_RATIO;
+    const delayMs = Math.max(300, Math.floor(baseDelayMs * jitterFactor));
     clearReconnectTimer();
     reconnectTimerRef.current = setTimeout(() => {
       void connectTerminal({ isAutoReconnect: true, userInitiated: false });
@@ -379,6 +401,7 @@ export default function TerminalPage() {
   const disconnectTerminal = (showToast = false) => {
     clearReconnectTimer();
     clearConnectTimeout();
+    clearHeartbeatTimer();
     reconnectCountRef.current = 0;
     manualDisconnectRef.current = true;
     blockReconnectRef.current = true;
@@ -490,6 +513,7 @@ export default function TerminalPage() {
     const isCurrent = () => currentGeneration === generationRef.current;
 
     connectingRef.current = true;
+    manualDisconnectRef.current = false;
     attemptUserInitiatedRef.current = userInitiated && !isAutoReconnect;
     if (attemptUserInitiatedRef.current) {
       allowConnectedToastRef.current = true;
@@ -533,6 +557,7 @@ export default function TerminalPage() {
         reconnectCountRef.current = 0;
         setStatus("connected");
         connectingRef.current = false;
+        startHeartbeat();
         writeSystemLine("终端连接已建立，等待容器输出。");
         if (allowConnectedToastRef.current && !hasConnectedNoticeRef.current) {
           hasConnectedNoticeRef.current = true;
@@ -573,6 +598,7 @@ export default function TerminalPage() {
       socket.onclose = (event) => {
         if (!isCurrent()) return;
         clearConnectTimeout();
+        clearHeartbeatTimer();
         wsRef.current = null;
         setStatus("disconnected");
 
@@ -606,6 +632,7 @@ export default function TerminalPage() {
       } catch (error) {
       if (!isCurrent()) return;
       clearConnectTimeout();
+      clearHeartbeatTimer();
       setStatus("disconnected");
       wsRef.current = null;
       sessionCacheRef.current = null;
@@ -767,6 +794,7 @@ export default function TerminalPage() {
     return () => {
       clearReconnectTimer();
       clearConnectTimeout();
+      clearHeartbeatTimer();
       generationRef.current += 1;
       manualDisconnectRef.current = true;
       blockReconnectRef.current = true;

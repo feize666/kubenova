@@ -42,22 +42,25 @@ const (
 )
 
 type runtimeTokenPayload struct {
-	SessionID string `json:"sessionId"`
-	UserID    string `json:"userId"`
-	Type      string `json:"type"`
-	ClusterID string `json:"clusterId"`
-	Namespace string `json:"namespace"`
-	Pod       string `json:"pod"`
-	Container string `json:"container"`
-	Level     string `json:"level,omitempty"`
-	Keyword   string `json:"keyword,omitempty"`
-	TailLines int64  `json:"tailLines,omitempty"`
-	SinceSecs int64  `json:"sinceSeconds,omitempty"`
-	Follow    *bool  `json:"follow,omitempty"`
-	Previous  *bool  `json:"previous,omitempty"`
-	Timestamp *bool  `json:"timestamps,omitempty"`
-	Path      string `json:"path"`
-	Exp       int64  `json:"exp"`
+	SessionID              string `json:"sessionId"`
+	UserID                 string `json:"userId"`
+	Type                   string `json:"type"`
+	ClusterID              string `json:"clusterId"`
+	Namespace              string `json:"namespace"`
+	Pod                    string `json:"pod"`
+	Container              string `json:"container"`
+	Level                  string `json:"level,omitempty"`
+	Keyword                string `json:"keyword,omitempty"`
+	TailLines              int64  `json:"tailLines,omitempty"`
+	SinceSecs              int64  `json:"sinceSeconds,omitempty"`
+	SinceTime              string `json:"sinceTime,omitempty"`
+	UntilTime              string `json:"untilTime,omitempty"`
+	RefreshIntervalSeconds int64  `json:"refreshIntervalSeconds,omitempty"`
+	Follow                 *bool  `json:"follow,omitempty"`
+	Previous               *bool  `json:"previous,omitempty"`
+	Timestamp              *bool  `json:"timestamps,omitempty"`
+	Path                   string `json:"path"`
+	Exp                    int64  `json:"exp"`
 }
 
 type WSFrame struct {
@@ -70,6 +73,11 @@ type WSFrame struct {
 	ContentB64 string `json:"contentB64,omitempty"`
 	State      string `json:"state,omitempty"`
 	Code       string `json:"code,omitempty"`
+	Total      int    `json:"total,omitempty"`
+	// LastLogTimestamp and EmptyReason let clients leave "connecting" safely
+	// when a historical/fixed-window stream ends without log frames.
+	LastLogTimestamp string `json:"lastLogTimestamp,omitempty"`
+	EmptyReason      string `json:"emptyReason,omitempty"`
 }
 
 type authErrorResponse struct {
@@ -113,13 +121,16 @@ type internalBootstrapEnvelope struct {
 }
 
 type logStreamOptions struct {
-	Level        string `json:"level,omitempty"`
-	Keyword      string `json:"keyword,omitempty"`
-	TailLines    int64  `json:"tailLines,omitempty"`
-	SinceSeconds int64  `json:"sinceSeconds,omitempty"`
-	Follow       *bool  `json:"follow,omitempty"`
-	Previous     *bool  `json:"previous,omitempty"`
-	Timestamps   *bool  `json:"timestamps,omitempty"`
+	Level                  string `json:"level,omitempty"`
+	Keyword                string `json:"keyword,omitempty"`
+	TailLines              int64  `json:"tailLines,omitempty"`
+	SinceSeconds           int64  `json:"sinceSeconds,omitempty"`
+	SinceTime              string `json:"sinceTime,omitempty"`
+	UntilTime              string `json:"untilTime,omitempty"`
+	RefreshIntervalSeconds int64  `json:"refreshIntervalSeconds,omitempty"`
+	Follow                 *bool  `json:"follow,omitempty"`
+	Previous               *bool  `json:"previous,omitempty"`
+	Timestamps             *bool  `json:"timestamps,omitempty"`
 }
 
 type terminalClientEnvelope struct {
@@ -209,7 +220,11 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-var kubeconfigDataFieldPattern = regexp.MustCompile(`(?m)^(\s*(?:certificate-authority-data|client-certificate-data|client-key-data)\s*:\s*)(\S+)\s*$`)
+var (
+	kubeconfigDataFieldPattern = regexp.MustCompile(`(?m)^(\s*(?:certificate-authority-data|client-certificate-data|client-key-data)\s*:\s*)(\S+)\s*$`)
+	rfc3339LogPrefixPattern    = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))(?:\s|$)`)
+	nginxCommonLogTimePattern  = regexp.MustCompile(`\[(\d{1,2})/([A-Za-z]{3})/(\d{4}):(\d{2}):(\d{2}):(\d{2}) ([+-]\d{4})\]`)
+)
 
 func writeFrame(conn *websocket.Conn, frame WSFrame) error {
 	frame.Timestamp = time.Now().Format(time.RFC3339)
@@ -368,6 +383,27 @@ func validateRuntimeToken(token string, requestPath string, queryValues map[stri
 	}
 	if payload.SinceSecs < 0 {
 		return runtimeTokenPayload{}, "RUNTIME_TOKEN_SINCE_SECONDS_INVALID", "runtimeToken sinceSeconds claim is invalid"
+	}
+	if payload.SinceTime != "" {
+		parsedSinceTime, err := parseRFC3339Time(payload.SinceTime)
+		if err != nil {
+			return runtimeTokenPayload{}, "RUNTIME_TOKEN_SINCE_TIME_INVALID", "runtimeToken sinceTime claim is invalid"
+		}
+		if parsedSinceTime.After(time.Now()) {
+			return runtimeTokenPayload{}, "RUNTIME_TOKEN_SINCE_TIME_INVALID", "runtimeToken sinceTime cannot be in the future"
+		}
+	}
+	if payload.UntilTime != "" {
+		parsedUntilTime, err := parseRFC3339Time(payload.UntilTime)
+		if err != nil {
+			return runtimeTokenPayload{}, "RUNTIME_TOKEN_UNTIL_TIME_INVALID", "runtimeToken untilTime claim is invalid"
+		}
+		if parsedUntilTime.After(time.Now()) {
+			return runtimeTokenPayload{}, "RUNTIME_TOKEN_UNTIL_TIME_INVALID", "runtimeToken untilTime cannot be in the future"
+		}
+	}
+	if payload.RefreshIntervalSeconds < 0 {
+		return runtimeTokenPayload{}, "RUNTIME_TOKEN_REFRESH_INTERVAL_SECONDS_INVALID", "runtimeToken refreshIntervalSeconds claim is invalid"
 	}
 	if time.Now().Unix() >= payload.Exp {
 		return runtimeTokenPayload{}, "RUNTIME_TOKEN_EXPIRED", "runtimeToken is expired"
@@ -656,6 +692,7 @@ func streamPodLogs(
 		Timestamps: true,
 		Previous:   previous,
 	}
+	var untilTime *time.Time
 	if bootstrap.LogStreamOptions != nil {
 		if bootstrap.LogStreamOptions.Follow != nil {
 			options.Follow = *bootstrap.LogStreamOptions.Follow
@@ -669,8 +706,24 @@ func streamPodLogs(
 		if bootstrap.LogStreamOptions.TailLines > 0 {
 			options.TailLines = &bootstrap.LogStreamOptions.TailLines
 		}
-		if bootstrap.LogStreamOptions.SinceSeconds > 0 {
+		if bootstrap.LogStreamOptions.SinceTime != "" {
+			parsedSinceTime, parseErr := parseRFC3339Time(bootstrap.LogStreamOptions.SinceTime)
+			if parseErr != nil {
+				return fmt.Errorf("log stream sinceTime is invalid: %w", parseErr)
+			}
+			options.SinceTime = &metav1.Time{Time: parsedSinceTime}
+		} else if bootstrap.LogStreamOptions.SinceSeconds > 0 {
 			options.SinceSeconds = &bootstrap.LogStreamOptions.SinceSeconds
+		}
+		if bootstrap.LogStreamOptions.UntilTime != "" {
+			parsedUntilTime, parseErr := parseRFC3339Time(bootstrap.LogStreamOptions.UntilTime)
+			if parseErr != nil {
+				return fmt.Errorf("log stream untilTime is invalid: %w", parseErr)
+			}
+			untilTime = &parsedUntilTime
+			if bootstrap.LogStreamOptions.Follow == nil {
+				options.Follow = false
+			}
 		}
 	}
 
@@ -704,6 +757,13 @@ func streamPodLogs(
 	scanner := bufio.NewScanner(stream)
 	buffer := make([]byte, 0, 64*1024)
 	scanner.Buffer(buffer, 1024*1024)
+	rawLineCount := 0
+	total := 0
+	parseableCount := 0
+	rangeMatchedCount := 0
+	filterMatchedCount := 0
+	hasAbsoluteTimeFilter := options.SinceTime != nil || untilTime != nil
+	var lastLogTimestamp string
 
 	for scanner.Scan() {
 		select {
@@ -716,11 +776,31 @@ func streamPodLogs(
 		if line == "" {
 			continue
 		}
+		rawLineCount++
+		lineTime, hasLineTime := parseLogLineTimestamp(line)
+		if hasLineTime {
+			parseableCount++
+		}
+		if hasAbsoluteTimeFilter && !hasLineTime {
+			continue
+		}
+		if options.SinceTime != nil && lineTime.Before(options.SinceTime.Time) {
+			continue
+		}
+		if untilTime != nil && lineTime.After(*untilTime) {
+			break
+		}
+		rangeMatchedCount++
 		if !matchesLogFilters(line, bootstrap.LogStreamOptions) {
 			continue
 		}
+		filterMatchedCount++
 		if err = writer.writeFrame(WSFrame{Type: "log", Content: line}); err != nil {
 			return err
+		}
+		total++
+		if hasLineTime && (lastLogTimestamp == "" || lineTime.After(mustParseFrameTime(lastLogTimestamp))) {
+			lastLogTimestamp = lineTime.Format(time.RFC3339Nano)
 		}
 	}
 	if scanErr := scanner.Err(); scanErr != nil && ctx.Err() == nil {
@@ -729,8 +809,130 @@ func streamPodLogs(
 		}
 		return fmt.Errorf("log stream interrupted: %w", scanErr)
 	}
-	_ = writer.writeFrame(WSFrame{Type: "system", State: "disconnected", Content: "日志流已结束"})
+	_ = writer.writeFrame(WSFrame{
+		Type:             "system",
+		State:            "disconnected",
+		Content:          "日志流已结束",
+		Total:            total,
+		LastLogTimestamp: lastLogTimestamp,
+		EmptyReason: resolveLogStreamEmptyReason(
+			rawLineCount,
+			total,
+			parseableCount,
+			rangeMatchedCount,
+			filterMatchedCount,
+			hasAbsoluteTimeFilter,
+		),
+	})
 	return nil
+}
+
+func parseRFC3339Time(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return parsed, nil
+}
+
+func isLogLineAfterUntilTime(line string, untilTime *time.Time) bool {
+	if untilTime == nil {
+		return false
+	}
+	lineTime, ok := parseLogLineTimestamp(line)
+	if !ok {
+		return false
+	}
+	return lineTime.After(*untilTime)
+}
+
+func parseLogLineTimestamp(line string) (time.Time, bool) {
+	if matches := rfc3339LogPrefixPattern.FindStringSubmatch(line); len(matches) == 2 {
+		parsed, err := parseRFC3339Time(matches[1])
+		if err == nil {
+			return parsed, true
+		}
+	}
+	if matches := nginxCommonLogTimePattern.FindStringSubmatch(line); len(matches) == 8 {
+		parsed, err := parseNginxCommonLogTime(matches)
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func parseNginxCommonLogTime(matches []string) (time.Time, error) {
+	month, ok := nginxMonthNumber(matches[2])
+	if !ok {
+		return time.Time{}, fmt.Errorf("unknown nginx log month: %s", matches[2])
+	}
+	day, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid nginx log day: %s", matches[1])
+	}
+	offset := matches[7]
+	if len(offset) != 5 {
+		return time.Time{}, fmt.Errorf("invalid nginx log timezone offset: %s", offset)
+	}
+	value := fmt.Sprintf(
+		"%s-%02d-%02dT%s:%s:%s%s:%s",
+		matches[3],
+		month,
+		day,
+		matches[4],
+		matches[5],
+		matches[6],
+		offset[:3],
+		offset[3:],
+	)
+	return time.Parse(time.RFC3339, value)
+}
+
+func nginxMonthNumber(month string) (int, bool) {
+	months := map[string]int{
+		"jan": 1,
+		"feb": 2,
+		"mar": 3,
+		"apr": 4,
+		"may": 5,
+		"jun": 6,
+		"jul": 7,
+		"aug": 8,
+		"sep": 9,
+		"oct": 10,
+		"nov": 11,
+		"dec": 12,
+	}
+	value, ok := months[strings.ToLower(month)]
+	return value, ok
+}
+
+func mustParseFrameTime(value string) time.Time {
+	parsed, err := parseRFC3339Time(value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func resolveLogStreamEmptyReason(rawLineCount, total, parseableCount, rangeMatchedCount, filterMatchedCount int, hasAbsoluteTimeFilter bool) string {
+	if total > 0 {
+		return ""
+	}
+	if rawLineCount == 0 {
+		return "NO_LOG_LINES"
+	}
+	if hasAbsoluteTimeFilter && parseableCount == 0 {
+		return "NO_PARSEABLE_TIMESTAMPS"
+	}
+	if hasAbsoluteTimeFilter && rangeMatchedCount == 0 {
+		return "TIME_RANGE_NO_MATCH"
+	}
+	if filterMatchedCount == 0 {
+		return "FILTER_NO_MATCH"
+	}
+	return "NO_LOG_LINES"
 }
 
 func matchesLogFilters(line string, options *logStreamOptions) bool {
@@ -779,6 +981,15 @@ func describeLogStreamOptions(options *logStreamOptions) string {
 	}
 	if options.SinceSeconds > 0 {
 		parts = append(parts, fmt.Sprintf("sinceSeconds=%d", options.SinceSeconds))
+	}
+	if options.SinceTime != "" {
+		parts = append(parts, "sinceTime="+options.SinceTime)
+	}
+	if options.UntilTime != "" {
+		parts = append(parts, "untilTime="+options.UntilTime)
+	}
+	if options.RefreshIntervalSeconds > 0 {
+		parts = append(parts, fmt.Sprintf("refreshIntervalSeconds=%d", options.RefreshIntervalSeconds))
 	}
 	if options.Follow != nil {
 		parts = append(parts, fmt.Sprintf("follow=%t", *options.Follow))

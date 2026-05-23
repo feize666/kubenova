@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -14,17 +15,25 @@ import { PrismaService } from '../platform/database/prisma.service';
 import {
   RESOURCE_DETAIL_DESCRIPTOR_VERSION,
   type ResourceAssociation,
+  type ResourceDetailConfigUsage,
   type ResourceDetailDescriptor,
   type ResourceDetailMetadata,
   type ResourceDetailNetworkEndpoint,
+  type ResourceDetailNetworkPipeline,
   type ResourceDetailNetworkSummary,
   type ResourceDetailOverview,
   type ResourceDetailPvSummary,
   type ResourceDetailPvcSummary,
+  type ResourceDetailRelationshipGroup,
+  type ResourceDetailRelationshipGroupKey,
+  type ResourceDetailRelationshipItem,
+  type ResourceDetailRelationshipNode,
   type ResourceDetailResponse,
   type ResourceDetailRuntime,
   type ResourceDetailSection,
   type ResourceDetailStorageSummary,
+  type ResourceDetailStorageClassSummary,
+  type ResourceDetailStoragePipeline,
   type ResourceDetailVolumeSummary,
   type ResourceDetailMountSummary,
 } from './resources-detail.contract';
@@ -34,6 +43,7 @@ type DetailSource =
   | 'network'
   | 'storage'
   | 'config'
+  | 'namespace'
   | 'autoscaling';
 
 type KindMeta = {
@@ -81,6 +91,7 @@ const LIVE_NETWORK_DETAIL_KINDS = new Set([
   'Gateway',
   'HTTPRoute',
   'Middleware',
+  'NetworkPolicy',
 ]);
 
 const RESOURCE_DETAIL_FIELDS_BY_SECTION = {
@@ -106,16 +117,17 @@ const RESOURCE_DETAIL_FIELDS_BY_SECTION = {
     'nodeName',
   ],
   associations: ['kind', 'name', 'namespace', 'associationType'],
-  network: ['clusterIPs', 'podIPs', 'nodeNames', 'endpoints'],
+  network: ['clusterIPs', 'podIPs', 'nodeNames', 'endpoints', 'networkPipelines'],
   storage: [
     'storageClasses',
     'persistentVolumeClaims',
     'persistentVolumes',
     'volumes',
     'mounts',
+    'storagePipelines',
   ],
   events: ['items'],
-  metadata: ['labels', 'annotations', 'ownerReferences'],
+  metadata: ['labels', 'annotations', 'ownerReferences', 'configUsages'],
 } as const;
 
 const RESOURCE_DETAIL_SECTION_PROFILES: Record<
@@ -286,6 +298,32 @@ const RESOURCE_DETAIL_SECTION_PROFILES: Record<
   helmrepository: ['overview', 'runtime', 'associations', 'events', 'metadata'],
 };
 
+const RELATIONSHIP_GROUP_META: Record<
+  ResourceDetailRelationshipGroupKey,
+  { title: string; description: string }
+> = {
+  control: {
+    title: '控制关系',
+    description: 'Owner、控制器与被控制对象',
+  },
+  network: {
+    title: '网络关系',
+    description: '入口、服务、端点与后端 Pod/IP',
+  },
+  storage: {
+    title: '存储关系',
+    description: '容器挂载、Volume、PVC、PV 与 StorageClass',
+  },
+  config: {
+    title: '配置关系',
+    description: 'ConfigMap、Secret、ServiceAccount 与使用方',
+  },
+  other: {
+    title: '其他关系',
+    description: '未归类但可导航的关联资源',
+  },
+};
+
 export interface ResourceIdentity {
   clusterId: string;
   namespace?: string;
@@ -354,6 +392,8 @@ export interface DynamicResourceCreateRequest extends DynamicResourceIdentity {
 @Injectable()
 export class ResourcesService {
   private static readonly LIVE_NETWORK_ID_PREFIX = 'live:';
+  private readonly logger = new Logger(ResourcesService.name);
+
   constructor(
     private readonly clustersService: ClustersService,
     private readonly clusterHealthService: ClusterHealthService,
@@ -1421,17 +1461,25 @@ export class ResourcesService {
     }
     await this.clusterHealthService.assertClusterOnlineForRead(base.clusterId);
 
-    const context = await this.loadDetailContext(
-      base.clusterId,
-      base.namespace,
-    );
+    const [context, events] = await Promise.all([
+      this.loadDetailContext(base.clusterId, base.namespace),
+      this.buildEventsSummary(base),
+    ]);
     const descriptor = this.buildDescriptor(base.kind);
     const overview = this.buildOverview(base);
     const runtime = this.buildRuntime(base);
     const associations = this.buildAssociations(base, context);
     const network = this.buildNetworkSummary(base, runtime, context);
     const storage = this.buildStorageSummary(base, context);
-    const metadata = this.buildMetadata(base);
+    const metadata = this.buildMetadata(base, context);
+    const relationships = this.buildRelationshipGroups(
+      base,
+      context,
+      associations,
+      network,
+      storage,
+      metadata,
+    );
 
     return {
       descriptor,
@@ -1440,10 +1488,9 @@ export class ResourcesService {
       associations,
       network,
       storage,
-      events: {
-        items: [],
-      },
+      events,
       metadata,
+      relationships,
       generatedAt: new Date().toISOString(),
     };
   }
@@ -1496,13 +1543,16 @@ export class ResourcesService {
         podIPs: [],
         nodeNames: [],
         endpoints: [],
+        networkPipelines: [],
       },
       storage: {
         storageClasses: [],
         persistentVolumeClaims: [],
         persistentVolumes: [],
+        storageClassDetails: [],
         volumes: [],
         mounts: [],
+        storagePipelines: [],
       },
       events: {
         items: [],
@@ -1518,7 +1568,9 @@ export class ResourcesService {
           description: this.toMaybeString(info.description),
         }),
         ownerReferences: [],
+        configUsages: [],
       },
+      relationships: [],
       generatedAt: new Date().toISOString(),
     };
   }
@@ -1571,13 +1623,16 @@ export class ResourcesService {
         podIPs: [],
         nodeNames: [],
         endpoints: [],
+        networkPipelines: [],
       },
       storage: {
         storageClasses: [],
         persistentVolumeClaims: [],
         persistentVolumes: [],
+        storageClassDetails: [],
         volumes: [],
         mounts: [],
+        storagePipelines: [],
       },
       events: {
         items: [],
@@ -1592,7 +1647,9 @@ export class ResourcesService {
           message: this.toMaybeString(repository.message),
         }),
         ownerReferences: [],
+        configUsages: [],
       },
+      relationships: [],
       generatedAt: new Date().toISOString(),
     };
   }
@@ -1637,6 +1694,14 @@ export class ResourcesService {
 
   private buildRuntime(base: DetailResourceRecord): ResourceDetailRuntime {
     const status = this.toObject(base.statusJson);
+    const spec = this.toObject(base.spec);
+    const podSpec = this.isWorkloadKind(base.kind)
+      ? this.extractPodSpec(base.kind, base.spec)
+      : {};
+    const networkPolicyRuntime =
+      base.kind === 'NetworkPolicy'
+        ? this.buildNetworkPolicyRuntime(spec, status)
+        : {};
     const images = this.toStringArray(status.images ?? status.containerImages);
     const conditions = this.toArray(status.conditions)
       .map((condition) => this.toObject(condition))
@@ -1661,6 +1726,16 @@ export class ResourcesService {
       images,
       podIP: this.toMaybeString(status.podIP),
       nodeName: this.toMaybeString(status.nodeName),
+      selector: this.extractSelectorString(base.kind, spec),
+      serviceAccountName: this.toMaybeString(podSpec.serviceAccountName),
+      restartPolicy: this.toMaybeString(podSpec.restartPolicy),
+      dnsPolicy: this.toMaybeString(podSpec.dnsPolicy),
+      schedulerName: this.toMaybeString(podSpec.schedulerName),
+      priorityClassName: this.toMaybeString(podSpec.priorityClassName),
+      nodeSelector: this.toStringMap(podSpec.nodeSelector),
+      tolerations: this.summarizeTolerations(podSpec.tolerations),
+      containerDetails: this.summarizeContainers(podSpec, status),
+      ...networkPolicyRuntime,
       ...(conditions.length > 0 ? { conditions } : {}),
     };
   }
@@ -1748,6 +1823,29 @@ export class ResourcesService {
       for (const secretName of refs.secretNames) {
         add('Secret', secretName, namespace, 'secret-ref');
       }
+
+      const podSpec = this.extractPodSpec(base.kind, base.spec);
+      const volumes = this.toArray(podSpec.volumes).map((item) =>
+        this.toObject(item),
+      );
+      for (const volume of volumes) {
+        const projected = this.toObject(volume.projected);
+        const projectedSources = this.toArray(projected.sources).map((item) =>
+          this.toObject(item),
+        );
+        for (const source of projectedSources) {
+          const configMap = this.toObject(source.configMap);
+          const secret = this.toObject(source.secret);
+          const configMapName = this.toMaybeString(configMap.name);
+          const secretName = this.toMaybeString(secret.name);
+          if (configMapName) {
+            add('ConfigMap', configMapName, namespace, 'config-ref');
+          }
+          if (secretName) {
+            add('Secret', secretName, namespace, 'secret-ref');
+          }
+        }
+      }
     }
 
     if (base.kind === 'Service') {
@@ -1834,8 +1932,11 @@ export class ResourcesService {
         if (workload.namespace !== namespace) {
           continue;
         }
-        const refs = this.extractWorkloadRefs(workload.kind, workload.spec);
-        if (refs.pvcNames.includes(base.name)) {
+        const pipelines = this.buildStoragePipelinesForWorkload(
+          workload,
+          context.storageResources,
+        );
+        if (pipelines.some((pipeline) => pipeline.pvcName === base.name)) {
           add(
             workload.kind,
             workload.name,
@@ -1866,6 +1967,21 @@ export class ResourcesService {
           );
         }
       }
+
+      for (const workload of context.workloads) {
+        const pipelines = this.buildStoragePipelinesForWorkload(
+          workload,
+          context.storageResources,
+        );
+        if (pipelines.some((pipeline) => pipeline.pvName === base.name)) {
+          add(
+            workload.kind,
+            workload.name,
+            workload.namespace ?? undefined,
+            'uses-volume',
+          );
+        }
+      }
     }
 
     if (base.kind === 'StorageClass') {
@@ -1880,6 +1996,23 @@ export class ResourcesService {
           storage.namespace ?? undefined,
           'uses-storageclass',
         );
+      }
+
+      for (const workload of context.workloads) {
+        const pipelines = this.buildStoragePipelinesForWorkload(
+          workload,
+          context.storageResources,
+        );
+        if (
+          pipelines.some((pipeline) => pipeline.storageClass === base.name)
+        ) {
+          add(
+            workload.kind,
+            workload.name,
+            workload.namespace ?? undefined,
+            'uses-storageclass',
+          );
+        }
       }
     }
 
@@ -1905,6 +2038,348 @@ export class ResourcesService {
     }
 
     return Array.from(map.values());
+  }
+
+  private buildRelationshipGroups(
+    base: DetailResourceRecord,
+    context: DetailContext,
+    associations: ResourceAssociation[],
+    network: ResourceDetailNetworkSummary,
+    storage: ResourceDetailStorageSummary,
+    metadata: ResourceDetailMetadata,
+  ): ResourceDetailRelationshipGroup[] {
+    const groups = new Map<
+      ResourceDetailRelationshipGroupKey,
+      ResourceDetailRelationshipItem[]
+    >();
+    const seen = new Set<string>();
+    const resolveId = (
+      kind: string | undefined,
+      name: string | undefined,
+      namespace?: string | null,
+    ) =>
+      this.resolveRelationshipId(
+        kind,
+        name,
+        namespace ?? undefined,
+        base,
+        context,
+        associations,
+      );
+    const addItem = (
+      group: ResourceDetailRelationshipGroupKey,
+      item: Omit<ResourceDetailRelationshipItem, 'key'> & { key?: string },
+    ) => {
+      const chain = item.chain
+        .filter((node) => Boolean(node.name))
+        .map((node) => this.enrichRelationshipNode(node, base, context, associations));
+      if (chain.length === 0) {
+        return;
+      }
+      const key =
+        item.key ??
+        [
+          group,
+          item.title,
+          item.subtitle ?? '',
+          ...chain.map((node) =>
+            [
+              node.kind ?? '',
+              node.namespace ?? '',
+              node.name ?? '',
+              node.id ?? '',
+              node.role ?? '',
+            ].join(':'),
+          ),
+        ].join('|');
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      groups.set(group, [
+        ...(groups.get(group) ?? []),
+        { ...item, key, chain },
+      ]);
+    };
+
+    for (const association of associations) {
+      const group = this.relationshipGroupForAssociation(association);
+      addItem(group, {
+        key: [
+          'assoc',
+          association.associationType,
+          association.kind,
+          association.namespace ?? '',
+          association.name,
+          association.id ?? '',
+        ].join('|'),
+        title: this.relationshipAssociationTitle(association.associationType),
+        subtitle: association.namespace
+          ? `名称空间 ${association.namespace}`
+          : '集群级资源',
+        tags: [
+          {
+            label: this.relationshipAssociationTitle(
+              association.associationType,
+            ),
+            color: this.relationshipAssociationColor(
+              association.associationType,
+            ),
+          },
+        ],
+        chain: [
+          {
+            kind: association.kind,
+            name: association.name,
+            namespace: association.namespace,
+            id: association.id,
+            role: association.associationType,
+            color: this.relationshipAssociationColor(
+              association.associationType,
+            ),
+          },
+        ],
+      });
+    }
+
+    network.networkPipelines.forEach((pipeline, index) => {
+      addItem('network', {
+        key: [
+          'network',
+          pipeline.sourceKind,
+          pipeline.sourceNamespace ?? '',
+          pipeline.sourceName,
+          pipeline.serviceNamespace ?? '',
+          pipeline.serviceName ?? '',
+          pipeline.endpointSourceKind ?? '',
+          pipeline.endpointSourceName ?? '',
+          pipeline.backendPodNamespace ?? '',
+          pipeline.backendPodName ?? pipeline.ip ?? '',
+          index,
+        ].join('|'),
+        title: '网络路径',
+        subtitle: [pipeline.host, pipeline.path, pipeline.port]
+          .filter(Boolean)
+          .join(' · '),
+        tags: [
+          ...(pipeline.servicePort
+            ? [{ label: `svc ${pipeline.servicePort}` }]
+            : []),
+          ...(pipeline.ready === undefined
+            ? []
+            : [
+                {
+                  label: pipeline.ready ? 'Ready' : 'NotReady',
+                  color: pipeline.ready ? 'success' : 'warning',
+                },
+              ]),
+        ],
+        chain: [
+          {
+            kind: pipeline.sourceKind,
+            name: pipeline.sourceName,
+            namespace: pipeline.sourceNamespace,
+            id:
+              pipeline.sourceId ??
+              resolveId(
+                pipeline.sourceKind,
+                pipeline.sourceName,
+                pipeline.sourceNamespace,
+              ),
+            role: 'entry',
+            color: 'green',
+          },
+          {
+            kind: 'Service',
+            name: pipeline.serviceName,
+            namespace: pipeline.serviceNamespace,
+            id:
+              pipeline.serviceId ??
+              resolveId('Service', pipeline.serviceName, pipeline.serviceNamespace),
+            role: 'service',
+            color: 'blue',
+          },
+          {
+            kind: pipeline.endpointSourceKind || 'Endpoints',
+            name: pipeline.endpointSourceName,
+            namespace: pipeline.serviceNamespace,
+            id:
+              pipeline.endpointSourceId ??
+              resolveId(
+                pipeline.endpointSourceKind || 'Endpoints',
+                pipeline.endpointSourceName,
+                pipeline.serviceNamespace,
+              ),
+            role: 'endpoint',
+            color:
+              pipeline.endpointSourceKind === 'EndpointSlice'
+                ? 'volcano'
+                : 'gold',
+          },
+          {
+            kind: pipeline.backendPodName ? 'Pod' : 'Pod/IP',
+            name: pipeline.backendPodName ?? pipeline.ip,
+            namespace: pipeline.backendPodNamespace,
+            id:
+              pipeline.backendPodId ??
+              resolveId('Pod', pipeline.backendPodName, pipeline.backendPodNamespace),
+            role: 'backend',
+            color: 'cyan',
+          },
+        ],
+      });
+    });
+
+    storage.storagePipelines.forEach((pipeline, index) => {
+      addItem('storage', {
+        key: [
+          'storage',
+          pipeline.container,
+          pipeline.mountPath,
+          pipeline.volumeName,
+          pipeline.pvcNamespace ?? '',
+          pipeline.pvcName ?? '',
+          pipeline.pvName ?? '',
+          pipeline.storageClass ?? '',
+          index,
+        ].join('|'),
+        title: '存储路径',
+        subtitle: [pipeline.mountPath, pipeline.readOnly ? '只读' : null]
+          .filter(Boolean)
+          .join(' · '),
+        tags: [
+          ...(pipeline.volumeType ? [{ label: pipeline.volumeType }] : []),
+          ...(pipeline.pvcPhase
+            ? [{ label: pipeline.pvcPhase, color: 'cyan' }]
+            : []),
+          ...(pipeline.pvPhase
+            ? [{ label: pipeline.pvPhase, color: 'blue' }]
+            : []),
+        ],
+        chain: [
+          {
+            kind: 'Container',
+            name: pipeline.container,
+            role: 'container',
+            color: 'geekblue',
+          },
+          {
+            kind: 'Volume',
+            name: pipeline.volumeName,
+            role: 'volume',
+            color: 'default',
+          },
+          {
+            kind: 'PersistentVolumeClaim',
+            name: pipeline.pvcName,
+            namespace: pipeline.pvcNamespace ?? base.namespace ?? undefined,
+            id: resolveId(
+              'PersistentVolumeClaim',
+              pipeline.pvcName,
+              pipeline.pvcNamespace ?? base.namespace ?? undefined,
+            ),
+            role: 'claim',
+            color: 'cyan',
+          },
+          {
+            kind: 'PersistentVolume',
+            name: pipeline.pvName,
+            id: resolveId(
+              'PersistentVolume',
+              pipeline.pvName,
+              undefined,
+            ),
+            role: 'volume',
+            color: 'blue',
+          },
+          {
+            kind: 'StorageClass',
+            name: pipeline.storageClass,
+            id: resolveId(
+              'StorageClass',
+              pipeline.storageClass,
+              undefined,
+            ),
+            role: 'class',
+            color: 'gold',
+          },
+        ],
+      });
+    });
+
+    metadata.configUsages.forEach((usage, index) => {
+      addItem('config', {
+        key: [
+          'config',
+          usage.referencedKind,
+          usage.referencedNamespace ?? '',
+          usage.referencedName,
+          usage.consumerKind,
+          usage.consumerNamespace ?? '',
+          usage.consumerName,
+          usage.usageType,
+          usage.container ?? '',
+          usage.mountPath ?? '',
+          usage.key ?? '',
+          index,
+        ].join('|'),
+        title: '配置引用',
+        subtitle: [
+          usage.container,
+          usage.mountPath,
+          usage.key ? `key ${usage.key}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        tags: [
+          {
+            label: this.relationshipConfigUsageTitle(usage.usageType),
+            color: this.relationshipConfigUsageColor(usage.usageType),
+          },
+        ],
+        chain: [
+          {
+            kind: usage.referencedKind,
+            name: usage.referencedName,
+            namespace: usage.referencedNamespace,
+            id:
+              usage.referencedId ??
+              resolveId(
+                usage.referencedKind,
+                usage.referencedName,
+                usage.referencedNamespace,
+              ),
+            role: 'referenced',
+            color:
+              usage.referencedKind === 'Secret' ? 'magenta' : 'blue',
+          },
+          {
+            kind: usage.consumerKind,
+            name: usage.consumerName,
+            namespace: usage.consumerNamespace,
+            id:
+              usage.consumerId ??
+              resolveId(
+                usage.consumerKind,
+                usage.consumerName,
+                usage.consumerNamespace,
+              ),
+            role: 'consumer',
+            color: 'geekblue',
+          },
+        ],
+      });
+    });
+
+    return (
+      Object.keys(RELATIONSHIP_GROUP_META) as ResourceDetailRelationshipGroupKey[]
+    )
+      .map((key) => ({
+        key,
+        ...RELATIONSHIP_GROUP_META[key],
+        items: groups.get(key) ?? [],
+      }))
+      .filter((group) => group.items.length > 0);
   }
 
   private buildNetworkSummary(
@@ -1937,6 +2412,284 @@ export class ResourcesService {
       podIPs: [],
       nodeNames: [],
       endpoints: [],
+      networkPipelines: [],
+    };
+    const pipelineKeys = new Set<string>();
+    const addPipeline = (pipeline: ResourceDetailNetworkPipeline) => {
+      const key = [
+        pipeline.sourceKind,
+        pipeline.sourceNamespace ?? '',
+        pipeline.sourceName,
+        pipeline.host ?? '',
+        pipeline.path ?? '',
+        pipeline.port ?? '',
+        pipeline.serviceNamespace ?? '',
+        pipeline.serviceName ?? '',
+        pipeline.servicePort ?? '',
+        pipeline.endpointSourceKind ?? '',
+        pipeline.endpointSourceName ?? '',
+        pipeline.backendPodNamespace ?? '',
+        pipeline.backendPodName ?? '',
+        pipeline.ip ?? '',
+        pipeline.ready === undefined ? '' : String(pipeline.ready),
+      ].join('|');
+      if (pipelineKeys.has(key)) {
+        return;
+      }
+      pipelineKeys.add(key);
+      summary.networkPipelines.push(pipeline);
+    };
+    const servicePortsByNsName = new Map<
+      string,
+      Array<{ port?: number; name?: string; targetPort?: string }>
+    >();
+    for (const item of context.networkResources) {
+      if (item.kind !== 'Service') {
+        continue;
+      }
+      const serviceSpec = this.toObject(item.spec);
+      const ports = this.toArray(serviceSpec.ports)
+        .map((port) => this.toObject(port))
+        .filter((port) => Object.keys(port).length > 0)
+        .map((port) => ({
+          port: this.toMaybeNumber(port.port) ?? undefined,
+          name: this.toMaybeString(port.name) ?? undefined,
+          targetPort: this.valueToString(port.targetPort),
+        }));
+      servicePortsByNsName.set(`${item.namespace ?? ''}/${item.name}`, ports);
+    }
+    if (base.kind === 'Service') {
+      const serviceSpec = this.toObject(base.spec);
+      const serviceStatus = this.toObject(base.statusJson);
+      const loadBalancer = this.toObject(serviceStatus.loadBalancer);
+      summary.service = {
+        type: this.toMaybeString(serviceSpec.type),
+        selector: this.toSelectorString(serviceSpec.selector),
+        externalIPs: this.toStringArray(serviceSpec.externalIPs),
+        loadBalancerIPs: this.toArray(loadBalancer.ingress)
+          .map((item) => this.toObject(item))
+          .map(
+            (item) =>
+              this.toMaybeString(item.ip) ??
+              this.toMaybeString(item.hostname),
+          )
+          .filter((item): item is string => Boolean(item)),
+        sessionAffinity: this.toMaybeString(serviceSpec.sessionAffinity),
+        externalTrafficPolicy: this.toMaybeString(
+          serviceSpec.externalTrafficPolicy,
+        ),
+        internalTrafficPolicy: this.toMaybeString(
+          serviceSpec.internalTrafficPolicy,
+        ),
+        publishNotReadyAddresses: this.toMaybeBoolean(
+          serviceSpec.publishNotReadyAddresses,
+        ),
+      };
+      const ports = this.toArray(serviceSpec.ports)
+        .map((port) => this.toObject(port))
+        .filter((port) => Object.keys(port).length > 0)
+        .map((port) => ({
+          port: this.toMaybeNumber(port.port) ?? undefined,
+          name: this.toMaybeString(port.name) ?? undefined,
+          targetPort: this.valueToString(port.targetPort),
+        }));
+      servicePortsByNsName.set(`${base.namespace ?? ''}/${base.name}`, ports);
+    }
+    const endpointsByServiceNsName = new Map<string, DetailResourceRecord[]>();
+    const endpointSlicesByServiceNsName = new Map<string, DetailResourceRecord[]>();
+    for (const item of context.networkResources) {
+      if (item.kind === 'Endpoints') {
+        const key = `${item.namespace ?? ''}/${item.name}`;
+        const list = endpointsByServiceNsName.get(key) ?? [];
+        list.push(item);
+        endpointsByServiceNsName.set(key, list);
+      }
+      if (item.kind === 'EndpointSlice') {
+        const serviceNames = this.extractEndpointSliceServiceNames(
+          item.spec,
+          item.statusJson,
+        );
+        for (const serviceName of serviceNames) {
+          const key = `${item.namespace ?? ''}/${serviceName}`;
+          const list = endpointSlicesByServiceNsName.get(key) ?? [];
+          list.push(item);
+          endpointSlicesByServiceNsName.set(key, list);
+        }
+      }
+    }
+    const resolveServicePortString = (
+      serviceName?: string,
+      serviceNamespace?: string,
+      routePort?: string,
+    ): string | undefined => {
+      if (routePort) {
+        return routePort;
+      }
+      if (!serviceName) {
+        return undefined;
+      }
+      const key = `${serviceNamespace ?? ''}/${serviceName}`;
+      const ports = servicePortsByNsName.get(key) ?? [];
+      if (ports.length === 1) {
+        const first = ports[0];
+        return (
+          first.targetPort ??
+          first.name ??
+          (typeof first.port === 'number' ? String(first.port) : undefined)
+        );
+      }
+      return undefined;
+    };
+    const addServicePipelines = (params: {
+      sourceKind: string;
+      sourceName: string;
+      sourceNamespace?: string;
+      host?: string;
+      path?: string;
+      port?: number;
+      serviceName?: string;
+      serviceNamespace?: string;
+      servicePort?: string;
+    }) => {
+      const serviceName = params.serviceName;
+      const serviceNamespace =
+        params.serviceNamespace ?? params.sourceNamespace ?? base.namespace ?? undefined;
+      const servicePort = resolveServicePortString(
+        serviceName,
+        serviceNamespace,
+        params.servicePort,
+      );
+      const serviceKey = serviceName
+        ? `${serviceNamespace ?? ''}/${serviceName}`
+        : undefined;
+
+      const addBackendPipeline = (
+        endpointSourceKind?: string,
+        endpointSourceName?: string,
+        backendPodName?: string,
+        backendPodNamespace?: string,
+        ip?: string,
+        ready?: boolean,
+      ) => {
+        addPipeline({
+          sourceKind: params.sourceKind,
+          sourceName: params.sourceName,
+          ...(params.sourceNamespace ? { sourceNamespace: params.sourceNamespace } : {}),
+          ...(params.host ? { host: params.host } : {}),
+          ...(params.path ? { path: params.path } : {}),
+          ...(typeof params.port === 'number' ? { port: params.port } : {}),
+          ...(serviceName ? { serviceName } : {}),
+          ...(serviceNamespace ? { serviceNamespace } : {}),
+          ...(servicePort ? { servicePort } : {}),
+          ...(endpointSourceKind ? { endpointSourceKind } : {}),
+          ...(endpointSourceName ? { endpointSourceName } : {}),
+          ...(backendPodName ? { backendPodName } : {}),
+          ...(backendPodNamespace ? { backendPodNamespace } : {}),
+          ...(ip ? { ip } : {}),
+          ...(ready !== undefined ? { ready } : {}),
+        });
+      };
+
+      if (!serviceKey) {
+        addBackendPipeline();
+        return;
+      }
+
+      let hasBackend = false;
+      const endpointSlices = endpointSlicesByServiceNsName.get(serviceKey) ?? [];
+      for (const endpointSlice of endpointSlices) {
+        const sliceSpec = this.toObject(endpointSlice.spec);
+        for (const endpoint of this.toArray(sliceSpec.endpoints)) {
+          const endpointObj = this.toObject(endpoint);
+          const addresses = this.toArray(endpointObj.addresses);
+          const targetRef = this.toObject(endpointObj.targetRef);
+          const targetKind = this.toMaybeString(targetRef.kind);
+          const podName =
+            targetKind === 'Pod' ? this.toMaybeString(targetRef.name) ?? undefined : undefined;
+          const podNamespace =
+            targetKind === 'Pod'
+              ? this.toMaybeString(targetRef.namespace) ??
+                endpointSlice.namespace ??
+                undefined
+              : undefined;
+          const ready = this.toMaybeBoolean(
+            this.toObject(endpointObj.conditions).ready,
+          );
+          for (const address of addresses) {
+            hasBackend = true;
+            addBackendPipeline(
+              'EndpointSlice',
+              endpointSlice.name,
+              podName,
+              podNamespace,
+              this.valueToString(address) ?? undefined,
+              ready ?? undefined,
+            );
+          }
+        }
+      }
+
+      const endpoints = endpointsByServiceNsName.get(serviceKey) ?? [];
+      for (const endpointResource of endpoints) {
+        const endpointSpec = this.toObject(endpointResource.spec);
+        for (const subset of this.toArray(endpointSpec.subsets)) {
+          const subsetObj = this.toObject(subset);
+          const readyAddresses = this.toArray(subsetObj.addresses);
+          const notReadyAddresses = this.toArray(subsetObj.notReadyAddresses);
+          for (const address of readyAddresses) {
+            const addressObj = this.toObject(address);
+            const targetRef = this.toObject(addressObj.targetRef);
+            const targetKind = this.toMaybeString(targetRef.kind);
+            const podName =
+              targetKind === 'Pod'
+                ? this.toMaybeString(targetRef.name) ?? undefined
+                : undefined;
+            const podNamespace =
+              targetKind === 'Pod'
+                ? this.toMaybeString(targetRef.namespace) ??
+                  endpointResource.namespace ??
+                  undefined
+                : undefined;
+            hasBackend = true;
+            addBackendPipeline(
+              'Endpoints',
+              endpointResource.name,
+              podName,
+              podNamespace,
+              this.toMaybeString(addressObj.ip) ?? undefined,
+              true,
+            );
+          }
+          for (const address of notReadyAddresses) {
+            const addressObj = this.toObject(address);
+            const targetRef = this.toObject(addressObj.targetRef);
+            const targetKind = this.toMaybeString(targetRef.kind);
+            const podName =
+              targetKind === 'Pod'
+                ? this.toMaybeString(targetRef.name) ?? undefined
+                : undefined;
+            const podNamespace =
+              targetKind === 'Pod'
+                ? this.toMaybeString(targetRef.namespace) ??
+                  endpointResource.namespace ??
+                  undefined
+                : undefined;
+            hasBackend = true;
+            addBackendPipeline(
+              'Endpoints',
+              endpointResource.name,
+              podName,
+              podNamespace,
+              this.toMaybeString(addressObj.ip) ?? undefined,
+              false,
+            );
+          }
+        }
+      }
+
+      if (!hasBackend) {
+        addBackendPipeline();
+      }
     };
 
     if (runtime.podIP) {
@@ -2070,6 +2823,156 @@ export class ResourcesService {
           }
         }
       }
+
+      for (const networkResource of context.networkResources) {
+        if (networkResource.namespace !== base.namespace) {
+          continue;
+        }
+        if (networkResource.kind === 'Ingress') {
+          const ingressSpec = this.toObject(networkResource.spec);
+          for (const rule of this.toArray(ingressSpec.rules)) {
+            const ruleObj = this.toObject(rule);
+            const host = this.toMaybeString(ruleObj.host);
+            const http = this.toObject(ruleObj.http);
+            for (const path of this.toArray(http.paths)) {
+              const pathObj = this.toObject(path);
+              const backend = this.toObject(pathObj.backend);
+              const service = this.toObject(backend.service);
+              const serviceName = this.toMaybeString(service.name);
+              if (serviceName !== base.name) {
+                continue;
+              }
+              const servicePort = this.valueToString(
+                this.toObject(service.port).number ??
+                  this.toObject(service.port).name,
+              );
+              addServicePipelines({
+                sourceKind: 'Ingress',
+                sourceName: networkResource.name,
+                sourceNamespace: networkResource.namespace ?? undefined,
+                host,
+                path: this.toMaybeString(pathObj.path),
+                serviceName: base.name,
+                serviceNamespace: base.namespace ?? undefined,
+                servicePort,
+              });
+            }
+          }
+        }
+        if (networkResource.kind === 'IngressRoute') {
+          const routeSpec = this.toObject(networkResource.spec);
+          const entryPoints = this.toArray(routeSpec.entryPoints)
+            .map((item) => this.valueToString(item))
+            .filter(Boolean)
+            .join(', ');
+          for (const route of this.toArray(routeSpec.routes)) {
+            const routeObj = this.toObject(route);
+            for (const backendService of this.toArray(routeObj.services)) {
+              const backendServiceObj = this.toObject(backendService);
+              const serviceName = this.toMaybeString(backendServiceObj.name);
+              if (serviceName !== base.name) {
+                continue;
+              }
+              addServicePipelines({
+                sourceKind: 'IngressRoute',
+                sourceName: networkResource.name,
+                sourceNamespace: networkResource.namespace ?? undefined,
+                host: entryPoints || undefined,
+                path: this.toMaybeString(routeObj.match),
+                port: this.toMaybeNumber(backendServiceObj.port) ?? undefined,
+                serviceName: base.name,
+                serviceNamespace: base.namespace ?? undefined,
+                servicePort: this.valueToString(backendServiceObj.port),
+              });
+            }
+          }
+        }
+        if (networkResource.kind === 'HTTPRoute') {
+          const routeSpec = this.toObject(networkResource.spec);
+          const hostnames = this.toArray(routeSpec.hostnames)
+            .map((item) => this.valueToString(item))
+            .filter((item): item is string => Boolean(item));
+          for (const rule of this.toArray(routeSpec.rules)) {
+            const ruleObj = this.toObject(rule);
+            const matches = this.toArray(ruleObj.matches);
+            const normalizedMatches = matches.length > 0 ? matches : [{}];
+            for (const backendRef of this.toArray(ruleObj.backendRefs)) {
+              const backendRefObj = this.toObject(backendRef);
+              const backendKind = this.toMaybeString(backendRefObj.kind) ?? 'Service';
+              const backendName = this.toMaybeString(backendRefObj.name);
+              const backendNamespace =
+                this.toMaybeString(backendRefObj.namespace) ??
+                networkResource.namespace ??
+                undefined;
+              if (
+                backendKind !== 'Service' ||
+                backendName !== base.name ||
+                backendNamespace !== base.namespace
+              ) {
+                continue;
+              }
+              const backendPort = this.valueToString(backendRefObj.port);
+              for (const match of normalizedMatches) {
+                const matchObj = this.toObject(match);
+                const pathObj = this.toObject(matchObj.path);
+                const routePath = this.toMaybeString(pathObj.value);
+                if (hostnames.length === 0) {
+                  addServicePipelines({
+                    sourceKind: 'HTTPRoute',
+                    sourceName: networkResource.name,
+                    sourceNamespace: networkResource.namespace ?? undefined,
+                    path: routePath,
+                    serviceName: base.name,
+                    serviceNamespace: base.namespace ?? undefined,
+                    servicePort: backendPort,
+                  });
+                  continue;
+                }
+                for (const hostname of hostnames) {
+                  addServicePipelines({
+                    sourceKind: 'HTTPRoute',
+                    sourceName: networkResource.name,
+                    sourceNamespace: networkResource.namespace ?? undefined,
+                    host: hostname,
+                    path: routePath,
+                    serviceName: base.name,
+                    serviceNamespace: base.namespace ?? undefined,
+                    servicePort: backendPort,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      const servicePorts = this.toArray(spec.ports)
+        .map((port) => this.toObject(port))
+        .filter((port) => Object.keys(port).length > 0);
+      if (servicePorts.length === 0) {
+        addServicePipelines({
+          sourceKind: 'Service',
+          sourceName: base.name,
+          sourceNamespace: base.namespace ?? undefined,
+          serviceName: base.name,
+          serviceNamespace: base.namespace ?? undefined,
+        });
+      } else {
+        for (const servicePort of servicePorts) {
+          addServicePipelines({
+            sourceKind: 'Service',
+            sourceName: base.name,
+            sourceNamespace: base.namespace ?? undefined,
+            port: this.toMaybeNumber(servicePort.port) ?? undefined,
+            serviceName: base.name,
+            serviceNamespace: base.namespace ?? undefined,
+            servicePort:
+              this.valueToString(servicePort.targetPort) ??
+              this.valueToString(servicePort.port) ??
+              undefined,
+          });
+        }
+      }
     }
 
     if (base.kind === 'Ingress') {
@@ -2085,6 +2988,10 @@ export class ResourcesService {
           const backend = this.toObject(pathObj.backend);
           const service = this.toObject(backend.service);
           const serviceName = this.toMaybeString(service.name);
+          const servicePort = this.valueToString(
+            this.toObject(service.port).number ??
+              this.toObject(service.port).name,
+          );
           summary.endpoints.push({
             kind: 'ingress-rule',
             name: serviceName ?? base.name,
@@ -2097,6 +3004,16 @@ export class ResourcesService {
             host,
             path: this.toMaybeString(pathObj.path),
             ports: [],
+          });
+          addServicePipelines({
+            sourceKind: 'Ingress',
+            sourceName: base.name,
+            sourceNamespace: base.namespace ?? undefined,
+            host,
+            path: this.toMaybeString(pathObj.path),
+            serviceName: serviceName ?? undefined,
+            serviceNamespace: base.namespace ?? undefined,
+            servicePort,
           });
         }
       }
@@ -2130,16 +3047,18 @@ export class ResourcesService {
         const services = this.toArray(routeObj.services);
         for (const service of services) {
           const serviceObj = this.toObject(service);
+          const serviceName = this.toMaybeString(serviceObj.name) ?? undefined;
+          const servicePort = this.valueToString(serviceObj.port);
           summary.endpoints.push({
             kind: 'ingress-rule',
-            name: this.toMaybeString(serviceObj.name) ?? base.name,
+            name: serviceName ?? base.name,
             namespace: base.namespace ?? undefined,
             sourceKind: 'IngressRoute',
             sourceName: base.name,
-            sourceId: this.toMaybeString(serviceObj.name)
+            sourceId: serviceName
               ? resolveNetworkTargetId(
                   'Service',
-                  this.toMaybeString(serviceObj.name) ?? '',
+                  serviceName,
                   base.namespace,
                 )
               : undefined,
@@ -2149,6 +3068,180 @@ export class ResourcesService {
               ? [{ port: this.toMaybeNumber(serviceObj.port) ?? 0 }]
               : [],
           });
+          addServicePipelines({
+            sourceKind: 'IngressRoute',
+            sourceName: base.name,
+            sourceNamespace: base.namespace ?? undefined,
+            host: entryPoints.join(', ') || undefined,
+            path: this.toMaybeString(routeObj.match),
+            port: this.toMaybeNumber(serviceObj.port) ?? undefined,
+            serviceName,
+            serviceNamespace: base.namespace ?? undefined,
+            servicePort,
+          });
+        }
+      }
+    }
+
+    if (base.kind === 'HTTPRoute') {
+      const spec = this.toObject(base.spec);
+      const hostnames = this.toArray(spec.hostnames)
+        .map((hostname) => this.valueToString(hostname))
+        .filter((hostname): hostname is string => Boolean(hostname));
+      const rules = this.toArray(spec.rules);
+      for (const rule of rules) {
+        const ruleObj = this.toObject(rule);
+        const matches = this.toArray(ruleObj.matches);
+        const normalizedMatches = matches.length > 0 ? matches : [{}];
+        const backendRefs = this.toArray(ruleObj.backendRefs);
+        for (const backendRef of backendRefs) {
+          const backendRefObj = this.toObject(backendRef);
+          const backendKind = this.toMaybeString(backendRefObj.kind) ?? 'Service';
+          if (backendKind !== 'Service') {
+            continue;
+          }
+          const serviceName = this.toMaybeString(backendRefObj.name);
+          if (!serviceName) {
+            continue;
+          }
+          const serviceNamespace =
+            this.toMaybeString(backendRefObj.namespace) ??
+            base.namespace ??
+            undefined;
+          const servicePort = this.valueToString(backendRefObj.port);
+          for (const match of normalizedMatches) {
+            const matchObj = this.toObject(match);
+            const pathObj = this.toObject(matchObj.path);
+            const routePath = this.toMaybeString(pathObj.value);
+            if (hostnames.length === 0) {
+              addServicePipelines({
+                sourceKind: 'HTTPRoute',
+                sourceName: base.name,
+                sourceNamespace: base.namespace ?? undefined,
+                path: routePath,
+                serviceName,
+                serviceNamespace,
+                servicePort,
+              });
+              continue;
+            }
+            for (const hostname of hostnames) {
+              addServicePipelines({
+                sourceKind: 'HTTPRoute',
+                sourceName: base.name,
+                sourceNamespace: base.namespace ?? undefined,
+                host: hostname,
+                path: routePath,
+                serviceName,
+                serviceNamespace,
+                servicePort,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (base.kind === 'Gateway') {
+      const spec = this.toObject(base.spec);
+      for (const listener of this.toArray(spec.listeners)) {
+        const listenerObj = this.toObject(listener);
+        const allowedRoutes = this.toObject(listenerObj.allowedRoutes);
+        const namespaces = this.toObject(allowedRoutes.namespaces);
+        addPipeline({
+          sourceKind: 'Gateway',
+          sourceName: base.name,
+          ...(base.namespace ? { sourceNamespace: base.namespace } : {}),
+          ...(this.toMaybeString(listenerObj.hostname)
+            ? { host: this.toMaybeString(listenerObj.hostname) ?? undefined }
+            : {}),
+          ...(this.toMaybeNumber(listenerObj.port) !== undefined
+            ? { port: this.toMaybeNumber(listenerObj.port) ?? undefined }
+            : {}),
+          ...(this.toMaybeString(namespaces.from)
+            ? { path: `allowedRoutes:${this.toMaybeString(namespaces.from)}` }
+            : {}),
+        });
+      }
+      const gatewayNamespace = base.namespace ?? undefined;
+      const gatewayName = base.name;
+      for (const route of context.networkResources) {
+        if (route.kind !== 'HTTPRoute') {
+          continue;
+        }
+        const routeSpec = this.toObject(route.spec);
+        const parentRefs = this.toArray(routeSpec.parentRefs);
+        const attachedToGateway = parentRefs.some((parentRef) => {
+          const parentRefObj = this.toObject(parentRef);
+          const parentKind = this.toMaybeString(parentRefObj.kind) ?? 'Gateway';
+          const parentName = this.toMaybeString(parentRefObj.name);
+          const parentNamespace =
+            this.toMaybeString(parentRefObj.namespace) ??
+            route.namespace ??
+            undefined;
+          return (
+            parentKind === 'Gateway' &&
+            parentName === gatewayName &&
+            parentNamespace === gatewayNamespace
+          );
+        });
+        if (!attachedToGateway) {
+          continue;
+        }
+        const hostnames = this.toArray(routeSpec.hostnames)
+          .map((hostname) => this.valueToString(hostname))
+          .filter((hostname): hostname is string => Boolean(hostname));
+        const rules = this.toArray(routeSpec.rules);
+        for (const rule of rules) {
+          const ruleObj = this.toObject(rule);
+          const matches = this.toArray(ruleObj.matches);
+          const normalizedMatches = matches.length > 0 ? matches : [{}];
+          const backendRefs = this.toArray(ruleObj.backendRefs);
+          for (const backendRef of backendRefs) {
+            const backendRefObj = this.toObject(backendRef);
+            const backendKind = this.toMaybeString(backendRefObj.kind) ?? 'Service';
+            if (backendKind !== 'Service') {
+              continue;
+            }
+            const serviceName = this.toMaybeString(backendRefObj.name);
+            if (!serviceName) {
+              continue;
+            }
+            const serviceNamespace =
+              this.toMaybeString(backendRefObj.namespace) ??
+              route.namespace ??
+              undefined;
+            const servicePort = this.valueToString(backendRefObj.port);
+            for (const match of normalizedMatches) {
+              const matchObj = this.toObject(match);
+              const pathObj = this.toObject(matchObj.path);
+              const routePath = this.toMaybeString(pathObj.value);
+              if (hostnames.length === 0) {
+                addServicePipelines({
+                  sourceKind: 'Gateway',
+                  sourceName: base.name,
+                  sourceNamespace: gatewayNamespace,
+                  path: routePath,
+                  serviceName,
+                  serviceNamespace,
+                  servicePort,
+                });
+                continue;
+              }
+              for (const hostname of hostnames) {
+                addServicePipelines({
+                  sourceKind: 'Gateway',
+                  sourceName: base.name,
+                  sourceNamespace: gatewayNamespace,
+                  host: hostname,
+                  path: routePath,
+                  serviceName,
+                  serviceNamespace,
+                  servicePort,
+                });
+              }
+            }
+          }
         }
       }
     }
@@ -2179,6 +3272,64 @@ export class ResourcesService {
               targetPort: this.toMaybeString(port.name) ?? undefined,
             })),
           });
+          const targetRef = this.toObject(addressObj.targetRef);
+          const targetKind = this.toMaybeString(targetRef.kind);
+          const podName =
+            targetKind === 'Pod'
+              ? this.toMaybeString(targetRef.name) ?? undefined
+              : undefined;
+          const podNamespace =
+            targetKind === 'Pod'
+              ? this.toMaybeString(targetRef.namespace) ??
+                base.namespace ??
+                undefined
+              : undefined;
+          addPipeline({
+            sourceKind: 'Service',
+            sourceName: base.name,
+            ...(base.namespace ? { sourceNamespace: base.namespace } : {}),
+            serviceName: base.name,
+            ...(base.namespace ? { serviceNamespace: base.namespace } : {}),
+            endpointSourceKind: 'Endpoints',
+            endpointSourceName: base.name,
+            ...(podName ? { backendPodName: podName } : {}),
+            ...(podNamespace ? { backendPodNamespace: podNamespace } : {}),
+            ...(this.toMaybeString(addressObj.ip)
+              ? { ip: this.toMaybeString(addressObj.ip) ?? undefined }
+              : {}),
+            ready: true,
+          });
+        }
+        const notReadyAddresses = this.toArray(subsetObj.notReadyAddresses);
+        for (const address of notReadyAddresses) {
+          const addressObj = this.toObject(address);
+          const targetRef = this.toObject(addressObj.targetRef);
+          const targetKind = this.toMaybeString(targetRef.kind);
+          const podName =
+            targetKind === 'Pod'
+              ? this.toMaybeString(targetRef.name) ?? undefined
+              : undefined;
+          const podNamespace =
+            targetKind === 'Pod'
+              ? this.toMaybeString(targetRef.namespace) ??
+                base.namespace ??
+                undefined
+              : undefined;
+          addPipeline({
+            sourceKind: 'Service',
+            sourceName: base.name,
+            ...(base.namespace ? { sourceNamespace: base.namespace } : {}),
+            serviceName: base.name,
+            ...(base.namespace ? { serviceNamespace: base.namespace } : {}),
+            endpointSourceKind: 'Endpoints',
+            endpointSourceName: base.name,
+            ...(podName ? { backendPodName: podName } : {}),
+            ...(podNamespace ? { backendPodNamespace: podNamespace } : {}),
+            ...(this.toMaybeString(addressObj.ip)
+              ? { ip: this.toMaybeString(addressObj.ip) ?? undefined }
+              : {}),
+            ready: false,
+          });
         }
       }
     }
@@ -2189,6 +3340,10 @@ export class ResourcesService {
         .map((port) => this.toObject(port))
         .filter((port) => Object.keys(port).length > 0);
       const endpoints = this.toArray(spec.endpoints);
+      const serviceNames = this.extractEndpointSliceServiceNames(
+        base.spec,
+        base.statusJson,
+      );
       for (const endpoint of endpoints) {
         const endpointObj = this.toObject(endpoint);
         const addresses = this.toArray(endpointObj.addresses);
@@ -2208,11 +3363,305 @@ export class ResourcesService {
               targetPort: this.toMaybeString(port.name) ?? undefined,
             })),
           });
+          const targetRef = this.toObject(endpointObj.targetRef);
+          const targetKind = this.toMaybeString(targetRef.kind);
+          const podName =
+            targetKind === 'Pod'
+              ? this.toMaybeString(targetRef.name) ?? undefined
+              : undefined;
+          const podNamespace =
+            targetKind === 'Pod'
+              ? this.toMaybeString(targetRef.namespace) ??
+                base.namespace ??
+                undefined
+              : undefined;
+          const ready = this.toMaybeBoolean(
+            this.toObject(endpointObj.conditions).ready,
+          );
+          for (const serviceName of serviceNames) {
+            addPipeline({
+              sourceKind: 'Service',
+              sourceName: serviceName,
+              ...(base.namespace ? { sourceNamespace: base.namespace } : {}),
+              serviceName,
+              ...(base.namespace ? { serviceNamespace: base.namespace } : {}),
+              endpointSourceKind: 'EndpointSlice',
+              endpointSourceName: base.name,
+              ...(podName ? { backendPodName: podName } : {}),
+              ...(podNamespace ? { backendPodNamespace: podNamespace } : {}),
+              ...(this.valueToString(address)
+                ? { ip: this.valueToString(address) ?? undefined }
+                : {}),
+              ...(ready !== undefined ? { ready } : {}),
+            });
+          }
         }
       }
     }
 
     return summary;
+  }
+
+  private relationshipGroupForAssociation(
+    association: ResourceAssociation,
+  ): ResourceDetailRelationshipGroupKey {
+    if (
+      association.associationType === 'owner' ||
+      association.associationType === 'owned-pod'
+    ) {
+      return 'control';
+    }
+    if (
+      [
+        'routes-to-service',
+        'traefik-routes-to-service',
+        'selects-service',
+        'service-endpoints',
+        'service-endpointslice',
+        'backend-service',
+        'route-middleware',
+      ].includes(association.associationType)
+    ) {
+      return 'network';
+    }
+    if (
+      [
+        'mount-claim',
+        'bound-volume',
+        'bound-claim',
+        'uses-volume',
+        'uses-claim',
+        'uses-storageclass',
+      ].includes(association.associationType)
+    ) {
+      return 'storage';
+    }
+    if (
+      [
+        'config-ref',
+        'secret-ref',
+        'uses-configmap',
+        'uses-secret',
+        'tls-secret',
+      ].includes(association.associationType)
+    ) {
+      return 'config';
+    }
+    return 'other';
+  }
+
+  private relationshipAssociationTitle(associationType: string): string {
+    const labels: Record<string, string> = {
+      'routes-to-service': 'Ingress 转发',
+      'traefik-routes-to-service': 'IngressRoute 转发',
+      'selects-service': '后端发现',
+      'service-endpoints': '服务端点',
+      'service-endpointslice': '端点切片',
+      'backend-service': '后端服务',
+      'tls-secret': 'TLS 证书',
+      'route-middleware': '路由中间件',
+      'owned-pod': '拥有 Pod',
+      owner: '上级控制器',
+      'uses-configmap': '使用 ConfigMap',
+      'uses-secret': '使用 Secret',
+      'secret-ref': 'Secret 引用',
+      'config-ref': '配置引用',
+      'mount-claim': '挂载 PVC',
+      'bound-volume': '绑定 PV',
+      'bound-claim': '绑定 PVC',
+      'uses-volume': '使用 PV',
+      'uses-claim': '使用 PVC',
+      'uses-storageclass': '使用 StorageClass',
+    };
+    return labels[associationType] ?? associationType;
+  }
+
+  private relationshipAssociationColor(associationType: string): string {
+    const colors: Record<string, string> = {
+      'routes-to-service': 'green',
+      'traefik-routes-to-service': 'cyan',
+      'selects-service': 'orange',
+      'service-endpoints': 'gold',
+      'service-endpointslice': 'volcano',
+      'backend-service': 'blue',
+      'tls-secret': 'magenta',
+      'route-middleware': 'geekblue',
+      'owned-pod': 'purple',
+      owner: 'purple',
+      'uses-configmap': 'blue',
+      'uses-secret': 'magenta',
+      'secret-ref': 'purple',
+      'config-ref': 'blue',
+      'mount-claim': 'cyan',
+      'bound-volume': 'blue',
+      'bound-claim': 'cyan',
+      'uses-volume': 'blue',
+      'uses-claim': 'cyan',
+      'uses-storageclass': 'gold',
+    };
+    return colors[associationType] ?? 'default';
+  }
+
+  private relationshipConfigUsageTitle(usageType: string): string {
+    const labels: Record<string, string> = {
+      volume: 'Volume',
+      env: 'Env',
+      envFrom: 'EnvFrom',
+      projected: 'Projected',
+      imagePullSecret: 'ImagePullSecret',
+      token: 'Token',
+      tls: 'TLS',
+      unknown: 'Unknown',
+    };
+    return labels[usageType] ?? usageType;
+  }
+
+  private relationshipConfigUsageColor(usageType: string): string {
+    const colors: Record<string, string> = {
+      volume: 'blue',
+      env: 'cyan',
+      envFrom: 'geekblue',
+      projected: 'purple',
+      imagePullSecret: 'magenta',
+      token: 'gold',
+      tls: 'red',
+      unknown: 'default',
+    };
+    return colors[usageType] ?? 'default';
+  }
+
+  private enrichRelationshipNode(
+    node: ResourceDetailRelationshipNode,
+    base: DetailResourceRecord,
+    context: DetailContext,
+    associations: ResourceAssociation[],
+  ): ResourceDetailRelationshipNode {
+    const kind = node.kind;
+    const name = node.name;
+    const namespace = node.namespace;
+    const apiVersion = kind ? this.resolveRelationshipApiVersion(kind) : undefined;
+    const clusterId = this.resolveRelationshipClusterId(
+      kind,
+      name,
+      namespace,
+      base,
+      context,
+    );
+    const id =
+      node.id ??
+      this.resolveRelationshipId(
+        kind,
+        name,
+        namespace,
+        base,
+        context,
+        associations,
+      );
+
+    return {
+      ...node,
+      ...(id ? { id } : {}),
+      ...(clusterId ? { clusterId } : {}),
+      ...(apiVersion ? { apiVersion } : {}),
+    };
+  }
+
+  private resolveRelationshipApiVersion(kind: string): string | undefined {
+    try {
+      return this.resolveKind(kind).apiVersion;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private resolveRelationshipClusterId(
+    kind: string | undefined,
+    name: string | undefined,
+    namespace: string | undefined,
+    base: DetailResourceRecord,
+    context: DetailContext,
+  ): string | undefined {
+    if (!kind || !name || kind === 'Container' || kind === 'Volume' || kind === 'Pod/IP') {
+      return undefined;
+    }
+    if (
+      base.kind === kind &&
+      base.name === name &&
+      (!namespace || !base.namespace || base.namespace === namespace)
+    ) {
+      return base.clusterId;
+    }
+
+    const pools = [
+      context.workloads,
+      context.networkResources,
+      context.storageResources,
+      context.configResources,
+    ];
+    for (const pool of pools) {
+      const matched = pool.find(
+        (item) =>
+          item.kind === kind &&
+          item.name === name &&
+          (!namespace || !item.namespace || item.namespace === namespace),
+      );
+      if (matched) {
+        return matched.clusterId;
+      }
+    }
+    return base.clusterId;
+  }
+
+  private resolveRelationshipId(
+    kind: string | undefined,
+    name: string | undefined,
+    namespace: string | undefined,
+    base: DetailResourceRecord,
+    context: DetailContext,
+    associations: ResourceAssociation[],
+  ): string | undefined {
+    if (!kind || !name || kind === 'Container' || kind === 'Volume' || kind === 'Pod/IP') {
+      return undefined;
+    }
+    const association = associations.find(
+      (item) =>
+        item.kind === kind &&
+        item.name === name &&
+        (!namespace || !item.namespace || item.namespace === namespace) &&
+        item.id,
+    );
+    if (association?.id) {
+      return association.id;
+    }
+    if (
+      base.kind === kind &&
+      base.name === name &&
+      (!namespace || !base.namespace || base.namespace === namespace)
+    ) {
+      return base.id;
+    }
+
+    const pools = [
+      context.workloads,
+      context.networkResources,
+      context.storageResources,
+      context.configResources,
+    ];
+    for (const pool of pools) {
+      const matched = pool.find(
+        (item) =>
+          item.kind === kind &&
+          item.name === name &&
+          (!namespace || !item.namespace || item.namespace === namespace),
+      );
+      if (matched?.id) {
+        return matched.id;
+      }
+    }
+    if (namespace) {
+      return this.buildLiveNetworkId(base.clusterId, kind, namespace, name);
+    }
+    return undefined;
   }
 
   private buildStorageSummary(
@@ -2222,8 +3671,10 @@ export class ResourcesService {
     const storageClasses = new Set<string>();
     const pvcMap = new Map<string, ResourceDetailPvcSummary>();
     const pvMap = new Map<string, ResourceDetailPvSummary>();
+    const storageClassMap = new Map<string, ResourceDetailStorageClassSummary>();
     const volumes: ResourceDetailVolumeSummary[] = [];
     const mounts: ResourceDetailMountSummary[] = [];
+    const storagePipelines: ResourceDetailStoragePipeline[] = [];
 
     const addPvc = (
       name: string,
@@ -2231,6 +3682,7 @@ export class ResourcesService {
       phase?: string,
       storageClass?: string,
       volumeName?: string,
+      detail?: DetailResourceRecord,
     ) => {
       if (!name) {
         return;
@@ -2245,13 +3697,19 @@ export class ResourcesService {
         ...(phase ? { phase } : {}),
         ...(storageClass ? { storageClass } : {}),
         ...(volumeName ? { volumeName } : {}),
+        ...this.summarizePvcDetail(detail),
       });
       if (storageClass) {
         storageClasses.add(storageClass);
       }
     };
 
-    const addPv = (name: string, phase?: string, storageClass?: string) => {
+    const addPv = (
+      name: string,
+      phase?: string,
+      storageClass?: string,
+      detail?: DetailResourceRecord,
+    ) => {
       if (!name || pvMap.has(name)) {
         return;
       }
@@ -2259,10 +3717,17 @@ export class ResourcesService {
         name,
         ...(phase ? { phase } : {}),
         ...(storageClass ? { storageClass } : {}),
+        ...this.summarizePvDetail(detail),
       });
       if (storageClass) {
         storageClasses.add(storageClass);
       }
+    };
+    const addStorageClassDetail = (detail?: DetailResourceRecord | null) => {
+      if (!detail || detail.kind !== 'StorageClass') {
+        return;
+      }
+      storageClassMap.set(detail.name, this.summarizeStorageClassDetail(detail));
     };
 
     if (this.isWorkloadKind(base.kind)) {
@@ -2272,6 +3737,12 @@ export class ResourcesService {
       }
       for (const mount of refs.mounts) {
         mounts.push(mount);
+      }
+      for (const pipeline of this.buildStoragePipelinesForWorkload(
+        base,
+        context.storageResources,
+      )) {
+        storagePipelines.push(pipeline);
       }
       for (const pvcName of refs.pvcNames) {
         const pvc = context.storageResources.find(
@@ -2289,9 +3760,41 @@ export class ResourcesService {
             this.toMaybeString(pvcStatus.phase),
             this.resolveStorageClass(pvc),
             this.toMaybeString(pvcSpec.volumeName),
+            pvc,
           );
         } else {
           addPvc(pvcName, base.namespace ?? undefined);
+        }
+      }
+
+      for (const pipeline of storagePipelines) {
+        if (!pipeline.pvcName) {
+          continue;
+        }
+        addPvc(
+          pipeline.pvcName,
+          pipeline.pvcNamespace,
+          pipeline.pvcPhase,
+          pipeline.storageClass,
+          pipeline.pvName,
+          context.storageResources.find(
+            (item) =>
+              item.kind === 'PersistentVolumeClaim' &&
+              item.name === pipeline.pvcName &&
+              item.namespace === pipeline.pvcNamespace,
+          ),
+        );
+        if (pipeline.pvName) {
+          addPv(
+            pipeline.pvName,
+            pipeline.pvPhase,
+            pipeline.storageClass,
+            context.storageResources.find(
+              (item) =>
+                item.kind === 'PersistentVolume' &&
+                item.name === pipeline.pvName,
+            ),
+          );
         }
       }
     }
@@ -2307,6 +3810,7 @@ export class ResourcesService {
         this.toMaybeString(status.phase),
         storageClass,
         volumeName,
+        base,
       );
       if (volumeName) {
         const pv = context.storageResources.find(
@@ -2318,6 +3822,7 @@ export class ResourcesService {
           volumeName,
           this.toMaybeString(pvStatus.phase),
           this.resolveStorageClass(pv),
+          pv,
         );
       }
     }
@@ -2328,6 +3833,7 @@ export class ResourcesService {
         base.name,
         this.toMaybeString(status.phase),
         this.resolveStorageClass(base),
+        base,
       );
       for (const pvc of context.storageResources) {
         if (pvc.kind !== 'PersistentVolumeClaim') {
@@ -2344,12 +3850,14 @@ export class ResourcesService {
           this.toMaybeString(pvcStatus.phase),
           this.resolveStorageClass(pvc),
           this.toMaybeString(pvcSpec.volumeName),
+          pvc,
         );
       }
     }
 
     if (base.kind === 'StorageClass') {
       storageClasses.add(base.name);
+      addStorageClassDetail(base);
       for (const storage of context.storageResources) {
         const storageClass = this.resolveStorageClass(storage);
         if (storageClass !== base.name) {
@@ -2364,12 +3872,34 @@ export class ResourcesService {
             this.toMaybeString(status.phase),
             storageClass,
             this.toMaybeString(spec.volumeName),
+            storage,
           );
           continue;
         }
         if (storage.kind === 'PersistentVolume') {
           const status = this.toObject(storage.statusJson);
-          addPv(storage.name, this.toMaybeString(status.phase), storageClass);
+          addPv(
+            storage.name,
+            this.toMaybeString(status.phase),
+            storageClass,
+            storage,
+          );
+        }
+      }
+
+      for (const workload of context.workloads) {
+        const pipelines = this.buildStoragePipelinesForWorkload(
+          workload,
+          context.storageResources,
+        );
+        if (
+          pipelines.some((pipeline) => pipeline.storageClass === base.name)
+        ) {
+          storagePipelines.push(
+            ...pipelines.filter(
+              (pipeline) => pipeline.storageClass === base.name,
+            ),
+          );
         }
       }
     }
@@ -2378,12 +3908,17 @@ export class ResourcesService {
       storageClasses: Array.from(storageClasses),
       persistentVolumeClaims: Array.from(pvcMap.values()),
       persistentVolumes: Array.from(pvMap.values()),
+      storageClassDetails: Array.from(storageClassMap.values()),
       volumes,
       mounts,
+      storagePipelines,
     };
   }
 
-  private buildMetadata(base: DetailResourceRecord): ResourceDetailMetadata {
+  private buildMetadata(
+    base: DetailResourceRecord,
+    context: DetailContext,
+  ): ResourceDetailMetadata {
     const status = this.toObject(base.statusJson);
     const ownerReferences = this.toArray(status.ownerReferences).map((item) => {
       const ref = this.toObject(item);
@@ -2394,12 +3929,269 @@ export class ResourcesService {
         controller: this.toMaybeBoolean(ref.controller),
       };
     });
+    const configUsages: ResourceDetailConfigUsage[] = [];
+    const addConfigUsage = (usage: ResourceDetailConfigUsage) => {
+      const key = [
+        usage.referencedKind,
+        usage.referencedNamespace ?? '',
+        usage.referencedName,
+        usage.consumerKind,
+        usage.consumerNamespace ?? '',
+        usage.consumerName,
+        usage.usageType,
+        usage.container ?? '',
+        usage.mountPath ?? '',
+        usage.key ?? '',
+      ].join('|');
+      if (configUsageKeys.has(key)) {
+        return;
+      }
+      configUsageKeys.add(key);
+      configUsages.push(usage);
+    };
+    const configUsageKeys = new Set<string>();
+    const appendConfigUsagesForWorkload = (
+      workload: Pick<DetailResourceRecord, 'kind' | 'name' | 'namespace' | 'spec'>,
+    ) => {
+      const refs = this.extractWorkloadRefs(workload.kind, workload.spec);
+      for (const usage of refs.configUsages) {
+        addConfigUsage({
+          ...usage,
+          consumerKind: workload.kind,
+          consumerName: workload.name,
+          consumerNamespace: workload.namespace ?? undefined,
+          referencedNamespace:
+            usage.referencedNamespace ??
+            workload.namespace ??
+            undefined,
+        });
+      }
+    };
+
+    if (this.isWorkloadKind(base.kind)) {
+      appendConfigUsagesForWorkload(base);
+    }
+    if (base.kind === 'ConfigMap' || base.kind === 'Secret') {
+      const referencedKind = base.kind;
+      for (const workload of context.workloads) {
+        if (workload.namespace !== base.namespace) {
+          continue;
+        }
+        const refs = this.extractWorkloadRefs(workload.kind, workload.spec);
+        for (const usage of refs.configUsages) {
+          if (
+            usage.referencedKind !== referencedKind ||
+            usage.referencedName !== base.name
+          ) {
+            continue;
+          }
+          addConfigUsage({
+            ...usage,
+            consumerKind: workload.kind,
+            consumerName: workload.name,
+            consumerNamespace: workload.namespace ?? undefined,
+            referencedNamespace:
+              usage.referencedNamespace ??
+              workload.namespace ??
+              undefined,
+          });
+        }
+      }
+      for (const networkResource of context.networkResources) {
+        if (networkResource.namespace !== base.namespace) {
+          continue;
+        }
+        if (
+          (base.kind === 'Secret' && networkResource.kind === 'Ingress') ||
+          (base.kind === 'Secret' && networkResource.kind === 'IngressRoute')
+        ) {
+          const secretNames =
+            networkResource.kind === 'Ingress'
+              ? this.extractIngressTlsSecretNames(networkResource.spec)
+              : (() => {
+                  const tls = this.toObject(this.toObject(networkResource.spec).tls);
+                  const secretName = this.toMaybeString(tls.secretName);
+                  return secretName ? [secretName] : [];
+                })();
+          if (!secretNames.includes(base.name)) {
+            continue;
+          }
+          addConfigUsage({
+            referencedKind: 'Secret',
+            referencedName: base.name,
+            referencedNamespace: base.namespace ?? undefined,
+            consumerKind: networkResource.kind,
+            consumerName: networkResource.name,
+            consumerNamespace: networkResource.namespace ?? undefined,
+            usageType: 'tls',
+          });
+        }
+      }
+    }
+    if (base.kind === 'Ingress') {
+      for (const secretName of this.extractIngressTlsSecretNames(base.spec)) {
+        addConfigUsage({
+          referencedKind: 'Secret',
+          referencedName: secretName,
+          referencedNamespace: base.namespace ?? undefined,
+          consumerKind: 'Ingress',
+          consumerName: base.name,
+          consumerNamespace: base.namespace ?? undefined,
+          usageType: 'tls',
+        });
+      }
+    }
+    if (base.kind === 'IngressRoute') {
+      const tls = this.toObject(this.toObject(base.spec).tls);
+      const secretName = this.toMaybeString(tls.secretName);
+      if (secretName) {
+        addConfigUsage({
+          referencedKind: 'Secret',
+          referencedName: secretName,
+          referencedNamespace: base.namespace ?? undefined,
+          consumerKind: 'IngressRoute',
+          consumerName: base.name,
+          consumerNamespace: base.namespace ?? undefined,
+          usageType: 'tls',
+        });
+      }
+    }
 
     return {
       labels: this.toStringMap(base.labels),
       annotations: this.toStringMap(base.annotations),
       ownerReferences,
+      configUsages,
     };
+  }
+
+  private async buildEventsSummary(
+    base: DetailResourceRecord,
+  ): Promise<ResourceDetailResponse['events']> {
+    try {
+      const kubeconfig = await this.clustersService.getKubeconfig(
+        base.clusterId,
+      );
+      if (!kubeconfig) {
+        return { items: [] };
+      }
+      const coreApi = this.k8sClientService.getCoreApi(kubeconfig) as unknown as {
+        listNamespacedEvent?: (param: {
+          namespace: string;
+          fieldSelector?: string;
+          limit?: number;
+        }) => Promise<{ items?: unknown[] }>;
+        listEventForAllNamespaces?: (param?: {
+          fieldSelector?: string;
+          limit?: number;
+        }) => Promise<{ items?: unknown[] }>;
+      };
+      const selectors = [
+        `involvedObject.kind=${base.kind}`,
+        `involvedObject.name=${base.name}`,
+        base.namespace ? `involvedObject.namespace=${base.namespace}` : null,
+      ].filter((item): item is string => Boolean(item));
+      const fieldSelector = selectors.join(',');
+      const response = base.namespace
+        ? await coreApi.listNamespacedEvent?.({
+            namespace: base.namespace,
+            fieldSelector,
+            limit: 30,
+          })
+        : await coreApi.listEventForAllNamespaces?.({
+            fieldSelector,
+            limit: 30,
+          });
+      const items = Array.isArray(response?.items) ? response.items : [];
+      return {
+        items: items
+          .map((event) => this.normalizeDetailEvent(event))
+          .filter(
+            (event): event is Record<string, unknown> =>
+              Object.keys(event).length > 0,
+          )
+          .sort(
+            (left, right) =>
+              this.eventTimestampMs(right) - this.eventTimestampMs(left),
+          ),
+      };
+    } catch (error) {
+      this.logger.warn(
+        `detail events degraded: ${base.kind}/${base.name}: ${(error as Error).message}`,
+      );
+      return { items: [] };
+    }
+  }
+
+  private normalizeDetailEvent(event: unknown): Record<string, unknown> {
+    const item = this.toObject(event);
+    if (Object.keys(item).length === 0) {
+      return {};
+    }
+    const metadata = this.toObject(item.metadata);
+    const involvedObject = this.toObject(item.involvedObject);
+    const related = this.toObject(item.related);
+    const source = this.toObject(item.source);
+    const normalized = {
+      id: this.toMaybeString(metadata.uid) ?? this.toMaybeString(metadata.name),
+      name: this.toMaybeString(metadata.name),
+      namespace: this.toMaybeString(metadata.namespace),
+      type: this.toMaybeString(item.type),
+      reason: this.toMaybeString(item.reason),
+      message: this.toMaybeString(item.message),
+      action: this.toMaybeString(item.action),
+      count: this.toMaybeNumber(item.count),
+      firstTimestamp: this.timestampToIso(item.firstTimestamp),
+      lastTimestamp:
+        this.timestampToIso(item.lastTimestamp) ??
+        this.timestampToIso(item.eventTime) ??
+        this.timestampToIso(metadata.creationTimestamp),
+      eventTime: this.timestampToIso(item.eventTime),
+      source:
+        this.toMaybeString(source.component) ??
+        this.toMaybeString(item.reportingComponent),
+      sourceHost: this.toMaybeString(source.host),
+      reportingComponent: this.toMaybeString(item.reportingComponent),
+      reportingInstance: this.toMaybeString(item.reportingInstance),
+      involvedObject: this.compactStringMap({
+        kind: this.toMaybeString(involvedObject.kind),
+        name: this.toMaybeString(involvedObject.name),
+        namespace: this.toMaybeString(involvedObject.namespace),
+        fieldPath: this.toMaybeString(involvedObject.fieldPath),
+        uid: this.toMaybeString(involvedObject.uid),
+      }),
+      related:
+        Object.keys(related).length > 0
+          ? this.compactStringMap({
+              kind: this.toMaybeString(related.kind),
+              name: this.toMaybeString(related.name),
+              namespace: this.toMaybeString(related.namespace),
+              fieldPath: this.toMaybeString(related.fieldPath),
+              uid: this.toMaybeString(related.uid),
+            })
+          : undefined,
+    };
+    return Object.fromEntries(
+      Object.entries(normalized).filter(([, value]) =>
+        Array.isArray(value)
+          ? value.length > 0
+          : value !== undefined &&
+            value !== null &&
+            !(typeof value === 'object' && Object.keys(value).length === 0),
+      ),
+    );
+  }
+
+  private eventTimestampMs(event: Record<string, unknown>): number {
+    const timestamp =
+      this.toMaybeString(event.lastTimestamp) ??
+      this.toMaybeString(event.eventTime) ??
+      this.toMaybeString(event.firstTimestamp);
+    if (!timestamp) {
+      return 0;
+    }
+    const parsed = new Date(timestamp).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
   }
 
   private async findDetailResource(
@@ -2602,6 +4394,33 @@ export class ResourcesService {
       createdAt =
         this.parseDateSafe(this.toMaybeString(metadata.creationTimestamp)) ??
         createdAt;
+    } else if (ref.kind === 'NetworkPolicy') {
+      const item = await apis.networkingApi.readNamespacedNetworkPolicy({
+        namespace: ref.namespace,
+        name: ref.name,
+      });
+      const specObj = this.toObject(item.spec);
+      const policyTypes = this.toStringArray(specObj.policyTypes);
+      const ingressRules = this.toArray(specObj.ingress).map((rule) =>
+        this.summarizeNetworkPolicyRule(this.toObject(rule), 'ingress'),
+      );
+      const egressRules = this.toArray(specObj.egress).map((rule) =>
+        this.summarizeNetworkPolicyRule(this.toObject(rule), 'egress'),
+      );
+      const podSelector = this.toSelectorString(
+        this.toObject(this.toObject(item.spec).podSelector).matchLabels,
+      );
+      spec = item.spec ?? null;
+      statusJson = {
+        phase: item.metadata?.deletionTimestamp ? 'Terminating' : 'Active',
+        policyTypes,
+        podSelector,
+        ingressRules,
+        egressRules,
+      };
+      labels = item.metadata?.labels ?? null;
+      annotations = item.metadata?.annotations ?? null;
+      createdAt = item.metadata?.creationTimestamp ?? createdAt;
     } else if (ref.kind === 'Service') {
       const item = await apis.coreApi.readNamespacedService({
         namespace: ref.namespace,
@@ -2733,7 +4552,8 @@ export class ResourcesService {
       | 'Middleware'
       | 'GatewayClass'
       | 'Gateway'
-      | 'HTTPRoute';
+      | 'HTTPRoute'
+      | 'NetworkPolicy';
     namespace: string;
     name: string;
   } | null {
@@ -2755,7 +4575,8 @@ export class ResourcesService {
       kindRaw !== 'GatewayClass' &&
       kindRaw !== 'Gateway' &&
       kindRaw !== 'HTTPRoute' &&
-      kindRaw !== 'Middleware'
+      kindRaw !== 'Middleware' &&
+      kindRaw !== 'NetworkPolicy'
     ) {
       return null;
     }
@@ -3140,6 +4961,10 @@ export class ResourcesService {
     secretNames: string[];
     volumes: ResourceDetailVolumeSummary[];
     mounts: ResourceDetailMountSummary[];
+    configUsages: Omit<
+      ResourceDetailConfigUsage,
+      'consumerKind' | 'consumerName' | 'consumerNamespace'
+    >[];
   } {
     const podSpec = this.extractPodSpec(kind, spec);
     const volumes = this.toArray(podSpec.volumes);
@@ -3153,6 +4978,32 @@ export class ResourcesService {
     const secretNames = new Set<string>();
     const volumeSummaries: ResourceDetailVolumeSummary[] = [];
     const mountSummaries: ResourceDetailMountSummary[] = [];
+    const configUsages: Omit<
+      ResourceDetailConfigUsage,
+      'consumerKind' | 'consumerName' | 'consumerNamespace'
+    >[] = [];
+    const configUsageKeys = new Set<string>();
+    const addConfigUsage = (
+      usage: Omit<
+        ResourceDetailConfigUsage,
+        'consumerKind' | 'consumerName' | 'consumerNamespace'
+      >,
+    ) => {
+      const key = [
+        usage.referencedKind,
+        usage.referencedNamespace ?? '',
+        usage.referencedName,
+        usage.usageType,
+        usage.container ?? '',
+        usage.mountPath ?? '',
+        usage.key ?? '',
+      ].join('|');
+      if (configUsageKeys.has(key)) {
+        return;
+      }
+      configUsageKeys.add(key);
+      configUsages.push(usage);
+    };
 
     for (const volume of volumes) {
       const vol = this.toObject(volume);
@@ -3164,6 +5015,7 @@ export class ResourcesService {
       const configMap = this.toObject(vol.configMap);
       const secret = this.toObject(vol.secret);
       const hostPath = this.toObject(vol.hostPath);
+      const projected = this.toObject(vol.projected);
 
       let type = 'other';
       let source: string | undefined;
@@ -3180,6 +5032,11 @@ export class ResourcesService {
         type = 'configMap';
         source = configMapName;
         configMapNames.add(configMapName);
+        addConfigUsage({
+          referencedKind: 'ConfigMap',
+          referencedName: configMapName,
+          usageType: 'volume',
+        });
       }
 
       const secretName = this.toMaybeString(secret.secretName);
@@ -3187,6 +5044,11 @@ export class ResourcesService {
         type = 'secret';
         source = secretName;
         secretNames.add(secretName);
+        addConfigUsage({
+          referencedKind: 'Secret',
+          referencedName: secretName,
+          usageType: 'volume',
+        });
       }
 
       if (hostPath.path && typeof hostPath.path === 'string') {
@@ -3200,6 +5062,46 @@ export class ResourcesService {
         }
         if (vol.projected !== undefined) {
           type = 'projected';
+          for (const source of this.toArray(projected.sources)) {
+            const sourceObj = this.toObject(source);
+            const projectedConfigMap = this.toObject(sourceObj.configMap);
+            const projectedSecret = this.toObject(sourceObj.secret);
+            const projectedConfigMapName = this.toMaybeString(
+              projectedConfigMap.name,
+            );
+            const projectedSecretName = this.toMaybeString(
+              projectedSecret.name,
+            );
+            if (projectedConfigMapName) {
+              configMapNames.add(projectedConfigMapName);
+              addConfigUsage({
+                referencedKind: 'ConfigMap',
+                referencedName: projectedConfigMapName,
+                usageType: 'projected',
+              });
+            }
+            if (projectedSecretName) {
+              secretNames.add(projectedSecretName);
+              addConfigUsage({
+                referencedKind: 'Secret',
+                referencedName: projectedSecretName,
+                usageType: 'projected',
+              });
+            }
+            const serviceAccountToken = this.toObject(
+              sourceObj.serviceAccountToken,
+            );
+            if (Object.keys(serviceAccountToken).length > 0) {
+              const serviceAccountName =
+                this.toMaybeString(podSpec.serviceAccountName) ?? 'default';
+              addConfigUsage({
+                referencedKind: 'ServiceAccount',
+                referencedName: serviceAccountName,
+                usageType: 'token',
+                key: this.toMaybeString(serviceAccountToken.path) ?? undefined,
+              });
+            }
+          }
         }
       }
 
@@ -3228,6 +5130,25 @@ export class ResourcesService {
           mountPath,
           readOnly: Boolean(this.toMaybeBoolean(mountObj.readOnly)),
         });
+        const referencedFromVolume = volumeSummaries.find((item) => item.name === volume);
+        if (referencedFromVolume?.type === 'configMap' && referencedFromVolume.source) {
+          addConfigUsage({
+            referencedKind: 'ConfigMap',
+            referencedName: referencedFromVolume.source,
+            usageType: 'volume',
+            container: containerName,
+            mountPath,
+          });
+        }
+        if (referencedFromVolume?.type === 'secret' && referencedFromVolume.source) {
+          addConfigUsage({
+            referencedKind: 'Secret',
+            referencedName: referencedFromVolume.source,
+            usageType: 'volume',
+            container: containerName,
+            mountPath,
+          });
+        }
       }
 
       const envFromList = this.toArray(containerObj.envFrom);
@@ -3239,9 +5160,21 @@ export class ResourcesService {
         const secretName = this.toMaybeString(secretRef.name);
         if (cmName) {
           configMapNames.add(cmName);
+          addConfigUsage({
+            referencedKind: 'ConfigMap',
+            referencedName: cmName,
+            usageType: 'envFrom',
+            container: containerName,
+          });
         }
         if (secretName) {
           secretNames.add(secretName);
+          addConfigUsage({
+            referencedKind: 'Secret',
+            referencedName: secretName,
+            usageType: 'envFrom',
+            container: containerName,
+          });
         }
       }
 
@@ -3253,13 +5186,42 @@ export class ResourcesService {
         const secretRef = this.toObject(valueFrom.secretKeyRef);
         const cmName = this.toMaybeString(cmRef.name);
         const secretName = this.toMaybeString(secretRef.name);
+        const envKey = this.toMaybeString(envObj.name);
         if (cmName) {
           configMapNames.add(cmName);
+          addConfigUsage({
+            referencedKind: 'ConfigMap',
+            referencedName: cmName,
+            usageType: 'env',
+            container: containerName,
+            key: envKey ?? this.toMaybeString(cmRef.key),
+          });
         }
         if (secretName) {
           secretNames.add(secretName);
+          addConfigUsage({
+            referencedKind: 'Secret',
+            referencedName: secretName,
+            usageType: 'env',
+            container: containerName,
+            key: envKey ?? this.toMaybeString(secretRef.key),
+          });
         }
       }
+    }
+
+    for (const imagePullSecret of this.toArray(podSpec.imagePullSecrets)) {
+      const imagePullSecretObj = this.toObject(imagePullSecret);
+      const name = this.toMaybeString(imagePullSecretObj.name);
+      if (!name) {
+        continue;
+      }
+      secretNames.add(name);
+      addConfigUsage({
+        referencedKind: 'Secret',
+        referencedName: name,
+        usageType: 'imagePullSecret',
+      });
     }
 
     return {
@@ -3268,7 +5230,205 @@ export class ResourcesService {
       secretNames: Array.from(secretNames),
       volumes: volumeSummaries,
       mounts: mountSummaries,
+      configUsages,
     };
+  }
+
+  private buildStoragePipelinesForWorkload(
+    workload: Pick<DetailResourceRecord, 'kind' | 'spec' | 'namespace'>,
+    storageResources: DetailResourceRecord[],
+  ): ResourceDetailStoragePipeline[] {
+    if (!this.isWorkloadKind(workload.kind)) {
+      return [];
+    }
+    const podSpec = this.extractPodSpec(workload.kind, workload.spec);
+    const volumeMap = new Map<string, Record<string, unknown>>();
+    for (const volume of this.toArray(podSpec.volumes)) {
+      const volumeObj = this.toObject(volume);
+      const volumeName = this.toMaybeString(volumeObj.name);
+      if (!volumeName) {
+        continue;
+      }
+      volumeMap.set(volumeName, volumeObj);
+    }
+
+    const pvcLookup = new Map<string, DetailResourceRecord>();
+    const pvLookup = new Map<string, DetailResourceRecord>();
+    for (const item of storageResources) {
+      if (item.kind === 'PersistentVolumeClaim') {
+        pvcLookup.set(`${item.namespace ?? ''}/${item.name}`, item);
+      } else if (item.kind === 'PersistentVolume') {
+        pvLookup.set(item.name, item);
+      }
+    }
+
+    const containers = [
+      ...this.toArray(podSpec.containers),
+      ...this.toArray(podSpec.initContainers),
+    ];
+    const pipelines: ResourceDetailStoragePipeline[] = [];
+
+    for (const container of containers) {
+      const containerObj = this.toObject(container);
+      const containerName =
+        this.toMaybeString(containerObj.name) ?? 'container';
+      for (const mount of this.toArray(containerObj.volumeMounts)) {
+        const mountObj = this.toObject(mount);
+        const volumeName = this.toMaybeString(mountObj.name);
+        const mountPath = this.toMaybeString(mountObj.mountPath);
+        if (!volumeName || !mountPath) {
+          continue;
+        }
+
+        const volume = volumeMap.get(volumeName) ?? {};
+        const volumeType = this.resolveVolumeType(volume);
+        const volumeSource = this.resolveVolumeSource(volume, volumeType);
+        const pvcObj = this.toObject(volume.persistentVolumeClaim);
+        const claimName = this.toMaybeString(pvcObj.claimName);
+        const claimNamespace = workload.namespace ?? undefined;
+        const pvc = claimName
+          ? pvcLookup.get(`${claimNamespace ?? ''}/${claimName}`)
+          : undefined;
+        const pvcSpec = this.toObject(pvc?.spec ?? null);
+        const pvcStatus = this.toObject(pvc?.statusJson ?? null);
+        const pvName = this.toMaybeString(pvcSpec.volumeName);
+        const pv = pvName ? pvLookup.get(pvName) : undefined;
+        const pvStatus = this.toObject(pv?.statusJson ?? null);
+        const pvcPhase = this.toMaybeString(pvcStatus.phase);
+        const pvPhase = this.toMaybeString(pvStatus.phase);
+        const storageClass =
+          this.resolveStorageClass(pvc) ??
+          this.resolveStorageClass(pv) ??
+          this.resolveStorageClassFromVolume(volume);
+
+        pipelines.push({
+          container: containerName,
+          mountPath,
+          readOnly: Boolean(this.toMaybeBoolean(mountObj.readOnly)),
+          volumeName,
+          ...(volumeType ? { volumeType } : {}),
+          ...(volumeSource ? { volumeSource } : {}),
+          ...(claimName ? { pvcName: claimName } : {}),
+          ...(claimName && claimNamespace ? { pvcNamespace: claimNamespace } : {}),
+          ...(pvcPhase ? { pvcPhase } : {}),
+          ...(pvName ? { pvName } : {}),
+          ...(pvPhase ? { pvPhase } : {}),
+          ...(storageClass ? { storageClass } : {}),
+        });
+      }
+    }
+
+    return pipelines;
+  }
+
+  private resolveStorageClassFromVolume(
+    volume: Record<string, unknown>,
+  ): string | undefined {
+    const pvc = this.toObject(volume.persistentVolumeClaim);
+    return this.toMaybeString(pvc.storageClassName);
+  }
+
+  private resolveVolumeType(volume: Record<string, unknown>): string | undefined {
+    if (this.toMaybeString(this.toObject(volume.persistentVolumeClaim).claimName)) {
+      return 'persistentVolumeClaim';
+    }
+    if (this.toMaybeString(this.toObject(volume.configMap).name)) {
+      return 'configMap';
+    }
+    if (this.toMaybeString(this.toObject(volume.secret).secretName)) {
+      return 'secret';
+    }
+    if (this.toMaybeString(this.toObject(volume.hostPath).path)) {
+      return 'hostPath';
+    }
+    if (volume.emptyDir !== undefined) {
+      return 'emptyDir';
+    }
+    if (volume.projected !== undefined) {
+      return 'projected';
+    }
+    if (this.toMaybeString(this.toObject(volume.csi).driver)) {
+      return 'csi';
+    }
+    if (this.toMaybeString(this.toObject(volume.nfs).server)) {
+      return 'nfs';
+    }
+    if (volume.downwardAPI !== undefined) {
+      return 'downwardAPI';
+    }
+    if (volume.ephemeral !== undefined) {
+      return 'ephemeral';
+    }
+    if (this.toMaybeString(this.toObject(volume.awsElasticBlockStore).volumeID)) {
+      return 'awsElasticBlockStore';
+    }
+    return 'other';
+  }
+
+  private resolveVolumeSource(
+    volume: Record<string, unknown>,
+    volumeType?: string,
+  ): string | undefined {
+    if (!volumeType) {
+      return undefined;
+    }
+    if (volumeType === 'persistentVolumeClaim') {
+      return this.toMaybeString(
+        this.toObject(volume.persistentVolumeClaim).claimName,
+      );
+    }
+    if (volumeType === 'configMap') {
+      return this.toMaybeString(this.toObject(volume.configMap).name);
+    }
+    if (volumeType === 'secret') {
+      return this.toMaybeString(this.toObject(volume.secret).secretName);
+    }
+    if (volumeType === 'hostPath') {
+      return this.toMaybeString(this.toObject(volume.hostPath).path);
+    }
+    if (volumeType === 'projected') {
+      const projected = this.toObject(volume.projected);
+      const sourceNames = new Set<string>();
+      for (const source of this.toArray(projected.sources)) {
+        const sourceObj = this.toObject(source);
+        const configMapName = this.toMaybeString(
+          this.toObject(sourceObj.configMap).name,
+        );
+        const secretName = this.toMaybeString(this.toObject(sourceObj.secret).name);
+        const serviceAccountTokenPath = this.toMaybeString(
+          this.toObject(sourceObj.serviceAccountToken).path,
+        );
+        const downwardPath = sourceObj.downwardAPI !== undefined
+          ? 'items'
+          : undefined;
+        if (configMapName) {
+          sourceNames.add(`configMap:${configMapName}`);
+        }
+        if (secretName) {
+          sourceNames.add(`secret:${secretName}`);
+        }
+        if (serviceAccountTokenPath) {
+          sourceNames.add(`serviceAccountToken:${serviceAccountTokenPath}`);
+        }
+        if (downwardPath) {
+          sourceNames.add(`downwardAPI:${downwardPath}`);
+        }
+      }
+      return Array.from(sourceNames).join(', ') || undefined;
+    }
+    if (volumeType === 'csi') {
+      return this.toMaybeString(this.toObject(volume.csi).driver);
+    }
+    if (volumeType === 'nfs') {
+      const nfs = this.toObject(volume.nfs);
+      return this.toMaybeString(nfs.path) ?? this.toMaybeString(nfs.server);
+    }
+    if (volumeType === 'awsElasticBlockStore') {
+      return this.toMaybeString(
+        this.toObject(volume.awsElasticBlockStore).volumeID,
+      );
+    }
+    return undefined;
   }
 
   private extractPodSpec(
@@ -3884,6 +6044,13 @@ export class ResourcesService {
     return date.toISOString();
   }
 
+  private timestampToIso(value: unknown): string | undefined {
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+    }
+    return this.normalizeDetailTimestamp(this.toMaybeString(value));
+  }
+
   private toStringArray(value: unknown): string[] {
     return this.toArray(value).filter(
       (item): item is string => typeof item === 'string' && item.length > 0,
@@ -3899,5 +6066,225 @@ export class ResourcesService {
       }
     }
     return result;
+  }
+
+  private extractSelectorString(
+    kind: string,
+    spec: Record<string, unknown>,
+  ): string | undefined {
+    if (kind === 'Service') {
+      return this.toSelectorString(spec.selector);
+    }
+    const selector = this.toObject(spec.selector);
+    return (
+      this.toSelectorString(selector.matchLabels) ??
+      this.toSelectorString(selector)
+    );
+  }
+
+  private summarizeContainers(
+    podSpec: Record<string, unknown>,
+    status: Record<string, unknown> = {},
+  ): ResourceDetailRuntime['containerDetails'] {
+    const fromSpec = [
+      ...this.toArray(podSpec.initContainers),
+      ...this.toArray(podSpec.containers),
+    ]
+      .map((item) => this.toObject(item))
+      .map((container) => {
+        const name = this.toMaybeString(container.name);
+        if (!name) {
+          return null;
+        }
+        const env = this.toArray(container.env)
+          .map((envItem) => this.toObject(envItem))
+          .map((envItem) => this.toMaybeString(envItem.name))
+          .filter((item): item is string => Boolean(item));
+        const envFrom = this.toArray(container.envFrom)
+          .map((envFromItem) => this.toObject(envFromItem))
+          .map((envFromItem) => {
+            const configMap = this.toMaybeString(
+              this.toObject(envFromItem.configMapRef).name,
+            );
+            const secret = this.toMaybeString(
+              this.toObject(envFromItem.secretRef).name,
+            );
+            return configMap
+              ? `ConfigMap/${configMap}`
+              : secret
+                ? `Secret/${secret}`
+                : undefined;
+          })
+          .filter((item): item is string => Boolean(item));
+        const ports = this.toArray(container.ports)
+          .map((portItem) => this.toObject(portItem))
+          .map((port) => ({
+            name: this.toMaybeString(port.name),
+            containerPort: this.toMaybeNumber(port.containerPort),
+            protocol: this.toMaybeString(port.protocol),
+          }))
+          .filter((port) => typeof port.containerPort === 'number');
+        const probes = [
+          container.livenessProbe !== undefined ? 'liveness' : undefined,
+          container.readinessProbe !== undefined ? 'readiness' : undefined,
+          container.startupProbe !== undefined ? 'startup' : undefined,
+        ].filter((item): item is string => Boolean(item));
+        const resources = this.toObject(container.resources);
+        const summary = {
+          name,
+          image: this.toMaybeString(container.image),
+          ports,
+          env: [...env, ...envFrom],
+          probes,
+          resources: {
+            requests: this.toStringMap(resources.requests),
+            limits: this.toStringMap(resources.limits),
+          },
+        };
+        return summary;
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    if (fromSpec.length > 0) {
+      return fromSpec;
+    }
+    const names = this.toStringArray(status.containerNames);
+    const images = this.toStringArray(status.containerImages);
+    return names.map((name, index) => ({
+      name,
+      ...(images[index] ? { image: images[index] } : {}),
+    }));
+  }
+
+  private summarizeTolerations(value: unknown): Array<Record<string, string>> {
+    return this.toArray(value)
+      .map((item) => this.toObject(item))
+      .map((item) =>
+        this.compactStringMap({
+          key: this.toMaybeString(item.key),
+          operator: this.toMaybeString(item.operator),
+          value: this.toMaybeString(item.value),
+          effect: this.toMaybeString(item.effect),
+          tolerationSeconds: this.valueToString(item.tolerationSeconds),
+        }),
+      )
+      .filter((item) => Object.keys(item).length > 0);
+  }
+
+  private buildNetworkPolicyRuntime(
+    spec: Record<string, unknown>,
+    status: Record<string, unknown>,
+  ): Pick<
+    ResourceDetailRuntime,
+    'policyTypes' | 'podSelector' | 'ingressRules' | 'egressRules'
+  > {
+    const policyTypes = this.toStringArray(
+      spec.policyTypes ?? status.policyTypes,
+    );
+    const ingressRules = this.toArray(spec.ingress ?? status.ingressRules).map(
+      (rule) => this.summarizeNetworkPolicyRule(this.toObject(rule), 'ingress'),
+    );
+    const egressRules = this.toArray(spec.egress ?? status.egressRules).map(
+      (rule) => this.summarizeNetworkPolicyRule(this.toObject(rule), 'egress'),
+    );
+    const podSelector =
+      this.toSelectorString(this.toObject(this.toObject(spec.podSelector).matchLabels)) ??
+      this.toMaybeString(status.podSelector);
+
+    return {
+      policyTypes,
+      podSelector,
+      ingressRules,
+      egressRules,
+    };
+  }
+
+  private summarizePvcDetail(
+    detail?: DetailResourceRecord,
+  ): Partial<ResourceDetailPvcSummary> {
+    if (!detail) {
+      return {};
+    }
+    const spec = this.toObject(detail.spec);
+    const status = this.toObject(detail.statusJson);
+    return {
+      capacity: this.valueToString(this.toObject(status.capacity).storage),
+      accessModes: this.toStringArray(status.accessModes ?? spec.accessModes),
+      volumeMode: this.toMaybeString(spec.volumeMode),
+    };
+  }
+
+  private summarizePvDetail(
+    detail?: DetailResourceRecord,
+  ): Partial<ResourceDetailPvSummary> {
+    if (!detail) {
+      return {};
+    }
+    const spec = this.toObject(detail.spec);
+    const status = this.toObject(detail.statusJson);
+    const claimRef = this.toObject(spec.claimRef);
+    const claimRefText =
+      this.toMaybeString(claimRef.name) &&
+      `${this.toMaybeString(claimRef.namespace) ?? 'default'}/${this.toMaybeString(claimRef.name)}`;
+    return {
+      capacity: this.valueToString(this.toObject(spec.capacity).storage),
+      accessModes: this.toStringArray(spec.accessModes),
+      volumeMode: this.toMaybeString(spec.volumeMode),
+      reclaimPolicy: this.toMaybeString(spec.persistentVolumeReclaimPolicy),
+      claimRef: claimRefText || undefined,
+      phase: this.toMaybeString(status.phase),
+    };
+  }
+
+  private summarizeStorageClassDetail(
+    detail: DetailResourceRecord,
+  ): ResourceDetailStorageClassSummary {
+    const spec = this.toObject(detail.spec);
+    return {
+      name: detail.name,
+      provisioner: this.toMaybeString(spec.provisioner),
+      reclaimPolicy: this.toMaybeString(spec.reclaimPolicy),
+      bindingMode:
+        this.toMaybeString(spec.volumeBindingMode) ??
+        this.toMaybeString((detail as unknown as { bindingMode?: unknown }).bindingMode),
+      allowVolumeExpansion: this.toMaybeBoolean(spec.allowVolumeExpansion),
+      parameters: this.toStringMap(spec.parameters),
+      mountOptions: this.toStringArray(spec.mountOptions),
+    };
+  }
+
+  private summarizeNetworkPolicyRule(
+    rule: Record<string, unknown>,
+    direction: 'ingress' | 'egress',
+  ): Record<string, unknown> {
+    const peers = this.toArray(direction === 'ingress' ? rule.from : rule.to)
+      .map((item) => this.toObject(item))
+      .map((peer) => ({
+        namespaceSelector: this.toSelectorString(
+          this.toObject(this.toObject(peer.namespaceSelector).matchLabels),
+        ),
+        podSelector: this.toSelectorString(
+          this.toObject(this.toObject(peer.podSelector).matchLabels),
+        ),
+        ipBlock: this.toMaybeString(this.toObject(peer.ipBlock).cidr),
+      }));
+    const ports = this.toArray(rule.ports)
+      .map((item) => this.toObject(item))
+      .map((port) => ({
+        protocol: this.toMaybeString(port.protocol),
+        port: this.valueToString(port.port),
+      }));
+    return {
+      peers,
+      ports,
+    };
+  }
+
+  private toSelectorString(value: unknown): string | undefined {
+    const map = this.toStringMap(value);
+    const entries = Object.entries(map);
+    if (entries.length === 0) {
+      return undefined;
+    }
+    return entries.map(([key, val]) => `${key}=${val}`).join(', ');
   }
 }

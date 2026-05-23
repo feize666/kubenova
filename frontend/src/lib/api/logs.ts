@@ -3,6 +3,7 @@ import type { CreateRuntimeSessionResponse } from "./runtime";
 import { buildRuntimeTargetParams, resolveRuntimeContainer, type RuntimeTargetBase } from "./runtime";
 
 export type LogLevel = "INFO" | "WARN" | "ERROR";
+export type LogsTimeMode = "quick" | "relative" | "absolute" | "recent";
 
 export interface LogRecord {
   id: string;
@@ -24,6 +25,12 @@ export interface LogsQueryParams {
   keyword?: string;
   tailLines?: number;
   sinceSeconds?: number;
+  sinceTime?: string;
+  untilTime?: string;
+  timeMode?: LogsTimeMode;
+  from?: string;
+  to?: string;
+  refreshIntervalSeconds?: number;
   follow?: boolean;
   previous?: boolean;
   timestamps?: boolean;
@@ -40,11 +47,16 @@ export interface LogsRouteTarget extends RuntimeTargetBase {
   level?: LogLevel;
   keyword?: string;
   sinceSeconds?: number;
+  sinceTime?: string;
+  untilTime?: string;
+  timeMode?: LogsTimeMode;
+  refreshIntervalSeconds?: number;
   tailLines?: number;
   follow?: boolean;
   previous?: boolean;
   timestamps?: boolean;
   from?: string;
+  to?: string;
   returnTo?: string;
   returnClusterId?: string;
   returnClusterName?: string;
@@ -71,6 +83,14 @@ export function buildLogsQueryParams(params: LogsQueryParams): URLSearchParams {
   if (params.keyword) query.set("keyword", params.keyword);
   if (params.tailLines !== undefined) query.set("tailLines", String(params.tailLines));
   if (params.sinceSeconds !== undefined) query.set("sinceSeconds", String(params.sinceSeconds));
+  if (params.sinceTime) query.set("sinceTime", params.sinceTime);
+  if (params.untilTime) query.set("untilTime", params.untilTime);
+  if (params.timeMode) query.set("timeMode", params.timeMode);
+  if (params.from) query.set("from", params.from);
+  if (params.to) query.set("to", params.to);
+  if (params.refreshIntervalSeconds !== undefined) {
+    query.set("refreshIntervalSeconds", String(params.refreshIntervalSeconds));
+  }
   if (params.follow !== undefined) query.set("follow", String(params.follow));
   if (params.previous !== undefined) query.set("previous", String(params.previous));
   if (params.timestamps !== undefined) query.set("timestamps", String(params.timestamps));
@@ -93,6 +113,15 @@ export function buildLogsRoute(target: LogsRouteTarget): string {
   if (typeof target.sinceSeconds === "number" && Number.isFinite(target.sinceSeconds)) {
     params.set("sinceSeconds", String(target.sinceSeconds));
   }
+  if (target.sinceTime) params.set("sinceTime", target.sinceTime);
+  if (target.untilTime) params.set("untilTime", target.untilTime);
+  if (target.timeMode) params.set("timeMode", target.timeMode);
+  if (
+    typeof target.refreshIntervalSeconds === "number" &&
+    Number.isFinite(target.refreshIntervalSeconds)
+  ) {
+    params.set("refreshIntervalSeconds", String(target.refreshIntervalSeconds));
+  }
   if (typeof target.tailLines === "number" && Number.isFinite(target.tailLines)) {
     params.set("tailLines", String(target.tailLines));
   }
@@ -100,6 +129,7 @@ export function buildLogsRoute(target: LogsRouteTarget): string {
   if (typeof target.previous === "boolean") params.set("previous", String(target.previous));
   if (typeof target.timestamps === "boolean") params.set("timestamps", String(target.timestamps));
   if (target.from) params.set("from", target.from);
+  if (target.to) params.set("to", target.to);
   if (target.returnTo) params.set("returnTo", target.returnTo);
   if (target.returnClusterId) params.set("returnClusterId", target.returnClusterId);
   if (target.returnClusterName) params.set("returnClusterName", target.returnClusterName);
@@ -130,6 +160,13 @@ export interface LogsQueryResponse {
   page: number;
   pageSize: number;
   total: number;
+  lastLogTimestamp?: string;
+  emptyReason?:
+    | "TARGET_REQUIRED"
+    | "NO_LOG_LINES"
+    | "NO_PARSEABLE_TIMESTAMPS"
+    | "TIME_RANGE_NO_MATCH"
+    | "FILTER_NO_MATCH";
   timestamp: string;
 }
 
@@ -153,6 +190,12 @@ export function createLogsStreamSession(params: LogsQueryParams, token?: string)
       keyword: params.keyword,
       tailLines: params.tailLines,
       sinceSeconds: params.sinceSeconds,
+      sinceTime: params.sinceTime,
+      untilTime: params.untilTime,
+      timeMode: params.timeMode,
+      from: params.from,
+      to: params.to,
+      refreshIntervalSeconds: params.refreshIntervalSeconds,
       follow: params.follow,
       previous: params.previous,
       timestamps: params.timestamps,

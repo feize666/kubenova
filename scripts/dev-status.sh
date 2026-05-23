@@ -11,6 +11,8 @@ LOG_DIR="$RUN_DIR/logs"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-4000}"
 RUNTIME_GATEWAY_PORT="${RUNTIME_GATEWAY_PORT:-4100}"
+FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-dev}"
+USE_TMUX="${USE_TMUX:-false}"
 
 stream_match() {
   local pattern="$1"
@@ -24,6 +26,25 @@ stream_match() {
 service_session_name() {
   local name="$1"
   echo "aiops-${name}"
+}
+
+service_pid_file() {
+  local name="$1"
+  if [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" && "$USE_TMUX" != "true" ]]; then
+    echo "$RUN_DIR/${name}.supervisor.pid"
+  else
+    echo "$RUN_DIR/${name}.pid"
+  fi
+}
+
+service_child_pid_file() {
+  local name="$1"
+  echo "$RUN_DIR/${name}.pid"
+}
+
+service_uses_supervisor() {
+  local name="$1"
+  [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" && "$USE_TMUX" != "true" ]]
 }
 
 tmux_session_exists() {
@@ -67,7 +88,7 @@ is_frontend_process() {
   local pid="$1"
   local cmdline
   cmdline="$(process_cmdline "$pid")"
-  [[ "$cmdline" == *"frontend/.next/standalone/server.js"* || "$cmdline" == *"next/dist/bin/next start"* || "$cmdline" == *"next/dist/bin/next dev"* ]]
+  [[ "$cmdline" == *"dev-supervise.sh frontend"* || "$cmdline" == *"next-server"* || "$cmdline" == *"frontend/.next/standalone/server.js"* || "$cmdline" == *"next/dist/bin/next start"* || "$cmdline" == *"next/dist/bin/next dev"* ]]
 }
 
 is_frontend_standalone_process() {
@@ -110,7 +131,10 @@ is_healthy() {
 check_service() {
   local name="$1"
   local port="$2"
-  local pid_file="$RUN_DIR/${name}.pid"
+  local pid_file
+  pid_file="$(service_pid_file "$name")"
+  local child_pid_file
+  child_pid_file="$(service_child_pid_file "$name")"
   local health_url
   health_url="$(service_health_url "$name" "$port")"
   local session_name
@@ -120,14 +144,33 @@ check_service() {
   if [[ -f "$pid_file" ]]; then
     pid="$(cat "$pid_file")"
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      local display_pid="$pid"
+      if service_uses_supervisor "$name" && [[ -f "$child_pid_file" ]]; then
+        local child_pid
+        child_pid="$(cat "$child_pid_file")"
+        if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
+          display_pid="$pid child=$child_pid"
+        fi
+      fi
+      if service_uses_supervisor "$name"; then
+        local listener
+        listener="$(listener_pid "$port" || true)"
+        if [[ -n "$listener" ]] && is_frontend_process "$listener"; then
+          display_pid="$display_pid listener=$listener"
+        fi
+      fi
+      if service_uses_supervisor "$name" && is_healthy "$health_url"; then
+        echo "[$name] 运行中 pid=$display_pid 端口=$port 健康=正常"
+        return
+      fi
       if service_is_starting "$pid" "$port"; then
-        echo "[$name] 启动中 pid=$pid 端口=$port"
+        echo "[$name] 启动中 pid=$display_pid 端口=$port"
         return
       fi
       if is_healthy "$health_url"; then
-        echo "[$name] 运行中 pid=$pid 端口=$port 健康=正常"
+        echo "[$name] 运行中 pid=$display_pid 端口=$port 健康=正常"
       else
-        echo "[$name] 运行中 pid=$pid 端口=$port 健康=异常"
+        echo "[$name] 运行中 pid=$display_pid 端口=$port 健康=异常"
       fi
       return
     fi

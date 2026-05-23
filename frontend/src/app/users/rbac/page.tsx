@@ -32,10 +32,13 @@ import {
   Typography,
 } from "antd";
 import type { TableProps } from "antd";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { NamespaceSelect } from "@/components/namespace-select";
-import { useModuleTableState } from "@/components/module-page";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { buildTablePagination } from "@/lib/table/pagination";
 import { usePersistentTableSortState } from "@/lib/table/use-persistent-table-sort-state";
 import {
@@ -505,10 +508,18 @@ function kindTag(kind: string): React.ReactNode {
 export default function RbacPage() {
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [kindFilter, setKindFilter] = useState<string>("");
   const [actionTargetId, setActionTargetId] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
-  const tableState = useModuleTableState(10);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const {
     sortBy,
     sortOrder,
@@ -521,9 +532,49 @@ export default function RbacPage() {
     defaultSortOrder: "desc",
   });
 
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+  });
+
+  const applyKeyword = () => {
+    setKeyword(keywordInput.trim());
+    setPage(1);
+  };
+
+  const clustersQuery = useQuery({
+    queryKey: ["clusters", "rbac-filter", accessToken],
+    queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken!),
+    enabled: !isInitializing && Boolean(accessToken),
+  });
+
+  const clusterOptions = useMemo(
+    () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
+    [clustersQuery.data?.items],
+  );
+  const currentQueryKey = [
+    ...RBAC_QUERY_KEY,
+    { clusterId, namespace, keyword, kindFilter, page, pageSize, sortBy, sortOrder },
+    accessToken,
+  ] as const;
+
   const query = useQuery({
-    queryKey: [...RBAC_QUERY_KEY, accessToken],
-    queryFn: () => getRbac({}, accessToken!),
+    queryKey: currentQueryKey,
+    queryFn: () =>
+      getRbac(
+        {
+          clusterId: clusterId || undefined,
+          namespace: namespace || undefined,
+          keyword: keyword || undefined,
+          kind: kindFilter || undefined,
+          page,
+          pageSize,
+          sortBy: sortBy || undefined,
+          sortOrder: sortOrder || undefined,
+        },
+        accessToken!,
+      ),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
@@ -531,11 +582,11 @@ export default function RbacPage() {
     mutationFn: ({ id, nextState }: RbacStateChangeInput) => setRbacState(id, nextState, accessToken!),
     onMutate: async ({ id, nextState }) => {
       setActionTargetId(id);
-      await queryClient.cancelQueries({ queryKey: [...RBAC_QUERY_KEY, accessToken] });
-      const previous = queryClient.getQueryData<RbacListResponse>([...RBAC_QUERY_KEY, accessToken]);
+      await queryClient.cancelQueries({ queryKey: currentQueryKey });
+      const previous = queryClient.getQueryData<RbacListResponse>(currentQueryKey);
 
       if (previous) {
-        queryClient.setQueryData<RbacListResponse>([...RBAC_QUERY_KEY, accessToken], {
+        queryClient.setQueryData<RbacListResponse>(currentQueryKey, {
           ...previous,
           items: previous.items.map((item) =>
             item.id === id
@@ -554,12 +605,12 @@ export default function RbacPage() {
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {
-        queryClient.setQueryData([...RBAC_QUERY_KEY, accessToken], context.previous);
+        queryClient.setQueryData(currentQueryKey, context.previous);
       }
     },
     onSettled: async () => {
       setActionTargetId("");
-      await queryClient.invalidateQueries({ queryKey: [...RBAC_QUERY_KEY, accessToken] });
+      await queryClient.invalidateQueries({ queryKey: [...RBAC_QUERY_KEY] });
     },
   });
 
@@ -571,44 +622,14 @@ export default function RbacPage() {
   });
 
   const sourceItems = useMemo(() => query.data?.items ?? [], [query.data?.items]);
-
+  const rows = useMemo<RbacTableRecord[]>(
+    () => sourceItems.map((item) => ({ ...item, key: item.id })),
+    [sourceItems],
+  );
   const knownNamespaces = useMemo(
     () => Array.from(new Set(sourceItems.map((item) => item.namespace).filter(Boolean))),
     [sourceItems],
   );
-
-  const filtered = useMemo(() => {
-    const keyword = tableState.keyword.toLowerCase();
-    return sourceItems.filter((item) => {
-      const keywordText = `${item.name} ${item.kind} ${item.namespace} ${item.subject} ${item.subjectKind} ${item.subjectNamespace}`.toLowerCase();
-      const matchKeyword = keyword ? keywordText.includes(keyword) : true;
-      const matchNamespace = tableState.namespace ? item.namespace === tableState.namespace : true;
-      const matchKind = kindFilter ? item.kind === kindFilter : true;
-      return matchKeyword && matchNamespace && matchKind;
-    });
-  }, [sourceItems, tableState.keyword, tableState.namespace, kindFilter]);
-
-  const sorted = useMemo(() => {
-    const list = [...filtered];
-    if (!sortBy || !sortOrder) return list;
-    const direction = sortOrder === "asc" ? 1 : -1;
-    list.sort((left, right) => {
-      const leftValue = String((left as Record<string, unknown>)[sortBy] ?? "");
-      const rightValue = String((right as Record<string, unknown>)[sortBy] ?? "");
-      if (sortBy === "updatedAt") {
-        return direction * ((Date.parse(leftValue) || 0) - (Date.parse(rightValue) || 0));
-      }
-      return direction * leftValue.localeCompare(rightValue, "zh-CN", { sensitivity: "base" });
-    });
-    return list;
-  }, [filtered, sortBy, sortOrder]);
-
-  const paged = useMemo(() => {
-    const start = (tableState.page - 1) * tableState.pageSize;
-    return sorted.slice(start, start + tableState.pageSize);
-  }, [sorted, tableState.page, tableState.pageSize]);
-
-  const rows = useMemo<RbacTableRecord[]>(() => paged.map((item) => ({ ...item, key: item.id })), [paged]);
 
   // 统计信息
   const stats = useMemo(() => {
@@ -771,33 +792,50 @@ export default function RbacPage() {
       {/* 筛选栏 */}
       <Card>
         <Row gutter={[12, 12]}>
-          <Col xs={24} md={10} lg={8}>
+          <Col xs={24} sm={12} md={6} lg={5}>
+            <ClusterSelect
+              style={{ width: "100%" }}
+              value={clusterId}
+              onChange={(value) => {
+                onClusterChange(value);
+                setPage(1);
+              }}
+              options={clusterOptions}
+              loading={clustersQuery.isLoading}
+              showAllOption
+            />
+          </Col>
+          <Col xs={24} sm={12} md={5} lg={4}>
+            <NamespaceSelect
+              style={{ width: "100%" }}
+              value={namespace}
+              onChange={(value) => {
+                onNamespaceChange(value);
+                setPage(1);
+              }}
+              knownNamespaces={knownNamespaces}
+              clusterId={clusterId}
+              disabled={namespaceDisabled}
+              placeholder={namespacePlaceholder}
+            />
+          </Col>
+          <Col xs={24} md={7} lg={6}>
             <Input
               allowClear
               placeholder="搜索策略名 / 用户名 / 名称空间"
-              value={tableState.keywordInput}
-              onChange={(e) => tableState.setKeywordInput(e.target.value)}
-              onPressEnter={tableState.applyKeyword}
+              value={keywordInput}
+              onChange={(e) => setKeywordInput(e.target.value)}
+              onPressEnter={applyKeyword}
               prefix={<SearchOutlined />}
             />
           </Col>
-          <Col xs={24} sm={12} md={6} lg={5}>
-            <NamespaceSelect
-              style={{ width: "100%" }}
-              value={tableState.namespace}
-              onChange={tableState.setNamespace}
-              knownNamespaces={knownNamespaces}
-              clusterId="rbac-scope"
-              placeholder="筛选名称空间"
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6} lg={5}>
+          <Col xs={24} sm={12} md={6} lg={4}>
             <Select
               style={{ width: "100%" }}
               value={kindFilter}
               onChange={(value) => {
                 setKindFilter(value);
-                tableState.setPage(1);
+                setPage(1);
               }}
               options={[
                 { label: "全部绑定类型", value: "" },
@@ -806,9 +844,9 @@ export default function RbacPage() {
               ]}
             />
           </Col>
-          <Col xs={24} md={8} lg={6}>
+          <Col xs={24} md={6} lg={5}>
             <Space>
-              <Button icon={<SearchOutlined />} type="primary" onClick={tableState.applyKeyword}>
+              <Button icon={<SearchOutlined />} type="primary" onClick={applyKeyword}>
                 查询
               </Button>
               <Button icon={<ReloadOutlined />} onClick={() => void query.refetch()} loading={query.isFetching}>
@@ -860,7 +898,7 @@ export default function RbacPage() {
           <Space>
             <span>角色绑定列表</span>
             {query.data ? (
-              <Tag color="blue">共 {filtered.length} 条</Tag>
+              <Tag color="blue">共 {query.data.total} 条</Tag>
             ) : null}
           </Space>
         }
@@ -872,23 +910,25 @@ export default function RbacPage() {
           loading={{ spinning: query.isLoading, description: "RBAC 数据加载中..." }}
           onChange={(pagination, filters, sorter, extra) => {
             handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
-            if (pagination.current && pagination.current !== tableState.page) {
-              tableState.setPage(pagination.current);
+            if (pagination.current && pagination.current !== page) {
+              setPage(pagination.current);
             }
-            if (pagination.pageSize && pagination.pageSize !== tableState.pageSize) {
-              tableState.setPageSize(pagination.pageSize);
+            if (pagination.pageSize && pagination.pageSize !== pageSize) {
+              setPageSize(pagination.pageSize);
+              setPage(1);
             }
           }}
           pagination={buildTablePagination({
-            current: tableState.page,
-            pageSize: tableState.pageSize,
-            total: sorted.length,
+            current: page,
+            pageSize,
+            total: query.data?.total ?? 0,
             onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== tableState.pageSize) {
-                tableState.setPageSize(nextPageSize);
+              if (nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
                 return;
               }
-              tableState.setPage(nextPage);
+              setPage(nextPage);
             },
             showTotal: (total) => `共 ${total} 条`,
           })}
@@ -900,7 +940,7 @@ export default function RbacPage() {
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description={
-                    tableState.keyword || tableState.namespace || kindFilter
+                    keyword || namespace || clusterId || kindFilter
                       ? "暂无符合条件的 RBAC 绑定"
                       : "暂无 RBAC 绑定，点击「新建绑定」创建"
                   }
@@ -914,7 +954,7 @@ export default function RbacPage() {
         open={createOpen}
         accessToken={accessToken ?? ""}
         onClose={() => setCreateOpen(false)}
-        onSuccess={() => void queryClient.invalidateQueries({ queryKey: [...RBAC_QUERY_KEY, accessToken] })}
+        onSuccess={() => void queryClient.invalidateQueries({ queryKey: [...RBAC_QUERY_KEY] })}
       />
     </Space>
   );

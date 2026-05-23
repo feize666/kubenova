@@ -14,6 +14,7 @@ import {
   Typography,
   message,
 } from "antd";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
@@ -41,6 +42,7 @@ import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/ta
 import { useAntdTableSortPagination } from "@/lib/table";
 import { buildResourceTableColumns } from "@/lib/table/resource-table-schema";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 interface ServiceFormValues {
   name: string;
@@ -50,12 +52,16 @@ interface ServiceFormValues {
 }
 
 export default function ServicesPage() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const { clusterId, namespace, namespaceDisabled, onClusterChange, onNamespaceChange } = useClusterNamespaceFilter();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+  const { clusterId, namespace, namespaceDisabled, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const {
@@ -194,6 +200,12 @@ export default function ServicesPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/network/services",
+  });
 
   const columns = buildResourceTableColumns<NetworkResource>({
     name: {

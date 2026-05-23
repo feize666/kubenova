@@ -546,6 +546,7 @@ export default function HelmRepositoriesPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken ?? undefined}
       />
 

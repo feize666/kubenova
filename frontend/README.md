@@ -52,6 +52,16 @@ npm run lint
 npm run build
 ```
 
+## 筛选联动回归（可执行）
+
+- 用例清单文档：`docs/filter-regression-matrix.md`
+- 列出全部用例：`npm run e2e:filters:list`
+- 运行逐页回归：
+
+```bash
+FILTER_BASE_URL=http://127.0.0.1:3000 FILTER_USER=<账号> FILTER_PASS=<密码> npm run e2e:filters:matrix
+```
+
 ## 当前阶段说明
 
 当前已完成“页面素材搭建”阶段：

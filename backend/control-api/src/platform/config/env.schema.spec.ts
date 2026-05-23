@@ -19,6 +19,13 @@ describe('parseEnv', () => {
       refreshTokenExpiresIn: '7d',
       runtimeGatewayBaseUrl: 'ws://localhost:4100',
       swaggerEnabled: true,
+      defaultAdminEmail: 'admin@local.dev',
+      defaultAdminPassword: 'admin123456',
+      aiModelBaseUrl: 'https://api.openai.com/v1',
+      aiModelApiKey: '',
+      aiModelName: 'gpt-4o-mini',
+      aiModelMaxTokens: 2048,
+      aiModelTimeoutMs: 30000,
     });
   });
 

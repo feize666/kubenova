@@ -28,6 +28,9 @@ export interface CreateRuntimeSessionRequest {
   command?: string;
   tailLines?: number;
   sinceSeconds?: number;
+  sinceTime?: string;
+  untilTime?: string;
+  refreshIntervalSeconds?: number;
   follow?: boolean;
   timestamps?: boolean;
 }
@@ -72,6 +75,9 @@ export interface RuntimeGatewaySessionBootstrap {
     keyword?: string;
     tailLines?: number;
     sinceSeconds?: number;
+    sinceTime?: string;
+    untilTime?: string;
+    refreshIntervalSeconds?: number;
     follow?: boolean;
     previous?: boolean;
     timestamps?: boolean;
@@ -131,7 +137,14 @@ export class RuntimeService {
       level: input.type === 'logs' ? input.level : undefined,
       keyword: input.type === 'logs' ? input.keyword?.trim() : undefined,
       tailLines: input.type === 'logs' ? input.tailLines : undefined,
-      sinceSeconds: input.type === 'logs' ? input.sinceSeconds : undefined,
+      sinceSeconds:
+        input.type === 'logs' && !input.sinceTime
+          ? input.sinceSeconds
+          : undefined,
+      sinceTime: input.type === 'logs' ? input.sinceTime : undefined,
+      untilTime: input.type === 'logs' ? input.untilTime : undefined,
+      refreshIntervalSeconds:
+        input.type === 'logs' ? input.refreshIntervalSeconds : undefined,
       follow: input.type === 'logs' ? input.follow : undefined,
       previous: input.type === 'logs' ? input.previous : undefined,
       timestamps: input.type === 'logs' ? input.timestamps : undefined,
@@ -228,7 +241,12 @@ export class RuntimeService {
               level: payload.level,
               keyword: payload.keyword,
               tailLines: payload.tailLines,
-              sinceSeconds: payload.sinceSeconds,
+              sinceSeconds: payload.sinceTime
+                ? undefined
+                : payload.sinceSeconds,
+              sinceTime: payload.sinceTime,
+              untilTime: payload.untilTime,
+              refreshIntervalSeconds: payload.refreshIntervalSeconds,
               follow: payload.follow,
               previous: payload.previous,
               timestamps: payload.timestamps,
@@ -275,6 +293,13 @@ export class RuntimeService {
 
     this.assertTailLines(input.tailLines, 'tailLines');
     this.assertPositiveInt(input.sinceSeconds, 'sinceSeconds');
+    const sinceTime = this.parseOptionalRfc3339(input.sinceTime, 'sinceTime');
+    const untilTime = this.parseOptionalRfc3339(input.untilTime, 'untilTime');
+    this.assertTimeRange(sinceTime, untilTime);
+    this.assertRefreshInterval(
+      input.refreshIntervalSeconds,
+      'refreshIntervalSeconds',
+    );
     this.assertBoolean(input.follow, 'follow');
     this.assertBoolean(input.previous, 'previous');
     this.assertBoolean(input.timestamps, 'timestamps');
@@ -293,6 +318,48 @@ export class RuntimeService {
 
     if (!Number.isInteger(value) || value <= 0) {
       throw new BadRequestException(`${field} 必须为正整数`);
+    }
+  }
+
+  private assertRefreshInterval(
+    value: number | undefined,
+    field: string,
+  ): void {
+    if (value === undefined) {
+      return;
+    }
+
+    if (!Number.isInteger(value) || (value !== 0 && value < 2)) {
+      throw new BadRequestException(`${field} 必须为 0 或不小于 2 的整数`);
+    }
+  }
+
+  private parseOptionalRfc3339(
+    raw: string | undefined,
+    field: string,
+  ): Date | undefined {
+    if (raw === undefined) {
+      return undefined;
+    }
+    const trimmed = raw.trim();
+    const rfc3339Pattern =
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+    if (!rfc3339Pattern.test(trimmed)) {
+      throw new BadRequestException(`${field} 必须为 ISO/RFC3339 时间`);
+    }
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(`${field} 必须为有效时间`);
+    }
+    if (parsed.getTime() > Date.now()) {
+      throw new BadRequestException(`${field} 不能晚于当前时间`);
+    }
+    return parsed;
+  }
+
+  private assertTimeRange(sinceTime?: Date, untilTime?: Date): void {
+    if (sinceTime && untilTime && sinceTime.getTime() > untilTime.getTime()) {
+      throw new BadRequestException('sinceTime 不能晚于 untilTime');
     }
   }
 
@@ -431,6 +498,19 @@ export class RuntimeService {
       if (input.sinceSeconds) {
         query.set('sinceSeconds', String(input.sinceSeconds));
       }
+      if (input.sinceTime) {
+        query.delete('sinceSeconds');
+        query.set('sinceTime', input.sinceTime);
+      }
+      if (input.untilTime) {
+        query.set('untilTime', input.untilTime);
+      }
+      if (input.refreshIntervalSeconds !== undefined) {
+        query.set(
+          'refreshIntervalSeconds',
+          String(input.refreshIntervalSeconds),
+        );
+      }
       if (input.previous) {
         query.set('previous', 'true');
       }
@@ -481,13 +561,17 @@ export class RuntimeService {
     const configuredBase = this.runtimeGatewayBase;
     if (configuredBase.startsWith('/')) {
       const requestHost =
-        access?.requestHost?.trim() || this.extractHostFromOrigin(access?.requestOrigin);
+        access?.requestHost?.trim() ||
+        this.extractHostFromOrigin(access?.requestOrigin);
       const requestProtocol =
         access?.requestProtocol ||
         this.extractProtocolFromOrigin(access?.requestOrigin);
       const wsProtocol = requestProtocol === 'https' ? 'wss' : 'ws';
       if (requestHost) {
-        return `${wsProtocol}://${requestHost}${configuredBase}`.replace(/\/+$/, '');
+        return `${wsProtocol}://${requestHost}${configuredBase}`.replace(
+          /\/+$/,
+          '',
+        );
       }
       return configuredBase;
     }

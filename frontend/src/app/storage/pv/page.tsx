@@ -17,6 +17,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
@@ -50,6 +51,7 @@ import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/ta
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 function normalizePhase(value?: string) {
   return value?.trim().toLowerCase() ?? "";
@@ -95,12 +97,15 @@ const ACCESS_MODE_OPTIONS = [
 ];
 
 export default function PvPage() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const { clusterId, onClusterChange } = useClusterNamespaceFilter();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+  const { clusterId, onClusterChange } = useClusterNamespaceFilter(initialClusterId);
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const {
     sortBy,
@@ -234,6 +239,12 @@ export default function PvPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace: "",
+    keyword,
+    path: "/storage/pv",
+  });
 
   const columns: ColumnsType<StorageResource> = [
     {
@@ -501,6 +512,7 @@ export default function PvPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken ?? undefined}
       />
       <ResourceYamlDrawer

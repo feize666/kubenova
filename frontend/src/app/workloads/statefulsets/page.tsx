@@ -66,6 +66,8 @@ import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import {
   runScaleConvergence,
   type ScaleConvergenceRound,
@@ -266,13 +268,15 @@ export default function StatefulSetsPage() {
   const { message } = App.useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const {
     sortBy,
     sortOrder,
@@ -286,7 +290,7 @@ export default function StatefulSetsPage() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<WorkloadListItem | null>(null);
+  const [editingItem] = useState<WorkloadListItem | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<FormValues>();
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -349,7 +353,7 @@ export default function StatefulSetsPage() {
         (item) =>
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [data?.items, mergedFilters],
   );
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
@@ -357,17 +361,12 @@ export default function StatefulSetsPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
-
-  const openEditModal = (item: WorkloadListItem) => {
-    setEditingItem(item);
-    form.setFieldsValue({
-      name: item.name,
-      namespace: item.namespace,
-      clusterId: item.clusterId,
-      replicas: item.replicas,
-    });
-    setModalOpen(true);
-  };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/workloads/statefulsets",
+  });
 
   const handleModalCancel = () => {
     setModalOpen(false);
@@ -655,7 +654,7 @@ export default function StatefulSetsPage() {
             <Col xs={24} sm={12} md={6} lg={4}>
               <ClusterSelect
                 value={clusterId}
-                onChange={(v) => { setClusterId(v); resetPage(); }}
+                onChange={(v) => { onClusterChange(v); resetPage(); }}
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
               />
@@ -663,9 +662,11 @@ export default function StatefulSetsPage() {
             <Col xs={24} sm={12} md={5} lg={4}>
               <NamespaceSelect
                 value={namespace}
-                onChange={(v) => { setNamespace(v); resetPage(); }}
+                onChange={(v) => { onNamespaceChange(v); resetPage(); }}
                 knownNamespaces={knownNamespaces}
                 clusterId={clusterId}
+                disabled={namespaceDisabled}
+                placeholder={namespacePlaceholder}
               />
             </Col>
             <Col xs={24} sm={16} md={7} lg={6}>
@@ -1022,6 +1023,7 @@ export default function StatefulSetsPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken ?? undefined}
       />
 

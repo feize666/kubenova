@@ -94,12 +94,14 @@ export class MonitoringController {
   @Get('inspection')
   async getInspection(
     @Query('clusterId') clusterId?: string,
+    @Query('namespace') namespace?: string,
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
     return this.monitoringService.getClusterInspection(
       clusterId && clusterId.trim() ? clusterId.trim() : undefined,
+      namespace && namespace.trim() ? namespace.trim() : undefined,
       this.parseTimeFilter(range, from, to, '24h'),
     );
   }
@@ -108,6 +110,7 @@ export class MonitoringController {
   async exportInspectionReport(
     @Res() response: Response,
     @Query('clusterId') clusterId: string | undefined,
+    @Query('namespace') namespace: string | undefined,
     @Query('format') format: string | undefined,
     @Query('range') range?: string,
     @Query('from') from?: string,
@@ -116,6 +119,7 @@ export class MonitoringController {
     const exportFormat = this.parseExportFormat(format);
     const result = await this.monitoringService.exportClusterInspectionReport(
       clusterId && clusterId.trim() ? clusterId.trim() : undefined,
+      namespace && namespace.trim() ? namespace.trim() : undefined,
       exportFormat,
       this.parseTimeFilter(range, from, to, '24h'),
     );
@@ -133,6 +137,7 @@ export class MonitoringController {
     @Body()
     body: {
       clusterId?: string;
+      namespace?: string;
       range?: string;
       from?: string;
       to?: string;
@@ -142,6 +147,7 @@ export class MonitoringController {
       body.clusterId && body.clusterId.trim()
         ? body.clusterId.trim()
         : undefined,
+      body.namespace && body.namespace.trim() ? body.namespace.trim() : undefined,
       this.parseTimeFilter(body.range, body.from, body.to, '24h'),
     );
   }

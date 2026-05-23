@@ -11,10 +11,31 @@ mkdir -p "$RUN_DIR"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-4000}"
 RUNTIME_GATEWAY_PORT="${RUNTIME_GATEWAY_PORT:-4100}"
+FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-dev}"
+USE_TMUX="${USE_TMUX:-false}"
 
 service_session_name() {
   local name="$1"
   echo "aiops-${name}"
+}
+
+service_pid_file() {
+  local name="$1"
+  if [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" && "$USE_TMUX" != "true" ]]; then
+    echo "$RUN_DIR/${name}.supervisor.pid"
+  else
+    echo "$RUN_DIR/${name}.pid"
+  fi
+}
+
+service_child_pid_file() {
+  local name="$1"
+  echo "$RUN_DIR/${name}.pid"
+}
+
+service_uses_supervisor() {
+  local name="$1"
+  [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" && "$USE_TMUX" != "true" ]]
 }
 
 tmux_session_exists() {
@@ -39,6 +60,20 @@ wait_for_port_free() {
   return 1
 }
 
+terminate_pid() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  sleep 1
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 -- "-$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+  fi
+}
+
 process_cwd() {
   local pid="$1"
   readlink -f "/proc/$pid/cwd" 2>/dev/null || true
@@ -55,7 +90,7 @@ is_frontend_process() {
   local pid="$1"
   local cmdline
   cmdline="$(process_cmdline "$pid")"
-  [[ "$cmdline" == *"frontend/.next/standalone/server.js"* || "$cmdline" == *"next/dist/bin/next start"* || "$cmdline" == *"next/dist/bin/next dev"* ]]
+  [[ "$cmdline" == *"dev-supervise.sh frontend"* || "$cmdline" == *"next-server"* || "$cmdline" == *"frontend/.next/standalone/server.js"* || "$cmdline" == *"next/dist/bin/next start"* || "$cmdline" == *"next/dist/bin/next dev"* ]]
 }
 
 is_frontend_standalone_process() {
@@ -87,7 +122,10 @@ service_is_starting() {
 
 stop_service() {
   local name="$1"
-  local pid_file="$RUN_DIR/${name}.pid"
+  local pid_file
+  pid_file="$(service_pid_file "$name")"
+  local child_pid_file
+  child_pid_file="$(service_child_pid_file "$name")"
   local port="$2"
   local session_name
   session_name="$(service_session_name "$name")"
@@ -130,11 +168,22 @@ stop_service() {
       echo "[$name] 启动中（pid=$pid, 端口=$port），仍执行停止。"
     fi
     echo "[$name] 正在停止（pid=$pid）..."
-    kill "$pid" || true
-    sleep 1
-    if kill -0 "$pid" 2>/dev/null; then
-      echo "[$name] 正在强制终止（pid=$pid）..."
-      kill -9 "$pid" || true
+    terminate_pid "$pid"
+    if service_uses_supervisor "$name" && [[ -f "$child_pid_file" ]]; then
+      local child_pid
+      child_pid="$(cat "$child_pid_file")"
+      if [[ -n "$child_pid" ]] && kill -0 "$child_pid" 2>/dev/null; then
+        echo "[$name] 正在停止子进程（pid=$child_pid）..."
+        terminate_pid "$child_pid"
+      fi
+    fi
+    if service_uses_supervisor "$name"; then
+      local listener_pid_now
+      listener_pid_now="$(fuser -n tcp "$port" 2>/dev/null | awk '{print $1}' || true)"
+      if [[ -n "$listener_pid_now" ]] && is_frontend_process "$listener_pid_now"; then
+        echo "[$name] 正在停止监听进程（pid=$listener_pid_now）..."
+        terminate_pid "$listener_pid_now"
+      fi
     fi
     wait_for_port_free "$port" 10 || true
     echo "[$name] 已停止"
@@ -143,6 +192,9 @@ stop_service() {
   fi
 
   rm -f "$pid_file"
+  if service_uses_supervisor "$name"; then
+    rm -f "$child_pid_file"
+  fi
 }
 
 stop_service "frontend" "$FRONTEND_PORT"

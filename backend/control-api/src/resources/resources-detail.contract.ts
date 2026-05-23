@@ -61,6 +61,41 @@ export interface ResourceDetailNetworkSummary {
   podIPs: string[];
   nodeNames: string[];
   endpoints: ResourceDetailNetworkEndpoint[];
+  networkPipelines: ResourceDetailNetworkPipeline[];
+  service?: ResourceDetailServiceSummary;
+}
+
+export interface ResourceDetailServiceSummary {
+  type?: string;
+  selector?: string;
+  externalIPs?: string[];
+  loadBalancerIPs?: string[];
+  sessionAffinity?: string;
+  externalTrafficPolicy?: string;
+  internalTrafficPolicy?: string;
+  publishNotReadyAddresses?: boolean;
+}
+
+export interface ResourceDetailNetworkPipeline {
+  sourceKind: string;
+  sourceName: string;
+  sourceNamespace?: string;
+  sourceId?: string;
+  host?: string;
+  path?: string;
+  port?: number;
+  serviceName?: string;
+  serviceNamespace?: string;
+  serviceId?: string;
+  servicePort?: string;
+  endpointSourceKind?: string;
+  endpointSourceName?: string;
+  endpointSourceId?: string;
+  backendPodName?: string;
+  backendPodNamespace?: string;
+  backendPodId?: string;
+  ip?: string;
+  ready?: boolean;
 }
 
 export interface ResourceDetailVolumeSummary {
@@ -82,11 +117,44 @@ export interface ResourceDetailPvcSummary {
   phase?: string;
   storageClass?: string;
   volumeName?: string;
+  capacity?: string;
+  accessModes?: string[];
+  volumeMode?: string;
 }
 
 export interface ResourceDetailPvSummary {
   name: string;
   phase?: string;
+  storageClass?: string;
+  capacity?: string;
+  accessModes?: string[];
+  volumeMode?: string;
+  reclaimPolicy?: string;
+  claimRef?: string;
+}
+
+export interface ResourceDetailStorageClassSummary {
+  name: string;
+  provisioner?: string;
+  reclaimPolicy?: string;
+  bindingMode?: string;
+  allowVolumeExpansion?: boolean;
+  parameters?: Record<string, string>;
+  mountOptions?: string[];
+}
+
+export interface ResourceDetailStoragePipeline {
+  container: string;
+  mountPath: string;
+  readOnly: boolean;
+  volumeName: string;
+  volumeType?: string;
+  volumeSource?: string;
+  pvcName?: string;
+  pvcNamespace?: string;
+  pvcPhase?: string;
+  pvName?: string;
+  pvPhase?: string;
   storageClass?: string;
 }
 
@@ -94,8 +162,10 @@ export interface ResourceDetailStorageSummary {
   storageClasses: string[];
   persistentVolumeClaims: ResourceDetailPvcSummary[];
   persistentVolumes: ResourceDetailPvSummary[];
+  storageClassDetails: ResourceDetailStorageClassSummary[];
   volumes: ResourceDetailVolumeSummary[];
   mounts: ResourceDetailMountSummary[];
+  storagePipelines: ResourceDetailStoragePipeline[];
 }
 
 export interface ResourceDetailOwnerReference {
@@ -109,6 +179,65 @@ export interface ResourceDetailMetadata {
   labels: Record<string, string>;
   annotations: Record<string, string>;
   ownerReferences: ResourceDetailOwnerReference[];
+  configUsages: ResourceDetailConfigUsage[];
+}
+
+export type ResourceDetailConfigUsageType =
+  | 'volume'
+  | 'env'
+  | 'envFrom'
+  | 'projected'
+  | 'imagePullSecret'
+  | 'token'
+  | 'tls'
+  | 'unknown';
+
+export interface ResourceDetailConfigUsage {
+  referencedKind: string;
+  referencedName: string;
+  referencedNamespace?: string;
+  referencedId?: string;
+  consumerKind: string;
+  consumerName: string;
+  consumerNamespace?: string;
+  consumerId?: string;
+  usageType: ResourceDetailConfigUsageType;
+  container?: string;
+  mountPath?: string;
+  key?: string;
+}
+
+export type ResourceDetailRelationshipGroupKey =
+  | 'control'
+  | 'network'
+  | 'storage'
+  | 'config'
+  | 'other';
+
+export interface ResourceDetailRelationshipNode {
+  kind?: string;
+  name?: string;
+  namespace?: string;
+  id?: string;
+  clusterId?: string;
+  apiVersion?: string;
+  role?: string;
+  color?: string;
+}
+
+export interface ResourceDetailRelationshipItem {
+  key: string;
+  title: string;
+  subtitle?: string;
+  tags?: Array<{ label: string; color?: string }>;
+  chain: ResourceDetailRelationshipNode[];
+}
+
+export interface ResourceDetailRelationshipGroup {
+  key: ResourceDetailRelationshipGroupKey;
+  title: string;
+  description: string;
+  items: ResourceDetailRelationshipItem[];
 }
 
 export interface ResourceDetailRuntime {
@@ -121,6 +250,19 @@ export interface ResourceDetailRuntime {
   images: string[];
   podIP?: string;
   nodeName?: string;
+  selector?: string;
+  serviceAccountName?: string;
+  restartPolicy?: string;
+  dnsPolicy?: string;
+  schedulerName?: string;
+  priorityClassName?: string;
+  nodeSelector?: Record<string, string>;
+  tolerations?: Array<Record<string, string>>;
+  containerDetails?: ResourceDetailContainerSummary[];
+  policyTypes?: string[];
+  podSelector?: string;
+  ingressRules?: ResourceDetailNetworkPolicyRule[];
+  egressRules?: ResourceDetailNetworkPolicyRule[];
   conditions?: Array<{
     type?: string;
     status?: string;
@@ -128,6 +270,30 @@ export interface ResourceDetailRuntime {
     message?: string;
     lastTransitionTime?: string;
   }>;
+}
+
+export interface ResourceDetailNetworkPolicyRule {
+  peers?: Array<{
+    namespaceSelector?: string;
+    podSelector?: string;
+    ipBlock?: string;
+  }>;
+  ports?: Array<{
+    protocol?: string;
+    port?: string;
+  }>;
+}
+
+export interface ResourceDetailContainerSummary {
+  name: string;
+  image?: string;
+  ports?: Array<{ name?: string; containerPort?: number; protocol?: string }>;
+  env?: string[];
+  probes?: string[];
+  resources?: {
+    requests?: Record<string, string>;
+    limits?: Record<string, string>;
+  };
 }
 
 export interface ResourceDetailOverview {
@@ -152,5 +318,6 @@ export interface ResourceDetailResponse {
     items: Array<Record<string, unknown>>;
   };
   metadata: ResourceDetailMetadata;
+  relationships: ResourceDetailRelationshipGroup[];
   generatedAt: string;
 }

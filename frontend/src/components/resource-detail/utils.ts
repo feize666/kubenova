@@ -354,7 +354,8 @@ export function hasMetadataContent(metadata: ResourceDetailMetadata): boolean {
   return (
     Object.keys(metadata.labels).length > 0 ||
     Object.keys(metadata.annotations).length > 0 ||
-    metadata.ownerReferences.length > 0
+    metadata.ownerReferences.length > 0 ||
+    metadata.configUsages.length > 0
   );
 }
 
@@ -363,7 +364,8 @@ export function hasNetworkContent(network: ResourceDetailNetworkSummary): boolea
     network.clusterIPs.length > 0 ||
     network.podIPs.length > 0 ||
     network.nodeNames.length > 0 ||
-    network.endpoints.length > 0
+    network.endpoints.length > 0 ||
+    network.networkPipelines.length > 0
   );
 }
 
@@ -373,6 +375,7 @@ export function hasStorageContent(storage: ResourceDetailStorageSummary): boolea
     storage.persistentVolumeClaims.length > 0 ||
     storage.persistentVolumes.length > 0 ||
     storage.volumes.length > 0 ||
-    storage.mounts.length > 0
+    storage.mounts.length > 0 ||
+    storage.storagePipelines.length > 0
   );
 }

@@ -159,6 +159,7 @@ export interface InspectionActionResponse {
 export interface ClusterInspectionReport {
   timestamp: string;
   clusterId?: string;
+  namespace?: string;
   summary: {
     score: number;
     totalResources: number;
@@ -172,6 +173,7 @@ export interface ClusterInspectionReport {
 
 export interface ExecuteInspectionActionRequest {
   clusterId?: string;
+  namespace?: string;
 }
 
 export interface InspectionTimeFilter {
@@ -601,11 +603,13 @@ export class MonitoringService {
 
   async getClusterInspection(
     clusterId?: string,
+    namespace?: string,
     timeFilter?: InspectionTimeFilter,
   ): Promise<ClusterInspectionReport> {
     const { from, to } = this.resolveTimeWindow(timeFilter, '24h');
     const updatedAt = this.buildDateRangeWhere(from, to);
     const firedAt = this.buildDateRangeWhere(from, to);
+    const namespaceFilter = namespace?.trim();
     const clusters = await this.prisma.clusterRegistry.findMany({
       where: {
         deletedAt: null,
@@ -626,6 +630,7 @@ export class MonitoringService {
           where: {
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
+            ...(namespaceFilter ? { name: namespaceFilter } : {}),
             ...(updatedAt ? { updatedAt } : {}),
           },
           select: { clusterId: true, name: true, state: true, labels: true },
@@ -634,6 +639,7 @@ export class MonitoringService {
           where: {
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
+            ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
             ...(updatedAt ? { updatedAt } : {}),
           },
           select: {
@@ -654,6 +660,7 @@ export class MonitoringService {
           where: {
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
+            ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
             ...(updatedAt ? { updatedAt } : {}),
           },
           select: {
@@ -670,6 +677,7 @@ export class MonitoringService {
           where: {
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
+            ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
             ...(updatedAt ? { updatedAt } : {}),
           },
           select: {
@@ -686,6 +694,7 @@ export class MonitoringService {
           where: {
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
+            ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
             ...(updatedAt ? { updatedAt } : {}),
           },
           select: {
@@ -702,6 +711,7 @@ export class MonitoringService {
           where: this.activeClusterAlertWhere({
             status: 'firing',
             ...(clusterIds.length > 0 ? { clusterId: { in: clusterIds } } : {}),
+            ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
             ...(firedAt ? { firedAt } : {}),
           }),
           orderBy: { firedAt: 'desc' },
@@ -711,8 +721,16 @@ export class MonitoringService {
 
     const items: InspectionIssue[] = [];
     const pushIssue = (issue: Omit<InspectionIssue, 'id'>) => {
+      const rawId = [
+        issue.category,
+        issue.severity,
+        issue.clusterId ?? '',
+        issue.namespace ?? '',
+        issue.resourceRef,
+        issue.title,
+      ].join('|');
       items.push({
-        id: `issue-${items.length + 1}`,
+        id: this.buildInspectionIssueId(rawId),
         ...issue,
       });
     };
@@ -983,6 +1001,7 @@ export class MonitoringService {
     return {
       timestamp: new Date().toISOString(),
       clusterId,
+      namespace: namespaceFilter,
       summary: {
         score,
         totalResources,
@@ -997,9 +1016,10 @@ export class MonitoringService {
 
   async rerunClusterInspection(
     clusterId?: string,
+    namespace?: string,
     timeFilter?: InspectionTimeFilter,
   ): Promise<ClusterInspectionReport> {
-    return this.getClusterInspection(clusterId, timeFilter);
+    return this.getClusterInspection(clusterId, namespace, timeFilter);
   }
 
   async exportAlerts(
@@ -1044,18 +1064,20 @@ export class MonitoringService {
 
   async exportClusterInspectionReport(
     clusterId: string | undefined,
+    namespace: string | undefined,
     format: InspectionExportFormat,
     timeFilter?: InspectionTimeFilter,
   ): Promise<InspectionReportExportResult> {
-    const report = await this.getClusterInspection(clusterId, timeFilter);
+    const report = await this.getClusterInspection(clusterId, namespace, timeFilter);
     const clusterSegment = clusterId?.trim()
       ? clusterId.trim()
       : 'all-clusters';
+    const namespaceSegment = namespace?.trim() ? `-${namespace.trim()}` : '';
     const timestampSegment = report.timestamp
       .replace(/[:]/g, '-')
       .replace(/\..+$/, '')
       .replace('T', '_');
-    const baseName = `inspection-report-${clusterSegment}-${timestampSegment}`;
+    const baseName = `inspection-report-${clusterSegment}${namespaceSegment}-${timestampSegment}`;
 
     if (format === 'json') {
       return {
@@ -1089,6 +1111,7 @@ export class MonitoringService {
   ): Promise<InspectionActionResponse> {
     const report = await this.getClusterInspection(
       request.clusterId?.trim() || undefined,
+      request.namespace?.trim() || undefined,
     );
     const issue = report.items.find((item) => item.id === issueId);
     if (!issue) {
@@ -1414,6 +1437,16 @@ export class MonitoringService {
     ];
   }
 
+  private buildInspectionIssueId(raw: string): string {
+    const normalized = raw
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48);
+
+    return `issue-${normalized || 'item'}`;
+  }
+
   private parseResourceRef(
     ref: string,
     clusterId?: string,
@@ -1445,6 +1478,7 @@ export class MonitoringService {
     const summaryRows = [
       ['timestamp', report.timestamp],
       ['clusterId', report.clusterId ?? ''],
+      ['namespace', report.namespace ?? ''],
       ['score', String(report.summary.score)],
       ['totalResources', String(report.summary.totalResources)],
       ['issueTotal', String(report.summary.issueTotal)],
@@ -1492,6 +1526,7 @@ export class MonitoringService {
     const summaryData = [
       { key: 'timestamp', value: report.timestamp },
       { key: 'clusterId', value: report.clusterId ?? '' },
+      { key: 'namespace', value: report.namespace ?? '' },
       { key: 'score', value: report.summary.score },
       { key: 'totalResources', value: report.summary.totalResources },
       { key: 'issueTotal', value: report.summary.issueTotal },

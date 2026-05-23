@@ -23,6 +23,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { MenuProps } from "antd";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
@@ -56,6 +57,7 @@ import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/ta
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 function normalizePhase(value?: string) {
   return value?.trim().toLowerCase() ?? "";
@@ -94,13 +96,16 @@ interface PvcFormValues {
 }
 
 export default function PvcPage() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
-    useClusterNamespaceFilter();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const {
     sortBy,
@@ -230,6 +235,12 @@ export default function PvcPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/storage/pvc",
+  });
 
   const handleOpenCreate = () => {
     form.resetFields();
@@ -484,6 +495,7 @@ export default function PvcPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken ?? undefined}
       />
       <ResourceYamlDrawer

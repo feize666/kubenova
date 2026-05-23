@@ -29,7 +29,7 @@ import {
 } from "antd";
 import type { MenuProps } from "antd";
 import type { ColumnsType, ColumnType } from "antd/es/table";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -53,6 +53,7 @@ import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { buildTerminalRoute } from "@/lib/workloads/terminal";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 // Pod 状态类型
 type PodPhase = "Running" | "Pending" | "Failed" | "Succeeded" | string;
@@ -321,14 +322,17 @@ const PHASE_OPTIONS = [
 
 export default function PodsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
-    useClusterNamespaceFilter();
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
 
   // 筛选状态
-  const [keywordInput, setKeywordInput] = useState("");
-  const [keyword, setKeyword] = useState("");
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [phaseFilter, setPhaseFilter] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const {
@@ -480,6 +484,7 @@ export default function PodsPage() {
     setMergedFilters(parsed.labels);
     setKeyword(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({ clusterId, namespace, keyword });
 
   const handleDelete = async (row: PodRow) => {
     try {
@@ -874,6 +879,7 @@ export default function PodsPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken || undefined}
       />
 

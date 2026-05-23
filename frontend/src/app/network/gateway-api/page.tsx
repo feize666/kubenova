@@ -3,6 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
@@ -28,6 +29,7 @@ import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/ta
 import { useAntdTableSortPagination } from "@/lib/table";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 type GatewayKindKey = "gatewayclass" | "gateway" | "httproute";
 
@@ -99,13 +101,16 @@ interface HttpRouteFormValues {
 }
 
 export default function GatewayApiPage() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
   const lastDiscoveryRefreshAtRef = useRef<Record<string, number>>({});
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
-    useClusterNamespaceFilter();
-  const [keywordInput, setKeywordInput] = useState("");
-  const [keyword, setKeyword] = useState("");
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [kind, setKind] = useState<GatewayKindKey>("gatewayclass");
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
@@ -299,6 +304,12 @@ export default function GatewayApiPage() {
     setMergedFilters(parsed);
     setKeyword(parsed.filter((item) => !item.includes("=")).join(" "));
   };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/network/gateway-api",
+  });
 
   const handleCreateSubmit = async () => {
     let values: GatewayFormValues & HttpRouteFormValues;

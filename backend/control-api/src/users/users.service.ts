@@ -145,8 +145,14 @@ export interface UsersListQuery {
 }
 
 export interface RbacListQuery {
+  clusterId?: string;
   keyword?: string;
   kind?: string;
+  namespace?: string;
+  subject?: string;
+  subjectKind?: string;
+  state?: string;
+  sort?: string | string[];
   page?: string;
   pageSize?: string;
 }
@@ -403,13 +409,24 @@ export class UsersService {
 
   /** 列表（数据库过滤 + 分页） */
   async listRbac(query: RbacListQuery = {}): Promise<UsersRbacResponse> {
+    const clusterId = query.clusterId?.trim();
     const keyword = query.keyword?.trim().toLowerCase();
     const kind = query.kind?.trim();
+    const namespace = query.namespace?.trim();
+    const subject = query.subject?.trim();
+    const subjectKind = query.subjectKind?.trim();
+    const state = query.state?.trim();
     const page = this.parsePositiveInt(query.page, 1);
     const pageSize = this.parsePositiveInt(query.pageSize, 10);
+    const orderBy = this.resolveRbacOrderBy(query.sort);
 
     const where: {
+      AND?: Array<Record<string, unknown>>;
       kind?: string;
+      namespace?: string;
+      subjectKind?: string;
+      state?: string;
+      subject?: { contains: string; mode: 'insensitive' };
       OR?: Array<{
         name?: { contains: string; mode: 'insensitive' };
         namespace?: { contains: string; mode: 'insensitive' };
@@ -420,11 +437,43 @@ export class UsersService {
     if (kind) {
       where.kind = kind;
     }
+    if (namespace) {
+      where.namespace = namespace;
+    }
+    if (subjectKind) {
+      where.subjectKind = subjectKind;
+    }
+    if (state) {
+      where.state = state;
+    }
+    if (subject) {
+      where.subject = { contains: subject, mode: 'insensitive' };
+    }
     if (keyword) {
       where.OR = [
         { name: { contains: keyword, mode: 'insensitive' } },
         { namespace: { contains: keyword, mode: 'insensitive' } },
         { subject: { contains: keyword, mode: 'insensitive' } },
+      ];
+    }
+    if (clusterId) {
+      const namespaces = await this.prisma.namespaceRecord.findMany({
+        where: {
+          clusterId,
+          state: { not: 'deleted' },
+        },
+        select: { name: true },
+      });
+      const namespaceNames = namespaces.map((item) => item.name).filter(Boolean);
+      where.AND = [
+        {
+          OR: [
+            { kind: 'ClusterRoleBinding' },
+            ...(namespaceNames.length > 0
+              ? [{ kind: 'RoleBinding', namespace: { in: namespaceNames } }]
+              : []),
+          ],
+        },
       ];
     }
 
@@ -433,7 +482,7 @@ export class UsersService {
       repo.count({ where }),
       repo.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -444,6 +493,18 @@ export class UsersService {
       total,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private resolveRbacOrderBy(
+    sort?: string | string[],
+  ): Array<Record<string, 'asc' | 'desc'>> {
+    const firstSort = Array.isArray(sort) ? sort[0] : sort;
+    const [rawField, rawOrder] = String(firstSort ?? 'updatedAt:desc').split(':');
+    const field = rawField?.trim();
+    const order: 'asc' | 'desc' = rawOrder?.trim() === 'asc' ? 'asc' : 'desc';
+    const allowedFields = new Set(['name', 'kind', 'namespace', 'subject', 'state', 'updatedAt']);
+    const resolvedField = allowedFields.has(field) ? field : 'updatedAt';
+    return [{ [resolvedField]: order }, { id: 'asc' }];
   }
 
   async createRbac(

@@ -65,6 +65,8 @@ import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import {
   runScaleConvergence,
   type ScaleConvergenceRound,
@@ -176,14 +178,16 @@ export default function DeploymentsPage() {
   const { message } = App.useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
-  const [clusterId, setClusterId] = useState("");
-  const [关键字, set关键字] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [关键字, set关键字] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [namespace, setNamespace] = useState("");
   const {
     sortBy,
     sortOrder,
@@ -450,6 +454,12 @@ export default function DeploymentsPage() {
     setMergedFilters(parsed.labelExpressions);
     set关键字(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword: 关键字,
+    path: "/workloads/deployments",
+  });
 
   const 扩缩容确认 = async () => {
     if (!扩缩容行) {
@@ -658,7 +668,7 @@ export default function DeploymentsPage() {
               <ClusterSelect
                 value={clusterId}
                 onChange={(v) => {
-                  setClusterId(v);
+                  onClusterChange(v);
                   resetPage();
                 }}
                 options={clusterOptions}
@@ -669,11 +679,13 @@ export default function DeploymentsPage() {
               <NamespaceSelect
                 value={namespace}
                 onChange={(v) => {
-                  setNamespace(v);
+                  onNamespaceChange(v);
                   resetPage();
                 }}
                 knownNamespaces={knownNamespaces}
                 clusterId={clusterId}
+                disabled={namespaceDisabled}
+                placeholder={namespacePlaceholder}
               />
             </Col>
             <Col xs={24} sm={16} md={7} lg={6}>
@@ -756,6 +768,7 @@ export default function DeploymentsPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken || undefined}
       />
 

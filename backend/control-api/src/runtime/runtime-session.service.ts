@@ -21,6 +21,9 @@ export interface RuntimeTokenPayload {
   keyword?: string;
   tailLines?: number;
   sinceSeconds?: number;
+  sinceTime?: string;
+  untilTime?: string;
+  refreshIntervalSeconds?: number;
   follow?: boolean;
   previous?: boolean;
   timestamps?: boolean;

@@ -16,6 +16,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
@@ -48,6 +49,7 @@ import {
   type DynamicResourceItem,
 } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 type ServiceAccountRecord = DynamicResourceItem;
 
@@ -108,13 +110,16 @@ function downloadTextFile(content: string, filename: string) {
 }
 
 export default function ServiceAccountsPage() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
   const lastDiscoveryRefreshAtRef = useRef<Record<string, number>>({});
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
-    useClusterNamespaceFilter();
-  const [keywordInput, setKeywordInput] = useState("");
-  const [keyword, setKeyword] = useState("");
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const { sortBy, sortOrder, pagination, resetPage, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ServiceAccountRecord>({
@@ -314,6 +319,12 @@ export default function ServiceAccountsPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/configs/serviceaccounts",
+  });
 
   const loadServiceAccountSecrets = async (row: ServiceAccountRecord) => {
     setTokenLoading(true);

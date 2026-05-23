@@ -23,6 +23,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import type { MenuProps } from "antd";
 import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -40,6 +41,8 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { ClusterSelect } from "@/components/cluster-select";
+import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
@@ -97,11 +100,14 @@ export default function HelmPage() {
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
 
-  const [clusterId, setClusterId] = useState("");
-  const [namespace, setNamespace] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
-  const [keyword, setKeyword] = useState("");
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
+  const [keyword, setKeyword] = useState(initialKeyword);
   const {
     sortBy,
     sortOrder,
@@ -368,6 +374,13 @@ export default function HelmPage() {
     setDetailTarget(null);
   };
 
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/workloads/helm",
+  });
+
   const handleChartSearch = () => {
     setInstallChartKeyword(installChartKeywordInput.trim());
     installForm.setFieldsValue({ chartName: undefined, version: undefined });
@@ -613,7 +626,7 @@ export default function HelmPage() {
             <ClusterSelect
               value={selectedClusterId}
               onChange={(v) => {
-                setClusterId(v);
+                onClusterChange(v);
                 resetPage();
                 setSelectedRowId(null);
                 setDetailTarget(null);
@@ -626,13 +639,15 @@ export default function HelmPage() {
             <NamespaceSelect
               value={namespace}
               onChange={(v) => {
-                setNamespace(v);
+                onNamespaceChange(v);
                 resetPage();
                 setSelectedRowId(null);
                 setDetailTarget(null);
               }}
               knownNamespaces={knownNamespaces}
               clusterId={selectedClusterId}
+              disabled={namespaceDisabled}
+              placeholder={namespacePlaceholder}
             />
           </Col>
           <Col xs={24} sm={16} md={7} lg={6}>
@@ -713,6 +728,7 @@ export default function HelmPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken ?? undefined}
       >
         {activeDetailRelease ? (

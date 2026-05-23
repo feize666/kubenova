@@ -31,9 +31,11 @@ import {
 } from "antd";
 import type { TableProps } from "antd";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { buildTablePagination } from "@/lib/table/pagination";
@@ -157,6 +159,9 @@ function ResultTag({ result }: { result: string }) {
 }
 
 function SecurityEventsTab() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
@@ -165,8 +170,8 @@ function SecurityEventsTab() {
   const [severityFilter, setSeverityFilter] = useState<string | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
-    useClusterNamespaceFilter();
-  const [keyword, setKeyword] = useState("");
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
@@ -196,10 +201,12 @@ function SecurityEventsTab() {
     [clustersQuery.data?.items],
   );
   const { data, isLoading } = useQuery({
-    queryKey: ["security", "events", severityFilter, statusFilter, accessToken],
+    queryKey: ["security", "events", clusterId, namespace, severityFilter, statusFilter, accessToken],
     queryFn: () =>
       getSecurityEvents(
         {
+          clusterId: clusterId || undefined,
+          namespace: namespace.trim() || undefined,
           severity: severityFilter,
           status: statusFilter,
           page: 1,
@@ -254,6 +261,12 @@ function SecurityEventsTab() {
     );
     return withKeyword;
   }, [clusterId, clusterMap, data?.items, keyword, namespace]);
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/security",
+  });
 
   const sortedItems = useMemo(() => {
     const list = [...filteredItems];

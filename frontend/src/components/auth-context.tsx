@@ -317,6 +317,7 @@ export function useAuth() {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const initial = readAuthSnapshot();
+  const initialAccessTokenRef = useRef(initial?.accessToken ?? "");
   const [accessToken, setAccessToken] = useState(initial?.accessToken ?? "");
   const [refreshToken, setRefreshToken] = useState(initial?.refreshToken ?? "");
   const [username, setUsername] = useState(initial?.username ?? "");
@@ -325,6 +326,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [lastRequestId, setLastRequestId] = useState("");
   const [isInitializing, setIsInitializing] = useState(true);
   const bootstrappedRef = useRef(false);
+  const authGenerationRef = useRef(0);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
+
+  const markAuthGeneration = () => {
+    authGenerationRef.current += 1;
+    return authGenerationRef.current;
+  };
+
+  const applyClearAuthState = (expectedGeneration?: number) => {
+    if (typeof expectedGeneration === "number" && expectedGeneration !== authGenerationRef.current) {
+      return;
+    }
+    clearAuthState({
+      setAccessToken,
+      setRefreshToken,
+      setUsername,
+      setRole,
+      setExpiresAt,
+    });
+  };
 
   useEffect(() => {
     if (bootstrappedRef.current) {
@@ -333,15 +354,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     bootstrappedRef.current = true;
 
     const run = async () => {
-      if (!accessToken) {
+      const initialAccessToken = initialAccessTokenRef.current;
+      if (!initialAccessToken) {
         setIsInitializing(false);
         return;
       }
+      const requestGeneration = authGenerationRef.current;
 
       try {
         const me = await requestAuthJson<{ user: AuthUser; expiresAt?: string }>("me", {
-          headers: { Authorization: `Bearer ${accessToken}` },
+          headers: { Authorization: `Bearer ${initialAccessToken}` },
         });
+        if (requestGeneration !== authGenerationRef.current) {
+          return;
+        }
         setUsername(me.data.user.username);
         setRole(normalizeRole(me.data.user.role));
         setLastRequestId(me.requestId);
@@ -353,13 +379,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLastRequestId(error.requestId);
         }
         if (isUnauthorizedAuthError(error)) {
-          clearAuthState({
-            setAccessToken,
-            setRefreshToken,
-            setUsername,
-            setRole,
-            setExpiresAt,
-          });
+          applyClearAuthState(requestGeneration);
         }
       } finally {
         setIsInitializing(false);
@@ -376,7 +396,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     const runRefresh = async () => {
-      try {
+      if (refreshInFlightRef.current) {
+        await refreshInFlightRef.current;
+        return;
+      }
+      const requestGeneration = authGenerationRef.current;
+      let currentTask: Promise<void> | null = null;
+      currentTask = (async () => {
+        try {
         const refreshed = await requestAuthJson<{
           accessToken: string;
           refreshToken: string;
@@ -386,7 +413,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           method: "POST",
           body: JSON.stringify({ refreshToken }),
         });
-        if (cancelled) {
+        if (cancelled || requestGeneration !== authGenerationRef.current) {
           return;
         }
         const remember = Boolean(window.localStorage.getItem(LOCAL_ACCESS_KEY));
@@ -397,6 +424,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: normalizeRole(refreshed.data.user.role),
           expiresAt: refreshed.data.expiresAt,
         };
+        markAuthGeneration();
         persistAuth(nextSnapshot, remember);
         setAccessToken(nextSnapshot.accessToken);
         setRefreshToken(nextSnapshot.refreshToken);
@@ -404,20 +432,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRole(nextSnapshot.role);
         setExpiresAt(nextSnapshot.expiresAt ?? "");
         setLastRequestId(refreshed.requestId);
-      } catch (error) {
-        if (error instanceof AuthApiError) {
-          setLastRequestId(error.requestId);
+        } catch (error) {
+          if (error instanceof AuthApiError) {
+            setLastRequestId(error.requestId);
+          }
+          if (!cancelled && isUnauthorizedAuthError(error)) {
+            applyClearAuthState(requestGeneration);
+          }
+        } finally {
+          if (refreshInFlightRef.current === currentTask) {
+            refreshInFlightRef.current = null;
+          }
         }
-        if (!cancelled && isUnauthorizedAuthError(error)) {
-          clearAuthState({
-            setAccessToken,
-            setRefreshToken,
-            setUsername,
-            setRole,
-            setExpiresAt,
-          });
-        }
-      }
+      })();
+      refreshInFlightRef.current = currentTask;
+      await currentTask;
     };
 
     if (isExpiringSoon(expiresAt)) {
@@ -501,6 +530,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             expiresAt: payload.data.expiresAt,
           };
 
+          markAuthGeneration();
           authExpiredHandled = false;
           resetAuthExpiryState();
           persistAuth(snapshot, remember);
@@ -515,13 +545,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (error instanceof AuthApiError) {
             setLastRequestId(error.requestId);
             if (error.status === 401) {
-              clearAuthState({
-                setAccessToken,
-                setRefreshToken,
-                setUsername,
-                setRole,
-                setExpiresAt,
-              });
+              applyClearAuthState();
             }
             if (error.status === 0) {
               if (msg.includes("错误路由") || msg.includes("非 JSON")) {
@@ -551,15 +575,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setLastRequestId(error.requestId);
           }
         } finally {
+          markAuthGeneration();
           authExpiredHandled = false;
           resetAuthExpiryState();
-          clearAuthState({
-            setAccessToken,
-            setRefreshToken,
-            setUsername,
-            setRole,
-            setExpiresAt,
-          });
+          applyClearAuthState();
         }
       },
     }),

@@ -31,13 +31,25 @@ type MockedPrisma = {
   };
 };
 
-function buildService(prisma: MockedPrisma): ResourcesService {
+function buildService(
+  prisma: MockedPrisma,
+  overrides: {
+    clustersService?: Partial<ClustersService>;
+    k8sClientService?: Partial<K8sClientService>;
+  } = {},
+): ResourcesService {
   return new ResourcesService(
-    {} as ClustersService,
+    {
+      getKubeconfig: jest.fn().mockResolvedValue(null),
+      ...overrides.clustersService,
+    } as unknown as ClustersService,
     {
       assertClusterOnlineForRead: jest.fn().mockResolvedValue(undefined),
     } as unknown as ClusterHealthService,
-    {} as K8sClientService,
+    {
+      getCoreApi: jest.fn(),
+      ...overrides.k8sClientService,
+    } as unknown as K8sClientService,
     prisma as never,
   );
 }
@@ -227,6 +239,48 @@ describe('ResourcesService detail aggregation', () => {
             updatedAt: now,
           },
           {
+            id: 'pod-1',
+            clusterId: 'cluster-a',
+            namespace: 'default',
+            kind: 'Pod',
+            name: 'web-7f9d8',
+            state: 'running',
+            spec: {},
+            statusJson: {},
+            labels: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'eps-1',
+            clusterId: 'cluster-a',
+            namespace: 'default',
+            kind: 'EndpointSlice',
+            name: 'svc-web-abc',
+            state: 'running',
+            spec: {
+              metadataLabels: {
+                'kubernetes.io/service-name': 'svc-web',
+              },
+              ports: [{ name: 'http', port: 8080, protocol: 'TCP' }],
+              endpoints: [
+                {
+                  addresses: ['10.10.0.21'],
+                  conditions: { ready: true },
+                  targetRef: {
+                    kind: 'Pod',
+                    name: 'web-7f9d8',
+                    namespace: 'default',
+                  },
+                },
+              ],
+            },
+            statusJson: {},
+            labels: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
             id: 'ing-1',
             clusterId: 'cluster-a',
             namespace: 'default',
@@ -281,7 +335,14 @@ describe('ResourcesService detail aggregation', () => {
         expect.objectContaining({
           kind: 'Ingress',
           name: 'ing-web',
+          id: 'ing-1',
           associationType: 'routes-to-service',
+        }),
+        expect.objectContaining({
+          kind: 'EndpointSlice',
+          name: 'svc-web-abc',
+          id: 'eps-1',
+          associationType: 'selects-service',
         }),
       ]),
     );
@@ -290,6 +351,69 @@ describe('ResourcesService detail aggregation', () => {
       expect.arrayContaining([
         expect.objectContaining({
           ip: '34.120.8.9',
+        }),
+      ]),
+    );
+    expect(detail.network.networkPipelines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceKind: 'Service',
+          sourceName: 'svc-web',
+          sourceNamespace: 'default',
+          serviceName: 'svc-web',
+          serviceNamespace: 'default',
+          endpointSourceKind: 'EndpointSlice',
+          endpointSourceName: 'svc-web-abc',
+          backendPodName: 'web-7f9d8',
+          backendPodNamespace: 'default',
+          ip: '10.10.0.21',
+          ready: true,
+        }),
+        expect.objectContaining({
+          sourceKind: 'Ingress',
+          sourceName: 'ing-web',
+          sourceNamespace: 'default',
+          host: 'web.example.com',
+          path: '/',
+          serviceName: 'svc-web',
+          serviceNamespace: 'default',
+        }),
+      ]),
+    );
+    expect(detail.relationships).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'network',
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              chain: expect.arrayContaining([
+                expect.objectContaining({
+                  kind: 'Service',
+                  name: 'svc-web',
+                  id: 'svc-1',
+                  clusterId: 'cluster-a',
+                  apiVersion: 'v1',
+                  role: 'entry',
+                }),
+                expect.objectContaining({
+                  kind: 'EndpointSlice',
+                  name: 'svc-web-abc',
+                  id: 'eps-1',
+                  clusterId: 'cluster-a',
+                  apiVersion: 'discovery.k8s.io/v1',
+                  role: 'endpoint',
+                }),
+                expect.objectContaining({
+                  kind: 'Pod',
+                  name: 'web-7f9d8',
+                  id: 'pod-1',
+                  clusterId: 'cluster-a',
+                  apiVersion: 'v1',
+                  role: 'backend',
+                }),
+              ]),
+            }),
+          ]),
         }),
       ]),
     );
@@ -360,6 +484,467 @@ describe('ResourcesService detail aggregation', () => {
       'metadata',
     ]);
     expect(detail.descriptor.sections).not.toContain('network');
+  });
+
+  it('builds pod storage pipeline from volumeMount to pvc pv and storageclass', async () => {
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'pod-1',
+          clusterId: 'cluster-a',
+          namespace: 'default',
+          kind: 'Pod',
+          name: 'web-0',
+          state: 'running',
+          spec: {
+            volumes: [
+              {
+                name: 'data',
+                persistentVolumeClaim: { claimName: 'web-data' },
+              },
+              {
+                name: 'cache',
+                emptyDir: {},
+              },
+            ],
+            containers: [
+              {
+                name: 'app',
+                image: 'nginx:1.27',
+                volumeMounts: [
+                  { name: 'data', mountPath: '/data', readOnly: false },
+                  { name: 'cache', mountPath: '/cache', readOnly: true },
+                ],
+                envFrom: [{ configMapRef: { name: 'app-config' } }],
+                env: [
+                  {
+                    name: 'DB_PASSWORD',
+                    valueFrom: {
+                      secretKeyRef: { name: 'db-secret', key: 'password' },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          statusJson: {
+            phase: 'Running',
+            ownerReferences: [{ kind: 'Deployment', name: 'web' }],
+          },
+          labels: { app: 'web' },
+          annotations: null,
+          replicas: null,
+          readyReplicas: null,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'deploy-1',
+            clusterId: 'cluster-a',
+            namespace: 'default',
+            kind: 'Deployment',
+            name: 'web',
+            state: 'running',
+            spec: { template: { spec: {} } },
+            statusJson: {},
+            labels: null,
+            annotations: null,
+            replicas: 1,
+            readyReplicas: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'pod-1',
+            clusterId: 'cluster-a',
+            namespace: 'default',
+            kind: 'Pod',
+            name: 'web-0',
+            state: 'running',
+            spec: {
+              volumes: [
+                {
+                  name: 'data',
+                  persistentVolumeClaim: { claimName: 'web-data' },
+                },
+                {
+                  name: 'cache',
+                  emptyDir: {},
+                },
+              ],
+              containers: [
+                {
+                  name: 'app',
+                  image: 'nginx:1.27',
+                  volumeMounts: [
+                    { name: 'data', mountPath: '/data', readOnly: false },
+                    { name: 'cache', mountPath: '/cache', readOnly: true },
+                  ],
+                  envFrom: [{ configMapRef: { name: 'app-config' } }],
+                  env: [
+                    {
+                      name: 'DB_PASSWORD',
+                      valueFrom: {
+                        secretKeyRef: { name: 'db-secret', key: 'password' },
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+            statusJson: {
+              phase: 'Running',
+              ownerReferences: [{ kind: 'Deployment', name: 'web' }],
+            },
+            labels: null,
+            annotations: null,
+            replicas: null,
+            readyReplicas: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'pvc-1',
+            clusterId: 'cluster-a',
+            namespace: 'default',
+            kind: 'PVC',
+            name: 'web-data',
+            state: 'Bound',
+            storageClass: 'fast-ssd',
+            capacity: '5Gi',
+            accessModes: ['ReadWriteOnce'],
+            bindingMode: null,
+            spec: { volumeName: 'pv-web-data', storageClassName: 'fast-ssd' },
+            statusJson: { phase: 'Bound' },
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'pv-1',
+            clusterId: 'cluster-a',
+            namespace: null,
+            kind: 'PV',
+            name: 'pv-web-data',
+            state: 'Bound',
+            storageClass: 'fast-ssd',
+            capacity: '5Gi',
+            accessModes: ['ReadWriteOnce'],
+            bindingMode: null,
+            spec: {
+              claimRef: { namespace: 'default', name: 'web-data' },
+              storageClassName: 'fast-ssd',
+            },
+            statusJson: { phase: 'Bound' },
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'sc-1',
+            clusterId: 'cluster-a',
+            namespace: null,
+            kind: 'SC',
+            name: 'fast-ssd',
+            state: 'available',
+            storageClass: null,
+            capacity: null,
+            accessModes: null,
+            bindingMode: 'WaitForFirstConsumer',
+            spec: {},
+            statusJson: {},
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'cm-1',
+            clusterId: 'cluster-a',
+            namespace: 'default',
+            kind: 'ConfigMap',
+            name: 'app-config',
+            state: 'available',
+            labels: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: 'secret-1',
+            clusterId: 'cluster-a',
+            namespace: 'default',
+            kind: 'Secret',
+            name: 'db-secret',
+            state: 'available',
+            labels: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]),
+      },
+    };
+
+    const service = buildService(prisma);
+    const detail = await service.getDetail('pod', 'pod-1');
+
+    expect(detail.storage.storageClasses).toContain('fast-ssd');
+    expect(detail.storage.storagePipelines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          container: 'app',
+          mountPath: '/data',
+          readOnly: false,
+          volumeName: 'data',
+          volumeType: 'persistentVolumeClaim',
+          volumeSource: 'web-data',
+          pvcName: 'web-data',
+          pvcNamespace: 'default',
+          pvcPhase: 'Bound',
+          pvName: 'pv-web-data',
+          pvPhase: 'Bound',
+          storageClass: 'fast-ssd',
+        }),
+        expect.objectContaining({
+          container: 'app',
+          mountPath: '/cache',
+          readOnly: true,
+          volumeName: 'cache',
+          volumeType: 'emptyDir',
+        }),
+      ]),
+    );
+    expect(detail.metadata.configUsages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          referencedKind: 'ConfigMap',
+          referencedName: 'app-config',
+          consumerKind: 'Pod',
+          consumerName: 'web-0',
+          consumerNamespace: 'default',
+          usageType: 'envFrom',
+          container: 'app',
+        }),
+        expect.objectContaining({
+          referencedKind: 'Secret',
+          referencedName: 'db-secret',
+          consumerKind: 'Pod',
+          consumerName: 'web-0',
+          consumerNamespace: 'default',
+          usageType: 'env',
+          container: 'app',
+          key: 'DB_PASSWORD',
+        }),
+      ]),
+    );
+    expect(detail.relationships).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'control',
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              chain: expect.arrayContaining([
+                expect.objectContaining({
+                  kind: 'Deployment',
+                  name: 'web',
+                  id: 'deploy-1',
+                  clusterId: 'cluster-a',
+                  apiVersion: 'apps/v1',
+                  role: 'owner',
+                }),
+              ]),
+            }),
+          ]),
+        }),
+        expect.objectContaining({
+          key: 'config',
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              chain: expect.arrayContaining([
+                expect.objectContaining({
+                  kind: 'ConfigMap',
+                  name: 'app-config',
+                  id: 'cm-1',
+                  clusterId: 'cluster-a',
+                  apiVersion: 'v1',
+                  role: 'referenced',
+                }),
+                expect.objectContaining({
+                  kind: 'Pod',
+                  name: 'web-0',
+                  id: 'pod-1',
+                  clusterId: 'cluster-a',
+                  apiVersion: 'v1',
+                  role: 'consumer',
+                }),
+              ]),
+            }),
+            expect.objectContaining({
+              chain: expect.arrayContaining([
+                expect.objectContaining({
+                  kind: 'Secret',
+                  name: 'db-secret',
+                  id: 'secret-1',
+                  clusterId: 'cluster-a',
+                  apiVersion: 'v1',
+                  role: 'referenced',
+                }),
+                expect.objectContaining({
+                  kind: 'Pod',
+                  name: 'web-0',
+                  id: 'pod-1',
+                  clusterId: 'cluster-a',
+                  apiVersion: 'v1',
+                  role: 'consumer',
+                }),
+              ]),
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it('loads live Kubernetes events for detail drawer', async () => {
+    const listNamespacedEvent = jest.fn().mockResolvedValue({
+      items: [
+        {
+          metadata: {
+            name: 'web.older',
+            namespace: 'default',
+            uid: 'event-older',
+            creationTimestamp: '2026-04-16T10:00:00.000Z',
+          },
+          involvedObject: {
+            kind: 'Pod',
+            namespace: 'default',
+            name: 'web-0',
+            fieldPath: 'spec.containers{app}',
+            uid: 'pod-uid',
+          },
+          type: 'Normal',
+          reason: 'Pulled',
+          message: 'Successfully pulled image',
+          count: 1,
+          firstTimestamp: '2026-04-16T10:00:00.000Z',
+          lastTimestamp: '2026-04-16T10:00:00.000Z',
+          source: { component: 'kubelet', host: 'worker-a' },
+        },
+        {
+          metadata: {
+            name: 'web.newer',
+            namespace: 'default',
+            uid: 'event-newer',
+            creationTimestamp: '2026-04-16T10:05:00.000Z',
+          },
+          involvedObject: {
+            kind: 'Pod',
+            namespace: 'default',
+            name: 'web-0',
+          },
+          type: 'Warning',
+          reason: 'BackOff',
+          message: 'Back-off restarting failed container',
+          count: 3,
+          lastTimestamp: '2026-04-16T10:05:00.000Z',
+          reportingComponent: 'kubelet',
+          reportingInstance: 'worker-a',
+        },
+      ],
+    });
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'pod-1',
+          clusterId: 'cluster-a',
+          namespace: 'default',
+          kind: 'Pod',
+          name: 'web-0',
+          state: 'running',
+          spec: { containers: [{ name: 'app', image: 'nginx:1.27' }] },
+          statusJson: { phase: 'Running' },
+          labels: null,
+          annotations: null,
+          replicas: null,
+          readyReplicas: null,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    };
+
+    const service = buildService(prisma, {
+      clustersService: {
+        getKubeconfig: jest.fn().mockResolvedValue('kubeconfig-a'),
+      },
+      k8sClientService: {
+        getCoreApi: jest.fn().mockReturnValue({ listNamespacedEvent }),
+      },
+    });
+    const detail = await service.getDetail('pod', 'pod-1');
+
+    expect(listNamespacedEvent).toHaveBeenCalledWith({
+      namespace: 'default',
+      fieldSelector:
+        'involvedObject.kind=Pod,involvedObject.name=web-0,involvedObject.namespace=default',
+      limit: 30,
+    });
+    expect(detail.events.items[0]).toEqual(
+      expect.objectContaining({
+        id: 'event-newer',
+        type: 'Warning',
+        reason: 'BackOff',
+        message: 'Back-off restarting failed container',
+        count: 3,
+        lastTimestamp: '2026-04-16T10:05:00.000Z',
+        source: 'kubelet',
+        reportingInstance: 'worker-a',
+        involvedObject: {
+          kind: 'Pod',
+          name: 'web-0',
+          namespace: 'default',
+        },
+      }),
+    );
+    expect(detail.events.items[1]).toEqual(
+      expect.objectContaining({
+        id: 'event-older',
+        type: 'Normal',
+        reason: 'Pulled',
+        source: 'kubelet',
+        sourceHost: 'worker-a',
+        involvedObject: {
+          kind: 'Pod',
+          name: 'web-0',
+          namespace: 'default',
+          fieldPath: 'spec.containers{app}',
+          uid: 'pod-uid',
+        },
+      }),
+    );
   });
 });
 

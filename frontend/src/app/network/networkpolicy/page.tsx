@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Card, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -21,6 +22,7 @@ import { useAntdTableSortPagination } from "@/lib/table";
 import { createNetworkResource, deleteNetworkResource, getNetworkResources, type CreateNetworkResourcePayload, type NetworkResource } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 type NetworkPolicyResource = NetworkResource & {
   spec?: {
@@ -43,13 +45,16 @@ interface NetworkPolicyFormValues {
 }
 
 export default function NetworkPolicyPage() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
-    useClusterNamespaceFilter();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -192,6 +197,12 @@ export default function NetworkPolicyPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/network/networkpolicy",
+  });
 
   const columns: ColumnsType<NetworkPolicyResource> = [
     {

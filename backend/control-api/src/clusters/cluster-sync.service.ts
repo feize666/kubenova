@@ -30,6 +30,7 @@ export interface SyncResult {
     ingressRoutes: number;
     configmaps: number;
     secrets: number;
+    serviceaccounts: number;
     pvs: number;
     pvcs: number;
     storageclasses: number;
@@ -104,6 +105,7 @@ export class ClusterSyncService {
       ingressRoutes: 0,
       configmaps: 0,
       secrets: 0,
+      serviceaccounts: 0,
       pvs: 0,
       pvcs: 0,
       storageclasses: 0,
@@ -176,6 +178,13 @@ export class ClusterSyncService {
 
     // ── 同步 Secrets（只同步 key，不同步 value）─────────────────
     counts.secrets = await this.syncSecrets(clusterId, coreApi, errors);
+
+    // ── 同步 ServiceAccounts（供详情关系导航定位）───────────────
+    counts.serviceaccounts = await this.syncServiceAccounts(
+      clusterId,
+      coreApi,
+      errors,
+    );
 
     // ── 同步 PV / PVC / StorageClass ────────────────────────────
     counts.pvs = await this.syncPersistentVolumes(clusterId, coreApi, errors);
@@ -646,6 +655,7 @@ export class ClusterSyncService {
               string,
               string
             >,
+            spec: toJson(pod.spec ?? {}),
             statusJson: toJson({
               phase,
               podIP: pod.status?.podIP ?? null,
@@ -669,6 +679,7 @@ export class ClusterSyncService {
               string,
               string
             >,
+            spec: toJson(pod.spec ?? {}),
             statusJson: toJson({
               phase,
               podIP: pod.status?.podIP ?? null,
@@ -1310,11 +1321,7 @@ export class ClusterSyncService {
             name,
             state: 'active',
             labels: (svc.metadata?.labels ?? {}) as Record<string, string>,
-            spec: toJson({
-              type: svc.spec?.type,
-              clusterIP: svc.spec?.clusterIP,
-              ports: svc.spec?.ports,
-            }),
+            spec: toJson(svc.spec ?? {}),
             statusJson: toJson({
               loadBalancer: svc.status?.loadBalancer,
               creationTimestamp: createdAt,
@@ -1323,11 +1330,7 @@ export class ClusterSyncService {
           update: {
             state: 'active',
             labels: (svc.metadata?.labels ?? {}) as Record<string, string>,
-            spec: toJson({
-              type: svc.spec?.type,
-              clusterIP: svc.spec?.clusterIP,
-              ports: svc.spec?.ports,
-            }),
+            spec: toJson(svc.spec ?? {}),
             statusJson: toJson({
               loadBalancer: svc.status?.loadBalancer,
               creationTimestamp: createdAt,
@@ -1875,6 +1878,81 @@ export class ClusterSyncService {
     }
   }
 
+  private async syncServiceAccounts(
+    clusterId: string,
+    coreApi: k8s.CoreV1Api,
+    errors: string[],
+  ): Promise<number> {
+    try {
+      const resp = await coreApi.listServiceAccountForAllNamespaces();
+      const items = resp.items;
+      const liveKeys = new Set<string>();
+
+      for (const serviceAccount of items) {
+        const namespace = serviceAccount.metadata?.namespace ?? '';
+        const name = serviceAccount.metadata?.name ?? '';
+        if (!namespace || !name) continue;
+        liveKeys.add(`${namespace}/${name}`);
+
+        const secretNames = (serviceAccount.secrets ?? [])
+          .map((secret) => secret.name)
+          .filter((secretName): secretName is string => Boolean(secretName));
+        const imagePullSecretNames = (serviceAccount.imagePullSecrets ?? [])
+          .map((secret) => secret.name)
+          .filter((secretName): secretName is string => Boolean(secretName));
+        const dataKeys = [
+          ...secretNames.map((secretName) => `secret:${secretName}`),
+          ...imagePullSecretNames.map(
+            (secretName) => `imagePullSecret:${secretName}`,
+          ),
+        ];
+
+        await this.prisma.configResource.upsert({
+          where: {
+            clusterId_namespace_kind_name: {
+              clusterId,
+              namespace,
+              kind: 'ServiceAccount',
+              name,
+            },
+          },
+          create: {
+            clusterId,
+            namespace,
+            kind: 'ServiceAccount',
+            name,
+            state: 'active',
+            dataKeys,
+            labels: (serviceAccount.metadata?.labels ?? {}) as Record<
+              string,
+              string
+            >,
+          },
+          update: {
+            state: 'active',
+            dataKeys,
+            labels: (serviceAccount.metadata?.labels ?? {}) as Record<
+              string,
+              string
+            >,
+          },
+        });
+      }
+
+      await this.markDeletedConfigResources(
+        clusterId,
+        'ServiceAccount',
+        liveKeys,
+      );
+      return liveKeys.size;
+    } catch (err) {
+      const msg = `ServiceAccounts sync failed: ${(err as Error).message}`;
+      this.logger.error(msg);
+      errors.push(msg);
+      return 0;
+    }
+  }
+
   private async syncPersistentVolumes(
     clusterId: string,
     coreApi: k8s.CoreV1Api,
@@ -1909,10 +1987,7 @@ export class ClusterSyncService {
             accessModes: toJson(pv.spec?.accessModes ?? []),
             storageClass: pv.spec?.storageClassName ?? null,
             bindingMode: pv.status?.phase ?? null,
-            spec: toJson({
-              reclaimPolicy: pv.spec?.persistentVolumeReclaimPolicy,
-              volumeMode: pv.spec?.volumeMode,
-            }),
+            spec: toJson(pv.spec ?? {}),
             statusJson: toJson({
               phase: pv.status?.phase,
               creationTimestamp: createdAt,
@@ -1924,10 +1999,7 @@ export class ClusterSyncService {
             accessModes: toJson(pv.spec?.accessModes ?? []),
             storageClass: pv.spec?.storageClassName ?? null,
             bindingMode: pv.status?.phase ?? null,
-            spec: toJson({
-              reclaimPolicy: pv.spec?.persistentVolumeReclaimPolicy,
-              volumeMode: pv.spec?.volumeMode,
-            }),
+            spec: toJson(pv.spec ?? {}),
             statusJson: toJson({
               phase: pv.status?.phase,
               creationTimestamp: createdAt,
@@ -1982,12 +2054,11 @@ export class ClusterSyncService {
             accessModes: toJson(pvc.spec?.accessModes ?? []),
             storageClass: pvc.spec?.storageClassName ?? null,
             bindingMode: pvc.status?.phase ?? null,
-            spec: toJson({
-              volumeName: pvc.spec?.volumeName,
-              volumeMode: pvc.spec?.volumeMode,
-            }),
+            spec: toJson(pvc.spec ?? {}),
             statusJson: toJson({
               phase: pvc.status?.phase,
+              capacity: pvc.status?.capacity ?? {},
+              accessModes: pvc.status?.accessModes ?? pvc.spec?.accessModes ?? [],
               creationTimestamp: createdAt,
             }),
           },
@@ -1998,12 +2069,11 @@ export class ClusterSyncService {
             accessModes: toJson(pvc.spec?.accessModes ?? []),
             storageClass: pvc.spec?.storageClassName ?? null,
             bindingMode: pvc.status?.phase ?? null,
-            spec: toJson({
-              volumeName: pvc.spec?.volumeName,
-              volumeMode: pvc.spec?.volumeMode,
-            }),
+            spec: toJson(pvc.spec ?? {}),
             statusJson: toJson({
               phase: pvc.status?.phase,
+              capacity: pvc.status?.capacity ?? {},
+              accessModes: pvc.status?.accessModes ?? pvc.spec?.accessModes ?? [],
               creationTimestamp: createdAt,
             }),
           },
@@ -2058,6 +2128,9 @@ export class ClusterSyncService {
               provisioner: sc.provisioner,
               reclaimPolicy: sc.reclaimPolicy,
               allowVolumeExpansion: sc.allowVolumeExpansion ?? false,
+              parameters: sc.parameters ?? {},
+              mountOptions: sc.mountOptions ?? [],
+              volumeBindingMode: sc.volumeBindingMode,
             }),
             statusJson: toJson({
               isDefault:
@@ -2078,6 +2151,9 @@ export class ClusterSyncService {
               provisioner: sc.provisioner,
               reclaimPolicy: sc.reclaimPolicy,
               allowVolumeExpansion: sc.allowVolumeExpansion ?? false,
+              parameters: sc.parameters ?? {},
+              mountOptions: sc.mountOptions ?? [],
+              volumeBindingMode: sc.volumeBindingMode,
             }),
             statusJson: toJson({
               isDefault:

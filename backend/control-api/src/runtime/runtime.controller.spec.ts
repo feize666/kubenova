@@ -1,4 +1,7 @@
 import { PATH_METADATA } from '@nestjs/common/constants';
+
+jest.mock('@kubernetes/client-node', () => ({}));
+
 import { RuntimeController } from './runtime.controller';
 
 describe('RuntimeController', () => {

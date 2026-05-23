@@ -4,26 +4,20 @@ import { ClusterHealthSchedulerService } from './cluster-health-scheduler.servic
 
 describe('ClusterHealthSchedulerService', () => {
   it('probes active clusters with kubeconfig in cycle', async () => {
-    const clustersService = {
-      list: jest.fn().mockResolvedValue({
-        items: [
-          { id: 'a', state: 'active', hasKubeconfig: true },
-          { id: 'b', state: 'active', hasKubeconfig: false },
-          { id: 'c', state: 'disabled', hasKubeconfig: true },
-        ],
-      }),
-    } as any;
     const clusterHealthService = {
+      listClustersNeedingBackgroundProbe: jest.fn().mockResolvedValue(['a']),
       probeCluster: jest.fn().mockResolvedValue(null),
     } as any;
 
     const service = new ClusterHealthSchedulerService(
-      clustersService,
       clusterHealthService,
     ) as any;
 
     await service.runCycle('interval');
 
+    expect(
+      clusterHealthService.listClustersNeedingBackgroundProbe,
+    ).toHaveBeenCalledWith(10 * 60_000);
     expect(clusterHealthService.probeCluster).toHaveBeenCalledTimes(1);
     expect(clusterHealthService.probeCluster).toHaveBeenCalledWith('a', {
       source: 'auto',

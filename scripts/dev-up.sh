@@ -23,6 +23,8 @@ RUNTIME_GATEWAY_GOPROXY="${RUNTIME_GATEWAY_GOPROXY:-https://goproxy.cn,direct}"
 START_GATEWAY="${START_GATEWAY:-true}"
 USE_TMUX="${USE_TMUX:-false}"
 FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-dev}"
+FRONTEND_DEV_BUNDLER="${FRONTEND_DEV_BUNDLER:-webpack}"
+FRONTEND_NODE_OPTIONS="${FRONTEND_NODE_OPTIONS:---max-old-space-size=1536}"
 RUNTIME_GATEWAY_DEPS_STAMP="$CACHE_DIR/runtime-gateway-go-mod.download.stamp"
 
 stream_match() {
@@ -47,6 +49,25 @@ service_health_url() {
 service_session_name() {
   local name="$1"
   echo "aiops-${name}"
+}
+
+service_pid_file() {
+  local name="$1"
+  if [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" && "$USE_TMUX" != "true" ]]; then
+    echo "$RUN_DIR/${name}.supervisor.pid"
+  else
+    echo "$RUN_DIR/${name}.pid"
+  fi
+}
+
+service_child_pid_file() {
+  local name="$1"
+  echo "$RUN_DIR/${name}.pid"
+}
+
+service_uses_supervisor() {
+  local name="$1"
+  [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" && "$USE_TMUX" != "true" ]]
 }
 
 tmux_session_exists() {
@@ -117,6 +138,16 @@ prepare_frontend_deps() {
 clean_frontend_dev_cache() {
   if [[ "$FRONTEND_BOOT_MODE" != "dev" ]]; then
     return
+  fi
+
+  local bound_pid bound_cmdline
+  bound_pid="$(fuser -n tcp "$FRONTEND_PORT" 2>/dev/null | awk '{print $1}' || true)"
+  if [[ -n "$bound_pid" ]]; then
+    bound_cmdline="$(ps -p "$bound_pid" -o args= 2>/dev/null || true)"
+    if [[ "$bound_cmdline" == *"next-server"* || "$bound_cmdline" == *"next/dist/bin/next dev"* ]]; then
+      echo "[预检] 前端正在运行，跳过 dev 缓存清理"
+      return
+    fi
   fi
 
   local log_file="$LOG_DIR/frontend.log"
@@ -265,6 +296,64 @@ wait_for_port_free() {
   return 1
 }
 
+terminate_pid() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 0
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  sleep 1
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 -- "-$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+  fi
+}
+
+cleanup_orphan_processes() {
+  local name="$1" port="$2"
+  local pid_file
+  pid_file="$(service_pid_file "$name")"
+
+  if [[ -f "$pid_file" ]] && [[ -n "$(cat "$pid_file" 2>/dev/null || true)" ]]; then
+    return
+  fi
+
+  local bound_pid
+  bound_pid="$(listener_pid "$port" || true)"
+  if [[ -n "$bound_pid" ]]; then
+    return
+  fi
+
+  local pids=()
+  case "$name" in
+    frontend)
+      mapfile -t pids < <(pgrep -f "$FRONTEND_DIR/.next/standalone/server.js|$FRONTEND_DIR/node_modules/next/dist/bin/next dev|dev-supervise.sh frontend" 2>/dev/null || true)
+      ;;
+    control-api)
+      mapfile -t pids < <(pgrep -f "$CONTROL_API_DIR/node_modules/.bin/nest start --watch|cd $CONTROL_API_DIR|$CONTROL_API_DIR/dist/src/main" 2>/dev/null || true)
+      ;;
+    runtime-gateway)
+      mapfile -t pids < <(pgrep -f "$RUNTIME_GATEWAY_DIR|cmd/runtime-gateway|runtime-gateway" 2>/dev/null || true)
+      ;;
+  esac
+
+  for pid in "${pids[@]}"; do
+    [[ "$pid" != "$$" ]] || continue
+    if [[ "$name" == "frontend" ]] && ! is_frontend_process "$pid"; then
+      continue
+    fi
+    if [[ "$name" == "control-api" ]] && ! is_control_api_process "$pid"; then
+      continue
+    fi
+    if [[ "$name" == "runtime-gateway" ]] && ! is_runtime_gateway_process "$pid"; then
+      continue
+    fi
+    echo "[$name] 清理无端口监听的残留进程 pid=$pid"
+    terminate_pid "$pid"
+  done
+}
+
 resolve_managed_pid() {
   local name="$1" port="$2" fallback_pid="${3:-}"
   local bound_pid
@@ -319,7 +408,7 @@ is_frontend_process() {
   local pid="$1"
   local cmdline
   cmdline="$(process_cmdline "$pid")"
-  [[ "$cmdline" == *"next-server"* || "$cmdline" == *"frontend/.next/standalone/server.js"* || "$cmdline" == *"next/dist/bin/next start"* || "$cmdline" == *"next/dist/bin/next dev"* ]]
+  [[ "$cmdline" == *"dev-supervise.sh frontend"* || "$cmdline" == *"next-server"* || "$cmdline" == *"frontend/.next/standalone/server.js"* || "$cmdline" == *"next/dist/bin/next start"* || "$cmdline" == *"next/dist/bin/next dev"* ]]
 }
 
 is_frontend_standalone_process() {
@@ -388,12 +477,17 @@ start_if_not_running() {
   local workdir="$2"
   local port="$3"
   local cmd="$4"
-  local pid_file="$RUN_DIR/${name}.pid"
+  local pid_file
+  pid_file="$(service_pid_file "$name")"
+  local child_pid_file
+  child_pid_file="$(service_child_pid_file "$name")"
   local log_file="$LOG_DIR/${name}.log"
   local session_name
   session_name="$(service_session_name "$name")"
   local health_url
   health_url="$(service_health_url "$name" "$port")"
+
+  cleanup_orphan_processes "$name" "$port"
 
   if [[ -f "$pid_file" ]]; then
     local pid
@@ -408,11 +502,8 @@ start_if_not_running() {
         return
       fi
       echo "[$name] pid=$pid 仍在，但健康检查失败，正在重启..."
-      kill "$pid" || true
-      sleep 1
-      if kill -0 "$pid" 2>/dev/null; then
-        kill -9 "$pid" || true
-      fi
+      terminate_pid "$pid"
+      rm -f "$child_pid_file"
       wait_for_port_free "$port" 10 || true
     fi
     rm -f "$pid_file"
@@ -454,35 +545,26 @@ start_if_not_running() {
         return
       fi
       echo "[$name] runtime-gateway(pid=$bound_pid) 健康异常，正在以受管模式重启..."
-      kill "$bound_pid" || true
-      sleep 1
-      if kill -0 "$bound_pid" 2>/dev/null; then
-        kill -9 "$bound_pid" || true
-      fi
+      terminate_pid "$bound_pid"
     elif [[ "$name" == "frontend" ]] && is_frontend_process "$bound_pid"; then
       if [[ "$FRONTEND_BOOT_MODE" == "dev" ]] && is_frontend_standalone_process "$bound_pid"; then
         echo "[$name] 端口 $port 上存在旧前端(pid=$bound_pid)，当前以 dev 模式启动，准备重启为源码直跑。"
-        kill "$bound_pid" || true
-        sleep 1
-        if kill -0 "$bound_pid" 2>/dev/null; then
-          kill -9 "$bound_pid" || true
-        fi
+        terminate_pid "$bound_pid"
         wait_for_port_free "$port" 10 || true
       elif [[ -n "$health_url" ]] && is_healthy "$health_url"; then
         echo "[$name] 端口 $port 已由前端(pid=$bound_pid)提供服务，接管为受管进程。"
+        echo "$bound_pid" >"$child_pid_file"
         echo "$bound_pid" >"$pid_file"
         return
       elif service_is_starting "$bound_pid" "$port"; then
         echo "[$name] 启动中（pid=$bound_pid, 端口=$port）"
+        echo "$bound_pid" >"$child_pid_file"
         echo "$bound_pid" >"$pid_file"
         return
       else
         echo "[$name] 前端(pid=$bound_pid) 健康异常，正在以受管模式重启..."
-        kill "$bound_pid" || true
-        sleep 1
-        if kill -0 "$bound_pid" 2>/dev/null; then
-          kill -9 "$bound_pid" || true
-        fi
+        terminate_pid "$bound_pid"
+        rm -f "$child_pid_file"
         wait_for_port_free "$port" 10 || true
       fi
     elif [[ "$name" == "control-api" ]] && is_control_api_process "$bound_pid"; then
@@ -492,11 +574,7 @@ start_if_not_running() {
         return
       fi
       echo "[$name] 端口 $port 上存在旧 control-api(pid=$bound_pid)，准备重启为 watch 模式。"
-      kill "$bound_pid" || true
-      sleep 1
-      if kill -0 "$bound_pid" 2>/dev/null; then
-        kill -9 "$bound_pid" || true
-      fi
+      terminate_pid "$bound_pid"
       wait_for_port_free "$port" 10 || true
     else
       echo "[$name] 端口 $port 被 pid=$bound_pid 占用，且不受本脚本管理。"
@@ -517,17 +595,20 @@ start_if_not_running() {
   else
     (
       cd "$workdir"
+      local launch_cmd="$cmd"
+      if [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" ]]; then
+        launch_cmd="$ROOT_DIR/scripts/dev-supervise.sh frontend $(printf '%q' "$child_pid_file") $(printf '%q' "$cmd")"
+      fi
       if command -v setsid >/dev/null 2>&1; then
-        setsid bash -lc "$cmd" >"$log_file" 2>&1 < /dev/null &
+        setsid bash -lc "$launch_cmd" >"$log_file" 2>&1 < /dev/null &
       else
-        nohup bash -lc "$cmd" >"$log_file" 2>&1 < /dev/null &
+        nohup bash -lc "$launch_cmd" >"$log_file" 2>&1 < /dev/null &
       fi
       echo $! >"$pid_file"
     )
   fi
 
   sleep 2
-  wait_for_port_free "$port" 10 || true
   local new_pid raw_pid
   raw_pid=""
   if [[ -f "$pid_file" ]]; then
@@ -538,26 +619,35 @@ start_if_not_running() {
 
   if wait_for_health "$health_url" "$health_timeout"; then
     new_pid="$(resolve_managed_pid "$name" "$port" "$raw_pid")"
-    if [[ -n "$new_pid" ]]; then
+    if service_uses_supervisor "$name"; then
+      if [[ -n "$raw_pid" ]]; then
+        echo "$raw_pid" >"$pid_file"
+      fi
+      if [[ -n "$new_pid" ]]; then
+        echo "$new_pid" >"$child_pid_file"
+      fi
+    elif [[ -n "$new_pid" ]]; then
       echo "$new_pid" >"$pid_file"
     fi
     if [[ "$USE_TMUX" == "true" ]] && command -v tmux >/dev/null 2>&1; then
       echo "[$name] 已启动（pid=${new_pid:-unknown}, 会话=$session_name, 端口=$port, 日志=$log_file）"
     else
-      echo "[$name] 已启动（pid=${new_pid:-unknown}, 端口=$port, 日志=$log_file）"
+      if service_uses_supervisor "$name"; then
+        echo "[$name] 已启动（supervisor=${raw_pid:-unknown}, pid=${new_pid:-unknown}, 端口=$port, 日志=$log_file）"
+      else
+        echo "[$name] 已启动（pid=${new_pid:-unknown}, 端口=$port, 日志=$log_file）"
+      fi
     fi
     return
   fi
 
   new_pid="$(resolve_managed_pid "$name" "$port" "$raw_pid")"
   echo "[$name] 健康检查失败：${health_url:-N/A}（等待 ${health_timeout}s）"
-  if [[ -n "$new_pid" ]] && kill -0 "$new_pid" 2>/dev/null; then
-    kill "$new_pid" || true
-    sleep 1
-    if kill -0 "$new_pid" 2>/dev/null; then
-      kill -9 "$new_pid" || true
-    fi
+  terminate_pid "$raw_pid"
+  if [[ "$new_pid" != "$raw_pid" ]]; then
+    terminate_pid "$new_pid"
   fi
+  rm -f "$child_pid_file"
   if [[ "$USE_TMUX" == "true" ]] && command -v tmux >/dev/null 2>&1 && tmux_session_exists "$session_name"; then
     tmux kill-session -t "$session_name" 2>/dev/null || true
   fi
@@ -571,9 +661,15 @@ start_if_not_running "frontend" \
   "$FRONTEND_DIR" \
   "$FRONTEND_PORT" \
   "$(if [[ "$FRONTEND_BOOT_MODE" == "dev" ]]; then
-      printf '%s' "node --max-old-space-size=1536 ./node_modules/next/dist/bin/next dev --hostname 0.0.0.0 --port $FRONTEND_PORT"
+      bundler_flag=""
+      if [[ "$FRONTEND_DEV_BUNDLER" == "webpack" ]]; then
+        bundler_flag=" --webpack"
+      elif [[ "$FRONTEND_DEV_BUNDLER" == "turbopack" ]]; then
+        bundler_flag=" --turbopack"
+      fi
+      printf '%s' "NODE_OPTIONS='$FRONTEND_NODE_OPTIONS' ./node_modules/next/dist/bin/next dev --hostname 0.0.0.0 --port $FRONTEND_PORT$bundler_flag"
     else
-      printf '%s' "PORT=$FRONTEND_PORT HOSTNAME=0.0.0.0 node --max-old-space-size=1536 .next/standalone/server.js"
+      printf '%s' "PORT=$FRONTEND_PORT HOSTNAME=0.0.0.0 NODE_OPTIONS='$FRONTEND_NODE_OPTIONS' node .next/standalone/server.js"
     fi)"
 
 start_if_not_running "control-api" \

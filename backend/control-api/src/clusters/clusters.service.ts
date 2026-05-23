@@ -756,37 +756,39 @@ export class ClustersService implements OnModuleInit {
     const rbacApi = this.k8sClientService.getRbacAuthorizationApi(kubeconfig);
     const clusterRoleName = ClustersService.EXPORT_CLUSTER_ROLE_NAME;
     try {
-      await rbacApi.readClusterRole(clusterRoleName);
+      await rbacApi.readClusterRole({ name: clusterRoleName });
     } catch {
       await rbacApi.createClusterRole({
-        metadata: { name: clusterRoleName },
-        rules: [
-          {
-            apiGroups: [''],
-            resources: ['namespaces', 'nodes', 'pods', 'services', 'endpoints'],
-            verbs: ['get', 'list', 'watch'],
-          },
-          {
-            apiGroups: ['apps'],
-            resources: ['deployments', 'statefulsets', 'daemonsets', 'replicasets'],
-            verbs: ['get', 'list', 'watch'],
-          },
-          {
-            apiGroups: ['batch'],
-            resources: ['jobs', 'cronjobs'],
-            verbs: ['get', 'list', 'watch'],
-          },
-          {
-            apiGroups: ['networking.k8s.io'],
-            resources: ['ingresses', 'networkpolicies'],
-            verbs: ['get', 'list', 'watch'],
-          },
-          {
-            apiGroups: ['storage.k8s.io'],
-            resources: ['storageclasses'],
-            verbs: ['get', 'list', 'watch'],
-          },
-        ],
+        body: {
+          metadata: { name: clusterRoleName },
+          rules: [
+            {
+              apiGroups: [''],
+              resources: ['namespaces', 'nodes', 'pods', 'services', 'endpoints'],
+              verbs: ['get', 'list', 'watch'],
+            },
+            {
+              apiGroups: ['apps'],
+              resources: ['deployments', 'statefulsets', 'daemonsets', 'replicasets'],
+              verbs: ['get', 'list', 'watch'],
+            },
+            {
+              apiGroups: ['batch'],
+              resources: ['jobs', 'cronjobs'],
+              verbs: ['get', 'list', 'watch'],
+            },
+            {
+              apiGroups: ['networking.k8s.io'],
+              resources: ['ingresses', 'networkpolicies'],
+              verbs: ['get', 'list', 'watch'],
+            },
+            {
+              apiGroups: ['storage.k8s.io'],
+              resources: ['storageclasses'],
+              verbs: ['get', 'list', 'watch'],
+            },
+          ],
+        },
       });
     }
   }
@@ -801,30 +803,38 @@ export class ClustersService implements OnModuleInit {
     const bindingName = `${serviceAccountName}-binding`;
 
     try {
-      await coreApi.readNamespacedServiceAccount(serviceAccountName, namespace);
+      await coreApi.readNamespacedServiceAccount({
+        name: serviceAccountName,
+        namespace,
+      });
     } catch {
-      await coreApi.createNamespacedServiceAccount(namespace, {
-        metadata: { name: serviceAccountName },
+      await coreApi.createNamespacedServiceAccount({
+        namespace,
+        body: {
+          metadata: { name: serviceAccountName },
+        },
       });
     }
 
     try {
-      await rbacApi.readClusterRoleBinding(bindingName);
+      await rbacApi.readClusterRoleBinding({ name: bindingName });
     } catch {
       await rbacApi.createClusterRoleBinding({
-        metadata: { name: bindingName },
-        roleRef: {
-          apiGroup: 'rbac.authorization.k8s.io',
-          kind: 'ClusterRole',
-          name: ClustersService.EXPORT_CLUSTER_ROLE_NAME,
-        },
-        subjects: [
-          {
-            kind: 'ServiceAccount',
-            name: serviceAccountName,
-            namespace,
+        body: {
+          metadata: { name: bindingName },
+          roleRef: {
+            apiGroup: 'rbac.authorization.k8s.io',
+            kind: 'ClusterRole',
+            name: ClustersService.EXPORT_CLUSTER_ROLE_NAME,
           },
-        ],
+          subjects: [
+            {
+              kind: 'ServiceAccount',
+              name: serviceAccountName,
+              namespace,
+            },
+          ],
+        },
       });
     }
   }
@@ -840,16 +850,17 @@ export class ClustersService implements OnModuleInit {
     };
   }> {
     const coreApi = this.k8sClientService.getCoreApi(kubeconfig);
-    return coreApi.createNamespacedServiceAccountToken(
-      serviceAccountName,
+    return coreApi.createNamespacedServiceAccountToken({
+      name: serviceAccountName,
       namespace,
-      {
+      body: {
         spec: {
+          audiences: ['api'],
           expirationSeconds:
             ClustersService.EXPORT_TOKEN_EXPIRATION_SECONDS,
         },
       },
-    ) as Promise<{
+    }) as Promise<{
       status?: {
         token?: string;
         expirationTimestamp?: string;

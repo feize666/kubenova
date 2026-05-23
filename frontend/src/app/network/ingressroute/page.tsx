@@ -15,8 +15,8 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
   matchLabelExpressions,
@@ -42,6 +42,7 @@ import {
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 type IngressRouteResource = NetworkResource & {
   spec?: {
@@ -72,13 +73,13 @@ interface IngressRouteFormValues {
 
 export default function IngressRoutePage() {
   const { accessToken, isInitializing } = useAuth();
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
-    useClusterNamespaceFilter(searchParams.get("cluster") ?? "", searchParams.get("namespace") ?? "");
-  const initialKeyword = searchParams.get("keyword") ?? "";
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
@@ -98,16 +99,12 @@ export default function IngressRoutePage() {
     defaultPageSize: 10,
   });
 
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (clusterId.trim()) params.set("cluster", clusterId.trim());
-    if (namespace.trim()) params.set("namespace", namespace.trim());
-    if (keyword.trim()) params.set("keyword", keyword.trim());
-    const query = params.toString();
-    router.replace(query ? `/network/ingressroute?${query}` : "/network/ingressroute", {
-      scroll: false,
-    });
-  }, [clusterId, keyword, namespace, router]);
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/network/ingressroute",
+  });
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [

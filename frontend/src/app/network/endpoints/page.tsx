@@ -16,6 +16,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -42,6 +43,7 @@ import {
 } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 type EndpointAddress = {
   ip?: string;
@@ -143,13 +145,16 @@ function listPortPreview(resource: EndpointsResource) {
 }
 
 export default function EndpointsPage() {
+  const searchParams = useSearchParams();
+  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
+    readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
-    useClusterNamespaceFilter();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -274,6 +279,12 @@ export default function EndpointsPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  useSyncResourceFilterUrlState({
+    clusterId,
+    namespace,
+    keyword,
+    path: "/network/endpoints",
+  });
 
   const handleModalSubmit = async () => {
     let values: EndpointsFormValues;
@@ -345,7 +356,7 @@ export default function EndpointsPage() {
       width: TABLE_COL_WIDTH.release,
       render: (_: unknown, row: EndpointsResource) => (
         <Link href={`/network/services?namespace=${encodeURIComponent(row.namespace)}&keyword=${encodeURIComponent(row.name)}`}>
-          <Typography.Link>{row.name}</Typography.Link>
+          <Typography.Text style={{ color: "var(--ant-color-link)", cursor: "pointer" }}>{row.name}</Typography.Text>
         </Link>
       ),
     },

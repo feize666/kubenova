@@ -35,7 +35,7 @@ export function buildResourceTableColumns<T>(
   return columns;
 }
 
-export function buildResourceTableOrder<T>(
+export function buildResourceTableOrder(
   columns: Array<{ key?: string } | null | undefined>,
 ): StandardColumnKey[] {
   const keys = columns

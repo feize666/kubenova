@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   App,
+  Button,
   Card,
   Dropdown,
   Form,
@@ -215,6 +216,15 @@ export default function NamespacesPage() {
       dataIndex: "namespace",
       key: "namespace",
       width: getAdaptiveNameWidth(namespacesQuery.data?.items?.map((item) => item.namespace) ?? []),
+      render: (value: string, row) => (
+        <Button
+          type="link"
+          className="resource-name-link"
+          onClick={() => setDetailTarget({ kind: "Namespace", id: row.id })}
+        >
+          {value}
+        </Button>
+      ),
       ...getSortableColumnProps("namespace", namespacesQuery.isLoading && !namespacesQuery.data),
     },
     {
@@ -351,6 +361,7 @@ export default function NamespacesPage() {
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
         token={accessToken || undefined}
       />
 

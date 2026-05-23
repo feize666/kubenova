@@ -7,6 +7,7 @@ import {
   Alert,
   Button,
   Card,
+  DatePicker,
   Input,
   Popover,
   Select,
@@ -18,6 +19,7 @@ import {
   theme,
 } from "antd";
 import {
+  DownOutlined,
   ArrowLeftOutlined,
   ClearOutlined,
   DownloadOutlined,
@@ -27,6 +29,8 @@ import {
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import dayjs from "dayjs";
+import type { Dayjs } from "dayjs";
 import { useAuth } from "@/components/auth-context";
 import {
   createLogsStreamSession,
@@ -45,6 +49,11 @@ import {
 import { buildGatewayWsCandidates, sanitizeSensitiveMessage } from "@/lib/ws/terminal";
 
 type SeverityFilter = "INFO" | "WARN" | "ERROR";
+type TimeMode = "quick" | "relative" | "absolute" | "recent";
+type TimeUnit = "s" | "m" | "h" | "d";
+
+const { RangePicker } = DatePicker;
+const LOG_TIME_FORMAT = "YYYY-MM-DD HH:mm:ss";
 
 const TAIL_OPTIONS: Array<{ label: string; value: number }> = [
   { label: "100", value: 100 },
@@ -54,11 +63,44 @@ const TAIL_OPTIONS: Array<{ label: string; value: number }> = [
   { label: "全部", value: -1 },
 ];
 
-const HISTORY_RANGE_OPTIONS: Array<{ label: string; value: number }> = [
-  { label: "15m", value: 15 * 60 },
-  { label: "1h", value: 60 * 60 },
-  { label: "6h", value: 6 * 60 * 60 },
-  { label: "24h", value: 24 * 60 * 60 },
+const QUICK_TIME_OPTIONS: Array<{ label: string; from: string; seconds: number }> = [
+  { label: "最近 15 分钟", from: "now-15m", seconds: 15 * 60 },
+  { label: "最近 1 小时", from: "now-1h", seconds: 60 * 60 },
+  { label: "最近 6 小时", from: "now-6h", seconds: 6 * 60 * 60 },
+  { label: "最近 24 小时", from: "now-24h", seconds: 24 * 60 * 60 },
+];
+
+const RECENT_TIME_OPTIONS: Array<{ label: string; from: string; seconds: number }> = [
+  { label: "最近 5 分钟", from: "now-5m", seconds: 5 * 60 },
+  { label: "最近 15 分钟", from: "now-15m", seconds: 15 * 60 },
+  { label: "最近 30 分钟", from: "now-30m", seconds: 30 * 60 },
+  { label: "最近 1 小时", from: "now-1h", seconds: 60 * 60 },
+  { label: "最近 4 小时", from: "now-4h", seconds: 4 * 60 * 60 },
+  { label: "最近 12 小时", from: "now-12h", seconds: 12 * 60 * 60 },
+  { label: "最近 24 小时", from: "now-24h", seconds: 24 * 60 * 60 },
+];
+
+const TIME_MODE_OPTIONS: Array<{ label: string; value: TimeMode }> = [
+  { label: "快捷", value: "quick" },
+  { label: "相对时间", value: "relative" },
+  { label: "绝对时间", value: "absolute" },
+  { label: "最近使用", value: "recent" },
+];
+
+const TIME_UNIT_OPTIONS: Array<{ label: string; value: TimeUnit }> = [
+  { label: "秒前", value: "s" },
+  { label: "分钟前", value: "m" },
+  { label: "小时前", value: "h" },
+  { label: "天前", value: "d" },
+];
+
+const REFRESH_INTERVAL_OPTIONS: Array<{ label: string; value: number }> = [
+  { label: "关闭", value: 0 },
+  { label: "2秒", value: 2 },
+  { label: "5秒", value: 5 },
+  { label: "10秒", value: 10 },
+  { label: "30秒", value: 30 },
+  { label: "60秒", value: 60 },
 ];
 
 const LEVEL_FILTER_OPTIONS: Array<{ label: string; value: SeverityFilter }> = [
@@ -96,6 +138,128 @@ function pickTailLines(raw: string | null, fallback: number): number {
     return parsed;
   }
   return fallback;
+}
+
+function pickRefreshInterval(raw: string | null, fallback = 0): number {
+  const parsed = Number.parseInt(raw ?? "", 10);
+  return [0, 2, 5, 10, 30, 60].includes(parsed) ? parsed : fallback;
+}
+
+function normalizeLogTimeParam(raw: string | null): string {
+  if (!raw?.trim()) return "";
+  const parsed = dayjs(raw.trim());
+  if (!parsed.isValid() || parsed.isAfter(dayjs())) return "";
+  return parsed.toISOString();
+}
+
+function toLogTimeParam(value: Dayjs): string {
+  return value.millisecond(0).toISOString();
+}
+
+function pickTimeMode(raw: string | null, fallback: TimeMode): TimeMode {
+  return raw === "quick" || raw === "relative" || raw === "absolute" || raw === "recent"
+    ? raw
+    : fallback;
+}
+
+function secondsToNowExpression(seconds: number): string {
+  if (seconds % (24 * 60 * 60) === 0) return `now-${seconds / (24 * 60 * 60)}d`;
+  if (seconds % (60 * 60) === 0) return `now-${seconds / (60 * 60)}h`;
+  if (seconds % 60 === 0) return `now-${seconds / 60}m`;
+  return `now-${seconds}s`;
+}
+
+function parseNowExpression(raw: string): number | null {
+  const match = raw.trim().match(/^now-(\d+)([smhd])$/);
+  if (!match) return null;
+  const amount = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const multipliers: Record<TimeUnit, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+  return amount * multipliers[match[2] as TimeUnit];
+}
+
+function secondsToRelativeInput(seconds: number): { amount: string; unit: TimeUnit } {
+  if (seconds % 86400 === 0) return { amount: String(seconds / 86400), unit: "d" };
+  if (seconds % 3600 === 0) return { amount: String(seconds / 3600), unit: "h" };
+  if (seconds % 60 === 0) return { amount: String(seconds / 60), unit: "m" };
+  return { amount: String(seconds), unit: "s" };
+}
+
+function normalizeTimeEndpoint(raw: string | null, fallback: string): string {
+  const value = raw?.trim();
+  if (!value) return fallback;
+  if (value === "now") return "now";
+  if (parseNowExpression(value) !== null) return value;
+  const parsed = dayjs(value);
+  if (!parsed.isValid()) return fallback;
+  const capped = parsed.isAfter(dayjs()) ? dayjs() : parsed;
+  return toLogTimeParam(capped);
+}
+
+function inferInitialTimeState(searchParams: URLSearchParams): {
+  mode: TimeMode;
+  from: string;
+  to: string;
+  sinceSeconds: number;
+  sinceTime: string;
+  untilTime: string;
+  follow: boolean;
+  relativeAmount: string;
+  relativeUnit: TimeUnit;
+} {
+  const legacySinceSeconds = pickPositive(searchParams.get("sinceSeconds"), 60 * 60);
+  const legacySinceTime = normalizeLogTimeParam(searchParams.get("sinceTime"));
+  const legacyUntilTime = normalizeLogTimeParam(searchParams.get("untilTime"));
+  const hasModernRange = Boolean(searchParams.get("from") || searchParams.get("to"));
+  const fallbackFrom = legacySinceTime || secondsToNowExpression(legacySinceSeconds);
+  const fallbackTo = legacyUntilTime || "now";
+  const from = normalizeTimeEndpoint(searchParams.get("from"), fallbackFrom);
+  const to = normalizeTimeEndpoint(searchParams.get("to"), fallbackTo);
+  const relativeSeconds = parseNowExpression(from) ?? legacySinceSeconds;
+  const relativeInput = secondsToRelativeInput(relativeSeconds);
+  const modeFallback: TimeMode = legacySinceTime || legacyUntilTime ? "absolute" : "quick";
+  const mode = hasModernRange
+    ? pickTimeMode(searchParams.get("timeMode"), parseNowExpression(from) ? "quick" : "absolute")
+    : pickTimeMode(searchParams.get("timeMode"), modeFallback);
+  const toFollowsNow = to === "now";
+
+  return {
+    mode,
+    from,
+    to,
+    sinceSeconds: toFollowsNow && parseNowExpression(from) ? parseNowExpression(from)! : legacySinceSeconds,
+    sinceTime: parseNowExpression(from) ? "" : normalizeLogTimeParam(from),
+    untilTime: toFollowsNow ? "" : normalizeLogTimeParam(to),
+    follow: toFollowsNow ? pickBool(searchParams.get("follow"), true) : false,
+    relativeAmount: relativeInput.amount,
+    relativeUnit: relativeInput.unit,
+  };
+}
+
+function disabledFutureLogDate(current: Dayjs | null): boolean {
+  return Boolean(current?.isAfter(dayjs(), "day"));
+}
+
+function range(size: number): number[] {
+  return Array.from({ length: size }, (_, index) => index);
+}
+
+function disabledFutureLogTime(current: Dayjs | null) {
+  const now = dayjs();
+  if (!current?.isSame(now, "day")) {
+    return {};
+  }
+  return {
+    disabledHours: () => range(24).filter((hour) => hour > now.hour()),
+    disabledMinutes: (selectedHour: number) =>
+      selectedHour === now.hour()
+        ? range(60).filter((minute) => minute > now.minute())
+        : [],
+    disabledSeconds: (selectedHour: number, selectedMinute: number) =>
+      selectedHour === now.hour() && selectedMinute === now.minute()
+        ? range(60).filter((second) => second > now.second())
+        : [],
+  };
 }
 
 function buildBackHref(searchParams: URLSearchParams): string {
@@ -259,6 +423,17 @@ function formatConnectionTag(status: LogsConnectionStatus): { color: string; tex
   return { color: "default", text: "未连接" };
 }
 
+function formatRelativeTimeLabel(seconds: number): string {
+  const input = secondsToRelativeInput(seconds);
+  const unitLabels: Record<TimeUnit, string> = {
+    s: "秒",
+    m: "分钟",
+    h: "小时",
+    d: "天",
+  };
+  return `最近 ${input.amount} ${unitLabels[input.unit]}`;
+}
+
 export default function LogsPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -280,10 +455,23 @@ export default function LogsPage() {
   const [tailLines, setTailLines] = useState(
     pickTailLines(searchParams.get("tailLines"), 200),
   );
-  const [sinceSeconds, setSinceSeconds] = useState(
-    pickPositive(searchParams.get("sinceSeconds"), 60 * 60),
+  const currentQuery = searchParams.toString();
+  const initialTimeState = useMemo(
+    () => inferInitialTimeState(new URLSearchParams(currentQuery)),
+    [currentQuery],
   );
-  const [follow, setFollow] = useState(pickBool(searchParams.get("follow"), true));
+  const [timeMode, setTimeMode] = useState<TimeMode>(initialTimeState.mode);
+  const [from, setFrom] = useState(initialTimeState.from);
+  const [to, setTo] = useState(initialTimeState.to);
+  const [sinceSeconds, setSinceSeconds] = useState(initialTimeState.sinceSeconds);
+  const [sinceTime, setSinceTime] = useState(initialTimeState.sinceTime);
+  const [untilTime, setUntilTime] = useState(initialTimeState.untilTime);
+  const [relativeAmount, setRelativeAmount] = useState(initialTimeState.relativeAmount);
+  const [relativeUnit, setRelativeUnit] = useState<TimeUnit>(initialTimeState.relativeUnit);
+  const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useState(
+    pickRefreshInterval(searchParams.get("refreshIntervalSeconds")),
+  );
+  const [follow, setFollow] = useState(initialTimeState.follow);
   const [previous, setPrevious] = useState(
     pickBool(searchParams.get("previous"), false),
   );
@@ -300,6 +488,8 @@ export default function LogsPage() {
   );
   const [isConnecting, setIsConnecting] = useState(false);
   const [rawLines, setRawLines] = useState<RuntimeLogItem[]>([]);
+  const [lastLogTimestamp, setLastLogTimestamp] = useState("");
+  const [emptyReason, setEmptyReason] = useState("");
 
   const [beautifyEnabled, setBeautifyEnabled] = useState(true);
   const [formatEnabled, setFormatEnabled] = useState(false);
@@ -313,24 +503,59 @@ export default function LogsPage() {
   const socketRef = useRef<RuntimeLogsSocket | null>(null);
   const streamGenerationRef = useRef(0);
   const preloadRequestKeyRef = useRef("");
+  const lastRouteStateKeyRef = useRef("");
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
+  const rawLinesRef = useRef<RuntimeLogItem[]>([]);
 
   useEffect(() => {
     setContainer(routeContainer);
   }, [routeContainer]);
 
   useEffect(() => {
-    setTailLines(pickTailLines(searchParams.get("tailLines"), 200));
-    setSinceSeconds(pickPositive(searchParams.get("sinceSeconds"), 60 * 60));
-    setFollow(pickBool(searchParams.get("follow"), true));
-    setPrevious(pickBool(searchParams.get("previous"), false));
-    setTimestamps(pickBool(searchParams.get("timestamps"), true));
+    const params = new URLSearchParams(currentQuery);
+    const nextRouteStateKey = JSON.stringify({
+      clusterId,
+      namespace,
+      pod,
+      container: routeContainer,
+      tailLines: params.get("tailLines") ?? "",
+      timeMode: params.get("timeMode") ?? "",
+      from: params.get("from") ?? "",
+      to: params.get("to") ?? "",
+      sinceSeconds: params.get("sinceSeconds") ?? "",
+      sinceTime: params.get("sinceTime") ?? "",
+      untilTime: params.get("untilTime") ?? "",
+      refreshIntervalSeconds: params.get("refreshIntervalSeconds") ?? "",
+      follow: params.get("follow") ?? "",
+      previous: params.get("previous") ?? "",
+      timestamps: params.get("timestamps") ?? "",
+    });
+    if (lastRouteStateKeyRef.current === nextRouteStateKey) {
+      return;
+    }
+    lastRouteStateKeyRef.current = nextRouteStateKey;
+    const nextTimeState = inferInitialTimeState(params);
+    setTailLines(pickTailLines(params.get("tailLines"), 200));
+    setTimeMode(nextTimeState.mode);
+    setFrom(nextTimeState.from);
+    setTo(nextTimeState.to);
+    setSinceSeconds(nextTimeState.sinceSeconds);
+    setSinceTime(nextTimeState.sinceTime);
+    setUntilTime(nextTimeState.untilTime);
+    setRelativeAmount(nextTimeState.relativeAmount);
+    setRelativeUnit(nextTimeState.relativeUnit);
+    setRefreshIntervalSeconds(pickRefreshInterval(params.get("refreshIntervalSeconds")));
+    setFollow(nextTimeState.follow);
+    setPrevious(pickBool(params.get("previous"), false));
+    setTimestamps(pickBool(params.get("timestamps"), true));
     setSeverity([]);
     setAvailableContainers([]);
     setRawLines([]);
+    setLastLogTimestamp("");
+    setEmptyReason("");
     setStreamStatus("未连接");
     setStreamError("");
     setReconnectState(null);
@@ -338,11 +563,11 @@ export default function LogsPage() {
     streamGenerationRef.current += 1;
     socketRef.current?.disconnect();
     socketRef.current = null;
-  }, [clusterId, namespace, pod, routeContainer, searchParams]);
+  }, [clusterId, currentQuery, namespace, pod, routeContainer]);
 
   const backHref = useMemo(
-    () => buildBackHref(new URLSearchParams(searchParams.toString())),
-    [searchParams],
+    () => buildBackHref(new URLSearchParams(currentQuery)),
+    [currentQuery],
   );
 
   const clusterQuery = useQuery({
@@ -426,6 +651,7 @@ export default function LogsPage() {
 
   const clearStreamSocket = useCallback(() => {
     streamGenerationRef.current += 1;
+    preloadRequestKeyRef.current = "";
     socketRef.current?.disconnect();
     socketRef.current = null;
   }, []);
@@ -438,6 +664,43 @@ export default function LogsPage() {
     }),
     [beautifyEnabled, formatEnabled, timestamps],
   );
+
+  const customTimeRange = useMemo<[Dayjs, Dayjs] | null>(() => {
+    if (!sinceTime || !untilTime) return null;
+    const start = dayjs(sinceTime);
+    const end = dayjs(untilTime);
+    if (!start.isValid() || !end.isValid()) return null;
+    return [start, end];
+  }, [sinceTime, untilTime]);
+
+  const isFollowingNow = to === "now";
+  const emptyStateHint = useMemo(
+    () => ({
+      title: "暂无日志",
+      description:
+        emptyReason === "TIME_RANGE_NO_MATCH" && lastLogTimestamp
+          ? `当前时间范围无日志。最近一条日志时间：${dayjs(lastLogTimestamp).format(LOG_TIME_FORMAT)}。可扩大范围或切换最近 15 分钟。`
+          : emptyReason === "NO_PARSEABLE_TIMESTAMPS"
+            ? "当前日志没有可解析时间戳，无法按绝对时间过滤。可切换到相对时间或开启时间戳。"
+            : emptyReason === "FILTER_NO_MATCH"
+              ? "时间范围内有日志，但被级别或关键字过滤掉。"
+              : "当前时间范围内没有匹配日志，可调整过滤器或刷新。",
+      visible: rawLines.length === 0 && !isConnecting && !streamError,
+    }),
+    [emptyReason, isConnecting, lastLogTimestamp, rawLines.length, streamError],
+  );
+
+  const selectedTimeLabel = useMemo(() => {
+    const endLabel = isFollowingNow ? "现在" : dayjs(to).format(LOG_TIME_FORMAT);
+    const quick = QUICK_TIME_OPTIONS.find((item) => item.from === from && isFollowingNow);
+    if (quick && (timeMode === "quick" || timeMode === "recent")) {
+      return quick.label;
+    }
+    if (parseNowExpression(from) !== null && isFollowingNow) {
+      return `${formatRelativeTimeLabel(parseNowExpression(from)!)} 至现在`;
+    }
+    return `${dayjs(from).format(LOG_TIME_FORMAT)} 至 ${endLabel}`;
+  }, [from, isFollowingNow, timeMode, to]);
 
   const replayToTerminal = useCallback(
     (source: RuntimeLogItem[]) => {
@@ -510,16 +773,34 @@ export default function LogsPage() {
     (next: {
       container?: string;
       tailLines?: number;
-      sinceSeconds?: number;
+      sinceSeconds?: number | null;
+      sinceTime?: string | null;
+      untilTime?: string | null;
+      timeMode?: TimeMode;
+      from?: string | null;
+      to?: string | null;
+      refreshIntervalSeconds?: number;
       follow?: boolean;
       previous?: boolean;
       timestamps?: boolean;
     }) => {
-      const currentQuery = searchParams.toString();
       const params = new URLSearchParams(currentQuery);
       if (typeof next.container === "string") params.set("container", next.container);
       if (typeof next.tailLines === "number") params.set("tailLines", String(next.tailLines));
       if (typeof next.sinceSeconds === "number") params.set("sinceSeconds", String(next.sinceSeconds));
+      if (next.sinceSeconds === null) params.delete("sinceSeconds");
+      if (typeof next.sinceTime === "string") params.set("sinceTime", next.sinceTime);
+      if (next.sinceTime === null) params.delete("sinceTime");
+      if (typeof next.untilTime === "string") params.set("untilTime", next.untilTime);
+      if (next.untilTime === null) params.delete("untilTime");
+      if (typeof next.timeMode === "string") params.set("timeMode", next.timeMode);
+      if (typeof next.from === "string") params.set("from", next.from);
+      if (next.from === null) params.delete("from");
+      if (typeof next.to === "string") params.set("to", next.to);
+      if (next.to === null) params.delete("to");
+      if (typeof next.refreshIntervalSeconds === "number") {
+        params.set("refreshIntervalSeconds", String(next.refreshIntervalSeconds));
+      }
       if (typeof next.follow === "boolean") params.set("follow", String(next.follow));
       if (typeof next.previous === "boolean") params.set("previous", String(next.previous));
       if (typeof next.timestamps === "boolean") params.set("timestamps", String(next.timestamps));
@@ -529,7 +810,95 @@ export default function LogsPage() {
       }
       router.replace(`${pathname}?${nextQuery}`, { scroll: false });
     },
-    [pathname, router, searchParams],
+    [currentQuery, pathname, router],
+  );
+
+  const applyHistoryRange = useCallback(
+    (value: number) => {
+      const nextFrom = secondsToNowExpression(value);
+      setSinceSeconds(value);
+      setSinceTime("");
+      setUntilTime("");
+      setTimeMode("quick");
+      setFrom(nextFrom);
+      setTo("now");
+      setFollow(true);
+      syncRuntimeQueryToUrl({
+        timeMode: "quick",
+        from: nextFrom,
+        to: "now",
+        sinceSeconds: value,
+        sinceTime: null,
+        untilTime: null,
+        follow: true,
+      });
+    },
+    [syncRuntimeQueryToUrl],
+  );
+
+  const applyTimeRange = useCallback(
+    (input: { mode: TimeMode; from: string; to: string }) => {
+      const now = dayjs();
+      const relativeSeconds = parseNowExpression(input.from);
+      const toFollowsNow = input.to === "now";
+      const nextFrom = normalizeTimeEndpoint(input.from, secondsToNowExpression(sinceSeconds));
+      const nextTo = normalizeTimeEndpoint(input.to, "now");
+      const nextSinceTime = relativeSeconds === null ? normalizeLogTimeParam(nextFrom) : "";
+      const nextUntilTime = toFollowsNow ? "" : normalizeLogTimeParam(nextTo);
+      if (nextSinceTime && nextUntilTime && dayjs(nextSinceTime).isAfter(dayjs(nextUntilTime))) {
+        return;
+      }
+      if (nextUntilTime && dayjs(nextUntilTime).isAfter(now)) {
+        return;
+      }
+      const nextSinceSeconds = relativeSeconds ?? sinceSeconds;
+      const nextRelativeInput = secondsToRelativeInput(nextSinceSeconds);
+      setTimeMode(input.mode);
+      setFrom(nextFrom);
+      setTo(nextTo);
+      setSinceSeconds(nextSinceSeconds);
+      setSinceTime(nextSinceTime);
+      setUntilTime(nextUntilTime);
+      setRelativeAmount(nextRelativeInput.amount);
+      setRelativeUnit(nextRelativeInput.unit);
+      setFollow(toFollowsNow);
+      syncRuntimeQueryToUrl({
+        timeMode: input.mode,
+        from: nextFrom,
+        to: nextTo,
+        sinceSeconds: relativeSeconds === null ? null : nextSinceSeconds,
+        sinceTime: nextSinceTime || null,
+        untilTime: nextUntilTime || null,
+        follow: toFollowsNow,
+      });
+    },
+    [sinceSeconds, syncRuntimeQueryToUrl],
+  );
+
+  const applyRelativeTimeRange = useCallback(() => {
+    const amount = Number.parseInt(relativeAmount, 10);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    applyTimeRange({ mode: "relative", from: `now-${amount}${relativeUnit}`, to: "now" });
+  }, [applyTimeRange, relativeAmount, relativeUnit]);
+
+  const applyCustomTimeRange = useCallback(
+    (value: null | [Dayjs | null, Dayjs | null]) => {
+      if (!value?.[0] || !value[1]) {
+        return;
+      }
+      const now = dayjs();
+      const start = value[0].isAfter(now) ? now : value[0];
+      const end = value[1].isAfter(now) ? now : value[1];
+      if (start.isAfter(end)) {
+        return;
+      }
+      applyTimeRange({
+        mode: "absolute",
+        from: toLogTimeParam(start),
+        to: toLogTimeParam(end),
+      });
+    },
+    [applyTimeRange],
   );
 
   const fallbackFromPrevious = useCallback(() => {
@@ -541,6 +910,24 @@ export default function LogsPage() {
   const connectStream = useCallback(
     async (options?: { resetLines?: boolean; preloadHistory?: boolean }) => {
       if (isInitializing || !accessToken || !clusterId || !namespace || !pod || !container) {
+        return;
+      }
+      const effectiveUntilTime = isFollowingNow ? "" : untilTime;
+      const preloadKey = options?.preloadHistory
+        ? JSON.stringify({
+            clusterId,
+            namespace,
+            pod,
+            container,
+            tailLines,
+            sinceSeconds: customTimeRange ? undefined : sinceSeconds,
+            sinceTime,
+            untilTime: effectiveUntilTime,
+            previous: effectivePrevious,
+            timestamps,
+          })
+        : "";
+      if (preloadKey && preloadRequestKeyRef.current === preloadKey) {
         return;
       }
       clearStreamSocket();
@@ -557,19 +944,6 @@ export default function LogsPage() {
       const currentGeneration = streamGenerationRef.current;
       try {
         if (options?.preloadHistory) {
-          const preloadKey = JSON.stringify({
-            clusterId,
-            namespace,
-            pod,
-            container,
-            tailLines,
-            sinceSeconds,
-            previous: effectivePrevious,
-            timestamps,
-          });
-          if (preloadRequestKeyRef.current === preloadKey) {
-            return;
-          }
           preloadRequestKeyRef.current = preloadKey;
           let seed;
           try {
@@ -580,7 +954,9 @@ export default function LogsPage() {
                 pod,
                 container,
                 tailLines: tailLines > 0 ? tailLines : undefined,
-                sinceSeconds,
+                sinceSeconds: customTimeRange ? undefined : sinceSeconds,
+                sinceTime: sinceTime || undefined,
+                untilTime: effectiveUntilTime || undefined,
                 previous: effectivePrevious,
                 timestamps,
                 page: 1,
@@ -598,7 +974,9 @@ export default function LogsPage() {
                   pod,
                   container,
                   tailLines: tailLines > 0 ? tailLines : undefined,
-                  sinceSeconds,
+                  sinceSeconds: customTimeRange ? undefined : sinceSeconds,
+                  sinceTime: sinceTime || undefined,
+                  untilTime: effectiveUntilTime || undefined,
                   previous: false,
                   timestamps,
                   page: 1,
@@ -612,13 +990,15 @@ export default function LogsPage() {
           }
           if (currentGeneration !== streamGenerationRef.current) return;
           const seedLines = mapHistoryRecordsToRuntimeLogs(seed.items);
+          setLastLogTimestamp(seed.lastLogTimestamp ?? "");
+          setEmptyReason(seed.emptyReason ?? "");
           setRawLines(seedLines);
           replayToTerminal(seedLines);
           preloadRequestKeyRef.current = "";
         }
 
-        // "上一个实例" 只应展示上一实例的历史日志，不进入实时流/重连循环。
-        if (effectivePrevious) {
+        // "上一个实例" 和暂停跟随只展示历史日志，不进入实时流/重连循环。
+        if (effectivePrevious || !follow) {
           if (currentGeneration !== streamGenerationRef.current) {
             return;
           }
@@ -637,7 +1017,9 @@ export default function LogsPage() {
               pod,
               container,
               tailLines,
-              sinceSeconds,
+              sinceSeconds: customTimeRange ? undefined : sinceSeconds,
+              sinceTime: sinceTime || undefined,
+              untilTime: effectiveUntilTime || undefined,
               follow,
               previous: effectivePrevious,
               timestamps,
@@ -654,7 +1036,9 @@ export default function LogsPage() {
                 pod,
                 container,
                 tailLines,
-                sinceSeconds,
+                sinceSeconds: customTimeRange ? undefined : sinceSeconds,
+                sinceTime: sinceTime || undefined,
+                untilTime: effectiveUntilTime || undefined,
                 follow,
                 previous: false,
                 timestamps,
@@ -739,6 +1123,10 @@ export default function LogsPage() {
       clearStreamSocket,
       tailLines,
       sinceSeconds,
+      sinceTime,
+      untilTime,
+      isFollowingNow,
+      customTimeRange,
       follow,
       effectivePrevious,
       fallbackFromPrevious,
@@ -766,6 +1154,9 @@ export default function LogsPage() {
     container,
     tailLines,
     sinceSeconds,
+    sinceTime,
+    untilTime,
+    customTimeRange,
     follow,
     effectivePrevious,
     timestamps,
@@ -774,8 +1165,22 @@ export default function LogsPage() {
   ]);
 
   useEffect(() => {
+    rawLinesRef.current = rawLines;
     replayToTerminal(rawLines);
   }, [rawLines, severity, renderOptions, replayToTerminal]);
+
+  useEffect(() => {
+    if (rawLinesRef.current.length === 0 || !terminalRef.current) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const terminalRows = terminalHostRef.current?.querySelector(".xterm-rows")?.textContent?.trim() ?? "";
+      if (!terminalRows && rawLinesRef.current.length > 0) {
+        replayToTerminal(rawLinesRef.current);
+      }
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, [replayToTerminal, streamStatus]);
 
   const reconnectNow = () => {
     void connectStream({ resetLines: false, preloadHistory: false });
@@ -784,6 +1189,16 @@ export default function LogsPage() {
   const hardRefresh = () => {
     void connectStream({ resetLines: true, preloadHistory: true });
   };
+
+  useEffect(() => {
+    if (refreshIntervalSeconds <= 0 || (follow && !effectivePrevious)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void connectStream({ resetLines: true, preloadHistory: true });
+    }, refreshIntervalSeconds * 1000);
+    return () => window.clearInterval(timer);
+  }, [connectStream, effectivePrevious, follow, refreshIntervalSeconds]);
 
   const clearAll = () => {
     setRawLines([]);
@@ -869,115 +1284,225 @@ export default function LogsPage() {
             </div>
 
             <div className="headlamp-log-toolbar">
-              <div className="headlamp-log-control">
-                <span>容器</span>
-                <Select
-                  value={container || undefined}
-                  onChange={(value) => {
-                    setContainer(value);
-                    syncRuntimeQueryToUrl({ container: value });
-                  }}
-                  options={containerOptions.map((name) => ({ label: name, value: name }))}
-                  style={{ width: 190 }}
-                />
+              <div className="headlamp-log-group headlamp-log-group-main">
+                <div className="headlamp-log-control">
+                  <span>容器</span>
+                  <Select
+                    value={container || undefined}
+                    onChange={(value) => {
+                      setContainer(value);
+                      syncRuntimeQueryToUrl({ container: value });
+                    }}
+                    options={containerOptions.map((name) => ({ label: name, value: name }))}
+                    style={{ width: 200 }}
+                  />
+                </div>
+
+                <div className="headlamp-log-control">
+                  <span>行</span>
+                  <Select
+                    value={tailLines}
+                    onChange={(value) => {
+                      setTailLines(value);
+                      syncRuntimeQueryToUrl({ tailLines: value });
+                    }}
+                    options={TAIL_OPTIONS}
+                    style={{ width: 104 }}
+                  />
+                </div>
+
+                <div className="headlamp-log-control">
+                  <span>时间</span>
+                  <Popover
+                    trigger="click"
+                    placement="bottomLeft"
+	                    content={
+	                      <div className="headlamp-time-popover">
+	                        <div className="headlamp-time-tabs">
+	                          <Select
+	                            value={timeMode}
+	                            onChange={(value) => setTimeMode(value)}
+	                            options={TIME_MODE_OPTIONS}
+	                            style={{ width: 150 }}
+	                          />
+	                          <Select
+	                            value={refreshIntervalSeconds}
+	                            onChange={(value) => {
+	                              setRefreshIntervalSeconds(value);
+	                              syncRuntimeQueryToUrl({ refreshIntervalSeconds: value });
+	                            }}
+	                            options={REFRESH_INTERVAL_OPTIONS}
+	                            style={{ width: 120 }}
+	                          />
+                          <Button icon={<ReloadOutlined />} onClick={hardRefresh} loading={isConnecting}>
+                            刷新
+	                          </Button>
+	                        </div>
+	                        <div className="headlamp-time-section">
+	                          {timeMode === "quick" ? (
+	                            <>
+                              <Typography.Text strong>快捷选择</Typography.Text>
+	                              <Space wrap size={8}>
+	                                {QUICK_TIME_OPTIONS.map((item) => (
+	                                  <Button
+	                                    key={item.from}
+	                                    size="small"
+	                                    type={from === item.from && isFollowingNow ? "primary" : "default"}
+	                                    onClick={() => applyHistoryRange(item.seconds)}
+	                                  >
+	                                    {item.label}
+	                                  </Button>
+	                                ))}
+	                              </Space>
+	                            </>
+	                          ) : null}
+	                          {timeMode === "relative" ? (
+	                            <>
+                              <Typography.Text strong>相对时间</Typography.Text>
+	                              <Space wrap>
+	                                <Input
+	                                  value={relativeAmount}
+	                                  onChange={(event) => setRelativeAmount(event.target.value.replace(/\D/g, ""))}
+	                                  onPressEnter={applyRelativeTimeRange}
+	                                  style={{ width: 96 }}
+	                                />
+	                                <Select
+	                                  value={relativeUnit}
+	                                  onChange={setRelativeUnit}
+	                                  options={TIME_UNIT_OPTIONS}
+	                                  style={{ width: 150 }}
+	                                />
+	                                <Button type="primary" onClick={applyRelativeTimeRange}>
+                                  应用
+	                                </Button>
+	                              </Space>
+	                            </>
+	                          ) : null}
+	                          {timeMode === "absolute" ? (
+	                            <>
+                              <Typography.Text strong>绝对时间范围</Typography.Text>
+	                              <RangePicker
+	                                showTime
+	                                allowClear={false}
+	                                format={LOG_TIME_FORMAT}
+	                                value={customTimeRange}
+	                                disabledDate={disabledFutureLogDate}
+	                                disabledTime={disabledFutureLogTime}
+	                                onChange={applyCustomTimeRange}
+	                                style={{ width: 390 }}
+	                              />
+	                              <Typography.Text type="secondary" className="headlamp-time-help">
+                                绝对时间不能晚于当前；固定结束时间会关闭实时跟随。
+	                              </Typography.Text>
+	                            </>
+	                          ) : null}
+	                          {timeMode === "recent" ? (
+	                            <>
+                              <Typography.Text strong>最近使用范围</Typography.Text>
+	                              <Space wrap size={8}>
+	                                {RECENT_TIME_OPTIONS.map((item) => (
+	                                  <Button
+	                                    key={item.from}
+	                                    size="small"
+	                                    type={from === item.from && isFollowingNow ? "primary" : "default"}
+	                                    onClick={() => applyTimeRange({ mode: "recent", from: item.from, to: "now" })}
+	                                  >
+	                                    {item.label}
+	                                  </Button>
+	                                ))}
+	                              </Space>
+	                            </>
+	                          ) : null}
+	                        </div>
+	                        <Typography.Text type="secondary" className="headlamp-time-help">
+                          地址栏使用 timeMode/from/to/refreshIntervalSeconds；旧 sinceSeconds/sinceTime/untilTime 仍可读取。
+	                        </Typography.Text>
+	                      </div>
+	                    }
+	                  >
+	                    <Button className="headlamp-time-trigger">
+	                      <span>{selectedTimeLabel}</span>
+                      <DownOutlined />
+	                    </Button>
+	                  </Popover>
+	                </div>
+	              </div>
+
+              <div className="headlamp-log-group headlamp-log-group-mode">
+                <div className="headlamp-log-switch">
+                  <Switch
+                    checked={previous}
+                    onChange={(checked) => {
+                      setPreviousUnavailable(false);
+                      setPrevious(checked);
+                      syncRuntimeQueryToUrl({ previous: checked });
+                    }}
+                    size="small"
+                  />
+                  <span>上一个</span>
+                </div>
+
+                <div className="headlamp-log-switch">
+                  <Switch
+                    checked={timestamps}
+                    onChange={(checked) => {
+                      setTimestamps(checked);
+                      syncRuntimeQueryToUrl({ timestamps: checked });
+                    }}
+                    size="small"
+                  />
+                  <span>时间戳</span>
+                </div>
+
+                <div className="headlamp-log-switch">
+	                  <Switch
+	                    checked={follow}
+	                    disabled={!isFollowingNow}
+	                    onChange={(checked) => {
+	                      if (!isFollowingNow) return;
+	                      setFollow(checked);
+	                      syncRuntimeQueryToUrl({ follow: checked });
+	                    }}
+	                    size="small"
+	                  />
+                  <span>跟随</span>
+                </div>
+
+                <div className="headlamp-log-switch">
+                  <Switch
+                    checked={beautifyEnabled}
+                    onChange={setBeautifyEnabled}
+                    size="small"
+                  />
+                  <span>美化</span>
+                </div>
+
+                <div className="headlamp-log-switch">
+                  <Switch
+                    checked={formatEnabled}
+                    onChange={setFormatEnabled}
+                    size="small"
+                  />
+                  <span>格式化</span>
+                </div>
               </div>
 
-              <div className="headlamp-log-control">
-                <span>行</span>
-                <Select
-                  value={tailLines}
-                  onChange={(value) => {
-                    setTailLines(value);
-                    syncRuntimeQueryToUrl({ tailLines: value });
-                  }}
-                  options={TAIL_OPTIONS}
-                  style={{ width: 104 }}
-                />
-              </div>
+              <div className="headlamp-log-group headlamp-log-group-actions">
+                <div className="headlamp-log-control">
+                  <span>级别</span>
+                  <Select
+                    mode="multiple"
+                    maxTagCount={2}
+                    allowClear
+                    placeholder="全部"
+                    value={severity}
+                    onChange={(value) => setSeverity(value as SeverityFilter[])}
+                    options={LEVEL_FILTER_OPTIONS}
+                    style={{ width: 150 }}
+                  />
+                </div>
 
-              <div className="headlamp-log-control">
-                <span>时间</span>
-                <Select
-                  value={sinceSeconds}
-                  onChange={(value) => {
-                    setSinceSeconds(value);
-                    syncRuntimeQueryToUrl({ sinceSeconds: value });
-                  }}
-                  options={HISTORY_RANGE_OPTIONS}
-                  style={{ width: 104 }}
-                />
-              </div>
-
-              <div className="headlamp-log-switch">
-                <Switch
-                  checked={previous}
-                  onChange={(checked) => {
-                    setPreviousUnavailable(false);
-                    setPrevious(checked);
-                    syncRuntimeQueryToUrl({ previous: checked });
-                  }}
-                  size="small"
-                />
-                <span>上一个</span>
-              </div>
-
-              <div className="headlamp-log-switch">
-                <Switch
-                  checked={timestamps}
-                  onChange={(checked) => {
-                    setTimestamps(checked);
-                    syncRuntimeQueryToUrl({ timestamps: checked });
-                  }}
-                  size="small"
-                />
-                <span>时间戳</span>
-              </div>
-
-              <div className="headlamp-log-switch">
-                <Switch
-                  checked={follow}
-                  onChange={(checked) => {
-                    setFollow(checked);
-                    syncRuntimeQueryToUrl({ follow: checked });
-                  }}
-                  size="small"
-                />
-                <span>跟随</span>
-              </div>
-
-              <div className="headlamp-log-control">
-                <span>Severity</span>
-                <Select
-                  mode="multiple"
-                  maxTagCount={2}
-                  allowClear
-                  placeholder="All"
-                  value={severity}
-                  onChange={(value) => setSeverity(value as SeverityFilter[])}
-                  options={LEVEL_FILTER_OPTIONS}
-                  style={{ width: 150 }}
-                />
-              </div>
-
-              <div className="headlamp-log-switch">
-                <Switch
-                  checked={beautifyEnabled}
-                  onChange={setBeautifyEnabled}
-                  size="small"
-                />
-                <span>美化</span>
-              </div>
-
-              <div className="headlamp-log-switch">
-                <Switch
-                  checked={formatEnabled}
-                  onChange={setFormatEnabled}
-                  size="small"
-                />
-                <span>格式化</span>
-              </div>
-
-              <div className="headlamp-log-actions">
+                <div className="headlamp-log-actions">
                 <Tooltip title="查找">
                   <Popover
                     trigger="click"
@@ -1053,13 +1578,17 @@ export default function LogsPage() {
                   />
                 </Tooltip>
               </div>
+              </div>
             </div>
 
             <Space wrap size={8}>
-              <Tag color={effectivePrevious ? "purple" : "blue"}>
-                {effectivePrevious ? "上一个实例" : follow ? "实时跟随" : "跟随已暂停"}
-              </Tag>
-              {previousUnavailable ? (
+	              <Tag color={effectivePrevious ? "purple" : "blue"}>
+	                {effectivePrevious ? "上一个实例" : follow ? "实时跟随" : "跟随已暂停"}
+	              </Tag>
+	              <Tag color={isFollowingNow ? "green" : "orange"}>
+                {isFollowingNow ? "结束时间=现在，跟随当前时间" : "固定结束时间"}
+	              </Tag>
+	              {previousUnavailable ? (
                 <Tag color="orange">上一个实例不存在，已回退到当前实例</Tag>
               ) : null}
               {reconnectState ? (
@@ -1100,8 +1629,14 @@ export default function LogsPage() {
               </div>
               <div className="logs-terminal-state">{connectionMeta.text}</div>
             </div>
-            <div className="logs-terminal-host" ref={terminalHostRef} />
-          </div>
+	            <div className="logs-terminal-host" ref={terminalHostRef} />
+	            {emptyStateHint.visible ? (
+	              <div className="logs-empty-hint">
+	                <Typography.Text strong>{emptyStateHint.title}</Typography.Text>
+	                <Typography.Text type="secondary">{emptyStateHint.description}</Typography.Text>
+	              </div>
+	            ) : null}
+	          </div>
           {streamStatus === "连接异常" ? (
             <Button
               type="primary"
@@ -1109,15 +1644,16 @@ export default function LogsPage() {
               onClick={reconnectNow}
               loading={isConnecting}
             >
-              Reconnect
+              重新连接
             </Button>
           ) : null}
         </Card>
       </Space>
 
       <style jsx>{`
-        .logs-terminal-frame {
-          border-radius: 16px 16px 0 0;
+	        .logs-terminal-frame {
+	          position: relative;
+	          border-radius: 16px 16px 0 0;
           overflow: hidden;
           border: 1px solid rgba(148, 163, 184, 0.22);
           background: radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 28%),
@@ -1126,11 +1662,38 @@ export default function LogsPage() {
 
         .headlamp-log-toolbar {
           display: flex;
+          align-items: stretch;
+          gap: 12px;
+          width: 100%;
+          flex-wrap: wrap;
+          overflow: visible;
+          padding: 4px 0 2px;
+        }
+
+        .headlamp-log-group {
+          display: flex;
           align-items: flex-end;
           gap: 10px;
-          width: 100%;
-          overflow-x: auto;
-          padding: 4px 0;
+          flex-wrap: wrap;
+          min-width: 0;
+          padding: 8px;
+          border: 1px solid ${token.colorBorderSecondary};
+          border-radius: 14px;
+          background: ${token.colorFillQuaternary};
+        }
+
+        .headlamp-log-group-main {
+          flex: 1 1 560px;
+        }
+
+        .headlamp-log-group-mode {
+          flex: 1 1 320px;
+          align-content: center;
+        }
+
+        .headlamp-log-group-actions {
+          flex: 1 1 300px;
+          justify-content: flex-end;
         }
 
         .headlamp-log-control {
@@ -1151,12 +1714,45 @@ export default function LogsPage() {
         }
 
         .headlamp-log-actions {
-          margin-left: auto;
           display: inline-flex;
           align-items: center;
           gap: 4px;
           height: 32px;
           flex: 0 0 auto;
+        }
+
+        .headlamp-time-trigger {
+          width: 280px;
+          justify-content: space-between;
+        }
+
+        .headlamp-time-trigger span {
+          display: inline-block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+	        .headlamp-time-popover {
+	          display: grid;
+	          gap: 14px;
+	          width: min(430px, calc(100vw - 48px));
+	        }
+
+	        .headlamp-time-tabs {
+	          display: flex;
+	          align-items: center;
+	          gap: 8px;
+	          flex-wrap: wrap;
+	        }
+
+        .headlamp-time-section {
+          display: grid;
+          gap: 8px;
+        }
+
+        .headlamp-time-help {
+          font-size: 12px;
         }
 
         .headlamp-search-popover {
@@ -1256,14 +1852,30 @@ export default function LogsPage() {
           color: #93c5fd;
         }
 
-        .logs-terminal-host {
-          width: 100%;
-          min-height: 58vh;
-          max-height: 72vh;
-          background: transparent;
-          overflow: hidden;
-          padding: 12px;
-        }
+	        .logs-terminal-host {
+	          width: 100%;
+	          min-height: 58vh;
+	          max-height: 72vh;
+	          background: transparent;
+	          overflow: hidden;
+	          padding: 12px;
+	        }
+
+	        .logs-empty-hint {
+	          position: absolute;
+	          left: 50%;
+	          top: 52%;
+	          transform: translate(-50%, -50%);
+	          display: grid;
+	          gap: 6px;
+	          min-width: min(360px, calc(100% - 32px));
+	          padding: 18px 20px;
+	          border: 1px solid rgba(148, 163, 184, 0.2);
+	          border-radius: 14px;
+	          background: rgba(15, 23, 42, 0.72);
+	          text-align: center;
+	          pointer-events: none;
+	        }
 
         .logs-workspace-card :global(.xterm) {
           height: 100%;
@@ -1282,8 +1894,20 @@ export default function LogsPage() {
             align-items: flex-end;
           }
 
-          .headlamp-log-actions {
-            margin-left: 0;
+          .headlamp-log-group,
+          .headlamp-log-group-main,
+          .headlamp-log-group-mode,
+          .headlamp-log-group-actions {
+            flex: 1 1 100%;
+            justify-content: flex-start;
+          }
+
+          .headlamp-time-trigger {
+            width: min(280px, calc(100vw - 72px));
+          }
+
+          .headlamp-time-popover :global(.ant-picker-range) {
+            width: 100% !important;
           }
 
           .headlamp-search-popover {
