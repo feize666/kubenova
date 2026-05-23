@@ -30,6 +30,7 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ResourceTable } from "@/components/resource-table";
 import {
   createAutoscalingPolicy,
   deleteAutoscalingPolicy,
@@ -936,7 +937,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       </Row>
 
       <Card>
-        <Table<AutoscalingPolicyItem>
+        <ResourceTable<AutoscalingPolicyItem>
           rowKey="id"
           columns={columns}
           dataSource={visiblePolicies}

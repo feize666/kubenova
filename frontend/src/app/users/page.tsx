@@ -3,13 +3,14 @@
 import { PlusOutlined, ReloadOutlined, SearchOutlined, UserOutlined, CrownOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Alert, Button, Card, Col, Empty, Form, Input, Modal,
-  Popconfirm, Row, Select, Space, Table, Tag, Typography, theme, Badge,
+  Alert, Button, Card, Col, Form, Input, Modal,
+  Popconfirm, Row, Select, Space, Tag, Typography, theme, Badge,
 } from "antd";
-import type { TableProps } from "antd";
+import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { useModuleTableState } from "@/components/module-page";
+import { ResourceTable } from "@/components/resource-table";
 import { buildTablePagination } from "@/lib/table/pagination";
 import { usePersistentTableSortState } from "@/lib/table/use-persistent-table-sort-state";
 import {
@@ -326,7 +327,7 @@ export default function UsersPage() {
     [paged],
   );
 
-  const columns: TableProps<UserTableRecord>["columns"] = [
+  const columns: ColumnsType<UserTableRecord> = [
     {
       title: "用户",
       key: "user",
@@ -500,7 +501,7 @@ export default function UsersPage() {
       ) : null}
 
       <Card>
-        <Table<UserTableRecord>
+        <ResourceTable<UserTableRecord>
           rowKey="key"
           columns={columns}
           dataSource={rows}
@@ -527,14 +528,7 @@ export default function UsersPage() {
             },
             showTotal: (total) => `共 ${total} 位用户`,
           })}
-          locale={{
-            emptyText:
-              query.isLoading ? (
-                "正在加载..."
-              ) : (
-                <Empty description="暂无用户数据" />
-              ),
-          }}
+          emptyDescription="暂无用户数据"
         />
       </Card>
 

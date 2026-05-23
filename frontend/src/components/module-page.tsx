@@ -1,8 +1,9 @@
 "use client";
 
-import { Alert, Card, Col, Input, Row, Select, Space, Switch, Table, Tag, Typography } from "antd";
+import { Alert, Card, Col, Input, Row, Select, Space, Switch, Tag, Typography } from "antd";
 import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
+import { ResourceTable } from "@/components/resource-table";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { buildCompactTablePagination } from "@/lib/table/pagination";
 
@@ -203,11 +204,15 @@ export function ModulePage({
       {error ? <Alert type="error" showIcon message="数据加载失败" description={error} /> : null}
 
       <Card>
-        <Table<ModuleRecord>
+        <ResourceTable<ModuleRecord>
           rowKey="key"
           columns={normalizedColumns}
           dataSource={filteredData}
           loading={loading && !hasInitialData}
+          layoutOptions={{
+            nameValues: dataSource.map((item) => item.name),
+            actionWidth: TABLE_COL_WIDTH.action,
+          }}
           scroll={{ x: tableScrollX }}
           pagination={buildCompactTablePagination({
             current: 1,

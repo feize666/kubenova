@@ -18,7 +18,6 @@ import {
   Card,
   Col,
   Descriptions,
-  Empty,
   Form,
   Input,
   Modal,
@@ -26,17 +25,17 @@ import {
   Row,
   Select,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
 } from "antd";
-import type { TableProps } from "antd";
+import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
 import { NamespaceSelect } from "@/components/namespace-select";
+import { ResourceTable } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { buildTablePagination } from "@/lib/table/pagination";
@@ -639,7 +638,7 @@ export default function RbacPage() {
     return { total: sourceItems.length, active, clusterLevel, nsLevel };
   }, [sourceItems]);
 
-  const columns: TableProps<RbacTableRecord>["columns"] = [
+  const columns: ColumnsType<RbacTableRecord> = [
     {
       title: "策略名 / 角色",
       dataIndex: "name",
@@ -903,7 +902,7 @@ export default function RbacPage() {
           </Space>
         }
       >
-        <Table<RbacTableRecord>
+        <ResourceTable<RbacTableRecord>
           rowKey="key"
           columns={columns}
           dataSource={rows}
@@ -932,21 +931,11 @@ export default function RbacPage() {
             },
             showTotal: (total) => `共 ${total} 条`,
           })}
-          locale={{
-            emptyText:
-              query.isLoading ? (
-                "正在加载..."
-              ) : (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    keyword || namespace || clusterId || kindFilter
-                      ? "暂无符合条件的 RBAC 绑定"
-                      : "暂无 RBAC 绑定，点击「新建绑定」创建"
-                  }
-                />
-              ),
-          }}
+          emptyDescription={
+            keyword || namespace || clusterId || kindFilter
+              ? "暂无符合条件的 RBAC 绑定"
+              : "暂无 RBAC 绑定，点击「新建绑定」创建"
+          }
         />
       </Card>
 

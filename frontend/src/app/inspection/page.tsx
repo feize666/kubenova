@@ -15,7 +15,6 @@ import {
   Select,
   Space,
   Statistic,
-  Table,
   Tag,
   Typography,
 } from "antd";
@@ -25,6 +24,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
+import { ResourceTable } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
@@ -597,7 +597,7 @@ export default function InspectionPage() {
           </Col>
         </Row>
 
-        <Table<CapabilityBaselineMatrixItem>
+        <ResourceTable<CapabilityBaselineMatrixItem>
           rowKey={(record) => `${record.category}-${record.capabilityName}`}
           columns={capabilityColumns}
           dataSource={capabilityPagedItems}
@@ -629,7 +629,7 @@ export default function InspectionPage() {
       ) : null}
 
       <Card>
-        <Table<InspectionIssue>
+        <ResourceTable<InspectionIssue>
           rowKey="id"
           columns={columns}
           dataSource={issuePagedItems}

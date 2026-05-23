@@ -22,18 +22,18 @@ import {
   Skeleton,
   Space,
   Statistic,
-  Table,
   Tabs,
   Tag,
   Tooltip,
   Typography,
   message,
 } from "antd";
-import type { TableProps } from "antd";
+import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { NamespaceSelect } from "@/components/namespace-select";
+import { ResourceTable } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
@@ -316,7 +316,7 @@ function SecurityEventsTab() {
     }
   };
 
-  const columns: TableProps<SecurityEvent>["columns"] = [
+  const columns: ColumnsType<SecurityEvent> = [
     {
       title: "严重程度",
       dataIndex: "severity",
@@ -492,32 +492,32 @@ function SecurityEventsTab() {
         </Button>
       </Space>
 
-        <Table<SecurityEvent>
-          rowKey="id"
-          columns={columns}
-          dataSource={pagedItems}
-          loading={isLoading}
-          size="small"
-          scroll={{ x: 1000 }}
-          onChange={(pagination, filters, sorter, extra) => {
-            handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
-            if (extra.action === "sort") {
+      <ResourceTable<SecurityEvent>
+        rowKey="id"
+        columns={columns}
+        dataSource={pagedItems}
+        loading={isLoading}
+        size="small"
+        scroll={{ x: 1000 }}
+        onChange={(pagination, filters, sorter, extra) => {
+          handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
+          if (extra.action === "sort") {
+            setPage(1);
+          }
+        }}
+        pagination={buildTablePagination({
+          current: page,
+          pageSize,
+          total: sortedItems.length,
+          onChange: (nextPage, nextPageSize) => {
+            if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
+              setPageSize(nextPageSize);
               setPage(1);
+              return;
             }
-          }}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize,
-            total: sortedItems.length,
-            onChange: (nextPage, nextPageSize) => {
-              if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
-                setPage(1);
-                return;
-              }
-              setPage(nextPage);
-            },
-          })}
+            setPage(nextPage);
+          },
+        })}
         rowClassName={(record) =>
           record.severity === "critical" && record.status === "open"
             ? "ant-table-row-danger"
@@ -622,7 +622,7 @@ function AuditLogsTab() {
     }
   };
 
-  const columns: TableProps<AuditLogRecord>["columns"] = [
+  const columns: ColumnsType<AuditLogRecord> = [
     {
       title: "操作用户",
       dataIndex: "actor",
@@ -756,7 +756,7 @@ function AuditLogsTab() {
         </Button>
       </Space>
 
-      <Table<AuditLogRecord>
+      <ResourceTable<AuditLogRecord>
         rowKey="id"
         columns={columns}
         dataSource={pagedItems}

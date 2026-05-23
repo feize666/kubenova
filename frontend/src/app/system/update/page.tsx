@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Divider, Input, Row, Space, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Col, Divider, Input, Row, Space, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ResourceTable } from "@/components/resource-table";
 import {
   getSystemUpdateHistory,
   getSystemUpdateStatus,
@@ -291,7 +292,7 @@ export default function SystemUpdatePage() {
       </Row>
 
       <Card title="更新历史">
-        <Table<SystemUpdateHistoryItem>
+        <ResourceTable<SystemUpdateHistoryItem>
           rowKey={(row, idx) => `${row.timestamp}-${row.operationType}-${idx}`}
           columns={columns}
           dataSource={historyQuery.data?.items ?? []}
