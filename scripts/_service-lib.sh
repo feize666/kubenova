@@ -110,7 +110,7 @@ tmux_session_exists() {
 
 listener_pid() {
   local port="$1"
-  fuser -n tcp "$port" 2>/dev/null | awk '{print $1}'
+  fuser -n tcp "$port" 2>/dev/null | tr ' ' '\n' | sed '/^$/d' | head -n 1
 }
 
 wait_for_port_free() {
@@ -352,6 +352,7 @@ check_service_status() {
     pid="$(cat "$pid_file")"
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       local display_pid="$pid"
+      local listener=""
       if service_uses_supervisor "$name" && [[ -f "$child_pid_file" ]]; then
         local child_pid
         child_pid="$(cat "$child_pid_file")"
@@ -359,7 +360,17 @@ check_service_status() {
           display_pid="$pid child=$child_pid"
         fi
       fi
-      if service_is_starting "$pid" "$port"; then
+      listener="$(listener_pid "$port" || true)"
+      if [[ -n "$listener" ]] && service_matches_pid "$name" "$listener"; then
+        if service_uses_supervisor "$name"; then
+          display_pid="$display_pid listener=$listener"
+        fi
+        echo "[$name] 运行 pid=$display_pid port=$port health=$(health_text "$health_url")"
+        return
+      fi
+      if is_healthy "$health_url"; then
+        echo "[$name] 运行 pid=$display_pid port=$port health=$(health_text "$health_url")"
+      elif service_is_starting "$pid" "$port"; then
         echo "[$name] 启动中 pid=$display_pid port=$port"
       else
         echo "[$name] 运行 pid=$display_pid port=$port health=$(health_text "$health_url")"
