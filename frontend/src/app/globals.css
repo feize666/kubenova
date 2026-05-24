@@ -282,16 +282,89 @@ body {
   padding-top: 12px;
 }
 
-.resource-table .ant-pagination,
-.pod-table .ant-pagination {
-  margin-top: 12px;
+.resource-table .ant-table-pagination.ant-pagination,
+.pod-table .ant-table-pagination.ant-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px !important;
+  margin-bottom: 0;
 }
 
-.resource-table .ant-pagination,
-.resource-table .ant-pagination *,
-.pod-table .ant-pagination,
-.pod-table .ant-pagination * {
+.resource-table .ant-table-pagination.ant-pagination > li,
+.pod-table .ant-table-pagination.ant-pagination > li {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  margin-inline: 0 !important;
+}
+
+.resource-table .ant-table-pagination .ant-pagination-total-text,
+.pod-table .ant-table-pagination .ant-pagination-total-text {
+  justify-content: flex-start;
+  height: 32px;
+  line-height: 32px;
   text-align: left;
+}
+
+.resource-table .ant-table-pagination .ant-pagination-item,
+.resource-table .ant-table-pagination .ant-pagination-prev,
+.resource-table .ant-table-pagination .ant-pagination-next,
+.resource-table .ant-table-pagination .ant-pagination-jump-prev,
+.resource-table .ant-table-pagination .ant-pagination-jump-next,
+.pod-table .ant-table-pagination .ant-pagination-item,
+.pod-table .ant-table-pagination .ant-pagination-prev,
+.pod-table .ant-table-pagination .ant-pagination-next,
+.pod-table .ant-table-pagination .ant-pagination-jump-prev,
+.pod-table .ant-table-pagination .ant-pagination-jump-next {
+  min-width: 32px;
+  height: 32px;
+  line-height: 32px;
+}
+
+.resource-table .ant-table-pagination .ant-pagination-item a,
+.resource-table .ant-table-pagination .ant-pagination-prev .ant-pagination-item-link,
+.resource-table .ant-table-pagination .ant-pagination-next .ant-pagination-item-link,
+.pod-table .ant-table-pagination .ant-pagination-item a,
+.pod-table .ant-table-pagination .ant-pagination-prev .ant-pagination-item-link,
+.pod-table .ant-table-pagination .ant-pagination-next .ant-pagination-item-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  line-height: 1;
+  text-align: center;
+}
+
+.resource-table .ant-table-pagination .ant-pagination-options,
+.pod-table .ant-table-pagination .ant-pagination-options {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  margin-inline-start: 0;
+}
+
+.resource-table .ant-table-pagination .ant-pagination-options .ant-select,
+.resource-table .ant-table-pagination .ant-pagination-options .ant-select-selector,
+.pod-table .ant-table-pagination .ant-pagination-options .ant-select,
+.pod-table .ant-table-pagination .ant-pagination-options .ant-select-selector {
+  height: 32px !important;
+}
+
+.resource-table .ant-table-pagination .ant-pagination-options .ant-select-selector,
+.pod-table .ant-table-pagination .ant-pagination-options .ant-select-selector {
+  display: flex;
+  align-items: center;
+}
+
+.resource-table .ant-table-pagination .ant-pagination-options .ant-select-selection-item,
+.pod-table .ant-table-pagination .ant-pagination-options .ant-select-selection-item {
+  line-height: 30px;
 }
 
 .pod-action-trigger.ant-btn {

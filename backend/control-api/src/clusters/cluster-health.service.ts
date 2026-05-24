@@ -80,6 +80,7 @@ export interface ClusterHealthDetailResponse {
 
 export interface LegacyHealthResult {
   ok: boolean;
+  runtimeStatus: RuntimeStatus;
   latencyMs: number;
   version: string | null;
   nodeCount: number | null;
@@ -278,7 +279,8 @@ export class ClusterHealthService {
 
     if (snapshot.status === 'offline-mode') {
       return {
-        ok: true,
+        ok: false,
+        runtimeStatus: snapshot.status,
         latencyMs: snapshot.latencyMs ?? 0,
         version,
         nodeCount,
@@ -289,6 +291,7 @@ export class ClusterHealthService {
     if (snapshot.ok) {
       return {
         ok: true,
+        runtimeStatus: snapshot.status,
         latencyMs: snapshot.latencyMs ?? 0,
         version,
         nodeCount,
@@ -301,6 +304,7 @@ export class ClusterHealthService {
       (typeof detail.message === 'string' ? detail.message : '连接失败');
     return {
       ok: false,
+      runtimeStatus: snapshot.status,
       latencyMs: snapshot.latencyMs ?? 0,
       version: null,
       nodeCount,
@@ -505,7 +509,7 @@ export class ClusterHealthService {
     } else if (!cluster.hasKubeconfig) {
       status = 'offline-mode';
       payload = {
-        ok: true,
+        ok: false,
         latencyMs: 0,
         reason: 'OFFLINE_MODE',
         detailJson: { message: 'kubeconfig not configured' },

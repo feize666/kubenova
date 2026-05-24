@@ -196,15 +196,45 @@ export default function DeploymentsPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<DeploymentRow>({
-    defaultPageSize: 6,
+    storageKey: "workloads/deployments/table-sort",
+    defaultPageSize: 10,
+    defaultSortBy: "createdAt",
+    defaultSortOrder: "desc",
+    allowedSortBy: [
+      "name",
+      "clusterId",
+      "namespace",
+      "status",
+      "state",
+      "replicas",
+      "readyReplicas",
+      "availableReplicas",
+      "strategy",
+      "revision",
+      "createdAt",
+    ],
   });
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [扩缩容行, set扩缩容行] = useState<DeploymentRow | null>(null);
   const [目标副本, set目标副本] = useState<number>(1);
   const [scaleConvergence, setScaleConvergence] = useState<ScaleConvergenceViewState | null>(null);
   const [yaml目标, setYaml目标] = useState<ResourceIdentity | null>(null);
+  const page = pagination.pageIndex + 1;
+  const pageSize = pagination.pageSize;
 
-  const workloadsKey = ["workloads", "deployments", clusterId, 关键字, namespace, pagination.pageIndex + 1, pagination.pageSize, sortBy, sortOrder, accessToken];
+  const workloadsKey = [
+    "workloads",
+    "deployments",
+    clusterId,
+    namespace,
+    关键字,
+    mergedFilters,
+    page,
+    pageSize,
+    sortBy,
+    sortOrder,
+    accessToken,
+  ];
 
   const query = useQuery({
     queryKey: workloadsKey,
@@ -212,10 +242,10 @@ export default function DeploymentsPage() {
       getWorkloads(
         "deployments",
         {
-          page: pagination.pageIndex + 1,
-          pageSize: pagination.pageSize,
-          sortBy: sortBy || undefined,
-          sortOrder: sortOrder || undefined,
+          page,
+          pageSize,
+          sortBy,
+          sortOrder,
           keyword: 关键字.trim() || undefined,
           namespace: namespace.trim() || undefined,
           clusterId: clusterId || undefined,
@@ -225,6 +255,7 @@ export default function DeploymentsPage() {
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
+  const tableBusy = query.isFetching;
 
   // 集群列表（供筛选下拉和 Modal clusterId 选择）
   const clustersQuery = useQuery({
@@ -751,11 +782,11 @@ export default function DeploymentsPage() {
             rowKey="key"
             columns={antd列}
             dataSource={表格前数据}
-            loading={(query.isLoading && !query.data) || actionMutation.isPending}
+            loading={{ spinning: query.isLoading && !query.data, description: "Deployment 数据加载中..." }}
             onChange={(paginationInfo, filters, sorter, extra) =>
-              handleTableChange(paginationInfo, filters, sorter, extra, (query.isLoading && !query.data) || actionMutation.isPending)
+              handleTableChange(paginationInfo, filters, sorter, extra, tableBusy)
             }
-            pagination={getPaginationConfig(query.data?.total ?? 0, (query.isLoading && !query.data) || actionMutation.isPending)}
+            pagination={getPaginationConfig(query.data?.total ?? 0, tableBusy)}
             emptyDescription="暂无数据"
           />
         </Space>

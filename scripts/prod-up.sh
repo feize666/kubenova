@@ -78,7 +78,7 @@ frontend_pid="$(service_pid_file frontend)"
 control_api_pid="$(service_pid_file control-api)"
 runtime_gateway_pid="$(service_pid_file runtime-gateway)"
 
-frontend_cmd="HOSTNAME=0.0.0.0 PORT=$FRONTEND_PORT node --max-old-space-size=1536 .next/standalone/server.js"
+frontend_cmd="HOSTNAME=0.0.0.0 PORT=$FRONTEND_PORT node --max-old-space-size=2048 .next/standalone/server.js"
 control_api_cmd="PORT=$CONTROL_API_PORT CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=ws://127.0.0.1:$RUNTIME_GATEWAY_PORT RUNTIME_TOKEN_SECRET=$RUNTIME_TOKEN_SECRET node --enable-source-maps dist/src/main.js"
 runtime_gateway_cmd="PORT=$RUNTIME_GATEWAY_PORT CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_TOKEN_SECRET=$RUNTIME_TOKEN_SECRET GOPROXY=$RUNTIME_GATEWAY_GOPROXY ./runtime-gateway"
 

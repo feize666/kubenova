@@ -620,10 +620,24 @@ export default function LogsPage() {
     const terminal = new Terminal({
       ...FALLBACK_TERMINAL_OPTIONS,
       theme: {
-        background: "#07111f",
-        foreground: "#dbeafe",
-        cursor: "#38bdf8",
-        selectionBackground: "rgba(56, 189, 248, 0.35)",
+        background: "#061120",
+        foreground: "#eef6ff",
+        cursor: "#67e8f9",
+        selectionBackground: "rgba(56, 189, 248, 0.45)",
+        black: "#0f172a",
+        brightBlack: "#64748b",
+        blue: "#60a5fa",
+        brightBlue: "#93c5fd",
+        cyan: "#22d3ee",
+        brightCyan: "#67e8f9",
+        green: "#34d399",
+        brightGreen: "#86efac",
+        red: "#fb7185",
+        brightRed: "#fda4af",
+        yellow: "#fbbf24",
+        brightYellow: "#fde68a",
+        white: "#e5edf7",
+        brightWhite: "#ffffff",
       },
     });
     const fitAddon = new FitAddon();
@@ -1252,6 +1266,8 @@ export default function LogsPage() {
     <Card className="cyber-panel logs-workspace-card" styles={{ body: { padding: 20 } }} style={{ borderRadius: 24 }}>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <Card
+          className="logs-toolbar-card"
+          styles={{ body: { padding: 16 } }}
           style={{
             borderRadius: 18,
             borderColor: token.colorBorderSecondary,
@@ -1660,48 +1676,60 @@ export default function LogsPage() {
             linear-gradient(180deg, #07111f 0%, #08101a 100%);
         }
 
+        .logs-toolbar-card {
+          overflow: hidden;
+        }
+
         .headlamp-log-toolbar {
-          display: flex;
-          align-items: stretch;
+          display: grid;
+          grid-template-columns: minmax(520px, 1.45fr) minmax(360px, 0.95fr) minmax(360px, 0.9fr);
           gap: 12px;
           width: 100%;
-          flex-wrap: wrap;
+          align-items: stretch;
           overflow: visible;
-          padding: 4px 0 2px;
+          padding: 2px 0;
         }
 
         .headlamp-log-group {
           display: flex;
-          align-items: flex-end;
-          gap: 10px;
+          align-items: end;
+          gap: 12px;
           flex-wrap: wrap;
           min-width: 0;
-          padding: 8px;
+          min-height: 78px;
+          padding: 12px;
           border: 1px solid ${token.colorBorderSecondary};
           border-radius: 14px;
-          background: ${token.colorFillQuaternary};
+          background: linear-gradient(180deg, ${token.colorFillQuaternary}, ${token.colorFillTertiary});
         }
 
         .headlamp-log-group-main {
-          flex: 1 1 560px;
+          align-content: end;
         }
 
         .headlamp-log-group-mode {
-          flex: 1 1 320px;
-          align-content: center;
+          align-content: end;
+          justify-content: center;
         }
 
         .headlamp-log-group-actions {
-          flex: 1 1 300px;
           justify-content: flex-end;
+          align-content: end;
         }
 
         .headlamp-log-control {
           display: inline-grid;
-          gap: 3px;
+          gap: 6px;
           flex: 0 0 auto;
           color: var(--ant-color-text-secondary);
           font-size: 12px;
+          line-height: 1.2;
+        }
+
+        .headlamp-log-control > span {
+          height: 16px;
+          display: inline-flex;
+          align-items: center;
         }
 
         .headlamp-log-switch {
@@ -1711,6 +1739,7 @@ export default function LogsPage() {
           height: 32px;
           flex: 0 0 auto;
           white-space: nowrap;
+          color: ${token.colorTextSecondary};
         }
 
         .headlamp-log-actions {
@@ -1722,7 +1751,7 @@ export default function LogsPage() {
         }
 
         .headlamp-time-trigger {
-          width: 280px;
+          width: 320px;
           justify-content: space-between;
         }
 
@@ -1808,9 +1837,9 @@ export default function LogsPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          background: rgba(2, 6, 23, 0.72);
+          background: rgba(2, 6, 23, 0.88);
           border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-          color: #cbd5e1;
+          color: #dbeafe;
           font-size: 12px;
         }
 
@@ -1839,7 +1868,7 @@ export default function LogsPage() {
 
         .logs-terminal-title {
           font-weight: 600;
-          color: #dbeafe;
+          color: #f8fbff;
           text-align: center;
           flex: 1;
           margin: 0 12px;
@@ -1849,14 +1878,14 @@ export default function LogsPage() {
         }
 
         .logs-terminal-state {
-          color: #93c5fd;
+          color: #bfdbfe;
         }
 
 	        .logs-terminal-host {
 	          width: 100%;
 	          min-height: 58vh;
 	          max-height: 72vh;
-	          background: transparent;
+	          background: #061120;
 	          overflow: hidden;
 	          padding: 12px;
 	        }
@@ -1870,12 +1899,21 @@ export default function LogsPage() {
 	          gap: 6px;
 	          min-width: min(360px, calc(100% - 32px));
 	          padding: 18px 20px;
-	          border: 1px solid rgba(148, 163, 184, 0.2);
+	          border: 1px solid rgba(125, 211, 252, 0.38);
 	          border-radius: 14px;
-	          background: rgba(15, 23, 42, 0.72);
+	          background: rgba(15, 23, 42, 0.92);
+	          box-shadow: 0 16px 50px rgba(0, 0, 0, 0.28);
 	          text-align: center;
 	          pointer-events: none;
 	        }
+
+        .logs-empty-hint :global(.ant-typography) {
+          color: #e5f4ff;
+        }
+
+        .logs-empty-hint :global(.ant-typography-secondary) {
+          color: #bfd7ef !important;
+        }
 
         .logs-workspace-card :global(.xterm) {
           height: 100%;
@@ -1886,19 +1924,30 @@ export default function LogsPage() {
         }
 
         .logs-workspace-card :global(.xterm-rows) {
-          color: #dbeafe;
+          color: #eef6ff;
+          text-shadow: 0 0 1px rgba(255, 255, 255, 0.18);
         }
 
         @media (max-width: 768px) {
           .headlamp-log-toolbar {
+            grid-template-columns: 1fr;
             align-items: flex-end;
           }
+        }
 
-          .headlamp-log-group,
-          .headlamp-log-group-main,
-          .headlamp-log-group-mode,
+        @media (min-width: 769px) and (max-width: 1280px) {
+          .headlamp-log-toolbar {
+            grid-template-columns: 1fr 1fr;
+          }
+
           .headlamp-log-group-actions {
-            flex: 1 1 100%;
+            grid-column: 1 / -1;
+          }
+        }
+
+        @media (max-width: 768px) {
+          .headlamp-log-group,
+          .headlamp-log-group-actions {
             justify-content: flex-start;
           }
 

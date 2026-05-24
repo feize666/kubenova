@@ -1,7 +1,7 @@
 import { ApiError, CONTROL_API_BASE, apiRequest, extractApiError } from "./client";
 import type { Cluster, ClusterListResponse, GetClustersParams, QueryParams } from "./types";
 import type { ClusterDetailModel } from "@/lib/contracts/domain";
-import { getClusterHealthList } from "./cluster-health";
+import { getClusterHealthList, type RuntimeStatus } from "./cluster-health";
 
 export async function getClusters(params: GetClustersParams = {}, token: string): Promise<ClusterListResponse> {
   const query: QueryParams = {
@@ -73,6 +73,7 @@ export interface ClusterPayload {
 
 export interface ClusterHealthResult {
   ok: boolean;
+  runtimeStatus: RuntimeStatus;
   latencyMs: number;
   version: string | null;
   nodeCount: number | null;

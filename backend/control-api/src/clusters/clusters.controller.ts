@@ -608,7 +608,7 @@ export class ClustersController {
   /**
    * GET /api/clusters/:id/health
    * 检查集群连接健康状态
-   * 有 kubeconfig 时尝试真实连接；否则返回 mock 数据
+   * 有 kubeconfig 时尝试真实连接；否则返回离线模式状态
    */
   @Get(':id/health')
   async healthCheck(

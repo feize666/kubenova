@@ -3,11 +3,11 @@
   "version": "1.1.1",
   "private": true,
   "scripts": {
-    "dev": "node --max-old-space-size=1536 ./node_modules/next/dist/bin/next dev --webpack",
+    "dev": "node --max-old-space-size=3072 ./node_modules/next/dist/bin/next dev --webpack",
     "build": "next build",
     "build:stable": "node --max-old-space-size=2048 ./node_modules/next/dist/bin/next build",
     "start": "next start",
-    "start:stable": "HOSTNAME=0.0.0.0 PORT=${PORT:-3000} node --max-old-space-size=1536 .next/standalone/server.js",
+    "start:stable": "HOSTNAME=0.0.0.0 PORT=${PORT:-3000} node --max-old-space-size=2048 .next/standalone/server.js",
     "lint": "eslint",
     "e2e:filters": "node ./scripts/filter-regression.mjs",
     "e2e:filters:matrix": "node ./scripts/filter-regression-matrix.mjs",

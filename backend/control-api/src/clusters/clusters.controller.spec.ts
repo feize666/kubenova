@@ -22,6 +22,7 @@ describe('ClustersController', () => {
     } as any;
     const clusterHealthService = {
       probeCluster: jest.fn(),
+      getLegacyHealthResult: jest.fn(),
       listSelectableClusterIdsForResourceRead: jest.fn(),
     } as any;
     const clusterEventSyncService = {
@@ -71,5 +72,38 @@ describe('ClustersController', () => {
     expect(resp.data.items[0].id).toBe('c-1');
     expect(resp.data.total).toBe(1);
     expect(resp.meta.selectableOnly).toBe(true);
+  });
+
+  it('healthCheck returns legacy runtime status from health service', async () => {
+    const { controller, clusterHealthService } = createController();
+    clusterHealthService.getLegacyHealthResult.mockResolvedValue({
+      ok: false,
+      runtimeStatus: 'offline-mode',
+      latencyMs: 0,
+      version: 'v1.29.0',
+      nodeCount: null,
+      message: '离线模式，无法验证真实连接状态',
+    });
+
+    const req = { headers: {} } as any;
+    const res = {
+      getHeader: jest.fn().mockReturnValue(undefined),
+      setHeader: jest.fn(),
+    } as any;
+
+    const resp = await controller.healthCheck(req, res, 'c-1');
+
+    expect(clusterHealthService.getLegacyHealthResult).toHaveBeenCalledWith(
+      'c-1',
+    );
+    expect(resp.data).toEqual({
+      ok: false,
+      runtimeStatus: 'offline-mode',
+      latencyMs: 0,
+      version: 'v1.29.0',
+      nodeCount: null,
+      message: '离线模式，无法验证真实连接状态',
+    });
+    expect(resp.meta.action).toBe('health');
   });
 });

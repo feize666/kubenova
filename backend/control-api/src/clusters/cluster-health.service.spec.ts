@@ -190,6 +190,7 @@ describe('ClusterHealthService', () => {
     expect(service.probeCluster).not.toHaveBeenCalled();
     expect(result).toEqual({
       ok: true,
+      runtimeStatus: 'running',
       latencyMs: 23,
       version: 'v1.30.0',
       nodeCount: 6,
@@ -235,10 +236,85 @@ describe('ClusterHealthService', () => {
     expect(service.probeCluster).toHaveBeenCalledWith('c1', { source: 'auto' });
     expect(result).toEqual({
       ok: false,
+      runtimeStatus: 'offline',
       latencyMs: 91,
       version: null,
       nodeCount: 3,
       message: '集群连接异常: dial timeout',
     });
+  });
+
+  it('getLegacyHealthResult reports offline-mode as not healthy', async () => {
+    const service = createService() as any;
+    service.requireCluster = jest.fn().mockResolvedValue({
+      id: 'c1',
+      kubernetesVersion: 'v1.29.0',
+    });
+    service.getLatestSnapshot = jest.fn().mockResolvedValue(null);
+    service.probeCluster = jest.fn().mockResolvedValue({
+      clusterId: 'c1',
+      ok: false,
+      status: 'offline-mode',
+      latencyMs: 0,
+      checkedAt: new Date().toISOString(),
+      reason: 'OFFLINE_MODE',
+      source: 'auto',
+      timeoutMs: 8000,
+      failureCount: 0,
+      detailJson: { message: 'kubeconfig not configured' },
+      isStale: false,
+    });
+
+    const result = await service.getLegacyHealthResult('c1');
+
+    expect(service.probeCluster).toHaveBeenCalledWith('c1', { source: 'auto' });
+    expect(result).toEqual({
+      ok: false,
+      runtimeStatus: 'offline-mode',
+      latencyMs: 0,
+      version: 'v1.29.0',
+      nodeCount: null,
+      message: '离线模式，无法验证真实连接状态',
+    });
+  });
+
+  it('probeCluster stores offline-mode snapshot as not healthy', async () => {
+    const service = createService() as any;
+    const checkedAt = new Date();
+    service.clustersService.findById.mockResolvedValue({
+      id: 'c1',
+      state: 'active',
+      hasKubeconfig: false,
+    });
+    service.prisma.clusterHealthSnapshot.upsert.mockImplementation(
+      async ({ create }: any) => ({
+        ...create,
+        checkedAt,
+      }),
+    );
+
+    const result = await service.probeCluster('c1', { source: 'manual' });
+
+    expect(service.prisma.clusterHealthSnapshot.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          ok: false,
+          status: 'offline-mode',
+          reason: 'OFFLINE_MODE',
+        }),
+        update: expect.objectContaining({
+          ok: false,
+          status: 'offline-mode',
+          reason: 'OFFLINE_MODE',
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        clusterId: 'c1',
+        ok: false,
+        status: 'offline-mode',
+      }),
+    );
   });
 });
