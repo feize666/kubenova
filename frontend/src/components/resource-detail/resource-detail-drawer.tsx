@@ -109,7 +109,9 @@ export function ResourceDetailDrawer({
     if (query.data) {
       return `${getRenderProfile(query.data).title} · ${query.data.overview.name}`;
     }
-    const requestLabel = (activeRequest as { label?: string } | null)?.label;
+    const requestLabel =
+      (activeRequest as { label?: string; name?: string } | null)?.label ??
+      (activeRequest as { label?: string; name?: string } | null)?.name;
     if (requestLabel) {
       return `${getKindTitle(normalizedKind || activeRequest.kind)} · ${requestLabel}`;
     }
@@ -191,6 +193,7 @@ export function ResourceDetailDrawer({
             <ResourceDetailContent
               key={activeRequestKey}
               detail={query.data}
+              snapshot={activeRequest?.snapshot}
               onNavigateRequest={emitNavigateRequest}
             />
             {children}

@@ -7,36 +7,32 @@ import {
   EyeOutlined,
   FileTextOutlined,
   MoreOutlined,
-  SearchOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
   Button,
   Card,
-  Col,
-  Input,
   Dropdown,
   Modal,
-  Row,
-  Select,
   Space,
   Tag,
   Typography,
   message,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { ColumnsType, ColumnType } from "antd/es/table";
+import type { ColumnsType } from "antd/es/table";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { PodMetricCell } from "@/components/visual-system";
-import { ClusterSelect } from "@/components/cluster-select";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { getClusters } from "@/lib/api/clusters";
 import { buildLogsRoute } from "@/lib/api/logs";
@@ -46,9 +42,9 @@ import {
 } from "@/lib/api/workloads";
 import type { WorkloadListItem, WorkloadKindParam } from "@/lib/api/workloads";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
-import { NamespaceSelect } from "@/components/namespace-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { buildTerminalRoute } from "@/lib/workloads/terminal";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
@@ -326,14 +322,15 @@ export default function PodsPage() {
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
 
   // 筛选状态
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [keyword, setKeyword] = useState(initialKeyword);
-  const [phaseFilter, setPhaseFilter] = useState("");
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
+  const phaseFilter = typeof tableFilters.phase === "string" ? tableFilters.phase : "";
   const {
     sortBy,
     sortOrder,
@@ -434,9 +431,7 @@ export default function PodsPage() {
   // Client-side filtering only applies to labels on the current backend page.
   const tableData = useMemo<PodRow[]>(() => {
     let nextRows = [...rows];
-    if (phaseFilter) {
-      nextRows = nextRows.filter((row) => row.phase === phaseFilter);
-    }
+    if (phaseFilter) nextRows = nextRows.filter((row) => row.phase === phaseFilter);
     if (mergedFilters.length > 0) {
       nextRows = nextRows.filter((row) => {
         const itemLabels = (row.labels as Record<string, string> | null | undefined) ?? {};
@@ -477,8 +472,9 @@ export default function PodsPage() {
     });
   }, [sortBy, sortOrder, tableData]);
   const displayedTotal = podsQuery.data?.total ?? tableData.length;
-  const handleSearch = () => {
-    const parsed = parseSearchInput(keywordInput);
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseSearchInput(value);
+    setKeywordInput(value);
     resetPage();
     setMergedFilters(parsed.labels);
     setKeyword(parsed.keyword);
@@ -606,11 +602,13 @@ export default function PodsPage() {
     );
   }
 
-  const columns: ColumnsType<PodRow> = [
+  const columns: Array<HeadlampResourceTableColumn<PodRow>> = [
     {
       title: "Pod 名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "以名称过滤" },
       width: getAdaptiveNameWidth(tableData.map((row) => row.name), { max: 340 }),
       align: "left",
       ellipsis: true,
@@ -628,25 +626,27 @@ export default function PodsPage() {
             {row.name}
           </Typography.Text>
         ),
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "集群",
       dataIndex: "clusterId",
       key: "clusterId",
+      filter: { type: "text", placeholder: "以集群过滤" },
       width: TABLE_COL_WIDTH.cluster,
       align: "left",
       ellipsis: true,
       ...getSortableColumnProps("clusterId"),
       render: (_: unknown, row: PodRow) => getClusterDisplayName(clusterMap, row.clusterId),
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      filter: { type: "text", placeholder: "以名称空间过滤" },
       width: TABLE_COL_WIDTH.namespace,
       align: "left",
       ...getSortableColumnProps("namespace"),
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "就绪",
       dataIndex: "readyReplicas",
@@ -655,16 +655,21 @@ export default function PodsPage() {
       align: "left",
       ...getSortableColumnProps("readyReplicas"),
       render: (_: unknown, row: PodRow) => `${row.readyReplicas}/${row.replicas}`,
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "状态",
       dataIndex: "phase",
       key: "phase",
       width: TABLE_COL_WIDTH.status,
       align: "left",
+      filter: {
+        type: "select",
+        placeholder: "以状态过滤",
+        options: PHASE_OPTIONS.filter((item) => item.value).map((item) => ({ label: item.label, value: item.value })),
+      },
       ...getSortableColumnProps("phase"),
       render: (phase: string) => <Tag color={podPhaseColor(phase)}>{phase}</Tag>,
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "CPU 使用率",
       dataIndex: "cpuUsage",
@@ -673,7 +678,7 @@ export default function PodsPage() {
       align: "left",
       ...getSortableColumnProps("cpuUsage"),
       render: (_: unknown, row: PodRow) => renderUsageCell(row.cpuUsage ?? row.cpuUsagePercent, row, "cpu"),
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "内存使用率",
       dataIndex: "memoryUsage",
@@ -682,7 +687,7 @@ export default function PodsPage() {
       align: "left",
       ...getSortableColumnProps("memoryUsage"),
       render: (_: unknown, row: PodRow) => renderUsageCell(row.memoryUsage ?? row.memoryUsagePercent, row, "memory"),
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: <span style={{ whiteSpace: "nowrap" }}>重启次数</span>,
       dataIndex: "restartCount",
@@ -690,24 +695,26 @@ export default function PodsPage() {
       width: 116,
       align: "left",
       ...getSortableColumnProps("restartCount"),
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "Pod IP",
       dataIndex: "podIP",
       key: "podIP",
+      filter: { type: "text", placeholder: "以 IP 过滤" },
       width: TABLE_COL_WIDTH.ip,
       align: "left",
       ...getSortableColumnProps("podIP"),
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "节点",
       dataIndex: "nodeName",
       key: "nodeName",
+      filter: { type: "text", placeholder: "以节点过滤" },
       width: TABLE_COL_WIDTH.node,
       align: "left",
       ellipsis: true,
       ...getSortableColumnProps("nodeName"),
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "创建时间",
       dataIndex: "createdAt",
@@ -716,10 +723,11 @@ export default function PodsPage() {
       align: "left",
       ...getSortableColumnProps("createdAt"),
       render: (v: string) => <ResourceTimeCell value={v} now={now} mode="relative" />,
-    } as unknown as ColumnType<PodRow>,
+    },
     {
       title: "操作",
       key: "quick-actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       fixed: "right",
       align: "left",
@@ -781,59 +789,19 @@ export default function PodsPage() {
             />
           }
         />
-        <Row gutter={[8, 8]} align="middle" style={{ marginBottom: 10 }}>
-          <Col xs={24} sm={12} md={5} lg={4}>
-            <ClusterSelect
-              value={clusterId}
-              onChange={(v) => {
-                onClusterChange(v);
-                resetPage();
-              }}
-              options={clusterFilterOptions}
-              loading={clustersQuery.isLoading}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={4} lg={3}>
-            <NamespaceSelect
-              value={namespace}
-              onChange={(v) => {
-                onNamespaceChange(v);
-                resetPage();
-              }}
-              knownNamespaces={knownNamespaces}
-              clusterId={clusterId}
-              disabled={namespaceDisabled}
-              placeholder={namespacePlaceholder}
-            />
-          </Col>
-          <Col xs={24} md={7} lg={6}>
-            <Input
-              allowClear
-              placeholder="按 Pod 名称/标签搜索（示例：nginx app=web env=prod）"
-              value={keywordInput}
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onPressEnter={handleSearch}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={4} lg={3}>
-            <Select
-              className="resource-filter-select"
-              style={{ width: "100%" }}
-              value={phaseFilter}
-              onChange={(v) => {
-                setPhaseFilter(v);
-                resetPage();
-              }}
-              options={PHASE_OPTIONS}
-              placeholder="状态过滤"
-            />
-          </Col>
-          <Col xs={24} md={3} lg={3}>
-            <Button icon={<SearchOutlined />} type="primary" onClick={handleSearch}>
-              查询
-            </Button>
-          </Col>
-        </Row>
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          namespace={namespace}
+          clusterOptions={clusterFilterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+            onScopeChange(nextClusterId, nextNamespace);
+            resetPage();
+          }}
+        />
 
         {!isInitializing && !accessToken ? (
           <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再查看 Pod 信息。" style={{ marginBottom: 12 }} />
@@ -853,9 +821,21 @@ export default function PodsPage() {
 
         <ResourceTable<PodRow>
           rowKey="key"
+          tableKey="workloads.pods"
           bordered
-          columns={columns}
+          columns={columns as ColumnsType<PodRow>}
           dataSource={displayedRows}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按 Pod 名称/标签搜索（示例：nginx app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
           loading={{ spinning: podsQuery.isLoading && !podsQuery.data, description: "Pod 数据加载中..." }}
           onChange={(paginationInfo, filters, sorter, extra) =>
             handleTableChange(paginationInfo, filters, sorter, extra, tableBusy)

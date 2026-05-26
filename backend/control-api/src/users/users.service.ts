@@ -42,6 +42,7 @@ export async function verifyPassword(
 type ResourceState = 'active' | 'disabled';
 
 interface Actor {
+  id?: string;
   username?: string;
   role?: PlatformRole;
 }
@@ -103,6 +104,12 @@ export interface UsersRbacResponse {
   timestamp: string;
 }
 
+export interface TablePreferenceResponse {
+  tableKey: string;
+  value: unknown;
+  updatedAt: string | null;
+}
+
 export interface CreateUserRequest {
   username: string;
   password: string;
@@ -134,6 +141,10 @@ export interface UpdateRbacRequest {
   subjectKind?: RbacSubjectKind;
   subjectNamespace?: string;
   subjectRef?: RbacSubjectRef;
+}
+
+export interface UpdateTablePreferenceRequest {
+  value?: unknown;
 }
 
 export interface UsersListQuery {
@@ -404,6 +415,64 @@ export class UsersService {
   }
 
   // -------------------------------------------------------------------------
+  // Preferences — per-user table view preferences
+  // -------------------------------------------------------------------------
+
+  async getTablePreference(
+    actor: Actor | undefined,
+    tableKey: string,
+  ): Promise<TablePreferenceResponse> {
+    const userId = this.requireActorUserId(actor);
+    const normalizedTableKey = this.normalizeTableKey(tableKey);
+    const key = this.toTablePreferenceKey(normalizedTableKey);
+
+    const row = await this.preferenceRepo().findUnique({
+      where: { userId_key: { userId, key } },
+    });
+
+    if (!row) {
+      return {
+        tableKey: normalizedTableKey,
+        value: null,
+        updatedAt: null,
+      };
+    }
+
+    return this.toTablePreferenceResponse(normalizedTableKey, row);
+  }
+
+  async saveTablePreference(
+    actor: Actor | undefined,
+    tableKey: string,
+    body: UpdateTablePreferenceRequest,
+  ): Promise<TablePreferenceResponse> {
+    const userId = this.requireActorUserId(actor);
+    const normalizedTableKey = this.normalizeTableKey(tableKey);
+    if (
+      !body ||
+      !Object.prototype.hasOwnProperty.call(body, 'value') ||
+      body.value === undefined
+    ) {
+      throw new BadRequestException('value 不能为空');
+    }
+
+    const key = this.toTablePreferenceKey(normalizedTableKey);
+    const row = await this.preferenceRepo().upsert({
+      where: { userId_key: { userId, key } },
+      create: {
+        userId,
+        key,
+        value: body.value,
+      },
+      update: {
+        value: body.value,
+      },
+    });
+
+    return this.toTablePreferenceResponse(normalizedTableKey, row);
+  }
+
+  // -------------------------------------------------------------------------
   // RBAC — 数据库持久化
   // -------------------------------------------------------------------------
 
@@ -512,7 +581,7 @@ export class UsersService {
     body: CreateRbacRequest,
   ): Promise<RbacListItem> {
     assertWritePermission(actor);
-    const name = body?.name?.trim();
+    const name = this.requiredTrim(body?.name, 'name');
     const namespace = body?.namespace?.trim() ?? '';
     const kind = body?.kind;
     const subjectInput = this.resolveSubjectInput(body);
@@ -531,20 +600,22 @@ export class UsersService {
       subjectNamespace: subjectInput.subjectNamespace,
     });
 
-    const created = await this.rbacRepo().create({
-      data: {
-        name,
-        kind,
-        namespace: kind === 'RoleBinding' ? namespace : '',
-        subject: subjectInput.subject,
-        subjectKind: subjectInput.subjectKind,
-        subjectNamespace:
-          subjectInput.subjectKind === 'ServiceAccount'
-            ? subjectInput.subjectNamespace
-            : '',
-        state: 'active',
-      },
-    });
+    const created = await this.persistRbacWrite(() =>
+      this.rbacRepo().create({
+        data: {
+          name,
+          kind,
+          namespace: kind === 'RoleBinding' ? namespace : '',
+          subject: subjectInput.subject,
+          subjectKind: subjectInput.subjectKind,
+          subjectNamespace:
+            subjectInput.subjectKind === 'ServiceAccount'
+              ? subjectInput.subjectNamespace
+              : '',
+          state: 'active',
+        },
+      }),
+    );
 
     this.audit(actor, 'create', 'rbac', created.id);
     return this.toRbacListItem(created);
@@ -598,21 +669,23 @@ export class UsersService {
       subjectNamespace: nextSubjectInput.subjectNamespace,
     });
 
-    const updated = await this.rbacRepo().update({
-      where: { id },
-      data: {
-        name: nextName,
-        kind: nextKind,
-        namespace: nextKind === 'RoleBinding' ? nextNamespace : '',
-        subject: nextSubjectInput.subject,
-        subjectKind: nextSubjectInput.subjectKind,
-        subjectNamespace:
-          nextSubjectInput.subjectKind === 'ServiceAccount'
-            ? nextSubjectInput.subjectNamespace
-            : '',
-        version: { increment: 1 },
-      },
-    });
+    const updated = await this.persistRbacWrite(() =>
+      this.rbacRepo().update({
+        where: { id },
+        data: {
+          name: nextName,
+          kind: nextKind,
+          namespace: nextKind === 'RoleBinding' ? nextNamespace : '',
+          subject: nextSubjectInput.subject,
+          subjectKind: nextSubjectInput.subjectKind,
+          subjectNamespace:
+            nextSubjectInput.subjectKind === 'ServiceAccount'
+              ? nextSubjectInput.subjectNamespace
+              : '',
+          version: { increment: 1 },
+        },
+      }),
+    );
 
     this.audit(actor, 'update', 'rbac', updated.id);
     return this.toRbacListItem(updated);
@@ -686,8 +759,11 @@ export class UsersService {
     };
   }
 
-  private requiredTrim(value: string, field: string): string {
-    const next = value?.trim();
+  private requiredTrim(value: unknown, field: string): string {
+    if (typeof value !== 'string') {
+      throw new BadRequestException(`${field} 必须为字符串`);
+    }
+    const next = value.trim();
     if (!next) throw new BadRequestException(`${field} 不能为空`);
     return next;
   }
@@ -726,6 +802,47 @@ export class UsersService {
     };
   }
 
+  private preferenceRepo(): {
+    findUnique: (args: unknown) => Promise<UserPreferenceRecord | null>;
+    upsert: (args: unknown) => Promise<UserPreferenceRecord>;
+  } {
+    return (this.prisma as unknown as { userPreference: unknown })
+      .userPreference as {
+      findUnique: (args: unknown) => Promise<UserPreferenceRecord | null>;
+      upsert: (args: unknown) => Promise<UserPreferenceRecord>;
+    };
+  }
+
+  private requireActorUserId(actor: Actor | undefined): string {
+    const userId = actor?.id?.trim();
+    if (!userId) throw new BadRequestException('当前用户无效');
+    return userId;
+  }
+
+  private normalizeTableKey(tableKey: string): string {
+    const normalized = tableKey?.trim();
+    if (!normalized) throw new BadRequestException('tableKey 不能为空');
+    if (normalized.length > 120) {
+      throw new BadRequestException('tableKey 长度不能超过 120');
+    }
+    return normalized;
+  }
+
+  private toTablePreferenceKey(tableKey: string): string {
+    return `table:${tableKey}`;
+  }
+
+  private toTablePreferenceResponse(
+    tableKey: string,
+    row: UserPreferenceRecord,
+  ): TablePreferenceResponse {
+    return {
+      tableKey,
+      value: row.value,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
   private audit(
     actor: Actor | undefined,
     action: 'create' | 'update' | 'delete' | 'enable' | 'disable',
@@ -748,6 +865,30 @@ export class UsersService {
 
   private isRbacSubjectKind(value: unknown): value is RbacSubjectKind {
     return value === 'User' || value === 'Group' || value === 'ServiceAccount';
+  }
+
+  private async persistRbacWrite(
+    write: () => Promise<RbacBindingRecord>,
+  ): Promise<RbacBindingRecord> {
+    try {
+      return await write();
+    } catch (error) {
+      if (this.isPrismaBusinessError(error)) {
+        throw new BadRequestException('RBAC 绑定数据无效，请检查名称和主体配置');
+      }
+      throw error;
+    }
+  }
+
+  private isPrismaBusinessError(error: unknown): boolean {
+    const maybePrismaError = error as {
+      code?: string;
+      name?: string;
+    };
+    return (
+      maybePrismaError.name === 'PrismaClientValidationError' ||
+      ['P2000', 'P2002', 'P2003', 'P2011', 'P2012'].includes(maybePrismaError.code ?? '')
+    );
   }
 
   private assertRbacBindingFields(input: {
@@ -894,5 +1035,13 @@ interface RbacBindingRecord {
   subjectNamespace: string;
   state: string;
   version: number;
+  updatedAt: Date;
+}
+
+interface UserPreferenceRecord {
+  id: string;
+  userId: string;
+  key: string;
+  value: unknown;
   updatedAt: Date;
 }

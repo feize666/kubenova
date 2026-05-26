@@ -1,29 +1,27 @@
 "use client";
 
-import { DeleteOutlined, EyeOutlined, FileTextOutlined, SearchOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EyeOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import {
   Alert,
   App,
-  Button,
   Card,
-  Col,
   Dropdown,
   Form,
   Input,
   Modal,
-  Row,
   Select,
   Space,
   Tag,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { ColumnsType } from "antd/es/table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/lib/table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import {
   buildResourceActionMenuItems,
   matchLabelExpressions,
@@ -46,8 +44,7 @@ import {
 } from "@/lib/api/workloads";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
-import { NamespaceSelect } from "@/components/namespace-select";
-import { ClusterSelect } from "@/components/cluster-select";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -60,6 +57,25 @@ function stateTag(state: string) {
   if (state === "active") return <Tag color="green">调度中</Tag>;
   if (state === "disabled") return <Tag color="gold">暂停</Tag>;
   return <Tag color="red">已删除</Tag>;
+}
+
+const STATE_FILTER_OPTIONS = [
+  { label: "调度中", value: "active" },
+  { label: "暂停", value: "disabled" },
+  { label: "已删除", value: "deleted" },
+];
+
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
+function selectMatches(value: unknown, filterValue: unknown) {
+  return !filterValue || value === filterValue;
 }
 
 // CronJob 的 spec 可能含 schedule 字段
@@ -83,7 +99,8 @@ export default function CronJobsPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const {
     sortBy,
@@ -163,13 +180,33 @@ export default function CronJobsPage() {
       ),
     [data?.items, mergedFilters],
   );
+  const filteredTableData = useMemo(() => {
+    const nameFilter = getTextFilter(tableFilters, "name");
+    const clusterFilter = getTextFilter(tableFilters, "clusterId");
+    const namespaceFilter = getTextFilter(tableFilters, "namespace");
+    const scheduleFilter = getTextFilter(tableFilters, "schedule");
+    const lastScheduleTimeFilter = getTextFilter(tableFilters, "lastScheduleTime");
+    const createdAtFilter = getTextFilter(tableFilters, "createdAt");
+    const stateFilter = tableFilters.state;
+
+    return tableData.filter((item) => (
+      textMatches(item.name, nameFilter) &&
+      textMatches(`${item.clusterId} ${getClusterDisplayName(clusterMap, item.clusterId)}`, clusterFilter) &&
+      textMatches(item.namespace, namespaceFilter) &&
+      textMatches(item.spec?.schedule, scheduleFilter) &&
+      textMatches(item.spec?.lastScheduleTime, lastScheduleTimeFilter) &&
+      textMatches(item.createdAt, createdAtFilter) &&
+      selectMatches(item.state, stateFilter)
+    ));
+  }, [clusterMap, tableData, tableFilters]);
   const nameWidth = useMemo(
-    () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
-    [tableData],
+    () => getAdaptiveNameWidth(filteredTableData.map((item) => item.name), { max: 320 }),
+    [filteredTableData],
   );
 
-  const handleSearch = () => {
-    const parsed = parseResourceSearchInput(keywordInput);
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
@@ -272,11 +309,13 @@ export default function CronJobsPage() {
     }
   };
 
-  const columns: ColumnsType<CronJobItem> = [
+  const columns: Array<HeadlampResourceTableColumn<CronJobItem>> = [
     {
       title: "定时任务",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "以名称过滤" },
       width: nameWidth,
       ellipsis: true,
       render: (name: string, row: CronJobItem) =>
@@ -289,11 +328,12 @@ export default function CronJobsPage() {
         ),
       ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "clusterId", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: CronJobItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
+    { title: "集群", dataIndex: "clusterId", key: "clusterId", filter: { type: "text", placeholder: "以集群过滤" }, width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: CronJobItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
+    { title: "名称空间", dataIndex: "namespace", key: "namespace", filter: { type: "text", placeholder: "以命名空间过滤" }, width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
     {
       title: "调度表达式",
       key: "schedule",
+      filter: { type: "text", placeholder: "以 Cron 过滤" },
       width: TABLE_COL_WIDTH.schedule,
       render: (_: unknown, record: CronJobItem) => record.spec?.schedule ?? "-",
       sorter: (a, b) => (a.spec?.schedule ?? "").localeCompare(b.spec?.schedule ?? ""),
@@ -302,6 +342,7 @@ export default function CronJobsPage() {
     {
       title: "最近执行",
       key: "lastScheduleTime",
+      filter: { type: "text", placeholder: "以时间过滤" },
       width: TABLE_COL_WIDTH.time,
       render: (_: unknown, record: CronJobItem) => {
         const t = record.spec?.lastScheduleTime;
@@ -314,6 +355,7 @@ export default function CronJobsPage() {
       title: "状态",
       dataIndex: "state",
       key: "state",
+      filter: { type: "status", placeholder: "以状态过滤", options: STATE_FILTER_OPTIONS },
       width: TABLE_COL_WIDTH.status,
       render: (value: string) => stateTag(value),
       ...getSortableColumnProps("state"),
@@ -322,6 +364,7 @@ export default function CronJobsPage() {
       title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
+      filter: { type: "text", placeholder: "以时间过滤" },
       width: TABLE_COL_WIDTH.time,
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
       ...getSortableColumnProps("createdAt"),
@@ -329,6 +372,7 @@ export default function CronJobsPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       align: "left",
       fixed: "right",
@@ -362,47 +406,19 @@ export default function CronJobsPage() {
         />
 
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <Row gutter={[12, 12]} align="middle">
-            <Col xs={24} sm={12} md={6} lg={4}>
-              <ClusterSelect
-                value={clusterId}
-                onChange={(v) => { onClusterChange(v); resetPage(); }}
-                options={clusterOptions}
-                loading={clustersQuery.isLoading}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={5} lg={4}>
-              <NamespaceSelect
-                value={namespace}
-                onChange={(v) => { onNamespaceChange(v); resetPage(); }}
-                knownNamespaces={knownNamespaces}
-                clusterId={clusterId}
-                disabled={namespaceDisabled}
-                placeholder={namespacePlaceholder}
-              />
-            </Col>
-            <Col xs={24} sm={16} md={7} lg={6}>
-              <Input
-                prefix={<SearchOutlined />}
-                allowClear
-                placeholder="按名称/标签搜索（示例：app-a app=web env=prod）"
-                value={keywordInput}
-                onChange={(e) => setKeywordInput(e.target.value)}
-                onPressEnter={handleSearch}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={4} lg={3}>
-              <Space>
-                <Button
-                  icon={<SearchOutlined />}
-                  type="primary"
-                  onClick={handleSearch}
-                >
-                  查询
-                </Button>
-              </Space>
-            </Col>
-          </Row>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              resetPage();
+            }}
+          />
 
           {!isInitializing && !accessToken ? (
             <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" />
@@ -420,8 +436,21 @@ export default function CronJobsPage() {
           <ResourceTable<CronJobItem>
             bordered
             rowKey="id"
+            tableKey="workloads.cronjobs"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
             columns={columns}
-            dataSource={tableData}
+            dataSource={filteredTableData}
             loading={isLoading && !data}
             onChange={(paginationInfo, filters, sorter, extra) =>
               handleTableChange(paginationInfo, filters, sorter, extra, isLoading && !data)

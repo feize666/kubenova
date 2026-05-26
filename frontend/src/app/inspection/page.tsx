@@ -23,11 +23,18 @@ import type { Dayjs } from "dayjs";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
+import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
+import {
+  ResourceFilterToolbar,
+  ResourceFilterToolbarItem,
+} from "@/components/resource-filter-toolbar";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { buildTablePagination } from "@/lib/table/pagination";
 import {
   getCapabilityBaseline,
@@ -109,12 +116,14 @@ export default function InspectionPage() {
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [keyword, setKeyword] = useState(initialKeyword);
   const [exportFormat, setExportFormat] = useState<InspectionExportFormat>("xlsx");
   const [activeResult, setActiveResult] = useState<InspectionActionResult | null>(null);
+  const [issueDetail, setIssueDetail] = useState<InspectionIssue | null>(null);
+  const [capabilityDetail, setCapabilityDetail] = useState<CapabilityBaselineMatrixItem | null>(null);
   const [refreshingInspection, setRefreshingInspection] = useState(false);
   const [timePreset, setTimePreset] = useState<MonitoringTimePreset | "custom">("24h");
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null);
@@ -122,6 +131,8 @@ export default function InspectionPage() {
   const [capabilityPageSize, setCapabilityPageSize] = useState(10);
   const [issuePage, setIssuePage] = useState(1);
   const [issuePageSize, setIssuePageSize] = useState(12);
+  const [capabilityFilters, setCapabilityFilters] = useState<HeadlampTableFilters>({});
+  const [issueFilters, setIssueFilters] = useState<HeadlampTableFilters>({});
   const enabled = !isInitializing && Boolean(accessToken);
   useSyncResourceFilterUrlState({
     clusterId,
@@ -247,12 +258,21 @@ export default function InspectionPage() {
     }
   };
 
-  const columns: ColumnsType<InspectionIssue> = [
+  const columns: Array<HeadlampResourceTableColumn<InspectionIssue>> = [
     {
       title: "严重级别",
       dataIndex: "severity",
       key: "severity",
       width: 100,
+      filter: {
+        type: "select",
+        placeholder: "以级别过滤",
+        options: [
+          { label: "严重", value: "critical" },
+          { label: "警告", value: "warning" },
+          { label: "提示", value: "info" },
+        ],
+      },
       render: (v: InspectionIssue["severity"]) => severityTag(v),
     },
     {
@@ -260,6 +280,11 @@ export default function InspectionPage() {
       dataIndex: "category",
       key: "category",
       width: 110,
+      filter: {
+        type: "select",
+        placeholder: "以分类过滤",
+        options: Object.entries(CATEGORY_LABEL).map(([value, label]) => ({ label, value })),
+      },
       render: (v: InspectionIssue["category"]) => CATEGORY_LABEL[v] ?? v,
     },
     {
@@ -267,6 +292,11 @@ export default function InspectionPage() {
       dataIndex: "title",
       key: "title",
       width: 220,
+      required: true,
+      filter: { type: "text", placeholder: "以问题过滤" },
+      render: (value: string, record) => (
+        <Typography.Link onClick={() => setIssueDetail(record)}>{value}</Typography.Link>
+      ),
     },
     {
       title: "资源",
@@ -274,12 +304,14 @@ export default function InspectionPage() {
       key: "resourceRef",
       width: 260,
       ellipsis: true,
+      filter: { type: "text", placeholder: "以资源过滤" },
     },
     {
       title: "诊断证据",
       dataIndex: "evidence",
       key: "evidence",
       width: 220,
+      filter: { type: "text", placeholder: "以证据过滤" },
       render: (v?: string) => v || "-",
     },
     {
@@ -287,10 +319,12 @@ export default function InspectionPage() {
       dataIndex: "suggestion",
       key: "suggestion",
       ellipsis: true,
+      filter: { type: "text", placeholder: "以建议过滤" },
     },
     {
       title: "修复动作",
       key: "actions",
+      required: true,
       width: 280,
       render: (_, record) => {
         const actions = record.actions ?? [];
@@ -316,24 +350,41 @@ export default function InspectionPage() {
     },
   ];
 
-  const capabilityColumns: ColumnsType<CapabilityBaselineMatrixItem> = [
+  const capabilityColumns: Array<HeadlampResourceTableColumn<CapabilityBaselineMatrixItem>> = [
     {
       title: "类别",
       dataIndex: "category",
       key: "category",
       width: 180,
+      filter: { type: "text", placeholder: "以类别过滤" },
     },
     {
       title: "能力项",
       dataIndex: "capabilityName",
       key: "capabilityName",
       width: 260,
+      required: true,
+      filter: { type: "text", placeholder: "以能力项过滤" },
+      render: (value: string, record) => (
+        <Typography.Link onClick={() => setCapabilityDetail(record)}>{value}</Typography.Link>
+      ),
     },
     {
       title: "状态",
       dataIndex: "status",
       key: "status",
       width: 120,
+      filter: {
+        type: "select",
+        placeholder: "以状态过滤",
+        options: [
+          { label: "已实现", value: "implemented" },
+          { label: "规划中", value: "planned" },
+          { label: "进行中", value: "in-progress" },
+          { label: "阻塞", value: "blocked" },
+          { label: "待补齐", value: "gap" },
+        ],
+      },
       render: (value: CapabilityBaselineStatus) => capabilityStatusTag(value),
     },
     {
@@ -341,6 +392,7 @@ export default function InspectionPage() {
       dataIndex: "rancherAlignment",
       key: "rancherAlignment",
       width: 220,
+      filter: { type: "text", placeholder: "以 Rancher 过滤" },
       render: (value?: string) => value || "-",
     },
     {
@@ -348,6 +400,7 @@ export default function InspectionPage() {
       dataIndex: "kubesphereAlignment",
       key: "kubesphereAlignment",
       width: 220,
+      filter: { type: "text", placeholder: "以 KubeSphere 过滤" },
       render: (value?: string) => value || "-",
     },
     {
@@ -355,6 +408,7 @@ export default function InspectionPage() {
       dataIndex: "trackedTask",
       key: "trackedTask",
       width: 180,
+      filter: { type: "text", placeholder: "以任务过滤" },
       render: (value: string | null | undefined, record) => {
         if (record.status === "planned") {
           return value ? <Tag color="processing">{value}</Tag> : <Tag color="error">未关联任务</Tag>;
@@ -392,7 +446,35 @@ export default function InspectionPage() {
     };
   }, [capabilityQuery.data]);
 
-  const capabilityItems = useMemo(() => capabilityQuery.data?.items ?? [], [capabilityQuery.data?.items]);
+  const capabilityItems = useMemo(() => {
+    const raw = capabilityQuery.data?.items ?? [];
+    const categoryFilter = typeof capabilityFilters.category === "string" ? capabilityFilters.category.toLowerCase() : "";
+    const capabilityFilter = typeof capabilityFilters.capabilityName === "string" ? capabilityFilters.capabilityName.toLowerCase() : "";
+    const statusFilter = typeof capabilityFilters.status === "string" ? capabilityFilters.status : "";
+    const rancherFilter = typeof capabilityFilters.rancherAlignment === "string" ? capabilityFilters.rancherAlignment.toLowerCase() : "";
+    const kubesphereFilter =
+      typeof capabilityFilters.kubesphereAlignment === "string" ? capabilityFilters.kubesphereAlignment.toLowerCase() : "";
+    const taskFilter = typeof capabilityFilters.trackedTask === "string" ? capabilityFilters.trackedTask.toLowerCase() : "";
+    return raw.filter((item) => {
+      const matchCategory = categoryFilter ? item.category.toLowerCase().includes(categoryFilter) : true;
+      const matchCapability = capabilityFilter ? item.capabilityName.toLowerCase().includes(capabilityFilter) : true;
+      const matchStatus = statusFilter ? item.status === statusFilter : true;
+      const matchRancher = rancherFilter ? (item.rancherAlignment ?? "").toLowerCase().includes(rancherFilter) : true;
+      const matchKubesphere = kubesphereFilter
+        ? (item.kubesphereAlignment ?? "").toLowerCase().includes(kubesphereFilter)
+        : true;
+      const matchTask = taskFilter ? (item.trackedTask ?? "").toLowerCase().includes(taskFilter) : true;
+      return matchCategory && matchCapability && matchStatus && matchRancher && matchKubesphere && matchTask;
+    });
+  }, [
+    capabilityFilters.capabilityName,
+    capabilityFilters.category,
+    capabilityFilters.kubesphereAlignment,
+    capabilityFilters.rancherAlignment,
+    capabilityFilters.status,
+    capabilityFilters.trackedTask,
+    capabilityQuery.data?.items,
+  ]);
   const capabilityPagedItems = useMemo(() => {
     const start = (capabilityPage - 1) * capabilityPageSize;
     return capabilityItems.slice(start, start + capabilityPageSize);
@@ -400,20 +482,40 @@ export default function InspectionPage() {
 
   const issueItems = useMemo(() => reportQuery.data?.items ?? [], [reportQuery.data?.items]);
   const issueItemsFiltered = useMemo(() => {
+    const severityFilter = typeof issueFilters.severity === "string" ? issueFilters.severity : "";
+    const categoryFilter = typeof issueFilters.category === "string" ? issueFilters.category : "";
+    const titleFilter = typeof issueFilters.title === "string" ? issueFilters.title.toLowerCase() : "";
+    const resourceFilter = typeof issueFilters.resourceRef === "string" ? issueFilters.resourceRef.toLowerCase() : "";
+    const evidenceFilter = typeof issueFilters.evidence === "string" ? issueFilters.evidence.toLowerCase() : "";
+    const suggestionFilter = typeof issueFilters.suggestion === "string" ? issueFilters.suggestion.toLowerCase() : "";
     const byNamespace = namespace.trim()
       ? issueItems.filter((item) => (item.namespace ?? "").trim() === namespace.trim())
       : issueItems;
-    if (!keyword.trim()) {
-      return byNamespace;
-    }
     const loweredKeyword = keyword.trim().toLowerCase();
     return byNamespace.filter((item) =>
-      [item.title, item.resourceRef, item.evidence ?? "", item.suggestion]
-        .join(" ")
-        .toLowerCase()
-        .includes(loweredKeyword),
+      {
+        const searchText = [item.title, item.resourceRef, item.evidence ?? "", item.suggestion].join(" ").toLowerCase();
+        const matchKeyword = loweredKeyword ? searchText.includes(loweredKeyword) : true;
+        const matchSeverity = severityFilter ? item.severity === severityFilter : true;
+        const matchCategory = categoryFilter ? item.category === categoryFilter : true;
+        const matchTitle = titleFilter ? item.title.toLowerCase().includes(titleFilter) : true;
+        const matchResource = resourceFilter ? item.resourceRef.toLowerCase().includes(resourceFilter) : true;
+        const matchEvidence = evidenceFilter ? (item.evidence ?? "").toLowerCase().includes(evidenceFilter) : true;
+        const matchSuggestion = suggestionFilter ? item.suggestion.toLowerCase().includes(suggestionFilter) : true;
+        return matchKeyword && matchSeverity && matchCategory && matchTitle && matchResource && matchEvidence && matchSuggestion;
+      },
     );
-  }, [issueItems, keyword, namespace]);
+  }, [
+    issueFilters.category,
+    issueFilters.evidence,
+    issueFilters.resourceRef,
+    issueFilters.severity,
+    issueFilters.suggestion,
+    issueFilters.title,
+    issueItems,
+    keyword,
+    namespace,
+  ]);
   const capabilityMaxPage = useMemo(
     () => Math.max(1, Math.ceil(capabilityItems.length / capabilityPageSize)),
     [capabilityItems.length, capabilityPageSize],
@@ -455,45 +557,9 @@ export default function InspectionPage() {
       </Card>
 
       <Card>
-        <ResourceClusterNamespaceFilters
-          clusterId={clusterId}
-          namespace={namespace}
-          keywordInput={keywordInput}
-          clusterOptions={clusterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onClusterChange={(value) => {
-            onClusterChange(value);
-            setIssuePage(1);
-          }}
-          onNamespaceChange={(value) => {
-            onNamespaceChange(value);
-            setIssuePage(1);
-          }}
-          onKeywordInputChange={setKeywordInput}
-          onSearch={() => {
-            setKeyword(keywordInput.trim());
-            setIssuePage(1);
-          }}
-          keywordPlaceholder="搜索问题 / 资源 / 证据 / 修复建议"
-          extraFilters={
-            <Space wrap>
-              <Select
-                style={{ width: 120 }}
-                value={timePreset}
-                onChange={(value: MonitoringTimePreset | "custom") => setTimePreset(value)}
-                options={TIME_PRESETS}
-              />
-              {timePreset === "custom" ? (
-                <RangePicker
-                  showTime
-                  format="YYYY-MM-DD HH:mm:ss"
-                  value={customRange}
-                  onChange={(value) => setCustomRange(value as [Dayjs, Dayjs] | null)}
-                />
-              ) : null}
+        <ResourceFilterToolbar
+          actions={
+            <>
               <Button icon={<ReloadOutlined />} onClick={() => void handleRefreshInspection()} loading={refreshingInspection}>
                 重新巡检
               </Button>
@@ -519,10 +585,43 @@ export default function InspectionPage() {
               <Typography.Text type="secondary">
                 最后更新时间：{reportQuery.dataUpdatedAt ? new Date(reportQuery.dataUpdatedAt).toLocaleString("zh-CN") : "-"}
               </Typography.Text>
-            </Space>
+            </>
           }
-          marginBottom={0}
-        />
+        >
+          <ResourceFilterToolbarItem width="auto">
+            <ResourceScopeFilterButton
+              clusterId={clusterId}
+              namespace={namespace}
+              clusterOptions={clusterOptions}
+              clusterLoading={clustersQuery.isLoading}
+              knownNamespaces={knownNamespaces}
+              namespaceDisabled={namespaceDisabled}
+              namespacePlaceholder={namespacePlaceholder}
+              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                onScopeChange(nextClusterId, nextNamespace);
+                setIssuePage(1);
+              }}
+            />
+          </ResourceFilterToolbarItem>
+          <ResourceFilterToolbarItem label="时间范围" width="sm">
+            <Select
+              style={{ width: "100%" }}
+              value={timePreset}
+              onChange={(value: MonitoringTimePreset | "custom") => setTimePreset(value)}
+              options={TIME_PRESETS}
+            />
+          </ResourceFilterToolbarItem>
+          {timePreset === "custom" ? (
+            <ResourceFilterToolbarItem label="自定义时间" width="xl">
+              <RangePicker
+                showTime
+                format="YYYY-MM-DD HH:mm:ss"
+                value={customRange}
+                onChange={(value) => setCustomRange(value as [Dayjs, Dayjs] | null)}
+              />
+            </ResourceFilterToolbarItem>
+          ) : null}
+        </ResourceFilterToolbar>
       </Card>
 
       {!enabled ? <Alert type="warning" showIcon message="请先登录后再执行资源巡检。" /> : null}
@@ -599,8 +698,15 @@ export default function InspectionPage() {
 
         <ResourceTable<CapabilityBaselineMatrixItem>
           rowKey={(record) => `${record.category}-${record.capabilityName}`}
-          columns={capabilityColumns}
+          tableKey="business.inspection.capabilityBaseline"
+          columns={capabilityColumns as ColumnsType<CapabilityBaselineMatrixItem>}
           dataSource={capabilityPagedItems}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          filters={capabilityFilters}
+          onFiltersChange={(nextFilters) => {
+            setCapabilityFilters(nextFilters);
+            setCapabilityPage(1);
+          }}
           loading={capabilityQuery.isLoading}
           pagination={buildTablePagination({
             current: capabilityPage,
@@ -631,8 +737,24 @@ export default function InspectionPage() {
       <Card>
         <ResourceTable<InspectionIssue>
           rowKey="id"
-          columns={columns}
+          tableKey="business.inspection.issues"
+          columns={columns as ColumnsType<InspectionIssue>}
           dataSource={issuePagedItems}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: (value) => {
+              setKeywordInput(value);
+              setKeyword(value.trim());
+              setIssuePage(1);
+            },
+            placeholder: "搜索问题 / 资源 / 证据 / 修复建议",
+          }}
+          filters={issueFilters}
+          onFiltersChange={(nextFilters) => {
+            setIssueFilters(nextFilters);
+            setIssuePage(1);
+          }}
           loading={reportQuery.isLoading}
           pagination={buildTablePagination({
             current: issuePage,
@@ -698,6 +820,74 @@ export default function InspectionPage() {
           </Space>
         ) : null}
       </Modal>
+      <BusinessDetailDrawer
+        open={Boolean(issueDetail)}
+        title={issueDetail ? `巡检问题 · ${issueDetail.title}` : "巡检问题"}
+        subtitle={issueDetail ? `${CATEGORY_LABEL[issueDetail.category] ?? issueDetail.category} / ${issueDetail.resourceRef}` : undefined}
+        onClose={() => setIssueDetail(null)}
+        sections={buildInspectionIssueDetailSections(issueDetail)}
+      />
+      <BusinessDetailDrawer
+        open={Boolean(capabilityDetail)}
+        title={capabilityDetail ? `能力项 · ${capabilityDetail.capabilityName}` : "能力项"}
+        subtitle={capabilityDetail?.category}
+        onClose={() => setCapabilityDetail(null)}
+        sections={buildCapabilityDetailSections(capabilityDetail)}
+      />
     </Space>
   );
+}
+
+function buildInspectionIssueDetailSections(record: InspectionIssue | null): BusinessDetailSection[] {
+  if (!record) {
+    return [];
+  }
+  return [
+    {
+      key: "basic",
+      title: "问题信息",
+      items: [
+        { key: "severity", label: "严重级别", value: severityTag(record.severity) },
+        { key: "category", label: "分类", value: CATEGORY_LABEL[record.category] ?? record.category },
+        { key: "title", label: "问题", value: record.title },
+        { key: "resourceRef", label: "资源", value: <Typography.Text code>{record.resourceRef}</Typography.Text> },
+      ],
+    },
+    {
+      key: "diagnosis",
+      title: "诊断与建议",
+      items: [
+        { key: "evidence", label: "诊断证据", value: record.evidence || "-" },
+        { key: "suggestion", label: "修复建议", value: record.suggestion },
+        { key: "actions", label: "可用动作", value: record.actions?.map((action) => action.label).join("、") || "-" },
+      ],
+    },
+  ];
+}
+
+function buildCapabilityDetailSections(record: CapabilityBaselineMatrixItem | null): BusinessDetailSection[] {
+  if (!record) {
+    return [];
+  }
+  return [
+    {
+      key: "basic",
+      title: "能力信息",
+      items: [
+        { key: "category", label: "类别", value: record.category },
+        { key: "capabilityName", label: "能力项", value: record.capabilityName },
+        { key: "status", label: "状态", value: capabilityStatusTag(record.status) },
+        { key: "trackedTask", label: "关联任务", value: record.trackedTask || "-" },
+      ],
+    },
+    {
+      key: "alignment",
+      title: "平台对标",
+      items: [
+        { key: "rancherAlignment", label: "Rancher 对标", value: record.rancherAlignment || "-" },
+        { key: "kubesphereAlignment", label: "KubeSphere 对标", value: record.kubesphereAlignment || "-" },
+        { key: "updatedAt", label: "更新时间", value: record.updatedAt ? new Date(record.updatedAt).toLocaleString("zh-CN") : "-" },
+      ],
+    },
+  ];
 }

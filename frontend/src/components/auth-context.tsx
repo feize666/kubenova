@@ -316,13 +316,11 @@ export function useAuth() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const initial = readAuthSnapshot();
-  const initialAccessTokenRef = useRef(initial?.accessToken ?? "");
-  const [accessToken, setAccessToken] = useState(initial?.accessToken ?? "");
-  const [refreshToken, setRefreshToken] = useState(initial?.refreshToken ?? "");
-  const [username, setUsername] = useState(initial?.username ?? "");
-  const [role, setRole] = useState(initial?.role ?? "");
-  const [expiresAt, setExpiresAt] = useState(initial?.expiresAt ?? "");
+  const [accessToken, setAccessToken] = useState("");
+  const [refreshToken, setRefreshToken] = useState("");
+  const [username, setUsername] = useState("");
+  const [role, setRole] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
   const [lastRequestId, setLastRequestId] = useState("");
   const [isInitializing, setIsInitializing] = useState(true);
   const bootstrappedRef = useRef(false);
@@ -354,16 +352,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     bootstrappedRef.current = true;
 
     const run = async () => {
-      const initialAccessToken = initialAccessTokenRef.current;
-      if (!initialAccessToken) {
+      const snapshot = readAuthSnapshot();
+      if (!snapshot?.accessToken) {
         setIsInitializing(false);
         return;
       }
       const requestGeneration = authGenerationRef.current;
+      setAccessToken(snapshot.accessToken);
+      setRefreshToken(snapshot.refreshToken);
+      setUsername(snapshot.username);
+      setRole(snapshot.role);
+      setExpiresAt(snapshot.expiresAt ?? "");
 
       try {
         const me = await requestAuthJson<{ user: AuthUser; expiresAt?: string }>("me", {
-          headers: { Authorization: `Bearer ${initialAccessToken}` },
+          headers: { Authorization: `Bearer ${snapshot.accessToken}` },
         });
         if (requestGeneration !== authGenerationRef.current) {
           return;

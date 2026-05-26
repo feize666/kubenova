@@ -17,6 +17,7 @@ import {
   SettingOutlined,
   SunFilled,
 } from "@ant-design/icons";
+import { useQuery } from "@tanstack/react-query";
 import { Avatar, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Skeleton, Space } from "antd";
 import type { MenuProps } from "antd";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -28,6 +29,7 @@ import { useThemeMode } from "@/components/theme-context";
 import { listCapabilities } from "@/lib/api/capabilities";
 import { buildLoginRoute, buildInternalReturnTo } from "@/lib/login-return";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
+import { queryKeys } from "@/lib/query";
 
 const { Header, Sider, Content } = Layout;
 const SIDEBAR_OPEN_SECTION_KEY = "kubenova.nav.sidebar.openSection.v2";
@@ -74,21 +76,6 @@ const sectionIconMap: Record<string, React.ReactNode> = {
   "section-intelligence": <BranchesOutlined />,
   "section-system-management": <SettingOutlined />,
 };
-
-function areStringSetsEqual(left: Set<string> | null, right: Set<string> | null) {
-  if (left === right) {
-    return true;
-  }
-  if (!left || !right || left.size !== right.size) {
-    return false;
-  }
-  for (const value of left) {
-    if (!right.has(value)) {
-      return false;
-    }
-  }
-  return true;
-}
 
 function getSectionOrder(key: string) {
   const index = SIDEBAR_SECTION_ORDER.indexOf(key as (typeof SIDEBAR_SECTION_ORDER)[number]);
@@ -172,12 +159,8 @@ const AppSider = memo(function AppSider({
     () => findActiveSectionKey(pathname, visibleSections),
     [pathname, visibleSections],
   );
-  const [openSectionKey, setOpenSectionKey] = useState<string | undefined>(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-    return window.localStorage.getItem(SIDEBAR_OPEN_SECTION_KEY) || undefined;
-  });
+  const [openSectionKey, setOpenSectionKey] = useState<string | undefined>();
+  const [sidebarStateRestored, setSidebarStateRestored] = useState(false);
   const effectiveOpenSectionKey =
     openSectionKey && sectionKeySet.has(openSectionKey)
       ? openSectionKey
@@ -233,6 +216,17 @@ const AppSider = memo(function AppSider({
   );
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setOpenSectionKey(window.localStorage.getItem(SIDEBAR_OPEN_SECTION_KEY) || undefined);
+      setSidebarStateRestored(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarStateRestored) {
+      return;
+    }
     if (typeof window === "undefined") {
       return;
     }
@@ -241,7 +235,7 @@ const AppSider = memo(function AppSider({
       return;
     }
     window.localStorage.removeItem(SIDEBAR_OPEN_SECTION_KEY);
-  }, [effectiveOpenSectionKey]);
+  }, [effectiveOpenSectionKey, sidebarStateRestored]);
 
   return (
     <Sider
@@ -335,7 +329,17 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
   const { mode, toggleTheme } = useThemeMode();
   const { accessToken, isAuthenticated, isInitializing, username, role, logout } = useAuth();
   const isLoginPage = pathname === "/login";
-  const [disabledPaths, setDisabledPaths] = useState<Set<string> | null>(null);
+  const capabilitiesQuery = useQuery({
+    queryKey: queryKeys.capabilities.list(accessToken),
+    queryFn: () => listCapabilities(accessToken),
+    enabled: !isLoginPage && !isInitializing && isAuthenticated && Boolean(accessToken),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    refetchOnMount: false,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: false,
+  });
   const currentReturnTo = useMemo(
     () => buildInternalReturnTo(pathname, searchParams.toString()),
     [pathname, searchParams],
@@ -346,61 +350,20 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     { key: "logout", label: "退出登录" },
   ];
 
-  useEffect(() => {
-    let cancelled = false;
+  const disabledPaths = useMemo(() => {
     if (!isAuthenticated || !accessToken) {
-      return () => {
-        cancelled = true;
-      };
+      return null;
     }
-
-    const refreshCapabilities = async () => {
-      try {
-        const capabilities = await listCapabilities(accessToken);
-        if (cancelled) return;
-        const nextDisabledPaths = new Set(
-          capabilities
-            .filter((item) => !item.enabled)
-            .map((item) => item.route)
-            .filter(Boolean),
-        );
-        setDisabledPaths((current) =>
-          areStringSetsEqual(current, nextDisabledPaths) ? current : nextDisabledPaths,
-        );
-      } catch {
-        if (cancelled) return;
-        // Fail-open to avoid blocking navigation due to transient backend loss.
-      }
-    };
-
-    const initialTimer = window.setTimeout(() => {
-      void refreshCapabilities();
-    }, 2500);
-    const timer = window.setInterval(() => {
-      void refreshCapabilities();
-    }, 60_000);
-    const handleFocus = () => {
-      void refreshCapabilities();
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void refreshCapabilities();
-      }
-    };
-
-    window.addEventListener("focus", handleFocus);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    void refreshCapabilities();
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(initialTimer);
-      window.clearInterval(timer);
-      window.removeEventListener("focus", handleFocus);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [accessToken, isAuthenticated]);
+    if (!capabilitiesQuery.data) {
+      return null;
+    }
+    return new Set(
+      capabilitiesQuery.data
+        .filter((item) => !item.enabled)
+        .map((item) => item.route)
+        .filter(Boolean),
+    );
+  }, [accessToken, capabilitiesQuery.data, isAuthenticated]);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") {

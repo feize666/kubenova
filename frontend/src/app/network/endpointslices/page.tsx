@@ -13,7 +13,6 @@ import {
   Typography,
   message,
 } from "antd";
-import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -31,9 +30,10 @@ import { ResourceTable } from "@/components/resource-table";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
-import { useAntdTableSortPagination } from "@/lib/table";
+import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import {
   createNetworkResource,
   deleteNetworkResource,
@@ -90,6 +90,15 @@ interface EndpointSliceFormValues {
   addressType: "IPv4" | "IPv6" | "FQDN";
   addresses: string;
   ports: string;
+}
+
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
 }
 
 function splitCsv(input?: string) {
@@ -168,6 +177,7 @@ export default function EndpointSlicesPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -276,9 +286,16 @@ export default function EndpointSlicesPage() {
     () =>
       ((data?.items ?? []) as EndpointSliceResource[]).filter(
         (item) =>
-          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters) &&
+          textMatches(item.name, getTextFilter(tableFilters, "name")) &&
+          textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
+          textMatches(item.namespace, getTextFilter(tableFilters, "namespace")) &&
+          textMatches(resolveServiceName(item), getTextFilter(tableFilters, "serviceName")) &&
+          textMatches(item.spec?.addressType, getTextFilter(tableFilters, "addressType")) &&
+          textMatches(listPortPreview(item).join(", "), getTextFilter(tableFilters, "ports")) &&
+          textMatches(listAddressPreview(item).join(", "), getTextFilter(tableFilters, "addresses")),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters, tableFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -287,6 +304,13 @@ export default function EndpointSlicesPage() {
 
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
+    resetPage();
+    setMergedFilters(parsed.labelExpressions);
+    setKeyword(parsed.keyword);
+  };
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
@@ -334,11 +358,13 @@ export default function EndpointSlicesPage() {
     });
   };
 
-  const columns: ColumnsType<EndpointSliceResource> = [
+  const columns: HeadlampResourceTableColumn<EndpointSliceResource>[] = [
     {
       title: "切片名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "名称" },
       width: nameWidth,
       ellipsis: true,
       ...getSortableColumnProps("name", isLoading && !data),
@@ -354,6 +380,7 @@ export default function EndpointSlicesPage() {
     {
       title: "集群",
       key: "clusterId",
+      filter: { type: "text", placeholder: "集群" },
       width: TABLE_COL_WIDTH.cluster,
       ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, row: EndpointSliceResource) => getClusterDisplayName(clusterMap, row.clusterId),
@@ -362,12 +389,14 @@ export default function EndpointSlicesPage() {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      filter: { type: "text", placeholder: "名称空间" },
       width: TABLE_COL_WIDTH.namespace,
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
     {
       title: "关联 Service",
       key: "serviceName",
+      filter: { type: "text", placeholder: "服务" },
       width: TABLE_COL_WIDTH.release,
       render: (_: unknown, row: EndpointSliceResource) => {
         const serviceName = resolveServiceName(row);
@@ -382,6 +411,7 @@ export default function EndpointSlicesPage() {
     {
       title: "地址类型",
       key: "addressType",
+      filter: { type: "text", placeholder: "地址类型" },
       width: TABLE_COL_WIDTH.type,
       render: (_: unknown, row: EndpointSliceResource) => row.spec?.addressType ?? "-",
     },
@@ -430,6 +460,7 @@ export default function EndpointSlicesPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       align: "center",
       fixed: "right",
@@ -501,6 +532,19 @@ export default function EndpointSlicesPage() {
         <ResourceTable<EndpointSliceResource>
           rowKey="id"
           columns={columns}
+          tableKey="network.endpointslices"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称/标签搜索（示例：slice-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
           dataSource={tableData}
           loading={isLoading && !data}
           onChange={(nextPagination, filters, sorter, extra) =>

@@ -2,7 +2,6 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Tag, Typography, message } from "antd";
-import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -11,10 +10,12 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
+import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getNamespaces } from "@/lib/api/namespaces";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import {
@@ -27,12 +28,13 @@ import {
   type DynamicResourceItem,
 } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
-import { useAntdTableSortPagination } from "@/lib/table";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
+import type { ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 type GatewayKindKey = "gatewayclass" | "gateway" | "httproute";
+type DetailTarget = NonNullable<ResourceDetailDrawerProps["request"]>;
 
 const GATEWAY_KIND_OPTIONS: Array<{ label: string; value: GatewayKindKey }> = [
   { label: "GatewayClass", value: "gatewayclass" },
@@ -66,6 +68,19 @@ const GATEWAY_KIND_META: Record<
     description: "管理 HTTP 路由规则",
   },
 };
+
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
+function toGatewayDetailKind(kind: GatewayKindKey): string {
+  return GATEWAY_KIND_META[kind].title;
+}
 
 type GatewayRow = DynamicResourceItem;
 
@@ -113,8 +128,9 @@ export default function GatewayApiPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [keyword, setKeyword] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [kind, setKind] = useState<GatewayKindKey>("gatewayclass");
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -168,7 +184,6 @@ export default function GatewayApiPage() {
       accessToken,
     ],
     queryFn: () =>
-      // TODO: backend must accept omitted clusterId for the all-clusters default view.
       getDynamicResources(
         {
           clusterId: clusterId || undefined,
@@ -287,9 +302,16 @@ export default function GatewayApiPage() {
                 Object.entries(item.labels ?? {}).some(([key, value]) =>
                   `${key}=${value}`.toLowerCase().includes(filter.toLowerCase()),
                 ),
-              )),
+              )) &&
+          textMatches(item.name, getTextFilter(tableFilters, "name")) &&
+          textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
+          textMatches(item.namespace || "-", getTextFilter(tableFilters, "namespace")) &&
+          textMatches(
+            Object.entries(item.labels ?? {}).map(([key, value]) => `${key}=${value}`).join(" "),
+            getTextFilter(tableFilters, "labels"),
+          ),
       ),
-    [rows, mergedFilters],
+    [clusterMap, mergedFilters, rows, tableFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -301,6 +323,16 @@ export default function GatewayApiPage() {
       .split(/\s+/)
       .map((item) => item.trim())
       .filter(Boolean);
+    resetPage();
+    setMergedFilters(parsed);
+    setKeyword(parsed.filter((item) => !item.includes("=")).join(" "));
+  };
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = value
+      .split(/\s+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    setKeywordInput(value);
     resetPage();
     setMergedFilters(parsed);
     setKeyword(parsed.filter((item) => !item.includes("=")).join(" "));
@@ -453,17 +485,32 @@ export default function GatewayApiPage() {
     }
   };
 
-  const columns: ColumnsType<GatewayRow> = [
+  const columns: HeadlampResourceTableColumn<GatewayRow>[] = [
     {
       title: "名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "名称" },
       width: nameWidth,
       ellipsis: true,
       ...getSortableColumnProps("name", listQuery.isLoading),
       render: (value: string, row) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind, id: row.id })}>
+          <Typography.Link
+            onClick={() =>
+              setDetailTarget({
+                kind: toGatewayDetailKind(kind),
+                id: row.id,
+                kindLabel: kindMeta.title,
+                apiVersion: row.apiVersion,
+                namespace: row.namespace,
+                name: row.name,
+                label: row.name,
+                snapshot: { labels: row.labels },
+              })
+            }
+          >
             {value}
           </Typography.Link>
         ) : (
@@ -473,6 +520,7 @@ export default function GatewayApiPage() {
     {
       title: "集群",
       key: "clusterId",
+      filter: { type: "text", placeholder: "集群" },
       width: TABLE_COL_WIDTH.cluster,
       ...getSortableColumnProps("clusterId", listQuery.isLoading),
       render: (_: unknown, row) => getClusterDisplayName(clusterMap, row.clusterId),
@@ -481,6 +529,7 @@ export default function GatewayApiPage() {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      filter: { type: "text", placeholder: "名称空间" },
       width: TABLE_COL_WIDTH.namespace,
       ...getSortableColumnProps("namespace", listQuery.isLoading),
       render: (value: string) => value || "-",
@@ -512,6 +561,7 @@ export default function GatewayApiPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       fixed: "right",
       render: (_: unknown, row) => (
@@ -625,6 +675,19 @@ export default function GatewayApiPage() {
         <ResourceTable<GatewayRow>
           rowKey="id"
           columns={columns}
+          tableKey="network.gateway-api"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称/标签搜索（示例：gw-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
           dataSource={tableData}
           loading={listQuery.isLoading}
           onChange={(nextPagination, filters, sorter, extra) =>
@@ -634,7 +697,16 @@ export default function GatewayApiPage() {
           onRow={(record) => ({
             onClick: () => {
               if (record.id) {
-                setDetailTarget({ kind, id: record.id });
+                setDetailTarget({
+                  kind: toGatewayDetailKind(kind),
+                  id: record.id,
+                  kindLabel: kindMeta.title,
+                  apiVersion: record.apiVersion,
+                  namespace: record.namespace,
+                  name: record.name,
+                  label: record.name,
+                  snapshot: { labels: record.labels },
+                });
               }
             },
           })}

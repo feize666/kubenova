@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -17,6 +18,7 @@ import type {
   CreateRbacRequest,
   CreateUserRequest,
   RbacListQuery,
+  UpdateTablePreferenceRequest,
   UpdateRbacRequest,
   UpdateUserRequest,
   UsersListQuery,
@@ -27,6 +29,7 @@ interface RequestActor {
   user?: {
     username?: string;
     role?: PlatformRole;
+    id?: string;
   };
 }
 
@@ -90,6 +93,29 @@ export class UsersController {
   @Post('rbac/:id/disable')
   disableRbac(@Req() req: { user?: RequestActor }, @Param('id') id: string) {
     return this.usersService.setRbacState(req.user?.user, id, 'disabled');
+  }
+
+  /** GET /users/preferences/table/:tableKey — 当前用户表格视图偏好 */
+  @Get('preferences/table/:tableKey')
+  getTablePreference(
+    @Req() req: { user?: RequestActor },
+    @Param('tableKey') tableKey: string,
+  ) {
+    return this.usersService.getTablePreference(req.user?.user, tableKey);
+  }
+
+  /** PUT /users/preferences/table/:tableKey — 保存当前用户表格视图偏好 */
+  @Put('preferences/table/:tableKey')
+  saveTablePreference(
+    @Req() req: { user?: RequestActor },
+    @Param('tableKey') tableKey: string,
+    @Body() body: UpdateTablePreferenceRequest,
+  ) {
+    return this.usersService.saveTablePreference(
+      req.user?.user,
+      tableKey,
+      body,
+    );
   }
 
   /** GET /users/:id — 单条查询 */

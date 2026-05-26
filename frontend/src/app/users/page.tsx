@@ -1,18 +1,23 @@
 "use client";
 
-import { PlusOutlined, ReloadOutlined, SearchOutlined, UserOutlined, CrownOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, UserOutlined, CrownOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Alert, Button, Card, Col, Form, Input, Modal,
-  Popconfirm, Row, Select, Space, Tag, Typography, theme, Badge,
-} from "antd";
+import { Alert, Button, Card, Form, Input, Modal, Select, Space, Tag, Typography, theme, Badge } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { useModuleTableState } from "@/components/module-page";
+import {
+  ResourceActionDropdown,
+  type ResourceActionItem,
+} from "@/components/resource-action-bar";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { buildTablePagination } from "@/lib/table/pagination";
 import { usePersistentTableSortState } from "@/lib/table/use-persistent-table-sort-state";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import {
   createUser,
   deleteUser,
@@ -243,9 +248,11 @@ export default function UsersPage() {
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
   const [status, setStatus] = useState<string>("");
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [actionTargetId, setActionTargetId] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
   const [editRecord, setEditRecord] = useState<UserTableRecord | null>(null);
+  const [detailRecord, setDetailRecord] = useState<UserTableRecord | null>(null);
   const tableState = useModuleTableState(10);
   const {
     sortBy,
@@ -311,14 +318,19 @@ export default function UsersPage() {
   const sourceItems = useMemo(() => query.data?.items ?? [], [query.data?.items]);
 
   const filtered = useMemo(() => {
-    const keyword = tableState.keyword.toLowerCase();
+    const keyword = tableState.keywordInput.trim().toLowerCase();
+    const userFilter = typeof tableFilters.user === "string" ? tableFilters.user.toLowerCase() : "";
+    const roleFilter = typeof tableFilters.role === "string" ? tableFilters.role : "";
+    const stateFilter = typeof tableFilters.state === "string" ? tableFilters.state : status;
     return sourceItems.filter((item) => {
       const keywordText = `${item.name} ${item.username} ${item.role}`.toLowerCase();
       const matchKeyword = keyword ? keywordText.includes(keyword) : true;
-      const matchStatus = status ? (item.isActive ? "active" : "disabled") === status : true;
-      return matchKeyword && matchStatus;
+      const matchUser = userFilter ? keywordText.includes(userFilter) : true;
+      const matchRole = roleFilter ? item.role === roleFilter : true;
+      const matchStatus = stateFilter ? (item.isActive ? "active" : "disabled") === stateFilter : true;
+      return matchKeyword && matchUser && matchRole && matchStatus;
     });
-  }, [sourceItems, tableState.keyword, status]);
+  }, [sourceItems, status, tableFilters.role, tableFilters.state, tableFilters.user, tableState.keywordInput]);
 
   const paged = useMemo(() => filtered, [filtered]);
 
@@ -326,13 +338,21 @@ export default function UsersPage() {
     () => paged.map((item) => ({ ...item, key: item.id })),
     [paged],
   );
+  const userWidth = useMemo(
+    () => getAdaptiveNameWidth(rows.map((row) => row.name || row.username), { max: 280 }),
+    [rows],
+  );
 
-  const columns: ColumnsType<UserTableRecord> = [
+  const columns: Array<HeadlampResourceTableColumn<UserTableRecord>> = [
     {
       title: "用户",
       key: "user",
+      required: true,
+      width: userWidth,
+      ellipsis: true,
+      filter: { type: "text", placeholder: "以用户过滤" },
       render: (_, row) => (
-        <Space>
+        <Space style={{ maxWidth: "100%" }}>
           <div
             style={{
               width: 32,
@@ -352,13 +372,21 @@ export default function UsersPage() {
           >
             {(row.name || row.username || "?")[0].toUpperCase()}
           </div>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 13, color: themeToken.colorText }}>
+          <div style={{ minWidth: 0 }}>
+            <Typography.Link
+              onClick={() => setDetailRecord(row)}
+              ellipsis
+              title={row.name || row.username}
+              style={{ display: "block", maxWidth: 190, fontWeight: 600, fontSize: 13 }}
+            >
               {row.name || "—"}
-            </div>
-            <div style={{ fontSize: 12, color: themeToken.colorTextSecondary }}>
+            </Typography.Link>
+            <Typography.Text
+              ellipsis={{ tooltip: row.username }}
+              style={{ display: "block", maxWidth: 190, fontSize: 12, color: themeToken.colorTextSecondary }}
+            >
               {row.username}
-            </div>
+            </Typography.Text>
           </div>
         </Space>
       ),
@@ -367,6 +395,16 @@ export default function UsersPage() {
       title: "角色",
       dataIndex: "role",
       key: "role",
+      width: 130,
+      ellipsis: true,
+      filter: {
+        type: "select",
+        placeholder: "以角色过滤",
+        options: [
+          { label: "管理员", value: "admin" },
+          { label: "普通用户", value: "user" },
+        ],
+      },
       ...getSortableColumnProps("role", query.isLoading && !query.data),
       render: (role: string) =>
         role === "admin" ? (
@@ -378,6 +416,16 @@ export default function UsersPage() {
     {
       title: "状态",
       key: "state",
+      width: TABLE_COL_WIDTH.state,
+      ellipsis: true,
+      filter: {
+        type: "select",
+        placeholder: "以状态过滤",
+        options: [
+          { label: "已启用", value: "active" },
+          { label: "已禁用", value: "disabled" },
+        ],
+      },
       render: (_, row) =>
         row.isActive ? (
           <Badge status="success" text={<span style={{ color: themeToken.colorText }}>已启用</span>} />
@@ -389,45 +437,50 @@ export default function UsersPage() {
       title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
+      width: TABLE_COL_WIDTH.time,
+      ellipsis: true,
       ...getSortableColumnProps("createdAt", query.isLoading && !query.data),
       render: (v: string) => new Date(v).toLocaleDateString("zh-CN"),
     },
     {
       title: "操作",
       key: "actions",
+      required: true,
+      width: TABLE_COL_WIDTH.actionCompact,
+      fixed: "right",
       render: (_, row) => {
         const isActive = row.isActive;
         const isLoading = stateMutation.isPending && actionTargetId === row.id;
+        const actions: ResourceActionItem[] = [
+          {
+            key: isActive ? "disable" : "enable",
+            label: isActive ? "禁用" : "启用",
+            loading: isLoading,
+            onClick: () =>
+              stateMutation.mutate({ id: row.id, nextState: isActive ? "disabled" : "active" }),
+          },
+          {
+            key: "edit",
+            label: "编辑",
+            onClick: () => setEditRecord(row),
+          },
+          {
+            key: "delete",
+            label: "删除",
+            danger: true,
+            loading: deleteMutation.isPending && deleteMutation.variables === row.id,
+            onClick: () => deleteMutation.mutate(row.id),
+            confirm: {
+              title: "确认删除用户",
+              description: `删除用户 ${row.name || row.username} 后将不可恢复`,
+              okText: "确认",
+              cancelText: "取消",
+              okDanger: true,
+            },
+          },
+        ];
         return (
-          <Space size={4}>
-            <Button
-              size="small"
-              loading={isLoading}
-              onClick={() =>
-                stateMutation.mutate({ id: row.id, nextState: isActive ? "disabled" : "active" })
-              }
-            >
-              {isActive ? "禁用" : "启用"}
-            </Button>
-            <Button size="small" onClick={() => setEditRecord(row)}>
-              编辑
-            </Button>
-            <Popconfirm
-              title="确认删除用户"
-              description={`删除用户 ${row.name || row.username} 后将不可恢复`}
-              okText="确认"
-              cancelText="取消"
-              onConfirm={() => deleteMutation.mutate(row.id)}
-            >
-              <Button
-                size="small"
-                danger
-                loading={deleteMutation.isPending && deleteMutation.variables === row.id}
-              >
-                删除
-              </Button>
-            </Popconfirm>
-          </Space>
+          <ResourceActionDropdown actions={actions} ariaLabel={`${row.username} 更多操作`} />
         );
       },
     },
@@ -442,49 +495,6 @@ export default function UsersPage() {
         <Typography.Text type="secondary">
           管理平台用户账号、角色权限与账号状态。用户创建后可使用用户名+密码登录。
         </Typography.Text>
-      </Card>
-
-      <Card>
-        <Row gutter={[12, 12]}>
-          <Col xs={24} md={10} lg={8}>
-            <Input
-              prefix={<SearchOutlined />}
-              allowClear
-              placeholder="搜索用户名/角色"
-              value={tableState.keywordInput}
-              onChange={(e) => tableState.setKeywordInput(e.target.value)}
-              onPressEnter={tableState.applyKeyword}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6} lg={5}>
-            <Select
-              style={{ width: "100%" }}
-              value={status}
-              onChange={(value) => {
-                setStatus(value);
-                tableState.setPage(1);
-              }}
-              options={[
-                { label: "全部状态", value: "" },
-                { label: "已启用", value: "active" },
-                { label: "已禁用", value: "disabled" },
-              ]}
-            />
-          </Col>
-          <Col xs={24} md={8} lg={11}>
-            <Space>
-              <Button icon={<SearchOutlined />} type="primary" onClick={tableState.applyKeyword}>
-                查询
-              </Button>
-              <Button icon={<ReloadOutlined />} onClick={() => void query.refetch()}>
-                刷新
-              </Button>
-              <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
-                新建用户
-              </Button>
-            </Space>
-          </Col>
-        </Row>
       </Card>
 
       {!isInitializing && !accessToken ? (
@@ -503,8 +513,35 @@ export default function UsersPage() {
       <Card>
         <ResourceTable<UserTableRecord>
           rowKey="key"
-          columns={columns}
+          tableKey="business.users"
+          columns={columns as ColumnsType<UserTableRecord>}
           dataSource={rows}
+          layoutOptions={{ nameValues: rows.map((row) => row.name || row.username), actionWidth: TABLE_COL_WIDTH.actionCompact }}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: tableState.keywordInput,
+            onChange: (value) => {
+              tableState.setKeywordInput(value);
+              tableState.setPage(1);
+            },
+            placeholder: "搜索用户名/角色",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            setStatus(typeof nextFilters.state === "string" ? nextFilters.state : "");
+            tableState.setPage(1);
+          }}
+          toolbarExtra={
+            <Space size={8} wrap>
+              <Button icon={<ReloadOutlined />} onClick={() => void query.refetch()}>
+                刷新
+              </Button>
+              <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
+                新建用户
+              </Button>
+            </Space>
+          }
           loading={{ spinning: query.isLoading, description: "用户数据加载中..." }}
           onChange={(pagination, filters, sorter, extra) => {
             handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
@@ -548,6 +585,39 @@ export default function UsersPage() {
           void queryClient.invalidateQueries({ queryKey: [...USERS_QUERY_KEY, accessToken] })
         }
       />
+      <BusinessDetailDrawer
+        open={Boolean(detailRecord)}
+        title={detailRecord ? `用户详情 · ${detailRecord.name || detailRecord.username}` : "用户详情"}
+        subtitle={detailRecord?.username}
+        onClose={() => setDetailRecord(null)}
+        sections={buildUserDetailSections(detailRecord)}
+      />
     </Space>
   );
+}
+
+function buildUserDetailSections(record: UserTableRecord | null): BusinessDetailSection[] {
+  if (!record) {
+    return [];
+  }
+  return [
+    {
+      key: "basic",
+      title: "基础信息",
+      items: [
+        { key: "name", label: "姓名", value: record.name || "-" },
+        { key: "username", label: "用户名", value: <Typography.Text code>{record.username}</Typography.Text> },
+        { key: "role", label: "角色", value: record.role === "admin" ? "管理员" : "普通用户" },
+        { key: "state", label: "状态", value: record.isActive ? "已启用" : "已禁用" },
+      ],
+    },
+    {
+      key: "lifecycle",
+      title: "生命周期",
+      items: [
+        { key: "createdAt", label: "创建时间", value: new Date(record.createdAt).toLocaleString("zh-CN") },
+        { key: "updatedAt", label: "更新时间", value: record.updatedAt ? new Date(record.updatedAt).toLocaleString("zh-CN") : "-" },
+      ],
+    },
+  ];
 }

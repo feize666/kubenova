@@ -13,7 +13,6 @@ import {
   Typography,
   message,
 } from "antd";
-import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -35,9 +34,10 @@ import {
   type NetworkResource,
 } from "@/lib/api/network";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
-import { useAntdTableSortPagination } from "@/lib/table";
+import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -62,6 +62,15 @@ interface IngressFormValues {
   serviceName: string;
 }
 
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
 export default function IngressPage() {
   const { accessToken, isInitializing } = useAuth();
   const searchParams = useSearchParams();
@@ -74,6 +83,7 @@ export default function IngressPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const {
     sortBy,
@@ -248,9 +258,16 @@ export default function IngressPage() {
       (data?.items ?? []).filter(
         (item) =>
           hasKnownCluster(clusterMap, item.clusterId) &&
-          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters) &&
+          textMatches(item.name, getTextFilter(tableFilters, "name")) &&
+          textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
+          textMatches(item.namespace, getTextFilter(tableFilters, "namespace")) &&
+          textMatches(
+            Array.isArray(item.spec?.rules) ? item.spec.rules.map((rule) => rule.host).join(" ") : "",
+            getTextFilter(tableFilters, "host"),
+          ),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters, tableFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -265,6 +282,7 @@ export default function IngressPage() {
 
   const handleFilterSearch = (raw: string) => {
     const parsed = parseResourceSearchInput(raw);
+    setKeywordInput(raw);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
@@ -286,11 +304,13 @@ export default function IngressPage() {
     return rows;
   };
 
-  const columns: ColumnsType<IngressResource> = [
+  const columns: HeadlampResourceTableColumn<IngressResource>[] = [
     {
       title: "入口名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "名称" },
       width: nameWidth,
       ellipsis: true,
       ...getSortableColumnProps("name", isLoading && !data),
@@ -306,6 +326,7 @@ export default function IngressPage() {
     {
       title: "集群",
       key: "clusterId",
+      filter: { type: "text", placeholder: "集群" },
       width: TABLE_COL_WIDTH.cluster,
       ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, record: IngressResource) => getClusterDisplayName(clusterMap, record.clusterId),
@@ -314,12 +335,14 @@ export default function IngressPage() {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      filter: { type: "text", placeholder: "名称空间" },
       width: TABLE_COL_WIDTH.namespace,
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
     {
       title: "域名",
       key: "host",
+      filter: { type: "text", placeholder: "域名" },
       width: TABLE_COL_WIDTH.url,
       render: (_: unknown, record: IngressResource) => {
         const hosts = Array.from(
@@ -337,6 +360,7 @@ export default function IngressPage() {
     {
       title: "路径",
       key: "path",
+      filter: { type: "text", placeholder: "路径" },
       width: TABLE_COL_WIDTH.ports,
       render: (_: unknown, record: IngressResource) => {
         const paths = getIngressBackends(record).map((item) => item.path);
@@ -352,6 +376,7 @@ export default function IngressPage() {
     {
       title: "后端服务",
       key: "serviceName",
+      filter: { type: "text", placeholder: "服务" },
       width: TABLE_COL_WIDTH.image,
       render: (_: unknown, record: IngressResource) => {
         const backends = getIngressBackends(record);
@@ -379,6 +404,7 @@ export default function IngressPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       align: "center",
       fixed: "right",
@@ -428,12 +454,7 @@ export default function IngressPage() {
             onNamespaceChange(value);
             resetPage();
           }}
-          onKeywordInputChange={(value) => {
-            setKeywordInput(value);
-            if (!value.trim()) {
-              handleFilterSearch("");
-            }
-          }}
+          onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
           keywordPlaceholder="按名称/标签搜索（示例：ingress-a app=web env=prod）"
         />
@@ -460,6 +481,19 @@ export default function IngressPage() {
         <ResourceTable<IngressResource>
           rowKey="id"
           columns={columns}
+          tableKey="network.ingress"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleFilterSearch,
+            placeholder: "按名称/标签搜索（示例：ingress-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
           dataSource={tableData}
           loading={isLoading && !data}
           onChange={(nextPagination, filters, sorter, extra) =>

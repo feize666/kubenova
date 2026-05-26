@@ -13,7 +13,6 @@ import {
   Typography,
   message,
 } from "antd";
-import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -29,9 +28,10 @@ import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
-import { useAntdTableSortPagination } from "@/lib/table";
+import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import {
   createNetworkResource,
   deleteNetworkResource,
@@ -71,6 +71,15 @@ interface IngressRouteFormValues {
   tlsSecretName?: string;
 }
 
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
 export default function IngressRoutePage() {
   const { accessToken, isInitializing } = useAuth();
   const searchParams = useSearchParams();
@@ -83,6 +92,7 @@ export default function IngressRoutePage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -225,9 +235,28 @@ export default function IngressRoutePage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters) &&
+          textMatches(item.name, getTextFilter(tableFilters, "name")) &&
+          textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
+          textMatches(item.namespace, getTextFilter(tableFilters, "namespace")) &&
+          textMatches(Array.isArray(item.spec?.entryPoints) ? item.spec.entryPoints.join(" ") : "", getTextFilter(tableFilters, "entryPoints")) &&
+          textMatches(Array.isArray(item.spec?.routes) ? item.spec.routes[0]?.match : "", getTextFilter(tableFilters, "match")) &&
+          textMatches(
+            Array.isArray(item.spec?.routes) && Array.isArray(item.spec.routes[0]?.services)
+              ? item.spec.routes[0].services
+                  .map((service: { name?: string; port?: number | string }) => `${service.name}:${service.port ?? ""}`)
+                  .join(" ")
+              : "",
+            getTextFilter(tableFilters, "serviceName"),
+          ) &&
+          textMatches(
+            Array.isArray(item.spec?.routes) && Array.isArray(item.spec.routes[0]?.middlewares)
+              ? item.spec.routes[0].middlewares.map((middleware: { name?: string }) => middleware.name).join(" ")
+              : "",
+            getTextFilter(tableFilters, "middlewares"),
+          ),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters, tableFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -242,16 +271,19 @@ export default function IngressRoutePage() {
 
   const handleFilterSearch = (raw: string) => {
     const parsed = parseResourceSearchInput(raw);
+    setKeywordInput(raw);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
 
-  const columns: ColumnsType<IngressRouteResource> = [
+  const columns: HeadlampResourceTableColumn<IngressRouteResource>[] = [
     {
       title: "路由名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "名称" },
       width: nameWidth,
       ellipsis: true,
       ...getSortableColumnProps("name", isLoading && !data),
@@ -267,6 +299,7 @@ export default function IngressRoutePage() {
     {
       title: "集群",
       key: "clusterId",
+      filter: { type: "text", placeholder: "集群" },
       width: TABLE_COL_WIDTH.cluster,
       ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, record: IngressRouteResource) => getClusterDisplayName(clusterMap, record.clusterId),
@@ -275,12 +308,14 @@ export default function IngressRoutePage() {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      filter: { type: "text", placeholder: "名称空间" },
       width: TABLE_COL_WIDTH.namespace,
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
     {
       title: "入口点",
       key: "entryPoints",
+      filter: { type: "text", placeholder: "入口点" },
       width: TABLE_COL_WIDTH.schedule,
       render: (_: unknown, record: IngressRouteResource) => {
         const entryPoints = record.spec?.entryPoints ?? [];
@@ -296,6 +331,7 @@ export default function IngressRoutePage() {
     {
       title: "匹配规则",
       key: "match",
+      filter: { type: "text", placeholder: "匹配" },
       width: TABLE_COL_WIDTH.url,
       render: (_: unknown, record: IngressRouteResource) => (
         <Typography.Text ellipsis={{ tooltip: record.spec?.routes?.[0]?.match ?? "-" }}>
@@ -306,6 +342,7 @@ export default function IngressRoutePage() {
     {
       title: "后端服务",
       key: "serviceName",
+      filter: { type: "text", placeholder: "服务" },
       width: TABLE_COL_WIDTH.ports,
       render: (_: unknown, record: IngressRouteResource) => {
         const services = record.spec?.routes?.[0]?.services ?? [];
@@ -350,6 +387,7 @@ export default function IngressRoutePage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       align: "left",
       fixed: "right",
@@ -399,12 +437,7 @@ export default function IngressRoutePage() {
             onNamespaceChange(value);
             resetPage();
           }}
-          onKeywordInputChange={(value) => {
-            setKeywordInput(value);
-            if (!value.trim()) {
-              handleFilterSearch("");
-            }
-          }}
+          onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
           keywordPlaceholder="按名称/标签搜索（示例：ir-a app=web env=prod）"
         />
@@ -426,6 +459,19 @@ export default function IngressRoutePage() {
         <ResourceTable<IngressRouteResource>
           rowKey="id"
           columns={columns}
+          tableKey="network.ingressroute"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleFilterSearch,
+            placeholder: "按名称/标签搜索（示例：ir-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
           dataSource={tableData}
           loading={isLoading && !data}
           onChange={(nextPagination, filters, sorter, extra) =>

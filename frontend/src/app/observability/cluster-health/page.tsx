@@ -5,7 +5,6 @@ import {
   ClockCircleOutlined,
   ExclamationCircleOutlined,
   ReloadOutlined,
-  SearchOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -29,8 +28,14 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import {
+  ResourceFilterToolbar,
+  ResourceFilterToolbarItem,
+} from "@/components/resource-filter-toolbar";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { useAntdTableSortPagination } from "@/lib/table";
 import {
@@ -110,6 +115,7 @@ export default function ClusterHealthCenterPage() {
   const [provider, setProvider] = useState("");
   const [lifecycleState, setLifecycleState] = useState<"" | "active" | "disabled" | "deleted">("");
   const [runtimeStatus, setRuntimeStatus] = useState<"" | RuntimeStatus>("");
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const {
     sortBy,
     sortOrder,
@@ -187,10 +193,33 @@ export default function ClusterHealthCenterPage() {
     },
   });
 
-  const items = useMemo(
-    () => healthQuery.data?.items ?? [],
-    [healthQuery.data?.items],
-  );
+  const items = useMemo(() => {
+    const raw = healthQuery.data?.items ?? [];
+    const clusterFilter = typeof tableFilters.clusterName === "string" ? tableFilters.clusterName.toLowerCase() : "";
+    const lifecycleFilter = typeof tableFilters.lifecycleState === "string" ? tableFilters.lifecycleState : "";
+    const runtimeFilter = typeof tableFilters.runtimeStatus === "string" ? tableFilters.runtimeStatus : "";
+    const sourceFilter = typeof tableFilters.source === "string" ? tableFilters.source : "";
+    const reasonFilter = typeof tableFilters.reason === "string" ? tableFilters.reason.toLowerCase() : "";
+    return raw.filter((item) => {
+      const clusterName = getClusterDisplayName(clusterMap, item.clusterId, item.clusterName).toLowerCase();
+      const matchCluster = clusterFilter
+        ? item.clusterId.toLowerCase().includes(clusterFilter) || clusterName.includes(clusterFilter)
+        : true;
+      const matchLifecycle = lifecycleFilter ? item.lifecycleState === lifecycleFilter : true;
+      const matchRuntime = runtimeFilter ? item.runtimeStatus === runtimeFilter : true;
+      const matchSource = sourceFilter ? item.source === sourceFilter : true;
+      const matchReason = reasonFilter ? (item.reason ?? "").toLowerCase().includes(reasonFilter) : true;
+      return matchCluster && matchLifecycle && matchRuntime && matchSource && matchReason;
+    });
+  }, [
+    clusterMap,
+    healthQuery.data?.items,
+    tableFilters.clusterName,
+    tableFilters.lifecycleState,
+    tableFilters.reason,
+    tableFilters.runtimeStatus,
+    tableFilters.source,
+  ]);
   const stats = useMemo(() => {
     const total = items.length;
     const running = items.filter((item) => item.runtimeStatus === "running").length;
@@ -212,11 +241,13 @@ export default function ClusterHealthCenterPage() {
     });
   }, [setPagination, totalPages]);
 
-  const columns: ColumnsType<ClusterHealthListItem> = [
+  const columns: Array<HeadlampResourceTableColumn<ClusterHealthListItem>> = [
     {
       title: "集群",
       dataIndex: "clusterName",
       key: "clusterName",
+      required: true,
+      filter: { type: "text", placeholder: "以集群过滤" },
       ...getSortableColumnProps("clusterName", healthQuery.isLoading),
       render: (value: string, record) => (
         <Space orientation="vertical" size={0}>
@@ -229,6 +260,15 @@ export default function ClusterHealthCenterPage() {
       dataIndex: "lifecycleState",
       key: "lifecycleState",
       width: 120,
+      filter: {
+        type: "select",
+        placeholder: "以生命周期过滤",
+        options: [
+          { label: lifecycleLabel("active"), value: "active" },
+          { label: lifecycleLabel("disabled"), value: "disabled" },
+          { label: lifecycleLabel("deleted"), value: "deleted" },
+        ],
+      },
       render: (value) => lifecycleTag(value),
     },
     {
@@ -236,6 +276,17 @@ export default function ClusterHealthCenterPage() {
       dataIndex: "runtimeStatus",
       key: "runtimeStatus",
       width: 140,
+      filter: {
+        type: "select",
+        placeholder: "以状态过滤",
+        options: [
+          { label: "运行中", value: "running" },
+          { label: "离线", value: "offline" },
+          { label: "探测中", value: "checking" },
+          { label: "已停用", value: "disabled" },
+          { label: "离线模式", value: "offline-mode" },
+        ],
+      },
       ...getSortableColumnProps("runtimeStatus", healthQuery.isLoading),
       render: (value: RuntimeStatus) => runtimeStatusTag(value),
     },
@@ -269,17 +320,28 @@ export default function ClusterHealthCenterPage() {
       dataIndex: "source",
       key: "source",
       width: 100,
+      filter: {
+        type: "select",
+        placeholder: "以来源过滤",
+        options: [
+          { label: "手动触发", value: "manual" },
+          { label: "事件触发", value: "event" },
+          { label: "自动探测", value: "scheduled" },
+        ],
+      },
       render: (value) => sourceTag(value),
     },
     {
       title: "原因",
       dataIndex: "reason",
       key: "reason",
+      filter: { type: "text", placeholder: "以原因过滤" },
       render: (value: string | null) => value || "-",
     },
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: 220,
       render: (_, record) => (
         <Space>
@@ -348,20 +410,26 @@ export default function ClusterHealthCenterPage() {
       </Row>
 
       <Card>
-        <Row gutter={[12, 12]}>
-          <Col xs={24} md={8}>
-            <Input
-              allowClear
-              value={keywordInput}
-              placeholder="关键字（集群名/ID）"
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onPressEnter={() => {
+        <ResourceFilterToolbar
+          actions={
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                setKeywordInput("");
+                setKeyword("");
+                setEnvironment("");
+                setProvider("");
+                setLifecycleState("");
+                setRuntimeStatus("");
                 resetPage();
-                setKeyword(keywordInput);
+                void healthQuery.refetch();
               }}
-            />
-          </Col>
-          <Col xs={24} md={4}>
+            >
+              重置
+            </Button>
+          }
+        >
+          <ResourceFilterToolbarItem label="环境" width="sm">
             <Input
               allowClear
               value={environment}
@@ -371,8 +439,8 @@ export default function ClusterHealthCenterPage() {
                 setEnvironment(e.target.value);
               }}
             />
-          </Col>
-          <Col xs={24} md={4}>
+          </ResourceFilterToolbarItem>
+          <ResourceFilterToolbarItem label="供应商" width="sm">
             <Input
               allowClear
               value={provider}
@@ -382,8 +450,8 @@ export default function ClusterHealthCenterPage() {
                 setProvider(e.target.value);
               }}
             />
-          </Col>
-          <Col xs={24} md={4}>
+          </ResourceFilterToolbarItem>
+          <ResourceFilterToolbarItem label="生命周期" width="sm">
             <Select
               style={{ width: "100%" }}
               value={lifecycleState}
@@ -398,8 +466,8 @@ export default function ClusterHealthCenterPage() {
                 { label: lifecycleLabel("deleted"), value: "deleted" },
               ]}
             />
-          </Col>
-          <Col xs={24} md={4}>
+          </ResourceFilterToolbarItem>
+          <ResourceFilterToolbarItem label="运行状态" width="sm">
             <Select
               style={{ width: "100%" }}
               value={runtimeStatus}
@@ -416,37 +484,8 @@ export default function ClusterHealthCenterPage() {
                 { label: "离线模式", value: "offline-mode" },
               ]}
             />
-          </Col>
-          <Col xs={24} md={24}>
-            <Space>
-              <Button
-                type="primary"
-                icon={<SearchOutlined />}
-                onClick={() => {
-                  resetPage();
-                  setKeyword(keywordInput);
-                }}
-              >
-                查询
-              </Button>
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={() => {
-                  setKeywordInput("");
-                  setKeyword("");
-                  setEnvironment("");
-                  setProvider("");
-                  setLifecycleState("");
-                  setRuntimeStatus("");
-                  resetPage();
-                  void healthQuery.refetch();
-                }}
-              >
-                重置
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+          </ResourceFilterToolbarItem>
+        </ResourceFilterToolbar>
       </Card>
 
       {healthQuery.isError ? (
@@ -461,8 +500,24 @@ export default function ClusterHealthCenterPage() {
       <Card>
         <ResourceTable<ClusterHealthListItem>
           rowKey="clusterId"
-          columns={columns}
+          tableKey="observability.clusterHealth"
+          columns={columns as ColumnsType<ClusterHealthListItem>}
           dataSource={items}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: (value) => {
+              setKeywordInput(value);
+              setKeyword(value.trim());
+              resetPage();
+            },
+            placeholder: "搜索集群名 / ID",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
           loading={healthQuery.isLoading}
           onChange={(nextPagination, filters, sorter, extra) =>
             handleTableChange(nextPagination, filters, sorter, extra, healthQuery.isLoading)

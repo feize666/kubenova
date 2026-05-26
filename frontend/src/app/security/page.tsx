@@ -8,7 +8,6 @@ import {
   LockOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
-  SearchOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,9 +15,7 @@ import {
   Button,
   Card,
   Col,
-  Input,
   Row,
-  Select,
   Skeleton,
   Space,
   Statistic,
@@ -32,14 +29,26 @@ import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
-import { NamespaceSelect } from "@/components/namespace-select";
+import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
+import {
+  ResourceActionDropdown,
+  type ResourceActionItem,
+} from "@/components/resource-action-bar";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
+import {
+  ResourceFilterToolbar,
+  ResourceFilterToolbarItem,
+} from "@/components/resource-filter-toolbar";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { buildTablePagination } from "@/lib/table/pagination";
 import { usePersistentTableSortState } from "@/lib/table/use-persistent-table-sort-state";
+import { TABLE_COL_WIDTH } from "@/lib/table-column-widths";
 import {
   type AuditLogRecord,
   type SecurityEvent,
@@ -166,10 +175,12 @@ function SecurityEventsTab() {
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
   const [refreshingEvents, setRefreshingEvents] = useState(false);
+  const [detailRecord, setDetailRecord] = useState<SecurityEvent | null>(null);
 
   const [severityFilter, setSeverityFilter] = useState<string | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [keyword, setKeyword] = useState(initialKeyword);
   const [page, setPage] = useState(1);
@@ -245,22 +256,24 @@ function SecurityEventsTab() {
 
   const filteredItems = useMemo(() => {
     const raw = data?.items ?? [];
+    const titleFilter = typeof tableFilters.title === "string" ? tableFilters.title.toLowerCase() : "";
+    const typeFilter = typeof tableFilters.type === "string" ? tableFilters.type : "";
+    const resourceFilter = typeof tableFilters.resourceName === "string" ? tableFilters.resourceName.toLowerCase() : "";
     const scoped = raw.filter((item) => {
       if (!matchesClusterSelection(item.cluster, clusterId, clusterMap)) return false;
       if (namespace && (item.namespace ?? "") !== namespace) return false;
       return true;
     });
-    if (!keyword.trim()) return scoped;
     const kw = keyword.trim().toLowerCase();
-    const withKeyword = scoped.filter(
-      (item) =>
-        item.title.toLowerCase().includes(kw) ||
-        item.type.toLowerCase().includes(kw) ||
-        item.resourceName.toLowerCase().includes(kw) ||
-        item.cluster.toLowerCase().includes(kw),
-    );
-    return withKeyword;
-  }, [clusterId, clusterMap, data?.items, keyword, namespace]);
+    return scoped.filter((item) => {
+      const searchText = `${item.title} ${item.type} ${item.resourceName} ${item.cluster}`.toLowerCase();
+      const matchKeyword = kw ? searchText.includes(kw) : true;
+      const matchTitle = titleFilter ? item.title.toLowerCase().includes(titleFilter) : true;
+      const matchType = typeFilter ? item.type === typeFilter : true;
+      const matchResource = resourceFilter ? item.resourceName.toLowerCase().includes(resourceFilter) : true;
+      return matchKeyword && matchTitle && matchType && matchResource;
+    });
+  }, [clusterId, clusterMap, data?.items, keyword, namespace, tableFilters.resourceName, tableFilters.title, tableFilters.type]);
   useSyncResourceFilterUrlState({
     clusterId,
     namespace,
@@ -316,12 +329,22 @@ function SecurityEventsTab() {
     }
   };
 
-  const columns: ColumnsType<SecurityEvent> = [
+  const columns: Array<HeadlampResourceTableColumn<SecurityEvent>> = [
     {
       title: "严重程度",
       dataIndex: "severity",
       key: "severity",
       width: 90,
+      filter: {
+        type: "select",
+        placeholder: "以严重度过滤",
+        options: [
+          { label: "严重", value: "critical" },
+          { label: "高危", value: "high" },
+          { label: "中危", value: "medium" },
+          { label: "低危", value: "low" },
+        ],
+      },
       ...getSortableColumnProps("severity", isLoading && !data),
       render: (v: string) => <SeverityTag severity={v} />,
     },
@@ -329,11 +352,14 @@ function SecurityEventsTab() {
       title: "事件标题",
       dataIndex: "title",
       key: "title",
+      required: true,
+      width: 240,
+      filter: { type: "text", placeholder: "以标题过滤" },
       ...getSortableColumnProps("title", isLoading && !data),
       ellipsis: true,
       render: (v: string, record) => (
         <Tooltip title={`事件类型: ${getEventTypeLabel(record.type)}`}>
-          <span>{v}</span>
+          <Typography.Link onClick={() => setDetailRecord(record)}>{v}</Typography.Link>
         </Tooltip>
       ),
     },
@@ -342,6 +368,19 @@ function SecurityEventsTab() {
       dataIndex: "type",
       key: "type",
       width: 180,
+      filter: {
+        type: "select",
+        placeholder: "以事件类型过滤",
+        options: [
+          { label: "漏洞扫描", value: "VulnerabilityScan" },
+          { label: "权限提升", value: "PrivilegeEscalation" },
+          { label: "认证失败", value: "AuthenticationFailure" },
+          { label: "网络策略违规", value: "NetworkPolicyViolation" },
+          { label: "策略违规", value: "PolicyViolation" },
+          { label: "敏感信息暴露", value: "SecretExposure" },
+          { label: "RBAC 权限违规", value: "RBACViolation" },
+        ],
+      },
       ...getSortableColumnProps("type", isLoading && !data),
       render: (v: string) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -353,10 +392,12 @@ function SecurityEventsTab() {
       title: "资源名称",
       dataIndex: "resourceName",
       key: "resourceName",
-      width: 160,
+      width: 180,
+      ellipsis: true,
+      filter: { type: "text", placeholder: "以资源过滤" },
       ...getSortableColumnProps("resourceName", isLoading && !data),
       render: (v: string) => (
-        <Typography.Text code style={{ fontSize: 12 }}>
+        <Typography.Text code ellipsis={{ tooltip: v }} style={{ fontSize: 12, maxWidth: 150 }}>
           {v}
         </Typography.Text>
       ),
@@ -365,9 +406,14 @@ function SecurityEventsTab() {
       title: "集群",
       dataIndex: "cluster",
       key: "cluster",
-      width: 140,
+      width: TABLE_COL_WIDTH.cluster,
+      ellipsis: true,
       ...getSortableColumnProps("cluster", isLoading && !data),
-      render: (v: string) => <Tag>{getClusterDisplayName(clusterMap, v)}</Tag>,
+      render: (v: string) => (
+        <Tag style={{ maxWidth: 132, overflow: "hidden", textOverflow: "ellipsis" }}>
+          {getClusterDisplayName(clusterMap, v)}
+        </Tag>
+      ),
     },
     {
       title: "发生时间",
@@ -384,30 +430,36 @@ function SecurityEventsTab() {
       dataIndex: "status",
       key: "status",
       width: 100,
+      filter: {
+        type: "select",
+        placeholder: "以状态过滤",
+        options: [
+          { label: "待处理", value: "open" },
+          { label: "已解决", value: "resolved" },
+        ],
+      },
       ...getSortableColumnProps("status", isLoading && !data),
       render: (v: string) => <EventStatusTag status={v} />,
     },
     {
       title: "操作",
       key: "action",
-      width: 100,
+      required: true,
+      width: TABLE_COL_WIDTH.actionCompact,
+      fixed: "right",
       render: (_, record) => {
-        if (record.status === "resolved") {
-          return (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              已处理
-            </Typography.Text>
-          );
-        }
+        const actions: ResourceActionItem[] = [
+          {
+            key: "resolve",
+            label: record.status === "resolved" ? "已处理" : "标记已解决",
+            disabled:
+              record.status === "resolved" ||
+              (resolveMutation.isPending && resolveMutation.variables === record.id),
+            onClick: () => resolveMutation.mutate(record.id),
+          },
+        ];
         return (
-          <Button
-            size="small"
-            type="link"
-            loading={resolveMutation.isPending && resolveMutation.variables === record.id}
-            onClick={() => resolveMutation.mutate(record.id)}
-          >
-            标记已解决
-          </Button>
+          <ResourceActionDropdown actions={actions} ariaLabel={`${record.title} 更多操作`} />
         );
       },
     },
@@ -416,86 +468,56 @@ function SecurityEventsTab() {
   return (
     <>
       {contextHolder}
-      <Space wrap style={{ marginBottom: 16 }}>
-        <Select
-          placeholder="集群"
-          style={{ width: 200 }}
-          value={clusterId}
-          options={clusterOptions}
-          loading={clustersQuery.isLoading}
-          onChange={(v) => {
-            onClusterChange(v);
-            setPage(1);
-          }}
-        />
-        <NamespaceSelect
-          style={{ width: 180 }}
-          value={namespace}
-          onChange={(v) => {
-            onNamespaceChange(v);
-            setPage(1);
-          }}
-          clusterId={clusterId}
-          knownNamespaces={knownNamespaces}
-          disabled={namespaceDisabled}
-          placeholder={namespacePlaceholder}
-        />
-        <Select
-          placeholder="严重程度"
-          allowClear
-          style={{ width: 130 }}
-          value={severityFilter}
-          onChange={(v) => {
-            setSeverityFilter(v);
-            setPage(1);
-          }}
-          options={[
-            { label: "全部严重程度", value: undefined },
-            { label: "严重", value: "critical" },
-            { label: "高危", value: "high" },
-            { label: "中危", value: "medium" },
-            { label: "低危", value: "low" },
-          ]}
-        />
-        <Select
-          placeholder="状态"
-          allowClear
-          style={{ width: 130 }}
-          value={statusFilter}
-          onChange={(v) => {
-            setStatusFilter(v);
-            setPage(1);
-          }}
-          options={[
-            { label: "全部状态", value: undefined },
-            { label: "待处理", value: "open" },
-            { label: "已解决", value: "resolved" },
-          ]}
-        />
-        <Input
-          placeholder="搜索标题 / 类型 / 资源 / 集群..."
-          prefix={<SearchOutlined />}
-          style={{ width: 280 }}
-          value={keyword}
-          onChange={(e) => {
-            setKeyword(e.target.value);
-            setPage(1);
-          }}
-          allowClear
-        />
-        <Button
-          icon={<ReloadOutlined />}
-          loading={refreshingEvents}
-          onClick={() => void handleRefreshEvents()}
-        >
-          刷新
-        </Button>
-      </Space>
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <ResourceFilterToolbar>
+          <ResourceFilterToolbarItem width="auto">
+            <ResourceScopeFilterButton
+              clusterId={clusterId}
+              namespace={namespace}
+              clusterOptions={clusterOptions}
+              clusterLoading={clustersQuery.isLoading}
+              knownNamespaces={knownNamespaces}
+              namespaceDisabled={namespaceDisabled}
+              namespacePlaceholder={namespacePlaceholder}
+              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                onScopeChange(nextClusterId, nextNamespace);
+                setPage(1);
+              }}
+            />
+          </ResourceFilterToolbarItem>
+        </ResourceFilterToolbar>
+      </Card>
 
       <ResourceTable<SecurityEvent>
         rowKey="id"
-        columns={columns}
+        tableKey="business.security.events"
+        columns={columns as ColumnsType<SecurityEvent>}
         dataSource={pagedItems}
+        preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+        globalSearch={{
+          value: keyword,
+          onChange: (value) => {
+            setKeyword(value);
+            setPage(1);
+          },
+          placeholder: "搜索标题 / 类型 / 资源 / 集群",
+        }}
+        filters={tableFilters}
+        onFiltersChange={(nextFilters) => {
+          setTableFilters(nextFilters);
+          setSeverityFilter(typeof nextFilters.severity === "string" ? nextFilters.severity : undefined);
+          setStatusFilter(typeof nextFilters.status === "string" ? nextFilters.status : undefined);
+          setPage(1);
+        }}
+        toolbarExtra={
+          <Button
+            icon={<ReloadOutlined />}
+            loading={refreshingEvents}
+            onClick={() => void handleRefreshEvents()}
+          >
+            刷新
+          </Button>
+        }
         loading={isLoading}
         size="small"
         scroll={{ x: 1000 }}
@@ -524,6 +546,13 @@ function SecurityEventsTab() {
             : ""
         }
       />
+      <BusinessDetailDrawer
+        open={Boolean(detailRecord)}
+        title={detailRecord ? `安全事件 · ${detailRecord.title}` : "安全事件"}
+        subtitle={detailRecord ? `${getEventTypeLabel(detailRecord.type)} / ${detailRecord.resourceName}` : undefined}
+        onClose={() => setDetailRecord(null)}
+        sections={buildSecurityEventDetailSections(detailRecord, clusterMap)}
+      />
     </>
   );
 }
@@ -532,9 +561,11 @@ function AuditLogsTab() {
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const [refreshingAuditLogs, setRefreshingAuditLogs] = useState(false);
+  const [detailRecord, setDetailRecord] = useState<AuditLogRecord | null>(null);
 
   const [actionFilter, setActionFilter] = useState<string | undefined>(undefined);
   const [resultFilter, setResultFilter] = useState<string | undefined>(undefined);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -564,15 +595,21 @@ function AuditLogsTab() {
 
   const filteredItems = useMemo(() => {
     const raw = data?.items ?? [];
-    if (!keyword.trim()) return raw;
     const kw = keyword.trim().toLowerCase();
-    return raw.filter(
-      (item) =>
-        item.actor.toLowerCase().includes(kw) ||
-        item.resourceType.toLowerCase().includes(kw) ||
-        item.resourceId.toLowerCase().includes(kw),
-    );
-  }, [data?.items, keyword]);
+    const actorFilter = typeof tableFilters.actor === "string" ? tableFilters.actor.toLowerCase() : "";
+    const roleFilter = typeof tableFilters.role === "string" ? tableFilters.role.toLowerCase() : "";
+    const resourceTypeFilter = typeof tableFilters.resourceType === "string" ? tableFilters.resourceType.toLowerCase() : "";
+    const resourceIdFilter = typeof tableFilters.resourceId === "string" ? tableFilters.resourceId.toLowerCase() : "";
+    return raw.filter((item) => {
+      const searchText = `${item.actor} ${item.resourceType} ${item.resourceId}`.toLowerCase();
+      const matchKeyword = kw ? searchText.includes(kw) : true;
+      const matchActor = actorFilter ? item.actor.toLowerCase().includes(actorFilter) : true;
+      const matchRole = roleFilter ? item.role.toLowerCase().includes(roleFilter) : true;
+      const matchResourceType = resourceTypeFilter ? item.resourceType.toLowerCase().includes(resourceTypeFilter) : true;
+      const matchResourceId = resourceIdFilter ? item.resourceId.toLowerCase().includes(resourceIdFilter) : true;
+      return matchKeyword && matchActor && matchRole && matchResourceType && matchResourceId;
+    });
+  }, [data?.items, keyword, tableFilters.actor, tableFilters.resourceId, tableFilters.resourceType, tableFilters.role]);
 
   const sortedItems = useMemo(() => {
     const list = [...filteredItems];
@@ -622,18 +659,28 @@ function AuditLogsTab() {
     }
   };
 
-  const columns: ColumnsType<AuditLogRecord> = [
+  const columns: Array<HeadlampResourceTableColumn<AuditLogRecord>> = [
     {
       title: "操作用户",
       dataIndex: "actor",
       key: "actor",
       width: 130,
+      required: true,
+      ellipsis: true,
+      filter: { type: "text", placeholder: "以用户过滤" },
       ...getSortableColumnProps("actor", isLoading && !data),
-      render: (v: string) => (
+      render: (v: string, record) => (
         <Space size={4}>
-          <Typography.Text strong style={{ fontSize: 13 }}>
-            {v}
-          </Typography.Text>
+          <Tooltip title={v}>
+            <Typography.Link
+              strong
+              ellipsis
+              style={{ fontSize: 13, maxWidth: 104 }}
+              onClick={() => setDetailRecord(record)}
+            >
+              {v}
+            </Typography.Link>
+          </Tooltip>
         </Space>
       ),
     },
@@ -642,9 +689,11 @@ function AuditLogsTab() {
       dataIndex: "role",
       key: "role",
       width: 140,
+      ellipsis: true,
+      filter: { type: "text", placeholder: "以角色过滤" },
       ...getSortableColumnProps("role", isLoading && !data),
       render: (v: string) => (
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        <Typography.Text type="secondary" ellipsis={{ tooltip: v }} style={{ fontSize: 12, maxWidth: 112 }}>
           {v}
         </Typography.Text>
       ),
@@ -654,6 +703,18 @@ function AuditLogsTab() {
       dataIndex: "action",
       key: "action",
       width: 100,
+      filter: {
+        type: "select",
+        placeholder: "以操作过滤",
+        options: [
+          { label: "创建", value: "create" },
+          { label: "更新", value: "update" },
+          { label: "删除", value: "delete" },
+          { label: "启用", value: "enable" },
+          { label: "禁用", value: "disable" },
+          { label: "查询", value: "query" },
+        ],
+      },
       ...getSortableColumnProps("action", isLoading && !data),
       render: (v: string) => <ActionTag action={v} />,
     },
@@ -662,21 +723,32 @@ function AuditLogsTab() {
       dataIndex: "resourceType",
       key: "resourceType",
       width: 160,
+      ellipsis: true,
+      filter: { type: "text", placeholder: "以资源类型过滤" },
       ...getSortableColumnProps("resourceType", isLoading && !data),
       render: (v: string) => (
-        <Tag style={{ margin: 0 }}>{v}</Tag>
+        <Tag style={{ margin: 0, maxWidth: 132, overflow: "hidden", textOverflow: "ellipsis" }}>{v}</Tag>
       ),
     },
     {
       title: "资源名称",
       dataIndex: "resourceId",
       key: "resourceId",
+      width: 260,
+      filter: { type: "text", placeholder: "以资源名过滤" },
       ...getSortableColumnProps("resourceId", isLoading && !data),
       ellipsis: true,
-      render: (v: string) => (
-        <Typography.Text code style={{ fontSize: 12 }}>
-          {v}
-        </Typography.Text>
+      render: (v: string, record) => (
+        <Tooltip title={v}>
+          <Typography.Link
+            code
+            ellipsis
+            style={{ fontSize: 12, maxWidth: 230 }}
+            onClick={() => setDetailRecord(record)}
+          >
+            {v}
+          </Typography.Link>
+        </Tooltip>
       ),
     },
     {
@@ -684,6 +756,14 @@ function AuditLogsTab() {
       dataIndex: "result",
       key: "result",
       width: 80,
+      filter: {
+        type: "select",
+        placeholder: "以结果过滤",
+        options: [
+          { label: "成功", value: "success" },
+          { label: "失败", value: "failure" },
+        ],
+      },
       ...getSortableColumnProps("result", isLoading && !data),
       render: (v: string) => <ResultTag result={v} />,
     },
@@ -701,65 +781,36 @@ function AuditLogsTab() {
 
   return (
     <>
-      <Space wrap style={{ marginBottom: 16 }}>
-        <Select
-          placeholder="操作类型"
-          allowClear
-          style={{ width: 150 }}
-          value={actionFilter}
-          onChange={(v) => {
-            setActionFilter(v);
-            setPage(1);
-          }}
-          options={[
-            { label: "全部操作", value: undefined },
-            { label: "创建", value: "create" },
-            { label: "更新", value: "update" },
-            { label: "删除", value: "delete" },
-            { label: "启用", value: "enable" },
-            { label: "禁用", value: "disable" },
-            { label: "查询", value: "query" },
-          ]}
-        />
-        <Select
-          placeholder="操作结果"
-          allowClear
-          style={{ width: 130 }}
-          value={resultFilter}
-          onChange={(v) => {
-            setResultFilter(v);
-            setPage(1);
-          }}
-          options={[
-            { label: "全部结果", value: undefined },
-            { label: "成功", value: "success" },
-            { label: "失败", value: "failure" },
-          ]}
-        />
-        <Input
-          placeholder="搜索用户 / 资源类型 / 资源名..."
-          prefix={<SearchOutlined />}
-          style={{ width: 280 }}
-          value={keyword}
-          onChange={(e) => {
-            setKeyword(e.target.value);
-            setPage(1);
-          }}
-          allowClear
-        />
-        <Button
-          icon={<ReloadOutlined />}
-          loading={refreshingAuditLogs}
-          onClick={() => void handleRefreshAuditLogs()}
-        >
-          刷新
-        </Button>
-      </Space>
-
       <ResourceTable<AuditLogRecord>
         rowKey="id"
-        columns={columns}
+        tableKey="business.security.auditLogs"
+        columns={columns as ColumnsType<AuditLogRecord>}
         dataSource={pagedItems}
+        preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+        globalSearch={{
+          value: keyword,
+          onChange: (value) => {
+            setKeyword(value);
+            setPage(1);
+          },
+          placeholder: "搜索用户 / 资源类型 / 资源名",
+        }}
+        filters={tableFilters}
+        onFiltersChange={(nextFilters) => {
+          setTableFilters(nextFilters);
+          setActionFilter(typeof nextFilters.action === "string" ? nextFilters.action : undefined);
+          setResultFilter(typeof nextFilters.result === "string" ? nextFilters.result : undefined);
+          setPage(1);
+        }}
+        toolbarExtra={
+          <Button
+            icon={<ReloadOutlined />}
+            loading={refreshingAuditLogs}
+            onClick={() => void handleRefreshAuditLogs()}
+          >
+            刷新
+          </Button>
+        }
         loading={isLoading}
         size="small"
         scroll={{ x: 900 }}
@@ -783,8 +834,83 @@ function AuditLogsTab() {
           },
         })}
       />
+      <BusinessDetailDrawer
+        open={Boolean(detailRecord)}
+        title={detailRecord ? `审计日志 · ${detailRecord.actor}` : "审计日志"}
+        subtitle={detailRecord ? `${getActionLabel(detailRecord.action)} / ${detailRecord.resourceType}` : undefined}
+        onClose={() => setDetailRecord(null)}
+        sections={buildAuditLogDetailSections(detailRecord)}
+      />
     </>
   );
+}
+
+function buildSecurityEventDetailSections(
+  record: SecurityEvent | null,
+  clusterMap: Record<string, string>,
+): BusinessDetailSection[] {
+  if (!record) {
+    return [];
+  }
+  return [
+    {
+      key: "event",
+      title: "事件信息",
+      items: [
+        { key: "title", label: "事件标题", value: record.title },
+        { key: "severity", label: "严重程度", value: <SeverityTag severity={record.severity} /> },
+        { key: "type", label: "事件类型", value: getEventTypeLabel(record.type) },
+        { key: "status", label: "状态", value: <EventStatusTag status={record.status} /> },
+      ],
+    },
+    {
+      key: "resource",
+      title: "资源范围",
+      items: [
+        { key: "cluster", label: "集群", value: getClusterDisplayName(clusterMap, record.cluster) },
+        { key: "namespace", label: "名称空间", value: record.namespace || "-" },
+        { key: "resourceName", label: "资源名称", value: <Typography.Text code>{record.resourceName}</Typography.Text> },
+      ],
+    },
+    {
+      key: "time",
+      title: "时间",
+      items: [{ key: "occurredAt", label: "发生时间", value: formatTime(record.occurredAt) }],
+    },
+  ];
+}
+
+function buildAuditLogDetailSections(record: AuditLogRecord | null): BusinessDetailSection[] {
+  if (!record) {
+    return [];
+  }
+  return [
+    {
+      key: "actor",
+      title: "操作者",
+      items: [
+        { key: "actor", label: "操作用户", value: record.actor },
+        { key: "role", label: "角色", value: record.role },
+      ],
+    },
+    {
+      key: "operation",
+      title: "操作信息",
+      items: [
+        { key: "action", label: "操作类型", value: <ActionTag action={record.action} /> },
+        { key: "result", label: "结果", value: <ResultTag result={record.result} /> },
+        { key: "timestamp", label: "时间", value: formatTime(record.timestamp) },
+      ],
+    },
+    {
+      key: "resource",
+      title: "资源",
+      items: [
+        { key: "resourceType", label: "资源类型", value: record.resourceType },
+        { key: "resourceId", label: "资源名称", value: <Typography.Text code>{record.resourceId}</Typography.Text> },
+      ],
+    },
+  ];
 }
 
 export default function SecurityPage() {

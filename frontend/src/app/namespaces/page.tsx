@@ -17,7 +17,6 @@ import {
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -42,9 +41,10 @@ import {
   updateNamespace,
   type NamespaceListItem,
 } from "@/lib/api/namespaces";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { useAntdTableSortPagination } from "@/lib/table";
+import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 
 interface FormValues {
@@ -69,6 +69,15 @@ function parseLabels(input?: string): Record<string, string> {
   return labels;
 }
 
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
 export default function NamespacesPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
@@ -78,6 +87,7 @@ export default function NamespacesPage() {
   const { clusterId, onClusterChange } = useClusterNamespaceFilter();
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<NamespaceListItem>({
       defaultPageSize: 10,
@@ -210,12 +220,32 @@ export default function NamespacesPage() {
     }
   };
 
-  const columns: ColumnsType<NamespaceListItem> = [
+  const tableData = useMemo(() => {
+    const namespaceFilter = getTextFilter(tableFilters, "namespace");
+    const clusterFilter = getTextFilter(tableFilters, "clusterId");
+    const labelsFilter = getTextFilter(tableFilters, "labels");
+    return (namespacesQuery.data?.items ?? []).filter(
+      (item) =>
+        textMatches(item.namespace, namespaceFilter) &&
+        textMatches(getClusterDisplayName(clusterMap, item.clusterId, item.clusterName), clusterFilter) &&
+        textMatches(Object.entries(item.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(" "), labelsFilter),
+    );
+  }, [clusterMap, namespacesQuery.data?.items, tableFilters]);
+
+  const handleGlobalSearchChange = (value: string) => {
+    setKeywordInput(value);
+    resetPage();
+    setKeyword(value.trim());
+  };
+
+  const columns: HeadlampResourceTableColumn<NamespaceListItem>[] = [
     {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
       width: getAdaptiveNameWidth(namespacesQuery.data?.items?.map((item) => item.namespace) ?? []),
+      required: true,
+      filter: { type: "text", placeholder: "名称空间" },
       render: (value: string, row) => (
         <Button
           type="link"
@@ -232,6 +262,7 @@ export default function NamespacesPage() {
       dataIndex: "clusterId",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      filter: { type: "text", placeholder: "集群" },
       render: (_: unknown, row) => getClusterDisplayName(clusterMap, row.clusterId, row.clusterName),
       ...getSortableColumnProps("clusterId", namespacesQuery.isLoading && !namespacesQuery.data),
     },
@@ -246,6 +277,7 @@ export default function NamespacesPage() {
     {
       title: "标签",
       key: "labels",
+      filter: { type: "text", placeholder: "标签" },
       render: (_, row) => {
         const labels = Object.entries(row.labels ?? {});
         if (!labels.length) return <Typography.Text type="secondary">-</Typography.Text>;
@@ -262,8 +294,9 @@ export default function NamespacesPage() {
       title: "操作",
       key: "actions",
       width: 86,
-      align: "center",
+      align: "left",
       fixed: "right",
+      required: true,
       render: (_, row) => (
         <Dropdown
           trigger={["click"]}
@@ -344,7 +377,20 @@ export default function NamespacesPage() {
         <ResourceTable<NamespaceListItem>
           rowKey="id"
           columns={columns}
-          dataSource={namespacesQuery.data?.items ?? []}
+          tableKey="namespaces"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称空间搜索",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
+          dataSource={tableData}
           loading={namespacesQuery.isLoading}
           onChange={(nextPagination, filters, sorter, extra) =>
             handleTableChange(nextPagination, filters, sorter, extra, namespacesQuery.isLoading && !namespacesQuery.data)

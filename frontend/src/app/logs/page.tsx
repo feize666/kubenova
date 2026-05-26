@@ -1682,8 +1682,9 @@ export default function LogsPage() {
 
         .headlamp-log-toolbar {
           display: grid;
-          grid-template-columns: minmax(520px, 1.45fr) minmax(360px, 0.95fr) minmax(360px, 0.9fr);
-          gap: 12px;
+          grid-template-columns: minmax(500px, 1fr) max-content max-content;
+          justify-content: space-between;
+          gap: 10px;
           width: 100%;
           align-items: stretch;
           overflow: visible;
@@ -1693,11 +1694,11 @@ export default function LogsPage() {
         .headlamp-log-group {
           display: flex;
           align-items: end;
-          gap: 12px;
+          gap: 10px;
           flex-wrap: wrap;
           min-width: 0;
-          min-height: 78px;
-          padding: 12px;
+          min-height: 64px;
+          padding: 10px;
           border: 1px solid ${token.colorBorderSecondary};
           border-radius: 14px;
           background: linear-gradient(180deg, ${token.colorFillQuaternary}, ${token.colorFillTertiary});
@@ -1710,11 +1711,16 @@ export default function LogsPage() {
         .headlamp-log-group-mode {
           align-content: end;
           justify-content: center;
+          justify-self: end;
         }
 
         .headlamp-log-group-actions {
+          display: inline-flex;
           justify-content: flex-end;
           align-content: end;
+          justify-self: end;
+          flex-wrap: nowrap;
+          width: max-content;
         }
 
         .headlamp-log-control {
@@ -1745,13 +1751,13 @@ export default function LogsPage() {
         .headlamp-log-actions {
           display: inline-flex;
           align-items: center;
-          gap: 4px;
+          gap: 2px;
           height: 32px;
           flex: 0 0 auto;
         }
 
         .headlamp-time-trigger {
-          width: 320px;
+          width: min(320px, 34vw);
           justify-content: space-between;
         }
 
@@ -1928,20 +1934,19 @@ export default function LogsPage() {
           text-shadow: 0 0 1px rgba(255, 255, 255, 0.18);
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 1440px) {
           .headlamp-log-toolbar {
             grid-template-columns: 1fr;
-            align-items: flex-end;
+            justify-content: stretch;
           }
-        }
 
-        @media (min-width: 769px) and (max-width: 1280px) {
-          .headlamp-log-toolbar {
-            grid-template-columns: 1fr 1fr;
+          .headlamp-log-group-mode,
+          .headlamp-log-group-actions {
+            justify-self: stretch;
           }
 
           .headlamp-log-group-actions {
-            grid-column: 1 / -1;
+            width: auto;
           }
         }
 

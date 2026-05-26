@@ -9,6 +9,7 @@ type ClusterNamespaceFilterState = {
   namespacePlaceholder: string;
   onClusterChange: (nextClusterId: string) => void;
   onNamespaceChange: (nextNamespace: string) => void;
+  onScopeChange: (nextClusterId: string, nextNamespace: string) => void;
 };
 
 export function useClusterNamespaceFilter(initialClusterId = "", initialNamespace = ""): ClusterNamespaceFilterState {
@@ -25,6 +26,11 @@ export function useClusterNamespaceFilter(initialClusterId = "", initialNamespac
     setNamespace(nextNamespace);
   };
 
+  const onScopeChange = (nextClusterId: string, nextNamespace: string) => {
+    setClusterId(nextClusterId);
+    setNamespace(nextClusterId ? nextNamespace : "");
+  };
+
   return {
     clusterId,
     namespace,
@@ -32,5 +38,6 @@ export function useClusterNamespaceFilter(initialClusterId = "", initialNamespac
     namespacePlaceholder: hasConcreteCluster ? "全部名称空间" : "请先选择具体集群",
     onClusterChange,
     onNamespaceChange,
+    onScopeChange,
   };
 }

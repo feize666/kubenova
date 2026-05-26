@@ -17,10 +17,12 @@ type NetworkResourcePageFiltersProps = {
   namespacePlaceholder?: string;
   onClusterChange: (value: string) => void;
   onNamespaceChange: (value: string) => void;
+  onScopeChange?: (clusterId: string, namespace: string) => void;
   onKeywordInputChange: (value: string) => void;
   onSearch: () => void;
   extraFilters?: ReactNode;
   keywordPlaceholder?: string;
+  showKeywordSearch?: boolean;
 };
 
 export function NetworkResourcePageFilters({
@@ -35,10 +37,12 @@ export function NetworkResourcePageFilters({
   namespacePlaceholder,
   onClusterChange,
   onNamespaceChange,
+  onScopeChange,
   onKeywordInputChange,
   onSearch,
   extraFilters,
   keywordPlaceholder = "按名称/标签搜索",
+  showKeywordSearch = false,
 }: NetworkResourcePageFiltersProps) {
   return (
     <ResourceClusterNamespaceFilters
@@ -53,10 +57,12 @@ export function NetworkResourcePageFilters({
       namespacePlaceholder={namespacePlaceholder}
       onClusterChange={onClusterChange}
       onNamespaceChange={onNamespaceChange}
+      onScopeChange={onScopeChange}
       onKeywordInputChange={onKeywordInputChange}
       onSearch={onSearch}
       extraFilters={extraFilters}
       keywordPlaceholder={keywordPlaceholder}
+      showKeywordSearch={showKeywordSearch}
     />
   );
 }

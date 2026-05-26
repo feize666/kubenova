@@ -15,6 +15,7 @@ import {
   DetailSection,
   TagList,
 } from "./section-primitives";
+import { buildHeadlampDetailSections } from "./detail-section-builders";
 import type { ResourceDetailRendererProps } from "./types";
 import {
   buildOverviewFieldMap,
@@ -3148,6 +3149,7 @@ function MetadataSection({
 
 export function ResourceDetailContent({
   detail,
+  snapshot,
   onNavigateRequest,
 }: ResourceDetailRendererProps) {
   const profile = getRenderProfile(detail);
@@ -3331,10 +3333,8 @@ export function ResourceDetailContent({
     ),
     network: null,
     storage: null,
-    events: <EventsSection detail={detail} />,
-    metadata: (
-      <MetadataSection detail={detail} onNavigateRequest={onNavigateRequest} />
-    ),
+    events: null,
+    metadata: null,
   };
 
   const supplementaryOverviewFields = getOrderedFields(
@@ -3442,6 +3442,14 @@ export function ResourceDetailContent({
         detail={detail}
         onNavigateRequest={onNavigateRequest}
       />
+
+      {buildHeadlampDetailSections({
+        detail,
+        snapshot,
+        specSnapshot: snapshot?.spec,
+        statusSnapshot: snapshot?.status,
+        onNavigateRequest,
+      })}
 
       {SECTION_PRIORITY.filter((section) =>
         detail.descriptor.sections.includes(section),

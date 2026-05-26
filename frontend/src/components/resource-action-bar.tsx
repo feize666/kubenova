@@ -1,6 +1,20 @@
 "use client";
 
-import { DeleteOutlined, EditOutlined, FileTextOutlined, MoreOutlined } from "@ant-design/icons";
+import {
+  BugOutlined,
+  CheckCircleOutlined,
+  CodeOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
+  FileTextOutlined,
+  KeyOutlined,
+  MoreOutlined,
+  ReloadOutlined,
+  RetweetOutlined,
+  StopOutlined,
+  SyncOutlined,
+} from "@ant-design/icons";
 import { Button, Dropdown, Popconfirm, Space } from "antd";
 import type { MenuProps } from "antd";
 import { Modal } from "antd";
@@ -90,16 +104,39 @@ export interface ResourceActionDropdownProps {
 }
 
 export function getResourceActionIcon(actionKey: string): ReactNode | null {
-  switch (normalizeActionSlot(actionKey)) {
+  const normalizedKey = actionKey.toLowerCase();
+  switch (normalizeActionSlot(normalizedKey)) {
+    case "refresh":
+      return <ReloadOutlined />;
     case "edit":
       return <EditOutlined />;
     case "yaml":
       return <FileTextOutlined />;
+    case "scale":
+      return <RetweetOutlined />;
+    case "restart":
+      return <ReloadOutlined />;
+    case "enable-disable":
+      return normalizedKey.includes("enable") ? <CheckCircleOutlined /> : <StopOutlined />;
+    case "terminal":
+      return <CodeOutlined />;
+    case "logs":
+      return <BugOutlined />;
     case "delete":
       return <DeleteOutlined />;
     default:
-      return null;
+      break;
   }
+  if (normalizedKey.includes("detail") || normalizedKey === "view") {
+    return <EyeOutlined />;
+  }
+  if (normalizedKey.includes("token") || normalizedKey.includes("secret")) {
+    return <KeyOutlined />;
+  }
+  if (normalizedKey.includes("sync")) {
+    return <SyncOutlined />;
+  }
+  return null;
 }
 
 export function buildResourceActionMenuItems(actions: ResourceMenuItem[]): NonNullable<MenuProps["items"]> {
@@ -241,6 +278,7 @@ interface ResourceActionBarProps {
 const ACTION_SLOT_ALIASES: Record<string, TopActionBarSlot> = {
   create: "create",
   refresh: "refresh",
+  reload: "refresh",
   edit: "edit",
   yaml: "yaml",
   scale: "scale",
@@ -250,6 +288,8 @@ const ACTION_SLOT_ALIASES: Record<string, TopActionBarSlot> = {
   "image-update": "image-update",
   enable: "enable-disable",
   disable: "enable-disable",
+  "enable-user": "enable-disable",
+  "disable-user": "enable-disable",
   "enable-disable": "enable-disable",
   terminal: "terminal",
   logs: "logs",

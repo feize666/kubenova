@@ -7,16 +7,13 @@ import {
   App,
   Button,
   Card,
-  Col,
   Dropdown,
   Form,
   Input,
   InputNumber,
   Modal,
-  Row,
   Select,
   Space,
-  Table,
   Tabs,
   Typography,
 } from "antd";
@@ -40,13 +37,14 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourcePageHeader } from "@/components/resource-page-header";
-import { NamespaceSelect } from "@/components/namespace-select";
-import { ClusterSelect } from "@/components/cluster-select";
+import { ResourceFilterToolbarItem } from "@/components/resource-filter-toolbar";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import {
@@ -105,7 +103,7 @@ export default function HelmPage() {
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
 
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [keyword, setKeyword] = useState(initialKeyword);
@@ -368,8 +366,9 @@ export default function HelmPage() {
     [selectedInstallChart],
   );
 
-  const handleSearch = () => {
-    const parsed = parseResourceSearchInput(keywordInput);
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
     resetPage();
     setKeyword(parsed.keyword);
     setDetailTarget(null);
@@ -622,53 +621,27 @@ export default function HelmPage() {
       />
 
       <Card>
-        <Row gutter={[12, 12]} align="middle" style={{ marginBottom: 12 }}>
-          <Col xs={24} sm={12} md={6} lg={4}>
-            <ClusterSelect
-              value={selectedClusterId}
-              onChange={(v) => {
-                onClusterChange(v);
-                resetPage();
-                setSelectedRowId(null);
-                setDetailTarget(null);
-              }}
-              options={helmClusterOptions}
-              loading={clustersQuery.isLoading}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={5} lg={4}>
-            <NamespaceSelect
-              value={namespace}
-              onChange={(v) => {
-                onNamespaceChange(v);
-                resetPage();
-                setSelectedRowId(null);
-                setDetailTarget(null);
-              }}
-              knownNamespaces={knownNamespaces}
-              clusterId={selectedClusterId}
-              disabled={namespaceDisabled}
-              placeholder={namespacePlaceholder}
-            />
-          </Col>
-          <Col xs={24} sm={16} md={7} lg={6}>
-            <Input
-              prefix={<SearchOutlined />}
-              allowClear
-              placeholder="按 Release / Chart 搜索"
-              value={keywordInput}
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onPressEnter={handleSearch}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={4} lg={3}>
-            <Space>
-              <Button icon={<SearchOutlined />} type="primary" onClick={handleSearch}>
-                查询
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+        <div className="resource-filter-toolbar" style={{ marginBottom: 12 }}>
+          <div className="resource-filter-toolbar-controls">
+            <ResourceFilterToolbarItem width="auto">
+              <ResourceScopeFilterButton
+                clusterId={selectedClusterId}
+                namespace={namespace}
+                clusterOptions={helmClusterOptions}
+                clusterLoading={clustersQuery.isLoading}
+                knownNamespaces={knownNamespaces}
+                namespaceDisabled={namespaceDisabled}
+                namespacePlaceholder={namespacePlaceholder}
+                onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                  onScopeChange(nextClusterId, nextNamespace);
+                  resetPage();
+                  setSelectedRowId(null);
+                  setDetailTarget(null);
+                }}
+              />
+            </ResourceFilterToolbarItem>
+          </div>
+        </div>
 
         {!isInitializing && !accessToken ? (
           <Alert
@@ -702,6 +675,14 @@ export default function HelmPage() {
         <ResourceTable<HelmReleaseItem>
           bordered
           rowKey="id"
+          tableKey="workloads.helm.releases"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按 Release / Chart 搜索",
+          }}
+          sort={{ sortBy, sortOrder }}
           columns={columns}
           dataSource={rows}
           onRow={(record) => ({
@@ -791,8 +772,10 @@ export default function HelmPage() {
                 key: "history",
                 label: "历史",
                 children: (
-                  <Table<HelmReleaseHistoryItem>
+                  <ResourceTable<HelmReleaseHistoryItem>
                     rowKey={(item) => `${item.revision}-${item.updatedAt}`}
+                    tableKey="workloads.helm.history"
+                    preferencesClient={createTablePreferencesClient(accessToken || undefined)}
                     size="small"
                     bordered
                     columns={historyColumns}

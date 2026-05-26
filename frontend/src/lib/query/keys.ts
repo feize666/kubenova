@@ -43,6 +43,15 @@ function normalizeParams(params?: QueryParams | Record<string, unknown>) {
   return normalizeValue(params ?? {}) as KeyValue;
 }
 
+function queryScope(value?: string) {
+  if (!value) return "anonymous";
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(31, hash) + value.charCodeAt(index);
+  }
+  return `${value.length}:${(hash >>> 0).toString(36)}`;
+}
+
 export function moduleQueryKeys(moduleName: string) {
   return {
     all: [moduleName] as const,
@@ -54,6 +63,10 @@ export function moduleQueryKeys(moduleName: string) {
 }
 
 export const queryKeys = {
+  capabilities: {
+    all: ["capabilities"] as const,
+    list: (token?: string) => ["capabilities", "list", queryScope(token)] as const,
+  },
   clusters: moduleQueryKeys("clusters"),
   configs: {
     all: ["configs"] as const,

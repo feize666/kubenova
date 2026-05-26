@@ -20,7 +20,6 @@ import {
   Typography,
   message,
 } from "antd";
-import type { ColumnsType } from "antd/es/table";
 import type { MenuProps } from "antd";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -51,11 +50,12 @@ import {
 } from "@/lib/api/storage";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
-import { useAntdTableSortPagination } from "@/lib/table";
+import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
@@ -87,6 +87,15 @@ function pvcStatusTag(resource: StorageResource) {
   return <Tag color="default">{readPhase(resource) || "-"}</Tag>;
 }
 
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
 interface PvcFormValues {
   name: string;
   namespace: string;
@@ -107,6 +116,7 @@ export default function PvcPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const {
     sortBy,
     sortOrder,
@@ -220,9 +230,15 @@ export default function PvcPage() {
       (data?.items ?? []).filter(
         (item) =>
           hasKnownCluster(clusterMap, item.clusterId) &&
-          matchLabelExpressions(item.labels, mergedFilters),
+          matchLabelExpressions(item.labels, mergedFilters) &&
+          textMatches(item.name, getTextFilter(tableFilters, "name")) &&
+          textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
+          textMatches(item.namespace, getTextFilter(tableFilters, "namespace")) &&
+          textMatches(item.capacity, getTextFilter(tableFilters, "capacity")) &&
+          textMatches(item.storageClass, getTextFilter(tableFilters, "storageClass")) &&
+          textMatches(readPhase(item), getTextFilter(tableFilters, "state")),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters, tableFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -231,6 +247,13 @@ export default function PvcPage() {
 
   const handleSearch = () => {
     const parsed = parseResourceSearchInput(keywordInput);
+    resetPage();
+    setMergedFilters(parsed.labelExpressions);
+    setKeyword(parsed.keyword);
+  };
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
@@ -247,11 +270,13 @@ export default function PvcPage() {
     setModalOpen(true);
   };
 
-  const columns: ColumnsType<StorageResource> = [
+  const columns: HeadlampResourceTableColumn<StorageResource>[] = [
     {
       title: "声明名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "名称" },
       width: nameWidth,
       ellipsis: true,
       ...getSortableColumnProps("name", isLoading && !data),
@@ -267,6 +292,7 @@ export default function PvcPage() {
     {
       title: "集群",
       key: "clusterId",
+      filter: { type: "text", placeholder: "集群" },
       width: TABLE_COL_WIDTH.cluster,
       ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, row: StorageResource) =>
@@ -276,6 +302,7 @@ export default function PvcPage() {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      filter: { type: "text", placeholder: "名称空间" },
       width: TABLE_COL_WIDTH.namespace,
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
@@ -283,6 +310,7 @@ export default function PvcPage() {
       title: "申请容量",
       dataIndex: "capacity",
       key: "capacity",
+      filter: { type: "text", placeholder: "容量" },
       width: TABLE_COL_WIDTH.capacity,
       ...getSortableColumnProps("capacity", isLoading && !data),
     },
@@ -290,12 +318,14 @@ export default function PvcPage() {
       title: "存储类",
       dataIndex: "storageClass",
       key: "storageClass",
+      filter: { type: "text", placeholder: "存储类" },
       width: TABLE_COL_WIDTH.storageClass,
       ...getSortableColumnProps("storageClass", isLoading && !data),
     },
     {
       title: "绑定状态",
       key: "state",
+      filter: { type: "text", placeholder: "状态" },
       width: TABLE_COL_WIDTH.status,
       render: (_: unknown, row: StorageResource) => pvcStatusTag(row),
     },
@@ -310,6 +340,7 @@ export default function PvcPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: 110,
       fixed: "right",
       render: (_: unknown, row: StorageResource) => {
@@ -420,6 +451,19 @@ export default function PvcPage() {
         <ResourceTable<StorageResource>
           rowKey="id"
           columns={columns}
+          tableKey="storage.pvc"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称/标签搜索（示例：pvc-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
           dataSource={tableData}
           layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 }, actionWidth: 110 }}
           loading={isLoading && !data}

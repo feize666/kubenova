@@ -6,7 +6,6 @@ import {
   EyeOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SearchOutlined,
   ToolOutlined,
   UserOutlined,
 } from "@ant-design/icons";
@@ -21,7 +20,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Row,
   Select,
   Space,
@@ -29,13 +27,24 @@ import {
   Tooltip,
   Typography,
 } from "antd";
-import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { ClusterSelect } from "@/components/cluster-select";
-import { NamespaceSelect } from "@/components/namespace-select";
+import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
+import {
+  POD_ACTION_MENU_CLASS,
+  POD_ACTION_TRIGGER_CLASS,
+  ResourceActionDropdown,
+  type ResourceActionItem,
+  renderPodLikeResourceActionStyles,
+} from "@/components/resource-action-bar";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
+import {
+  ResourceFilterToolbar,
+  ResourceFilterToolbarItem,
+} from "@/components/resource-filter-toolbar";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { buildTablePagination } from "@/lib/table/pagination";
@@ -54,7 +63,9 @@ import {
   type RbacSubjectKind,
 } from "@/lib/api/rbac";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getDynamicResources } from "@/lib/api/resources";
+import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 
 type RbacTableRecord = RbacListItem & { key: string };
 
@@ -190,10 +201,10 @@ function RoleCards() {
 // ---------- CreateRbacModal ----------
 
 interface CreateRbacFormValues {
-  subject: string;
+  subject: string | string[];
   subjectKind: RbacSubjectKind;
   subjectNamespace?: string;
-  name: string;
+  name: string | string[];
   namespace?: string;
   kind: RbacKind;
   lookupClusterId?: string;
@@ -210,6 +221,13 @@ const PRESET_ROLES = ROLE_DEFINITIONS.map((r) => ({
   label: `${r.label} (${r.name})`,
   value: r.name,
 }));
+
+function normalizeSingleSelectValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) {
+    return String(value[0] ?? "").trim();
+  }
+  return String(value ?? "").trim();
+}
 
 function CreateRbacModal({ open, accessToken, onClose, onSuccess }: CreateRbacModalProps) {
   const [form] = Form.useForm<CreateRbacFormValues>();
@@ -282,16 +300,18 @@ function CreateRbacModal({ open, accessToken, onClose, onSuccess }: CreateRbacMo
 
   const mutation = useMutation({
     mutationFn: (values: CreateRbacFormValues) => {
+      const roleName = normalizeSingleSelectValue(values.name);
+      const subjectName = normalizeSingleSelectValue(values.subject);
       const payload: CreateRbacPayload = {
-        name: values.name,
+        name: roleName,
         kind: values.kind,
         namespace: values.namespace ?? "",
-        subject: values.subject,
+        subject: subjectName,
         subjectKind: values.subjectKind,
         subjectNamespace: values.subjectKind === "ServiceAccount" ? values.subjectNamespace : "",
         subjectRef: {
           kind: values.subjectKind,
-          name: values.subject,
+          name: subjectName,
           namespace: values.subjectKind === "ServiceAccount" ? values.subjectNamespace : "",
         },
       };
@@ -510,11 +530,13 @@ export default function RbacPage() {
   const searchParams = useSearchParams();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [kindFilter, setKindFilter] = useState<string>("");
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [actionTargetId, setActionTargetId] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [detailRecord, setDetailRecord] = useState<RbacTableRecord | null>(null);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [keyword, setKeyword] = useState(initialKeyword);
   const [page, setPage] = useState(1);
@@ -536,11 +558,6 @@ export default function RbacPage() {
     namespace,
     keyword,
   });
-
-  const applyKeyword = () => {
-    setKeyword(keywordInput.trim());
-    setPage(1);
-  };
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "rbac-filter", accessToken],
@@ -621,9 +638,36 @@ export default function RbacPage() {
   });
 
   const sourceItems = useMemo(() => query.data?.items ?? [], [query.data?.items]);
+  const tableItems = useMemo(() => {
+    const nameFilter = typeof tableFilters.name === "string" ? tableFilters.name.toLowerCase() : "";
+    const kindColumnFilter = typeof tableFilters.kind === "string" ? tableFilters.kind : "";
+    const namespaceFilter = typeof tableFilters.namespace === "string" ? tableFilters.namespace.toLowerCase() : "";
+    const subjectFilter = typeof tableFilters.subject === "string" ? tableFilters.subject.toLowerCase() : "";
+    const stateFilter = typeof tableFilters.state === "string" ? tableFilters.state : "";
+    return sourceItems.filter((item) => {
+      const matchName = nameFilter ? item.name.toLowerCase().includes(nameFilter) : true;
+      const matchKind = kindColumnFilter ? item.kind === kindColumnFilter : true;
+      const matchNamespace = namespaceFilter ? (item.namespace ?? "").toLowerCase().includes(namespaceFilter) : true;
+      const subjectText = `${item.subjectKind}:${item.subject}${item.subjectNamespace ? `@${item.subjectNamespace}` : ""}`.toLowerCase();
+      const matchSubject = subjectFilter ? subjectText.includes(subjectFilter) : true;
+      const matchState = stateFilter ? item.state === stateFilter : true;
+      return matchName && matchKind && matchNamespace && matchSubject && matchState;
+    });
+  }, [
+    sourceItems,
+    tableFilters.kind,
+    tableFilters.name,
+    tableFilters.namespace,
+    tableFilters.state,
+    tableFilters.subject,
+  ]);
   const rows = useMemo<RbacTableRecord[]>(
-    () => sourceItems.map((item) => ({ ...item, key: item.id })),
-    [sourceItems],
+    () => tableItems.map((item) => ({ ...item, key: item.id })),
+    [tableItems],
+  );
+  const nameWidth = useMemo(
+    () => getAdaptiveNameWidth(rows.map((item) => item.name), { min: 220, max: 300 }),
+    [rows],
   );
   const knownNamespaces = useMemo(
     () => Array.from(new Set(sourceItems.map((item) => item.namespace).filter(Boolean))),
@@ -638,20 +682,28 @@ export default function RbacPage() {
     return { total: sourceItems.length, active, clusterLevel, nsLevel };
   }, [sourceItems]);
 
-  const columns: ColumnsType<RbacTableRecord> = [
+  const columns: Array<HeadlampResourceTableColumn<RbacTableRecord>> = [
     {
       title: "策略名 / 角色",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "以策略名过滤" },
+      width: nameWidth,
+      ellipsis: true,
       ...getSortableColumnProps("name", query.isLoading && !query.data),
-      render: (value: string) => {
+      render: (value: string, row) => {
         const preset = ROLE_DEFINITIONS.find((r) => r.name === value);
         return (
           <Space size={4}>
             {preset ? <span style={{ color: preset.color }}>{preset.icon}</span> : null}
-            <Typography.Text strong style={{ fontFamily: "monospace" }}>
+            <Typography.Link
+              onClick={() => setDetailRecord(row)}
+              style={{ fontFamily: "monospace", fontWeight: 600 }}
+              ellipsis
+            >
               {value}
-            </Typography.Text>
+            </Typography.Link>
             {preset ? (
               <Tag color={preset.color} style={{ fontSize: 11 }}>
                 {preset.label}
@@ -665,6 +717,15 @@ export default function RbacPage() {
       title: "绑定类型",
       dataIndex: "kind",
       key: "kind",
+      width: 170,
+      filter: {
+        type: "select",
+        placeholder: "以类型过滤",
+        options: [
+          { label: "RoleBinding", value: "RoleBinding" },
+          { label: "ClusterRoleBinding", value: "ClusterRoleBinding" },
+        ],
+      },
       ...getSortableColumnProps("kind", query.isLoading && !query.data),
       render: (value: string) => kindTag(value),
     },
@@ -672,6 +733,8 @@ export default function RbacPage() {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      width: TABLE_COL_WIDTH.namespace,
+      filter: { type: "text", placeholder: "以名称空间过滤" },
       ...getSortableColumnProps("namespace", query.isLoading && !query.data),
       render: (value: string) =>
         value ? (
@@ -686,11 +749,13 @@ export default function RbacPage() {
       title: "绑定主体",
       dataIndex: "subject",
       key: "subject",
+      width: 260,
+      filter: { type: "text", placeholder: "以主体过滤" },
       ...getSortableColumnProps("subject", query.isLoading && !query.data),
       render: (value: string, row) => (
-        <Space size={4}>
+        <Space size={4} style={{ minWidth: 0 }}>
           <UserOutlined style={{ color: "#8c8c8c" }} />
-          <Typography.Text copyable={{ text: value }} style={{ fontFamily: "monospace" }}>
+          <Typography.Text copyable={{ text: value }} style={{ fontFamily: "monospace" }} ellipsis>
             {row.subjectKind}:{value}
             {row.subjectKind === "ServiceAccount" && row.subjectNamespace ? `@${row.subjectNamespace}` : ""}
           </Typography.Text>
@@ -701,6 +766,15 @@ export default function RbacPage() {
       title: "状态",
       dataIndex: "state",
       key: "state",
+      width: TABLE_COL_WIDTH.state,
+      filter: {
+        type: "select",
+        placeholder: "以状态过滤",
+        options: [
+          { label: "已启用", value: "active" },
+          { label: "已禁用", value: "disabled" },
+        ],
+      },
       ...getSortableColumnProps("state", query.isLoading && !query.data),
       render: (value: RbacState) => stateTag(value),
     },
@@ -708,6 +782,7 @@ export default function RbacPage() {
       title: "更新时间",
       dataIndex: "updatedAt",
       key: "updatedAt",
+      width: TABLE_COL_WIDTH.updateTime,
       ...getSortableColumnProps("updatedAt", query.isLoading && !query.data),
       render: (value: string) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -718,33 +793,41 @@ export default function RbacPage() {
     {
       title: "操作",
       key: "actions",
-      width: 160,
+      required: true,
+      width: TABLE_COL_WIDTH.actionCompact,
+      fixed: "right",
       render: (_, row) => {
         const isActive = row.state === "active";
         const isLoading = mutation.isPending && actionTargetId === row.id;
+        const actions: ResourceActionItem[] = [
+          {
+            key: isActive ? "disable" : "enable",
+            label: isActive ? "禁用" : "启用",
+            loading: isLoading,
+            onClick: () => mutation.mutate({ id: row.id, nextState: isActive ? "disabled" : "active" }),
+          },
+          {
+            key: "delete",
+            label: "删除",
+            danger: true,
+            loading: deleteMutation.isPending && deleteMutation.variables === row.id,
+            onClick: () => deleteMutation.mutate(row.id),
+            confirm: {
+              title: "确认删除绑定",
+              description: `删除绑定 "${row.name}" 后将不可恢复，确认继续？`,
+              okText: "确认删除",
+              cancelText: "取消",
+              okDanger: true,
+            },
+          },
+        ];
         return (
-          <Space size={4}>
-            <Button
-              size="small"
-              loading={isLoading}
-              type={isActive ? "default" : "primary"}
-              onClick={() => mutation.mutate({ id: row.id, nextState: isActive ? "disabled" : "active" })}
-            >
-              {isActive ? "禁用" : "启用"}
-            </Button>
-            <Popconfirm
-              title="确认删除绑定"
-              description={`删除绑定 "${row.name}" 后将不可恢复，确认继续？`}
-              okText="确认删除"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => deleteMutation.mutate(row.id)}
-            >
-              <Button size="small" danger loading={deleteMutation.isPending && deleteMutation.variables === row.id}>
-                删除
-              </Button>
-            </Popconfirm>
-          </Space>
+          <ResourceActionDropdown
+            actions={actions}
+            ariaLabel="更多操作"
+            triggerClassName={POD_ACTION_TRIGGER_CLASS}
+            menuClassName={POD_ACTION_MENU_CLASS}
+          />
         );
       },
     },
@@ -788,75 +871,24 @@ export default function RbacPage() {
       {/* 角色说明卡片 */}
       <RoleCards />
 
-      {/* 筛选栏 */}
       <Card>
-        <Row gutter={[12, 12]}>
-          <Col xs={24} sm={12} md={6} lg={5}>
-            <ClusterSelect
-              style={{ width: "100%" }}
-              value={clusterId}
-              onChange={(value) => {
-                onClusterChange(value);
-                setPage(1);
-              }}
-              options={clusterOptions}
-              loading={clustersQuery.isLoading}
-              showAllOption
-            />
-          </Col>
-          <Col xs={24} sm={12} md={5} lg={4}>
-            <NamespaceSelect
-              style={{ width: "100%" }}
-              value={namespace}
-              onChange={(value) => {
-                onNamespaceChange(value);
-                setPage(1);
-              }}
-              knownNamespaces={knownNamespaces}
+        <ResourceFilterToolbar>
+          <ResourceFilterToolbarItem width="auto">
+            <ResourceScopeFilterButton
               clusterId={clusterId}
-              disabled={namespaceDisabled}
-              placeholder={namespacePlaceholder}
-            />
-          </Col>
-          <Col xs={24} md={7} lg={6}>
-            <Input
-              allowClear
-              placeholder="搜索策略名 / 用户名 / 名称空间"
-              value={keywordInput}
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onPressEnter={applyKeyword}
-              prefix={<SearchOutlined />}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6} lg={4}>
-            <Select
-              style={{ width: "100%" }}
-              value={kindFilter}
-              onChange={(value) => {
-                setKindFilter(value);
+              namespace={namespace}
+              clusterOptions={clusterOptions}
+              clusterLoading={clustersQuery.isLoading}
+              knownNamespaces={knownNamespaces}
+              namespaceDisabled={namespaceDisabled}
+              namespacePlaceholder={namespacePlaceholder}
+              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                onScopeChange(nextClusterId, nextNamespace);
                 setPage(1);
               }}
-              options={[
-                { label: "全部绑定类型", value: "" },
-                { label: "RoleBinding", value: "RoleBinding" },
-                { label: "ClusterRoleBinding", value: "ClusterRoleBinding" },
-              ]}
             />
-          </Col>
-          <Col xs={24} md={6} lg={5}>
-            <Space>
-              <Button icon={<SearchOutlined />} type="primary" onClick={applyKeyword}>
-                查询
-              </Button>
-              <Button icon={<ReloadOutlined />} onClick={() => void query.refetch()} loading={query.isFetching}>
-                刷新
-              </Button>
-              <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
-                新建绑定
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+          </ResourceFilterToolbarItem>
+        </ResourceFilterToolbar>
       </Card>
 
       {/* 错误提示 */}
@@ -904,8 +936,36 @@ export default function RbacPage() {
       >
         <ResourceTable<RbacTableRecord>
           rowKey="key"
+          tableKey="business.rbac"
           columns={columns}
           dataSource={rows}
+          layoutOptions={{ nameValues: rows.map((item) => item.name), actionWidth: TABLE_COL_WIDTH.actionCompact }}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: (value) => {
+              setKeywordInput(value);
+              setKeyword(value.trim());
+              setPage(1);
+            },
+            placeholder: "搜索策略名 / 用户名 / 名称空间",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            setKindFilter(typeof nextFilters.kind === "string" ? nextFilters.kind : "");
+            setPage(1);
+          }}
+          toolbarExtra={
+            <Space size={8} wrap>
+              <Button icon={<ReloadOutlined />} onClick={() => void query.refetch()} loading={query.isFetching}>
+                刷新
+              </Button>
+              <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
+                新建绑定
+              </Button>
+            </Space>
+          }
           loading={{ spinning: query.isLoading, description: "RBAC 数据加载中..." }}
           onChange={(pagination, filters, sorter, extra) => {
             handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
@@ -945,6 +1005,49 @@ export default function RbacPage() {
         onClose={() => setCreateOpen(false)}
         onSuccess={() => void queryClient.invalidateQueries({ queryKey: [...RBAC_QUERY_KEY] })}
       />
+      {renderPodLikeResourceActionStyles({ triggerClassName: POD_ACTION_TRIGGER_CLASS, menuClassName: POD_ACTION_MENU_CLASS })}
+      <BusinessDetailDrawer
+        open={Boolean(detailRecord)}
+        title={detailRecord ? `RBAC 详情 · ${detailRecord.name}` : "RBAC 详情"}
+        subtitle={detailRecord ? `${detailRecord.kind} / ${detailRecord.namespace || "集群级"}` : undefined}
+        onClose={() => setDetailRecord(null)}
+        sections={buildRbacDetailSections(detailRecord)}
+      />
     </Space>
   );
+}
+
+function buildRbacDetailSections(record: RbacTableRecord | null): BusinessDetailSection[] {
+  if (!record) {
+    return [];
+  }
+  return [
+    {
+      key: "binding",
+      title: "绑定信息",
+      items: [
+        { key: "name", label: "策略名 / 角色", value: <Typography.Text code>{record.name}</Typography.Text> },
+        { key: "kind", label: "绑定类型", value: kindTag(record.kind) },
+        { key: "namespace", label: "名称空间", value: record.namespace || "集群级" },
+        { key: "state", label: "状态", value: stateTag(record.state) },
+      ],
+    },
+    {
+      key: "subject",
+      title: "绑定主体",
+      items: [
+        { key: "subjectKind", label: "主体类型", value: record.subjectKind },
+        { key: "subject", label: "主体名称", value: <Typography.Text code>{record.subject}</Typography.Text> },
+        { key: "subjectNamespace", label: "主体名称空间", value: record.subjectNamespace || "-" },
+      ],
+    },
+    {
+      key: "lifecycle",
+      title: "生命周期",
+      items: [
+        { key: "version", label: "版本", value: record.version },
+        { key: "updatedAt", label: "更新时间", value: record.updatedAt ? new Date(record.updatedAt).toLocaleString("zh-CN") : "-" },
+      ],
+    },
+  ];
 }

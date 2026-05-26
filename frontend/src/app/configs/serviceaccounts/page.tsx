@@ -11,7 +11,6 @@ import {
   Modal,
   Select,
   Space,
-  Table,
   Typography,
   message,
 } from "antd";
@@ -21,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
+import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
@@ -28,18 +28,16 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import {
   matchLabelExpressions,
   parseResourceSearchInput,
-  buildResourceActionMenuItems,
-  openResourceActionConfirm,
-  renderResourceActionTriggerButton,
 } from "@/components/resource-action-bar";
+import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { getClusters } from "@/lib/api/clusters";
 import { getNamespaces } from "@/lib/api/namespaces";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
-import type { ResourceDetailRequest } from "@/lib/api/resources";
-import { Dropdown } from "antd";
+import type { HeadlampTableFilters } from "@/lib/table";
 import {
   deleteDynamicResource,
   getDynamicResourceDetail,
@@ -53,6 +51,7 @@ import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter"
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
 type ServiceAccountRecord = DynamicResourceItem;
+type DetailTarget = NonNullable<ResourceDetailDrawerProps["request"]>;
 
 type CreateSaFormValues = {
   clusterId: string;
@@ -122,6 +121,7 @@ export default function ServiceAccountsPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [keyword, setKeyword] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const { sortBy, sortOrder, pagination, resetPage, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ServiceAccountRecord>({
       defaultPageSize: 10,
@@ -139,7 +139,7 @@ export default function ServiceAccountsPage() {
   const [tokenRows, setTokenRows] = useState<SecretTokenRow[]>([]);
   const [tokenLoading, setTokenLoading] = useState(false);
   const [tokenTitle, setTokenTitle] = useState("");
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
 
   const clustersQuery = useQuery({
     queryKey: ["serviceaccounts", "clusters", accessToken],
@@ -320,6 +320,13 @@ export default function ServiceAccountsPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
+    resetPage();
+    setMergedFilters(parsed.labelExpressions);
+    setKeyword(parsed.keyword);
+  };
   useSyncResourceFilterUrlState({
     clusterId,
     namespace,
@@ -467,7 +474,20 @@ export default function ServiceAccountsPage() {
       ellipsis: true,
       render: (name: string, row: ServiceAccountRecord) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "serviceaccount", id: row.id })}>
+          <Typography.Link
+            onClick={() =>
+              setDetailTarget({
+                kind: "ServiceAccount",
+                id: row.id,
+                kindLabel: "ServiceAccount",
+                apiVersion: row.apiVersion,
+                namespace: row.namespace,
+                name: row.name,
+                label: row.name,
+                snapshot: { labels: row.labels },
+              })
+            }
+          >
             {name}
           </Typography.Link>
         ) : (
@@ -500,43 +520,20 @@ export default function ServiceAccountsPage() {
       width: TABLE_COL_WIDTH.actionCompact,
       fixed: "right",
       render: (_: unknown, row: ServiceAccountRecord) => (
-        <Dropdown
-          trigger={["click"]}
-          placement="bottomRight"
-          menu={{
-            items: buildResourceActionMenuItems([
-              {
-                key: "secret-token",
-                label: "Secret/Token",
-                onClick: () => handleOpenSecretTokenForRow(row),
-              },
-              {
-                key: "yaml",
-                label: "YAML",
-                onClick: () => handleOpenYamlForRow(row),
-              },
-              {
-                key: "delete",
-                label: "删除",
-                danger: true,
-                onClick: () => {
-                  openResourceActionConfirm(
-                    {
-                      title: "删除 ServiceAccount",
-                      description: `确认删除 ServiceAccount「${row.name}」吗？此操作不可恢复。`,
-                      okText: "确认删除",
-                      cancelText: "取消",
-                      okDanger: true,
-                    },
-                    () => void handleDeleteRow(row),
-                  );
-                },
-              },
-            ]),
-          }}
-        >
-          {renderResourceActionTriggerButton({ ariaLabel: "更多操作" })}
-        </Dropdown>
+        <ResourceRowActions
+          deleteLabel="删除"
+          deleteTitle="删除 ServiceAccount"
+          deleteContent={`确认删除 ServiceAccount「${row.name}」吗？此操作不可恢复。`}
+          onYaml={() => handleOpenYamlForRow(row)}
+          onDelete={() => void handleDeleteRow(row)}
+          extraActions={[
+            {
+              key: "secret-token",
+              label: "Secret/Token",
+              onClick: () => handleOpenSecretTokenForRow(row),
+            },
+          ]}
+        />
       ),
     },
   ];
@@ -596,6 +593,19 @@ export default function ServiceAccountsPage() {
         <ResourceTable<ServiceAccountRecord>
           rowKey="id"
           columns={columns}
+          tableKey="configs.serviceaccounts"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "输入关键字，或 label 过滤（如 env=prod team=platform）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
           dataSource={tableData}
           layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
           loading={listQuery.isLoading}
@@ -605,7 +615,16 @@ export default function ServiceAccountsPage() {
           onRow={(record) => ({
             onClick: () => {
               if (record.id) {
-                setDetailTarget({ kind: "serviceaccount", id: record.id });
+                setDetailTarget({
+                  kind: "ServiceAccount",
+                  id: record.id,
+                  kindLabel: "ServiceAccount",
+                  apiVersion: record.apiVersion,
+                  namespace: record.namespace,
+                  name: record.name,
+                  label: record.name,
+                  snapshot: { labels: record.labels },
+                });
               }
             },
           })}
@@ -712,7 +731,8 @@ export default function ServiceAccountsPage() {
         footer={null}
         width={900}
       >
-        <Table<SecretTokenRow>
+        <ResourceTable<SecretTokenRow>
+          tableKey="configs.serviceaccounts.tokens"
           rowKey="key"
           dataSource={tokenRows}
           loading={tokenLoading}

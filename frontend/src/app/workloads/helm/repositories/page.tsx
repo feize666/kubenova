@@ -2,17 +2,19 @@
 
 import { DeleteOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Dropdown, Form, Input, Modal, Row, Select, Space, Switch, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Dropdown, Form, Input, Modal, Select, Space, Switch, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { MenuProps } from "antd";
 import { useMemo, useState } from "react";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import {
   buildResourceActionMenuItems,
   POD_ACTION_MENU_CLASS,
   POD_ACTION_TRIGGER_CLASS,
   openResourceActionConfirm,
+  parseResourceSearchInput,
   renderPodLikeResourceActionStyles,
   renderResourceActionTriggerButton,
 } from "@/components/resource-action-bar";
@@ -20,9 +22,10 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { useAuth } from "@/components/auth-context";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
-import { ClusterSelect } from "@/components/cluster-select";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { getClusters } from "@/lib/api/clusters";
 import { ApiError } from "@/lib/api/client";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
   createHelmRepository,
@@ -87,6 +90,9 @@ export default function HelmRepositoriesPage() {
   const [editingRepository, setEditingRepository] = useState<HelmRepositoryItem | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [quickUrlOpen, setQuickUrlOpen] = useState(false);
+  const [keywordInput, setKeywordInput] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [quickUrlError, setQuickUrlError] = useState<string | null>(null);
   const [form] = Form.useForm<RepositoryFormValues>();
@@ -317,10 +323,42 @@ export default function HelmRepositoriesPage() {
     [clustersQuery.data?.items],
   );
 
-  const rows = useMemo(
-    () => repositoriesQuery.data?.items ?? [],
-    [repositoriesQuery.data?.items],
-  );
+  const rows = useMemo(() => {
+    const raw = repositoriesQuery.data?.items ?? [];
+    const keywordFilter = keyword.trim().toLowerCase();
+    const nameFilter = typeof tableFilters.name === "string" ? tableFilters.name.toLowerCase() : "";
+    const clusterFilter = typeof tableFilters.clusterId === "string" ? tableFilters.clusterId.toLowerCase() : "";
+    const urlFilter = typeof tableFilters.url === "string" ? tableFilters.url.toLowerCase() : "";
+    const syncStatusFilter = typeof tableFilters.syncStatus === "string" ? tableFilters.syncStatus : "";
+    const messageFilter = typeof tableFilters.message === "string" ? tableFilters.message.toLowerCase() : "";
+    return raw.filter((item) => {
+      const matchName = nameFilter ? item.name.toLowerCase().includes(nameFilter) : true;
+      const clusterName = getClusterDisplayName(clusterMap, item.clusterId).toLowerCase();
+      const matchCluster = clusterFilter
+        ? item.clusterId.toLowerCase().includes(clusterFilter) || clusterName.includes(clusterFilter)
+        : true;
+      const matchUrl = urlFilter ? item.url.toLowerCase().includes(urlFilter) : true;
+      const matchStatus = syncStatusFilter ? item.syncStatus === syncStatusFilter : true;
+      const matchMessage = messageFilter ? (item.message ?? "").toLowerCase().includes(messageFilter) : true;
+      const matchKeyword = keywordFilter
+        ? item.name.toLowerCase().includes(keywordFilter) ||
+          item.url.toLowerCase().includes(keywordFilter) ||
+          item.clusterId.toLowerCase().includes(keywordFilter) ||
+          clusterName.includes(keywordFilter) ||
+          (item.message ?? "").toLowerCase().includes(keywordFilter)
+        : true;
+      return matchKeyword && matchName && matchCluster && matchUrl && matchStatus && matchMessage;
+    });
+  }, [
+    clusterMap,
+    keyword,
+    repositoriesQuery.data?.items,
+    tableFilters.clusterId,
+    tableFilters.message,
+    tableFilters.name,
+    tableFilters.syncStatus,
+    tableFilters.url,
+  ]);
   const presetOptions = useMemo(
     () =>
       (presetsQuery.data?.items ?? []).map((item: HelmRepositoryPresetItem) => ({
@@ -333,6 +371,13 @@ export default function HelmRepositoriesPage() {
     () => getAdaptiveNameWidth(rows.map((row) => row.name), { max: 320 }),
     [rows],
   );
+
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
+    setKeyword(parsed.keyword);
+    resetPage();
+  };
 
   const openRepositoryEditor = (repository: HelmRepositoryItem) => {
     setFormError(null);
@@ -386,11 +431,13 @@ export default function HelmRepositoriesPage() {
       { key: "delete", label: "删除", icon: <DeleteOutlined />, danger: true },
     ]);
 
-  const columns: ColumnsType<HelmRepositoryItem> = [
+  const columns: Array<HeadlampResourceTableColumn<HelmRepositoryItem>> = [
     {
       title: "仓库名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "以仓库过滤" },
       width: nameWidth,
       ellipsis: true,
       ...getSortableColumnProps("name"),
@@ -411,6 +458,7 @@ export default function HelmRepositoriesPage() {
       title: "集群",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      filter: { type: "text", placeholder: "以集群过滤" },
       ...getSortableColumnProps("clusterId"),
       render: (_: unknown, row: HelmRepositoryItem) => getClusterDisplayName(clusterMap, row.clusterId),
     },
@@ -421,12 +469,23 @@ export default function HelmRepositoriesPage() {
       ...getSortableColumnProps("namespace"),
       render: () => "-",
     },
-    { title: "仓库地址", dataIndex: "url", key: "url", width: TABLE_COL_WIDTH.url },
+    { title: "仓库地址", dataIndex: "url", key: "url", width: TABLE_COL_WIDTH.url, filter: { type: "text", placeholder: "以地址过滤" } },
     {
       title: "同步状态",
       dataIndex: "syncStatus",
       key: "syncStatus",
       width: TABLE_COL_WIDTH.status,
+      filter: {
+        type: "select",
+        placeholder: "以状态过滤",
+        options: [
+          { label: "已保存", value: "saved" },
+          { label: "已验证", value: "validated" },
+          { label: "待同步", value: "syncing" },
+          { label: "已同步", value: "synced" },
+          { label: "失败", value: "failed" },
+        ],
+      },
       render: (value: HelmRepositoryItem["syncStatus"]) => syncStatusTag(value),
     },
     {
@@ -437,10 +496,11 @@ export default function HelmRepositoriesPage() {
       ...getSortableColumnProps("updatedAt"),
       render: (value?: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
-    { title: "状态消息", dataIndex: "message", key: "message" },
+    { title: "状态消息", dataIndex: "message", key: "message", filter: { type: "text", placeholder: "以消息过滤" } },
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: 72,
       fixed: "right",
       align: "center",
@@ -488,18 +548,17 @@ export default function HelmRepositoriesPage() {
       />
 
       <Card>
-        <Row gutter={[12, 12]} align="middle" style={{ marginBottom: 12 }}>
-          <Col xs={24} sm={12} md={6} lg={4}>
-            <ClusterSelect
-              value={clusterId}
-              onChange={(v) => {
-                setClusterId(v);
-                resetPage();
-              }}
-              options={repositoryClusterOptions}
-            />
-          </Col>
-        </Row>
+        <div style={{ marginBottom: 12 }}>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            clusterOptions={repositoryClusterOptions}
+            namespaceVisible={false}
+            onApply={({ clusterId: nextClusterId }) => {
+              setClusterId(nextClusterId);
+              resetPage();
+            }}
+          />
+        </div>
 
         {!isInitializing && !accessToken ? (
           <Alert
@@ -523,8 +582,20 @@ export default function HelmRepositoriesPage() {
         <ResourceTable<HelmRepositoryItem>
           bordered
           rowKey={(row) => `${row.clusterId}/${row.name}`}
-          columns={columns}
+          tableKey="workloads.helm.repositories"
+          columns={columns as ColumnsType<HelmRepositoryItem>}
           dataSource={rows}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按仓库 / 地址 / 集群搜索",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
           loading={repositoriesQuery.isLoading && rows.length === 0}
           onChange={(paginationInfo, filters, sorter, extra) =>
             handleTableChange(

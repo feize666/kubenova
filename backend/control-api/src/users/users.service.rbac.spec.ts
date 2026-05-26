@@ -4,11 +4,16 @@ import { UsersService } from './users.service';
 describe('UsersService RBAC subject contract', () => {
   const actor = { username: 'tester', role: 'platform-admin' as const };
 
-  function createService(): UsersService {
+  function createService(options?: {
+    createError?: Error & { code?: string; clientVersion?: string };
+  }): UsersService {
     let seq = 0;
     const prisma = {
       rbacBinding: {
         create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          if (options?.createError) {
+            throw options.createError;
+          }
           seq += 1;
           return {
             id: `rbac-${seq}`,
@@ -66,6 +71,38 @@ describe('UsersService RBAC subject contract', () => {
     expect(created.subjectNamespace).toBe('apps');
   });
 
+  it('accepts /users/rbac payload from UI for User subjectRef', async () => {
+    const service = createService();
+    const created = await service.createRbac(actor, {
+      name: 'admin',
+      kind: 'RoleBinding',
+      namespace: 'study',
+      subject: 'test',
+      subjectKind: 'User',
+      subjectNamespace: '',
+      subjectRef: {
+        kind: 'User',
+        name: 'test',
+        namespace: '',
+      },
+    });
+
+    expect(created).toMatchObject({
+      name: 'admin',
+      kind: 'RoleBinding',
+      namespace: 'study',
+      subject: 'test',
+      subjectKind: 'User',
+      subjectNamespace: '',
+      subjectRef: {
+        kind: 'User',
+        name: 'test',
+        namespace: '',
+      },
+      state: 'active',
+    });
+  });
+
   it('rejects RoleBinding with Group subject', async () => {
     const service = createService();
     await expect(
@@ -76,6 +113,43 @@ describe('UsersService RBAC subject contract', () => {
         subjectRef: {
           kind: 'Group',
           name: 'ops-team',
+        },
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects non-string role names as BadRequestException', async () => {
+    const service = createService();
+    await expect(
+      service.createRbac(actor, {
+        name: ['admin'] as unknown as string,
+        kind: 'RoleBinding',
+        namespace: 'study',
+        subjectRef: {
+          kind: 'User',
+          name: 'test',
+          namespace: '',
+        },
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('maps RBAC persistence validation failures to BadRequestException', async () => {
+    const prismaError = Object.assign(new Error('Unique constraint failed'), {
+      code: 'P2002',
+      clientVersion: 'test',
+    });
+    const service = createService({ createError: prismaError });
+
+    await expect(
+      service.createRbac(actor, {
+        name: 'admin',
+        kind: 'RoleBinding',
+        namespace: 'study',
+        subjectRef: {
+          kind: 'User',
+          name: 'test',
+          namespace: '',
         },
       }),
     ).rejects.toThrow(BadRequestException);

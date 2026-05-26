@@ -17,18 +17,14 @@ type ThemeContextValue = {
 
 const ThemeModeContext = createContext<ThemeContextValue | null>(null);
 
-function getInitialThemeMode(): ThemeMode {
-  if (typeof document !== "undefined") {
-    const attr = document.documentElement.getAttribute("data-theme");
-    if (attr === "dark" || attr === "light") {
-      return attr;
-    }
+function readBrowserThemeMode(): ThemeMode {
+  const attr = document.documentElement.getAttribute("data-theme");
+  if (attr === "dark" || attr === "light") {
+    return attr;
   }
-  if (typeof window !== "undefined") {
-    const saved = window.localStorage.getItem("kubenova-theme-mode");
-    if (saved === "dark" || saved === "light") {
-      return saved;
-    }
+  const saved = window.localStorage.getItem("kubenova-theme-mode");
+  if (saved === "dark" || saved === "light") {
+    return saved;
   }
   return "light";
 }
@@ -142,12 +138,24 @@ const lightTheme = {
 };
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setMode] = useState<ThemeMode>(getInitialThemeMode);
+  const [mode, setMode] = useState<ThemeMode>("light");
+  const [isRestored, setIsRestored] = useState(false);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setMode(readBrowserThemeMode());
+      setIsRestored(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!isRestored) {
+      return;
+    }
     document.documentElement.setAttribute("data-theme", mode);
     window.localStorage.setItem("kubenova-theme-mode", mode);
-  }, [mode]);
+  }, [isRestored, mode]);
 
   const value = useMemo(
     () => ({ mode, toggleTheme: () => setMode((m) => (m === "dark" ? "light" : "dark")) }),

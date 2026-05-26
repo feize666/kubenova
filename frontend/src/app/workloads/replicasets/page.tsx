@@ -1,30 +1,28 @@
 "use client";
 
-import { DeleteOutlined, EyeOutlined, FileTextOutlined, ReloadOutlined, RetweetOutlined, RollbackOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EyeOutlined, FileTextOutlined, ReloadOutlined, RetweetOutlined, RollbackOutlined, StopOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import {
   Alert,
   App,
-  Button,
   Card,
-  Col,
   Dropdown,
   Form,
   Input,
   InputNumber,
   Modal,
-  Row,
   Select,
   Space,
   Tag,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { ColumnsType } from "antd/es/table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/lib/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import {
   buildResourceActionMenuItems,
   matchLabelExpressions,
@@ -50,8 +48,7 @@ import {
 } from "@/lib/api/workloads";
 import { type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
-import { NamespaceSelect } from "@/components/namespace-select";
-import { ClusterSelect } from "@/components/cluster-select";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import {
@@ -66,6 +63,25 @@ function stateTag(state: string) {
   if (state === "active") return <Tag color="green">启用</Tag>;
   if (state === "disabled") return <Tag color="default">禁用</Tag>;
   return <Tag color="red">已删除</Tag>;
+}
+
+const STATE_FILTER_OPTIONS = [
+  { label: "启用", value: "active" },
+  { label: "禁用", value: "disabled" },
+  { label: "已删除", value: "deleted" },
+];
+
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
+function selectMatches(value: unknown, filterValue: unknown) {
+  return !filterValue || value === filterValue;
 }
 
 interface FormValues {
@@ -94,7 +110,8 @@ export default function ReplicaSetsPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const {
     sortBy,
@@ -177,12 +194,32 @@ export default function ReplicaSetsPage() {
       ),
     [data?.items, mergedFilters],
   );
+  const filteredTableData = useMemo(() => {
+    const nameFilter = getTextFilter(tableFilters, "name");
+    const clusterFilter = getTextFilter(tableFilters, "clusterId");
+    const namespaceFilter = getTextFilter(tableFilters, "namespace");
+    const replicasFilter = getTextFilter(tableFilters, "replicas");
+    const readyFilter = getTextFilter(tableFilters, "readyReplicas");
+    const createdAtFilter = getTextFilter(tableFilters, "createdAt");
+    const stateFilter = tableFilters.state;
+
+    return tableData.filter((item) => (
+      textMatches(item.name, nameFilter) &&
+      textMatches(`${item.clusterId} ${getClusterDisplayName(clusterMap, item.clusterId)}`, clusterFilter) &&
+      textMatches(item.namespace, namespaceFilter) &&
+      textMatches(item.replicas, replicasFilter) &&
+      textMatches(item.readyReplicas, readyFilter) &&
+      textMatches(item.createdAt, createdAtFilter) &&
+      selectMatches(item.state, stateFilter)
+    ));
+  }, [clusterMap, tableData, tableFilters]);
   const nameWidth = useMemo(
-    () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
-    [tableData],
+    () => getAdaptiveNameWidth(filteredTableData.map((item) => item.name), { max: 320 }),
+    [filteredTableData],
   );
-  const handleSearch = () => {
-    const parsed = parseResourceSearchInput(keywordInput);
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
@@ -386,11 +423,13 @@ export default function ReplicaSetsPage() {
     }
   };
 
-  const columns: ColumnsType<WorkloadListItem> = [
+  const columns: Array<HeadlampResourceTableColumn<WorkloadListItem>> = [
     {
       title: "名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "以名称过滤" },
       width: nameWidth,
       ellipsis: true,
       render: (name: string, row: WorkloadListItem) =>
@@ -403,14 +442,15 @@ export default function ReplicaSetsPage() {
         ),
       ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "clusterId", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
-    { title: "期望副本", dataIndex: "replicas", key: "replicas", width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
-    { title: "实际副本", dataIndex: "readyReplicas", key: "readyReplicas", width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
+    { title: "集群", dataIndex: "clusterId", key: "clusterId", filter: { type: "text", placeholder: "以集群过滤" }, width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
+    { title: "名称空间", dataIndex: "namespace", key: "namespace", filter: { type: "text", placeholder: "以命名空间过滤" }, width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
+    { title: "期望副本", dataIndex: "replicas", key: "replicas", filter: { type: "text", placeholder: "过滤" }, width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
+    { title: "实际副本", dataIndex: "readyReplicas", key: "readyReplicas", filter: { type: "text", placeholder: "过滤" }, width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
     {
       title: "状态",
       dataIndex: "state",
       key: "state",
+      filter: { type: "status", placeholder: "以状态过滤", options: STATE_FILTER_OPTIONS },
       width: TABLE_COL_WIDTH.status,
       render: (value: string) => stateTag(value),
       ...getSortableColumnProps("state"),
@@ -419,6 +459,7 @@ export default function ReplicaSetsPage() {
       title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
+      filter: { type: "text", placeholder: "以时间过滤" },
       width: TABLE_COL_WIDTH.time,
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
       ...getSortableColumnProps("createdAt"),
@@ -426,6 +467,7 @@ export default function ReplicaSetsPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       align: "left",
       fixed: "right",
@@ -459,47 +501,19 @@ export default function ReplicaSetsPage() {
         />
 
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <Row gutter={[12, 12]} align="middle">
-            <Col xs={24} sm={12} md={6} lg={4}>
-              <ClusterSelect
-                value={clusterId}
-                onChange={(v) => { onClusterChange(v); resetPage(); }}
-                options={clusterOptions}
-                loading={clustersQuery.isLoading}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={5} lg={4}>
-              <NamespaceSelect
-                value={namespace}
-                onChange={(v) => { onNamespaceChange(v); resetPage(); }}
-                knownNamespaces={knownNamespaces}
-                clusterId={clusterId}
-                disabled={namespaceDisabled}
-                placeholder={namespacePlaceholder}
-              />
-            </Col>
-            <Col xs={24} sm={16} md={7} lg={6}>
-              <Input
-                prefix={<SearchOutlined />}
-                allowClear
-                placeholder="按名称/标签搜索（示例：app-a app=web env=prod）"
-                value={keywordInput}
-                onChange={(e) => setKeywordInput(e.target.value)}
-                onPressEnter={handleSearch}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={4} lg={3}>
-              <Space>
-                <Button
-                  icon={<SearchOutlined />}
-                  type="primary"
-                  onClick={handleSearch}
-                >
-                  查询
-                </Button>
-              </Space>
-            </Col>
-          </Row>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              resetPage();
+            }}
+          />
 
           {!isInitializing && !accessToken ? (
             <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" />
@@ -546,8 +560,21 @@ export default function ReplicaSetsPage() {
           <ResourceTable<WorkloadListItem>
             bordered
             rowKey="id"
+            tableKey="workloads.replicasets"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
             columns={columns}
-            dataSource={tableData}
+            dataSource={filteredTableData}
             loading={(isLoading && !data) || actionMutation.isPending}
             onChange={(paginationInfo, filters, sorter, extra) =>
               handleTableChange(paginationInfo, filters, sorter, extra, (isLoading && !data) || actionMutation.isPending)

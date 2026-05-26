@@ -22,6 +22,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampTableFilters, HeadlampResourceTableColumn } from "@/components/resource-table";
 import {
   matchLabelExpressions,
   parseResourceSearchInput,
@@ -40,11 +41,12 @@ import {
 } from "@/lib/api/configs";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
-import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
@@ -75,11 +77,12 @@ export default function SecretsPage() {
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [keyword, setKeyword] = useState(initialKeyword);
-  const [keywordInput, setKeywordInput] = useState(initialKeyword);
+  const [globalSearchInput, setGlobalSearchInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const { sortBy, sortOrder, pagination, resetPage, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ConfigResourceItem>({
@@ -209,21 +212,32 @@ export default function SecretsPage() {
     return raw.labels as Record<string, string>;
   };
 
-  const tableData = useMemo(
-    () =>
-      (data?.items ?? []).filter(
-        (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
-          matchLabelExpressions(resolveItemLabels(item), mergedFilters),
-      ),
-    [clusterMap, data?.items, mergedFilters],
-  );
+  const tableData = useMemo(() => {
+    const readFilter = (key: string) =>
+      typeof tableFilters[key] === "string" ? tableFilters[key].trim().toLowerCase() : "";
+    const nameFilter = readFilter("name");
+    const clusterFilter = readFilter("clusterId");
+    const namespaceFilter = readFilter("namespace");
+    const versionFilter = readFilter("version");
+
+    return (data?.items ?? []).filter((item) => {
+      if (!hasKnownCluster(clusterMap, item.clusterId)) return false;
+      if (!matchLabelExpressions(resolveItemLabels(item), mergedFilters)) return false;
+      if (nameFilter && !item.name.toLowerCase().includes(nameFilter)) return false;
+      const clusterLabel = getClusterDisplayName(clusterMap, item.clusterId).toLowerCase();
+      if (clusterFilter && !`${item.clusterId} ${clusterLabel}`.includes(clusterFilter)) return false;
+      if (namespaceFilter && !item.namespace.toLowerCase().includes(namespaceFilter)) return false;
+      if (versionFilter && !`v${item.version ?? ""}`.toLowerCase().includes(versionFilter)) return false;
+      return true;
+    });
+  }, [clusterMap, data?.items, mergedFilters, tableFilters]);
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
     [tableData],
   );
-  const handleSearch = () => {
-    const parsed = parseResourceSearchInput(keywordInput);
+  const handleGlobalSearchChange = (value: string) => {
+    setGlobalSearchInput(value);
+    const parsed = parseResourceSearchInput(value);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
@@ -235,11 +249,13 @@ export default function SecretsPage() {
     path: "/configs/secrets",
   });
 
-  const columns: ColumnsType<ConfigResourceItem> = [
+  const columns: Array<HeadlampResourceTableColumn<ConfigResourceItem>> = [
     {
       title: "名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "以名称过滤" },
       width: nameWidth,
       ellipsis: true,
       render: (name: string, row: ConfigResourceItem) =>
@@ -254,10 +270,17 @@ export default function SecretsPage() {
     {
       title: "集群",
       key: "clusterId",
+      filter: { type: "text", placeholder: "以集群过滤" },
       width: TABLE_COL_WIDTH.cluster,
       render: (_: unknown, record: ConfigResourceItem) => getClusterDisplayName(clusterMap, record.clusterId),
     },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", width: TABLE_COL_WIDTH.namespace },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      filter: { type: "text", placeholder: "以名称空间过滤" },
+      width: TABLE_COL_WIDTH.namespace,
+    },
     {
       title: "密钥项",
       dataIndex: "dataCount",
@@ -269,6 +292,7 @@ export default function SecretsPage() {
       title: "版本",
       dataIndex: "version",
       key: "version",
+      filter: { type: "text", placeholder: "以版本过滤" },
       width: TABLE_COL_WIDTH.version,
       render: (v?: number) => (typeof v === "number" ? `v${v}` : "-"),
     },
@@ -282,8 +306,9 @@ export default function SecretsPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
-      align: "center",
+      align: "left",
       fixed: "right",
       render: (_: unknown, row: ConfigResourceItem) => (
         <ResourceRowActions
@@ -312,28 +337,21 @@ export default function SecretsPage() {
       />
 
       <Card>
-        <ResourceClusterNamespaceFilters
-          clusterId={clusterId}
-          namespace={namespace}
-          keywordInput={keywordInput}
-          clusterOptions={clusterFilterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onClusterChange={(value) => {
-            onClusterChange(value);
-            resetPage();
-          }}
-          onNamespaceChange={(value) => {
-            onNamespaceChange(value);
-            resetPage();
-          }}
-          onKeywordInputChange={setKeywordInput}
-          onSearch={handleSearch}
-          keywordPlaceholder="按名称/标签搜索（示例：secret-a app=web env=prod）"
-          marginBottom={16}
-        />
+        <div style={{ marginBottom: 12 }}>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterFilterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              resetPage();
+            }}
+          />
+        </div>
 
         {!isInitializing && !accessToken ? (
           <Alert
@@ -355,9 +373,25 @@ export default function SecretsPage() {
         ) : null}
 
         <ResourceTable<ConfigResourceItem>
+          tableKey="configs.secrets"
           rowKey="id"
-          columns={columns}
+          columns={columns as ColumnsType<ConfigResourceItem>}
           dataSource={tableData}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: globalSearchInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "搜索名称或标签，如 secret-a app=web",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{
+            sortBy,
+            sortOrder,
+          }}
           layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
           loading={isLoading && !data}
           onChange={(nextPagination, filters, sorter, extra) =>

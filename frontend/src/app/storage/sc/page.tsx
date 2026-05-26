@@ -19,7 +19,6 @@ import {
   Typography,
   message,
 } from "antd";
-import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -49,11 +48,12 @@ import {
 } from "@/lib/api/storage";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
-import { useAntdTableSortPagination } from "@/lib/table";
+import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
@@ -69,6 +69,15 @@ function defaultTag(isDefault: boolean) {
   return isDefault ? <Tag color="green">默认</Tag> : <Tag>普通</Tag>;
 }
 
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
 export default function StorageClassPage() {
   const searchParams = useSearchParams();
   const { clusterId: initialClusterId, keyword: initialKeyword } =
@@ -80,6 +89,7 @@ export default function StorageClassPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const {
     sortBy,
     sortOrder,
@@ -145,9 +155,34 @@ export default function StorageClassPage() {
       (data?.items ?? []).filter(
         (item) =>
           hasKnownCluster(clusterMap, item.clusterId) &&
-          matchLabelExpressions(item.labels, mergedFilters),
+          matchLabelExpressions(item.labels, mergedFilters) &&
+          textMatches(item.name, getTextFilter(tableFilters, "name")) &&
+          textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
+          textMatches(
+            typeof item.spec === "object" && item.spec && typeof (item.spec as { provisioner?: unknown }).provisioner === "string"
+              ? (item.spec as { provisioner: string }).provisioner
+              : "-",
+            getTextFilter(tableFilters, "provisioner"),
+          ) &&
+          textMatches(item.bindingMode, getTextFilter(tableFilters, "bindingMode")) &&
+          textMatches(
+            typeof item.spec === "object" &&
+              item.spec &&
+              (item.spec as { allowVolumeExpansion?: boolean }).allowVolumeExpansion
+              ? "允许"
+              : "不允许",
+            getTextFilter(tableFilters, "allowVolumeExpansion"),
+          ) &&
+          textMatches(
+            typeof item.statusJson === "object" &&
+              item.statusJson &&
+              (item.statusJson as { isDefault?: boolean }).isDefault
+              ? "默认"
+              : "普通",
+            getTextFilter(tableFilters, "isDefault"),
+          ),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters, tableFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -181,11 +216,13 @@ export default function StorageClassPage() {
     },
   });
 
-  const columns: ColumnsType<StorageResource> = [
+  const columns: HeadlampResourceTableColumn<StorageResource>[] = [
     {
       title: "名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "名称" },
       width: nameWidth,
       ellipsis: true,
       ...getSortableColumnProps("name", isLoading && !data),
@@ -201,6 +238,7 @@ export default function StorageClassPage() {
     {
       title: "集群",
       key: "clusterId",
+      filter: { type: "text", placeholder: "集群" },
       width: TABLE_COL_WIDTH.cluster,
       ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, row) => getClusterDisplayName(clusterMap, row.clusterId),
@@ -208,6 +246,7 @@ export default function StorageClassPage() {
     {
       title: "Provisioner",
       key: "provisioner",
+      filter: { type: "text", placeholder: "Provisioner" },
       width: TABLE_COL_WIDTH.image,
       ...getSortableColumnProps("provisioner", isLoading && !data),
       render: (_: unknown, row) =>
@@ -219,6 +258,7 @@ export default function StorageClassPage() {
       title: "绑定模式",
       dataIndex: "bindingMode",
       key: "bindingMode",
+      filter: { type: "text", placeholder: "绑定模式" },
       width: TABLE_COL_WIDTH.schedule,
       ...getSortableColumnProps("bindingMode", isLoading && !data),
       render: (v: string | undefined) => v ?? "-",
@@ -226,6 +266,7 @@ export default function StorageClassPage() {
     {
       title: "扩容",
       key: "allowVolumeExpansion",
+      filter: { type: "text", placeholder: "扩容" },
       width: TABLE_COL_WIDTH.type,
       render: (_: unknown, row) => {
         const allow = Boolean(
@@ -239,6 +280,7 @@ export default function StorageClassPage() {
     {
       title: "默认",
       key: "isDefault",
+      filter: { type: "text", placeholder: "默认" },
       width: TABLE_COL_WIDTH.type,
       render: (_: unknown, row) => {
         const isDefault = Boolean(
@@ -260,6 +302,7 @@ export default function StorageClassPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       fixed: "right",
       render: (_: unknown, row: StorageResource) => {
@@ -381,6 +424,13 @@ export default function StorageClassPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
+    resetPage();
+    setMergedFilters(parsed.labelExpressions);
+    setKeyword(parsed.keyword);
+  };
   useSyncResourceFilterUrlState({
     clusterId,
     namespace: "",
@@ -428,6 +478,19 @@ export default function StorageClassPage() {
           <ResourceTable<StorageResource>
             rowKey="id"
             columns={columns}
+            tableKey="storage.sc"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：sc-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
             dataSource={tableData}
             bordered={false}
             layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}

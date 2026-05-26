@@ -3,9 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, Divider, Input, Row, Space, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import {
   getSystemUpdateHistory,
   getSystemUpdateStatus,
@@ -32,6 +35,8 @@ export default function SystemUpdatePage() {
   const queryClient = useQueryClient();
   const [targetVersion, setTargetVersion] = useState("v0.0.1");
   const [rollbackVersion, setRollbackVersion] = useState("");
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
+  const [detailRecord, setDetailRecord] = useState<SystemUpdateHistoryItem | null>(null);
 
   const statusQuery = useQuery({
     queryKey: ["system-update", "status", accessToken],
@@ -120,11 +125,12 @@ export default function SystemUpdatePage() {
     },
   });
 
-  const columns: ColumnsType<SystemUpdateHistoryItem> = [
+  const columns: Array<HeadlampResourceTableColumn<SystemUpdateHistoryItem>> = [
     {
       title: "时间",
       dataIndex: "timestamp",
       key: "timestamp",
+      required: true,
       width: 180,
       render: (v: string) => new Date(v).toLocaleString(),
     },
@@ -133,13 +139,19 @@ export default function SystemUpdatePage() {
       dataIndex: "operationType",
       key: "operationType",
       width: 170,
-      render: (v: string) => <Tag>{v}</Tag>,
+      filter: { type: "text", placeholder: "以操作过滤" },
+      render: (v: string, record) => (
+        <Typography.Link onClick={() => setDetailRecord(record)}>
+          <Tag>{v}</Tag>
+        </Typography.Link>
+      ),
     },
     {
       title: "目标版本",
       dataIndex: "targetVersion",
       key: "targetVersion",
       width: 160,
+      filter: { type: "text", placeholder: "以版本过滤" },
       render: (v?: string) => v || "-",
     },
     {
@@ -147,6 +159,14 @@ export default function SystemUpdatePage() {
       dataIndex: "result",
       key: "result",
       width: 100,
+      filter: {
+        type: "select",
+        placeholder: "以结果过滤",
+        options: [
+          { label: "成功", value: "success" },
+          { label: "失败", value: "failed" },
+        ],
+      },
       render: (v: string) => <Tag color={v === "success" ? "success" : "error"}>{v}</Tag>,
     },
     {
@@ -160,10 +180,30 @@ export default function SystemUpdatePage() {
       title: "消息",
       dataIndex: "message",
       key: "message",
+      filter: { type: "text", placeholder: "以消息过滤" },
     },
   ];
 
   const status = statusQuery.data;
+  const historyRows = useMemo(() => {
+    const operationFilter = typeof tableFilters.operationType === "string" ? tableFilters.operationType.toLowerCase() : "";
+    const targetVersionFilter = typeof tableFilters.targetVersion === "string" ? tableFilters.targetVersion.toLowerCase() : "";
+    const resultFilter = typeof tableFilters.result === "string" ? tableFilters.result : "";
+    const messageFilter = typeof tableFilters.message === "string" ? tableFilters.message.toLowerCase() : "";
+    return (historyQuery.data?.items ?? []).filter((item) => {
+      const matchOperation = operationFilter ? item.operationType.toLowerCase().includes(operationFilter) : true;
+      const matchVersion = targetVersionFilter ? (item.targetVersion ?? "").toLowerCase().includes(targetVersionFilter) : true;
+      const matchResult = resultFilter ? item.result === resultFilter : true;
+      const matchMessage = messageFilter ? item.message.toLowerCase().includes(messageFilter) : true;
+      return matchOperation && matchVersion && matchResult && matchMessage;
+    });
+  }, [
+    historyQuery.data?.items,
+    tableFilters.message,
+    tableFilters.operationType,
+    tableFilters.result,
+    tableFilters.targetVersion,
+  ]);
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -294,13 +334,50 @@ export default function SystemUpdatePage() {
       <Card title="更新历史">
         <ResourceTable<SystemUpdateHistoryItem>
           rowKey={(row, idx) => `${row.timestamp}-${row.operationType}-${idx}`}
-          columns={columns}
-          dataSource={historyQuery.data?.items ?? []}
+          tableKey="business.system.updateHistory"
+          columns={columns as ColumnsType<SystemUpdateHistoryItem>}
+          dataSource={historyRows}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          filters={tableFilters}
+          onFiltersChange={setTableFilters}
           loading={statusQuery.isLoading || historyQuery.isLoading}
           pagination={false}
           scroll={{ x: 1100 }}
         />
       </Card>
+      <BusinessDetailDrawer
+        open={Boolean(detailRecord)}
+        title={detailRecord ? `更新历史 · ${detailRecord.operationType}` : "更新历史"}
+        subtitle={detailRecord?.targetVersion}
+        onClose={() => setDetailRecord(null)}
+        sections={buildSystemUpdateDetailSections(detailRecord)}
+      />
     </Space>
   );
+}
+
+function buildSystemUpdateDetailSections(record: SystemUpdateHistoryItem | null): BusinessDetailSection[] {
+  if (!record) {
+    return [];
+  }
+  return [
+    {
+      key: "operation",
+      title: "操作信息",
+      items: [
+        { key: "operationType", label: "操作", value: record.operationType },
+        { key: "targetVersion", label: "目标版本", value: record.targetVersion || "-" },
+        { key: "result", label: "结果", value: statusTag(record.result === "success" ? "installed" : "failed") },
+        { key: "timestamp", label: "时间", value: new Date(record.timestamp).toLocaleString("zh-CN") },
+      ],
+    },
+    {
+      key: "detail",
+      title: "执行详情",
+      items: [
+        { key: "durationMs", label: "耗时(ms)", value: typeof record.durationMs === "number" ? record.durationMs : "-" },
+        { key: "message", label: "消息", value: record.message || "-" },
+      ],
+    },
+  ];
 }

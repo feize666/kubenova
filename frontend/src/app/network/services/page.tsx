@@ -34,13 +34,13 @@ import {
 } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
-import { useAntdTableSortPagination } from "@/lib/table";
-import { buildResourceTableColumns } from "@/lib/table/resource-table-schema";
+import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
@@ -49,6 +49,15 @@ interface ServiceFormValues {
   namespace: string;
   clusterId: string;
   type: "ClusterIP" | "NodePort" | "LoadBalancer";
+}
+
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
 }
 
 export default function ServicesPage() {
@@ -63,6 +72,7 @@ export default function ServicesPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const {
     sortBy,
@@ -186,9 +196,13 @@ export default function ServicesPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters) &&
+          textMatches(item.name, getTextFilter(tableFilters, "name")) &&
+          textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
+          textMatches(item.namespace, getTextFilter(tableFilters, "namespace")) &&
+          textMatches("Service", getTextFilter(tableFilters, "kind")),
       ),
-    [data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters, tableFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
@@ -200,6 +214,13 @@ export default function ServicesPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
+    resetPage();
+    setMergedFilters(parsed.labelExpressions);
+    setKeyword(parsed.keyword);
+  };
   useSyncResourceFilterUrlState({
     clusterId,
     namespace,
@@ -207,11 +228,13 @@ export default function ServicesPage() {
     path: "/network/services",
   });
 
-  const columns = buildResourceTableColumns<NetworkResource>({
-    name: {
+  const columns: HeadlampResourceTableColumn<NetworkResource>[] = [
+    {
       title: "服务名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "名称" },
       width: nameWidth,
       ellipsis: true,
       ...getSortableColumnProps("name", isLoading && !data),
@@ -224,60 +247,62 @@ export default function ServicesPage() {
           name
         ),
     },
-    cluster: {
+    {
       title: "集群",
       key: "clusterId",
+      filter: { type: "text", placeholder: "集群" },
       width: TABLE_COL_WIDTH.cluster,
       ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, row: NetworkResource) => getClusterDisplayName(clusterMap, row.clusterId),
     },
-    namespace: {
+    {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      filter: { type: "text", placeholder: "名称空间" },
       width: TABLE_COL_WIDTH.namespace,
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
-    body: [
-      {
-        title: "类型",
-        key: "kind",
-        width: TABLE_COL_WIDTH.type,
-        render: () => <Tag color="blue">Service</Tag>,
-      },
-      {
-        title: "创建时间",
-        dataIndex: "createdAt",
-        key: "createdAt",
-        width: TABLE_COL_WIDTH.time,
-        ...getSortableColumnProps("createdAt", isLoading && !data),
-        render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
-      },
-      {
-        title: "操作",
-        key: "actions",
-        width: TABLE_COL_WIDTH.actionCompact,
-        align: "left",
-        fixed: "right",
-        render: (_: unknown, row: NetworkResource) => (
-          <ResourceRowActions
-            deleteLabel="删除"
-            deleteTitle="删除 Service"
-            deleteContent={`确认删除 Service「${row.name}」吗？此操作不可恢复。`}
-            onYaml={() =>
-              setYamlTarget({
-                clusterId: row.clusterId,
-                namespace: row.namespace,
-                kind: "Service",
-                name: row.name,
-              })
-            }
-            onDelete={() => deleteMutation.mutate(row.id)}
-          />
-        ),
-      },
-    ],
-  });
+    {
+      title: "类型",
+      key: "kind",
+      filter: { type: "text", placeholder: "类型" },
+      width: TABLE_COL_WIDTH.type,
+      render: () => <Tag color="blue">Service</Tag>,
+    },
+    {
+      title: "创建时间",
+      dataIndex: "createdAt",
+      key: "createdAt",
+      width: TABLE_COL_WIDTH.time,
+      ...getSortableColumnProps("createdAt", isLoading && !data),
+      render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+    },
+    {
+      title: "操作",
+      key: "actions",
+      required: true,
+      width: TABLE_COL_WIDTH.actionCompact,
+      align: "left",
+      fixed: "right",
+      render: (_: unknown, row: NetworkResource) => (
+        <ResourceRowActions
+          deleteLabel="删除"
+          deleteTitle="删除 Service"
+          deleteContent={`确认删除 Service「${row.name}」吗？此操作不可恢复。`}
+          onYaml={() =>
+            setYamlTarget({
+              clusterId: row.clusterId,
+              namespace: row.namespace,
+              kind: "Service",
+              name: row.name,
+            })
+          }
+          onDelete={() => deleteMutation.mutate(row.id)}
+        />
+      ),
+    },
+  ];
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
@@ -328,6 +353,19 @@ export default function ServicesPage() {
         <ResourceTable<NetworkResource>
           rowKey="id"
           columns={columns}
+          tableKey="network.services"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称/标签搜索（示例：svc-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
           dataSource={tableData}
           loading={isLoading && !data}
           onChange={(nextPagination, filters, sorter, extra) =>

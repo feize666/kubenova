@@ -2,7 +2,6 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Card, Form, Input, Modal, Select, Space, Tag, Typography, message } from "antd";
-import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -16,10 +15,11 @@ import { NetworkResourcePageFilters } from "@/components/network-resource-page-f
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { matchLabelExpressions, parseResourceSearchInput } from "@/components/resource-action-bar";
 import { getClusters } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
-import { useAntdTableSortPagination } from "@/lib/table";
+import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { createNetworkResource, deleteNetworkResource, getNetworkResources, type CreateNetworkResourcePayload, type NetworkResource } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -45,6 +45,15 @@ interface NetworkPolicyFormValues {
   egressToNamespace?: string;
 }
 
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
 export default function NetworkPolicyPage() {
   const searchParams = useSearchParams();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
@@ -57,6 +66,7 @@ export default function NetworkPolicyPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -182,9 +192,22 @@ export default function NetworkPolicyPage() {
       (data?.items ?? []).filter(
         (item) =>
           hasKnownCluster(clusterMap, item.clusterId) &&
-          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters) &&
+          textMatches(item.name, getTextFilter(tableFilters, "name")) &&
+          textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
+          textMatches(item.namespace, getTextFilter(tableFilters, "namespace")) &&
+          textMatches(
+            Array.isArray(item.spec?.policyTypes) ? item.spec.policyTypes.join(", ") : "",
+            getTextFilter(tableFilters, "policyTypes"),
+          ) &&
+          textMatches(
+            item.spec?.podSelector && Object.keys(item.spec.podSelector as Record<string, unknown>).length > 0
+              ? "已配置"
+              : "-",
+            getTextFilter(tableFilters, "podSelector"),
+          ),
       ),
-    [clusterMap, data?.items, mergedFilters],
+    [clusterMap, data?.items, mergedFilters, tableFilters],
   );
 
   const nameWidth = useMemo(
@@ -198,6 +221,13 @@ export default function NetworkPolicyPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
+    resetPage();
+    setMergedFilters(parsed.labelExpressions);
+    setKeyword(parsed.keyword);
+  };
   useSyncResourceFilterUrlState({
     clusterId,
     namespace,
@@ -205,11 +235,13 @@ export default function NetworkPolicyPage() {
     path: "/network/networkpolicy",
   });
 
-  const columns: ColumnsType<NetworkPolicyResource> = [
+  const columns: HeadlampResourceTableColumn<NetworkPolicyResource>[] = [
     {
       title: "策略名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "名称" },
       width: nameWidth,
       ellipsis: true,
       ...getSortableColumnProps("name", isLoading && !data),
@@ -219,6 +251,7 @@ export default function NetworkPolicyPage() {
     {
       title: "集群",
       key: "clusterId",
+      filter: { type: "text", placeholder: "集群" },
       width: TABLE_COL_WIDTH.cluster,
       ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, row: NetworkPolicyResource) => getClusterDisplayName(clusterMap, row.clusterId),
@@ -227,12 +260,14 @@ export default function NetworkPolicyPage() {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
+      filter: { type: "text", placeholder: "名称空间" },
       width: TABLE_COL_WIDTH.namespace,
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
     {
       title: "类型",
       key: "policyTypes",
+      filter: { type: "text", placeholder: "类型" },
       width: TABLE_COL_WIDTH.type,
       render: (_: unknown, row: NetworkPolicyResource) => {
         const policyTypes = Array.isArray(row.spec?.policyTypes) ? row.spec?.policyTypes : [];
@@ -242,6 +277,7 @@ export default function NetworkPolicyPage() {
     {
       title: "Pod 选择器",
       key: "podSelector",
+      filter: { type: "text", placeholder: "Pod 选择器" },
       width: TABLE_COL_WIDTH.url,
       render: (_: unknown, row: NetworkPolicyResource) => {
         const selector = row.spec?.podSelector && typeof row.spec.podSelector === "object" ? Object.keys(row.spec.podSelector as Record<string, unknown>).length : 0;
@@ -259,6 +295,7 @@ export default function NetworkPolicyPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       align: "center",
       fixed: "right",
@@ -388,6 +425,19 @@ export default function NetworkPolicyPage() {
         <ResourceTable<NetworkPolicyResource>
           rowKey="id"
           columns={columns}
+          tableKey="network.networkpolicy"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称/标签搜索（示例：policy-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
           dataSource={tableData}
           loading={isLoading && !data}
           onChange={(nextPagination, filters, sorter, extra) =>

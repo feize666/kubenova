@@ -11,7 +11,6 @@ import {
   PauseCircleOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
-  SearchOutlined,
 } from "@ant-design/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -37,7 +36,12 @@ import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterDetailDrawer } from "@/components/cluster-detail-drawer";
+import {
+  ResourceFilterToolbar,
+  ResourceFilterToolbarItem,
+} from "@/components/resource-filter-toolbar";
 import { ResourceTable } from "@/components/resource-table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import {
@@ -53,6 +57,7 @@ import {
   getClusters,
   updateCluster,
 } from "@/lib/api/clusters";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import type { ClusterPayload } from "@/lib/api/clusters";
 import {
   getClusterHealthList,
@@ -171,6 +176,7 @@ export default function ClustersPage() {
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [environment, setEnvironment] = useState("");
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ClusterTableRecord>({
       defaultPageSize: 10,
@@ -224,13 +230,32 @@ export default function ClustersPage() {
   }, [query.data]);
 
   const visibleTableData = useMemo<ClusterTableRecord[]>(() => {
-    return tableData;
-  }, [tableData]);
-
-  const handleSearch = () => {
-    resetPage();
-    setKeyword(keywordInput);
-  };
+    const nameFilter = typeof tableFilters.name === "string" ? tableFilters.name.toLowerCase() : "";
+    const envFilter = typeof tableFilters.environment === "string" ? tableFilters.environment.toLowerCase() : "";
+    const providerFilter = typeof tableFilters.provider === "string" ? tableFilters.provider.toLowerCase() : "";
+    const versionFilter = typeof tableFilters.kubernetesVersion === "string" ? tableFilters.kubernetesVersion.toLowerCase() : "";
+    const stateFilter = typeof tableFilters.state === "string" ? tableFilters.state : "";
+    const kubeconfigFilter = typeof tableFilters.hasKubeconfig === "string" ? tableFilters.hasKubeconfig : "";
+    return tableData.filter((row) => {
+      const runtimeStatus = resolveRuntimeStatus(row, healthResults[row.id]).kind;
+      const matchName = nameFilter ? row.name.toLowerCase().includes(nameFilter) : true;
+      const matchEnv = envFilter ? (row.environment ?? "").toLowerCase().includes(envFilter) : true;
+      const matchProvider = providerFilter ? (row.provider ?? "").toLowerCase().includes(providerFilter) : true;
+      const matchVersion = versionFilter ? (row.kubernetesVersion ?? "").toLowerCase().includes(versionFilter) : true;
+      const matchState = stateFilter ? runtimeStatus === stateFilter : true;
+      const matchKubeconfig = kubeconfigFilter ? String(Boolean(row.hasKubeconfig)) === kubeconfigFilter : true;
+      return matchName && matchEnv && matchProvider && matchVersion && matchState && matchKubeconfig;
+    });
+  }, [
+    healthResults,
+    tableData,
+    tableFilters.environment,
+    tableFilters.hasKubeconfig,
+    tableFilters.kubernetesVersion,
+    tableFilters.name,
+    tableFilters.provider,
+    tableFilters.state,
+  ]);
 
   const refetchList = async () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.clusters.all });
@@ -394,11 +419,13 @@ export default function ClustersPage() {
     }
   };
 
-  const columns: ColumnsType<ClusterTableRecord> = [
+  const columns: Array<HeadlampResourceTableColumn<ClusterTableRecord>> = [
     {
       title: "集群名称",
       dataIndex: "name",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "以集群过滤" },
       width: getAdaptiveNameWidth((query.data?.items ?? []).map((item) => item.name)),
       ...getSortableColumnProps("name", query.isLoading),
       ellipsis: true,
@@ -427,9 +454,29 @@ export default function ClustersPage() {
         </Space>
       ),
     },
-    { title: "环境", dataIndex: "environment", key: "environment", width: 120, ...getSortableColumnProps("environment", query.isLoading) },
-    { title: "供应商", dataIndex: "provider", key: "provider", width: 150, ...getSortableColumnProps("provider", query.isLoading) },
-    { title: "K8s 版本", dataIndex: "kubernetesVersion", key: "kubernetesVersion", width: 120 },
+    {
+      title: "环境",
+      dataIndex: "environment",
+      key: "environment",
+      width: 120,
+      filter: { type: "text", placeholder: "以环境过滤" },
+      ...getSortableColumnProps("environment", query.isLoading),
+    },
+    {
+      title: "供应商",
+      dataIndex: "provider",
+      key: "provider",
+      width: 150,
+      filter: { type: "text", placeholder: "以供应商过滤" },
+      ...getSortableColumnProps("provider", query.isLoading),
+    },
+    {
+      title: "K8s 版本",
+      dataIndex: "kubernetesVersion",
+      key: "kubernetesVersion",
+      width: 120,
+      filter: { type: "text", placeholder: "以版本过滤" },
+    },
     {
       title: "资源使用率",
       key: "usage",
@@ -453,6 +500,17 @@ export default function ClustersPage() {
       title: "运行状态",
       key: "state",
       width: TABLE_COL_WIDTH.status,
+      filter: {
+        type: "select",
+        placeholder: "以状态过滤",
+        options: [
+          { label: "运行中", value: "running" },
+          { label: "离线", value: "offline" },
+          { label: "探测中", value: "checking" },
+          { label: "已停用", value: "disabled" },
+          { label: "离线模式", value: "offline-mode" },
+        ],
+      },
       render: (_: unknown, row: ClusterTableRecord) => {
         const runtimeStatus = resolveRuntimeStatus(
           row,
@@ -471,6 +529,14 @@ export default function ClustersPage() {
       title: "接入状态",
       key: "hasKubeconfig",
       width: 120,
+      filter: {
+        type: "select",
+        placeholder: "以接入过滤",
+        options: [
+          { label: "已接入", value: "true" },
+          { label: "离线模式", value: "false" },
+        ],
+      },
       render: (_: unknown, row: ClusterTableRecord) => {
         return row.hasKubeconfig ? (
           <Tooltip title="已配置 kubeconfig，工作负载数据将从集群实时同步">
@@ -490,6 +556,7 @@ export default function ClustersPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: 92,
       align: "center",
       render: (_, row) => {
@@ -595,17 +662,8 @@ export default function ClustersPage() {
       </Card>
 
       <Card>
-        <Row gutter={[12, 12]} align="middle">
-          <Col xs={24} md={10} lg={8}>
-            <Input
-              allowClear
-              placeholder="请输入关键字（名称/ID/供应商）"
-              value={keywordInput}
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onPressEnter={handleSearch}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6} lg={5}>
+        <ResourceFilterToolbar>
+          <ResourceFilterToolbarItem label="环境" width="sm">
             <Select
               className="resource-filter-select"
               style={{ width: "100%" }}
@@ -621,15 +679,8 @@ export default function ClustersPage() {
                 { label: "本地", value: "本地" },
               ]}
             />
-          </Col>
-          <Col xs={24} md={8} lg={6}>
-            <Space>
-              <Button icon={<SearchOutlined />} type="primary" onClick={handleSearch}>
-                查询
-              </Button>
-            </Space>
-          </Col>
-        </Row>
+          </ResourceFilterToolbarItem>
+        </ResourceFilterToolbar>
       </Card>
 
       {!isInitializing && !accessToken ? (
@@ -648,8 +699,24 @@ export default function ClustersPage() {
       <Card>
         <ResourceTable<ClusterTableRecord>
           rowKey="key"
-          columns={columns}
+          tableKey="business.clusters"
+          columns={columns as ColumnsType<ClusterTableRecord>}
           dataSource={visibleTableData}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: (value) => {
+              setKeywordInput(value);
+              setKeyword(value.trim());
+              resetPage();
+            },
+            placeholder: "搜索名称 / ID / 供应商",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
           loading={{ spinning: query.isLoading, description: "集群数据加载中..." }}
           onChange={(nextPagination, filters, sorter, extra) =>
             handleTableChange(nextPagination, filters, sorter, extra, query.isLoading)

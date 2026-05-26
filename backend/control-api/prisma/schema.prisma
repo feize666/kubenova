@@ -20,6 +20,20 @@ model User {
   runtimeSessions RuntimeSession[]
   aiConversationSessions AiConversationSession[]
   auditLogs    AuditLog[]
+  preferences  UserPreference[]
+}
+
+model UserPreference {
+  id        String   @id @default(cuid())
+  userId    String
+  key       String
+  value     Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([userId])
 }
 
 model Session {

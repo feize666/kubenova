@@ -1,10 +1,14 @@
 "use client";
 
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Col, Input, Row } from "antd";
+import { Button, Space } from "antd";
 import type { ReactNode } from "react";
-import { ClusterSelect } from "@/components/cluster-select";
-import { NamespaceSelect } from "@/components/namespace-select";
+import {
+  ResourceFilterToolbar,
+  ResourceFilterToolbarItem,
+  ResourceKeywordSearch,
+} from "@/components/resource-filter-toolbar";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 
 type Option = { label: string; value: string };
 
@@ -21,11 +25,13 @@ type ResourceClusterNamespaceFiltersProps = {
   namespaceVisible?: boolean;
   onClusterChange: (value: string) => void;
   onNamespaceChange?: (value: string) => void;
+  onScopeChange?: (clusterId: string, namespace: string) => void;
   onKeywordInputChange: (value: string) => void;
   onSearch: () => void;
   extraFilters?: ReactNode;
   keywordPlaceholder?: string;
   marginBottom?: number;
+  showKeywordSearch?: boolean;
 };
 
 export function ResourceClusterNamespaceFilters({
@@ -41,11 +47,13 @@ export function ResourceClusterNamespaceFilters({
   namespaceVisible = true,
   onClusterChange,
   onNamespaceChange,
+  onScopeChange,
   onKeywordInputChange,
   onSearch,
   extraFilters,
   keywordPlaceholder = "按名称/标签搜索",
   marginBottom = 12,
+  showKeywordSearch = false,
 }: ResourceClusterNamespaceFiltersProps) {
   const hasConcreteCluster = clusterId.trim().length > 0;
   const resolvedNamespaceDisabled = namespaceDisabled ?? !hasConcreteCluster;
@@ -53,45 +61,54 @@ export function ResourceClusterNamespaceFilters({
     namespacePlaceholder ?? (hasConcreteCluster ? "全部名称空间" : "请先选择具体集群");
 
   return (
-    <Row gutter={[12, 12]} align="middle" style={{ marginBottom }}>
-      <Col xs={24} sm={12} md={6} lg={4}>
-        <ClusterSelect
-          value={clusterId}
-          onChange={onClusterChange}
-          options={clusterOptions}
-          loading={clusterLoading}
-          showAllOption
-        />
-      </Col>
-      {namespaceVisible ? (
-        <Col xs={24} sm={12} md={5} lg={4}>
-          <NamespaceSelect
-            value={namespace}
-            onChange={onNamespaceChange ?? (() => undefined)}
-            knownNamespaces={knownNamespaces}
+    <div style={{ marginBottom }}>
+      <ResourceFilterToolbar
+        actions={
+          showKeywordSearch ? (
+            <Button icon={<SearchOutlined />} type="primary" onClick={onSearch}>
+              查询
+            </Button>
+          ) : null
+        }
+      >
+        <ResourceFilterToolbarItem width="auto">
+          <ResourceScopeFilterButton
             clusterId={clusterId}
-            loading={namespaceLoading}
-            disabled={resolvedNamespaceDisabled}
-            placeholder={resolvedNamespacePlaceholder}
+            namespace={namespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clusterLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceLoading={namespaceLoading}
+            namespaceDisabled={resolvedNamespaceDisabled}
+            namespacePlaceholder={resolvedNamespacePlaceholder}
+            namespaceVisible={namespaceVisible}
+            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+              if (onScopeChange) {
+                onScopeChange(nextClusterId, nextNamespace);
+              } else {
+                onClusterChange(nextClusterId);
+                onNamespaceChange?.(nextNamespace);
+              }
+            }}
           />
-        </Col>
-      ) : null}
-      <Col xs={24} sm={16} md={namespaceVisible ? 7 : 10} lg={namespaceVisible ? 6 : 8}>
-        <Input
-          prefix={<SearchOutlined />}
-          allowClear
-          placeholder={keywordPlaceholder}
-          value={keywordInput}
-          onChange={(event) => onKeywordInputChange(event.target.value)}
-          onPressEnter={onSearch}
-        />
-      </Col>
-      <Col xs={24} sm={12} md={4} lg={3}>
-        <Button icon={<SearchOutlined />} type="primary" onClick={onSearch}>
-          查询
-        </Button>
-      </Col>
-      {extraFilters ? <Col xs={24}>{extraFilters}</Col> : null}
-    </Row>
+        </ResourceFilterToolbarItem>
+        {showKeywordSearch ? (
+          <ResourceKeywordSearch
+            placeholder={keywordPlaceholder}
+            value={keywordInput}
+            onChange={onKeywordInputChange}
+            onSearch={onSearch}
+            width={namespaceVisible ? "lg" : "xl"}
+          />
+        ) : null}
+        {extraFilters ? (
+          <ResourceFilterToolbarItem width="auto">
+            <Space size={8} wrap>
+              {extraFilters}
+            </Space>
+          </ResourceFilterToolbarItem>
+        ) : null}
+      </ResourceFilterToolbar>
+    </div>
   );
 }

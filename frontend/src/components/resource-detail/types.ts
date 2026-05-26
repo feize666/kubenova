@@ -16,12 +16,26 @@ export interface ResourceDetailDrawerProps {
   request: {
     kind: string;
     id: string;
+    kindLabel?: string;
+    apiVersion?: string;
+    namespace?: string;
+    name?: string;
+    label?: string;
     snapshot?: ResourceDetailClientSnapshot;
   } | null;
   width?: number;
   extra?: ReactNode;
   children?: ReactNode;
-  onNavigateRequest?: (request: { kind: string; id: string; snapshot?: ResourceDetailClientSnapshot }) => void;
+  onNavigateRequest?: (request: {
+    kind: string;
+    id: string;
+    kindLabel?: string;
+    apiVersion?: string;
+    namespace?: string;
+    name?: string;
+    label?: string;
+    snapshot?: ResourceDetailClientSnapshot;
+  }) => void;
 }
 
 export interface ResourceDetailRendererProps {

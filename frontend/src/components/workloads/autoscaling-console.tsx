@@ -16,15 +16,15 @@ import {
   Select,
   Space,
   Statistic,
-  Table,
   Tag,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { NamespaceSelect } from "@/components/namespace-select";
-import { ClusterSelect } from "@/components/cluster-select";
+import { ResourceFilterToolbarItem } from "@/components/resource-filter-toolbar";
+import { ResourceFacetFilterButton } from "@/components/resource-facet-filter-button";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
@@ -44,6 +44,7 @@ import {
   type VpaPolicyConfig,
 } from "@/lib/api/autoscaling";
 import { ApiError } from "@/lib/api/client";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import type { HpaMetricSpec, HpaMetricTargetType } from "@/lib/contracts";
 import { getClusters } from "@/lib/api/clusters";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
@@ -57,6 +58,7 @@ import {
   buildResourceActionMenuItems,
   POD_ACTION_MENU_CLASS,
   POD_ACTION_TRIGGER_CLASS,
+  parseResourceSearchInput,
   renderPodLikeResourceActionStyles,
   renderResourceActionTriggerButton,
   type ResourceMenuItem,
@@ -321,7 +323,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const queryEnabled = !isInitializing && Boolean(accessToken);
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [kind, setKind] = useState("");
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
@@ -423,6 +425,13 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
   );
 
   useSyncResourceFilterUrlState({ clusterId, namespace, keyword });
+
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
+    resetPage();
+    setKeyword(parsed.keyword);
+  };
 
   const eventsQuery = useQuery({
     queryKey: [
@@ -673,6 +682,13 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     setYamlTarget(row);
   };
 
+  const openPolicyDetail = (row: AutoscalingPolicyItem) => {
+    setDetailRequest({
+      kind: row.type === "HPA" ? "HorizontalPodAutoscaler" : "VerticalPodAutoscaler",
+      id: `${row.clusterId}/${row.namespace}/${getAutoscalingResourceName(row)}`,
+    });
+  };
+
   const columns: ColumnsType<AutoscalingPolicyItem> = [
     {
       title: "策略类型",
@@ -687,7 +703,9 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       width: 220,
       render: (_, row) => (
         <Space orientation="vertical" size={0}>
-          <Typography.Text code>{getAutoscalingResourceName(row)}</Typography.Text>
+          <Typography.Link code onClick={() => openPolicyDetail(row)}>
+            {getAutoscalingResourceName(row)}
+          </Typography.Link>
         </Space>
       ),
       ...getSortableColumnProps("workloadName", policiesQuery.isLoading && !policiesQuery.data),
@@ -763,10 +781,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
               items,
               onClick: ({ key }) => {
                 if (key === "detail") {
-                  setDetailRequest({
-                    kind: row.type === "HPA" ? "HorizontalPodAutoscaler" : "VerticalPodAutoscaler",
-                    id: `${row.clusterId}/${row.namespace}/${getAutoscalingResourceName(row)}`,
-                  });
+                  openPolicyDetail(row);
                   return;
                 }
                 if (key === "edit") {
@@ -830,75 +845,55 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       />
 
       <Card>
-        <Row gutter={[12, 12]} align="middle">
-          <Col xs={24} sm={12} md={8} lg={6}>
-            <ClusterSelect
-              value={clusterId}
-              options={clusterOptions}
-              loading={clustersQuery.isLoading}
-              onChange={(value) => {
-                onClusterChange(value);
-                resetPage();
-              }}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={8} lg={6}>
-            <NamespaceSelect
-              value={namespace}
-              onChange={(value) => {
-                onNamespaceChange(value);
-                resetPage();
-              }}
-              knownNamespaces={knownNamespaces}
-              clusterId={clusterId}
-              disabled={namespaceDisabled}
-              placeholder={namespacePlaceholder}
-              style={{ width: "100%" }}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={8} lg={4}>
-            <Select
-              className="resource-filter-select"
-              value={kind}
-              options={[{ label: "全部类型", value: "" }, ...kindOptions]}
-              onChange={(value) => {
-                setKind(value);
-                resetPage();
-              }}
-              style={{ width: "100%" }}
-            />
-          </Col>
+        <div className="resource-filter-toolbar">
+          <div className="resource-filter-toolbar-controls">
+            <ResourceFilterToolbarItem width="auto">
+              <ResourceScopeFilterButton
+                clusterId={clusterId}
+                namespace={namespace}
+                clusterOptions={clusterOptions}
+                clusterLoading={clustersQuery.isLoading}
+                knownNamespaces={knownNamespaces}
+                namespaceDisabled={namespaceDisabled}
+                namespacePlaceholder={namespacePlaceholder}
+                onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                  onScopeChange(nextClusterId, nextNamespace);
+                  resetPage();
+                }}
+              />
+            </ResourceFilterToolbarItem>
+            <ResourceFilterToolbarItem width="sm">
+              <ResourceFacetFilterButton
+                label="类型"
+                value={kind}
+                allLabel="全部类型"
+                options={[{ label: "全部类型", value: "" }, ...kindOptions]}
+                onChange={(value) => {
+                  setKind(value);
+                  resetPage();
+                }}
+              />
+            </ResourceFilterToolbarItem>
           {!defaultType ? (
-            <Col xs={24} sm={12} md={8} lg={4}>
-              <Select
-                className="resource-filter-select"
+            <ResourceFilterToolbarItem width="sm">
+              <ResourceFacetFilterButton
+                label="策略"
                 value={typeFilter}
+                allLabel="全部策略"
                 options={[
                   { label: "全部策略", value: "" },
                   { label: "HPA", value: "HPA" },
                   { label: "VPA", value: "VPA" },
                 ]}
                 onChange={(value) => {
-                  setTypeFilter(value);
+                  setTypeFilter(value as AutoscalingType | "");
                   resetPage();
                 }}
-                style={{ width: "100%" }}
               />
-            </Col>
+            </ResourceFilterToolbarItem>
           ) : null}
-          <Col xs={24} sm={12} md={16} lg={8}>
-            <Input.Search
-              value={keywordInput}
-              onChange={(e) => setKeywordInput(e.target.value)}
-              onSearch={(value) => {
-                resetPage();
-                setKeyword(value);
-              }}
-              placeholder="按资源名称筛选"
-              allowClear
-            />
-          </Col>
-        </Row>
+          </div>
+        </div>
         
       </Card>
 
@@ -938,6 +933,14 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
 
       <Card>
         <ResourceTable<AutoscalingPolicyItem>
+          tableKey="workloads.autoscaling.policies"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按资源名称搜索",
+          }}
+          sort={{ sortBy, sortOrder }}
           rowKey="id"
           columns={columns}
           dataSource={visiblePolicies}
@@ -987,8 +990,10 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
               ? `${getAutoscalingResourceName(selectedItem)} · ${getClusterDisplayName(clusterMap, selectedItem.clusterId)}/${selectedItem.namespace}`
               : ""}
           </Typography.Text>
-          <Table<AutoscalingEventItem>
+          <ResourceTable<AutoscalingEventItem>
             rowKey={(item) => `${item.timestamp}-${item.reason}`}
+            tableKey="workloads.autoscaling.events"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
             columns={eventColumns}
             dataSource={selectedItem ? eventsQuery.data?.items ?? [] : []}
             loading={queryEnabled && Boolean(selectedItem) && !eventsQuery.data && eventsQuery.isLoading}

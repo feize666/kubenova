@@ -7,31 +7,27 @@ import {
   ReloadOutlined,
   RetweetOutlined,
   RollbackOutlined,
-  SearchOutlined,
   StopOutlined,
 } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import {
   Alert,
   App,
-  Button,
   Card,
-  Col,
   Dropdown,
-  Input,
   InputNumber,
   Modal,
-  Row,
   Space,
   Tag,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { ColumnsType } from "antd/es/table";
+import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/lib/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
+import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import {
   matchLabelExpressions,
   parseResourceSearchInput,
@@ -58,8 +54,7 @@ import {
 } from "@/lib/api/workloads";
 import { type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
-import { NamespaceSelect } from "@/components/namespace-select";
-import { ClusterSelect } from "@/components/cluster-select";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
@@ -117,6 +112,30 @@ const 状态颜色: Record<DeploymentStatus, string> = {
   收敛中: "processing",
   异常: "error",
 };
+
+const DEPLOYMENT_STATUS_FILTER_OPTIONS = [
+  { label: "运行中", value: "运行中" },
+  { label: "收敛中", value: "收敛中" },
+  { label: "异常", value: "异常" },
+];
+
+const DEPLOYMENT_STATE_FILTER_OPTIONS = [
+  { label: "启用", value: "启用" },
+  { label: "禁用", value: "禁用" },
+];
+
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
+function selectMatches(value: unknown, filterValue: unknown) {
+  return !filterValue || value === filterValue;
+}
 
 function parseReplicaPair(value: string): { current: number; desired: number } {
   const [currentRaw, desiredRaw] = value.split("/");
@@ -182,11 +201,12 @@ export default function DeploymentsPage() {
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [关键字, set关键字] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const {
     sortBy,
     sortOrder,
@@ -474,12 +494,41 @@ export default function DeploymentsPage() {
     [全量数据, mergedFilters],
   );
 
+  const 表格数据 = useMemo(() => {
+    const nameFilter = getTextFilter(tableFilters, "name");
+    const clusterFilter = getTextFilter(tableFilters, "clusterId");
+    const namespaceFilter = getTextFilter(tableFilters, "namespace");
+    const replicasFilter = getTextFilter(tableFilters, "replicas");
+    const readyFilter = getTextFilter(tableFilters, "readyReplicas");
+    const availableFilter = getTextFilter(tableFilters, "availableReplicas");
+    const strategyFilter = getTextFilter(tableFilters, "strategy");
+    const revisionFilter = getTextFilter(tableFilters, "revision");
+    const createdAtFilter = getTextFilter(tableFilters, "createdAt");
+    const statusFilter = tableFilters.status;
+    const stateFilter = tableFilters.state;
+
+    return 表格前数据.filter((row) => (
+      textMatches(row.名称, nameFilter) &&
+      textMatches(`${row.集群} ${getClusterDisplayName(clusterMap, row.集群)}`, clusterFilter) &&
+      textMatches(row.名称空间, namespaceFilter) &&
+      selectMatches(row.状态, statusFilter) &&
+      selectMatches(row.启用状态, stateFilter) &&
+      textMatches(row.副本数, replicasFilter) &&
+      textMatches(row.就绪数, readyFilter) &&
+      textMatches(row.可用数, availableFilter) &&
+      textMatches(row.策略, strategyFilter) &&
+      textMatches(row.修订版本, revisionFilter) &&
+      textMatches(row.创建时间, createdAtFilter)
+    ));
+  }, [clusterMap, tableFilters, 表格前数据]);
+
   const 名称列宽度 = useMemo(
-    () => getAdaptiveNameWidth(表格前数据.map((row) => row.名称), { max: 340 }),
-    [表格前数据],
+    () => getAdaptiveNameWidth(表格数据.map((row) => row.名称), { max: 340 }),
+    [表格数据],
   );
-  const handleSearch = () => {
-    const parsed = parseResourceSearchInput(keywordInput);
+  const handleGlobalSearchChange = (value: string) => {
+    const parsed = parseResourceSearchInput(value);
+    setKeywordInput(value);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     set关键字(parsed.keyword);
@@ -592,11 +641,13 @@ export default function DeploymentsPage() {
     }
   };
 
-  const antd列: ColumnsType<DeploymentRow> = [
+  const antd列: Array<HeadlampResourceTableColumn<DeploymentRow>> = [
     {
       title: "名称",
       dataIndex: "名称",
       key: "name",
+      required: true,
+      filter: { type: "text", placeholder: "以名称过滤" },
       width: 名称列宽度,
       ellipsis: true,
       render: (name: string, row: DeploymentRow) =>
@@ -609,12 +660,13 @@ export default function DeploymentsPage() {
         ),
       ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "集群", key: "clusterId", width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: DeploymentRow) => getClusterDisplayName(clusterMap, row.集群), ...getSortableColumnProps("clusterId") },
-    { title: "名称空间", dataIndex: "名称空间", key: "namespace", width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
+    { title: "集群", dataIndex: "集群", key: "clusterId", filter: { type: "text", placeholder: "以集群过滤" }, width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: DeploymentRow) => getClusterDisplayName(clusterMap, row.集群), ...getSortableColumnProps("clusterId") },
+    { title: "名称空间", dataIndex: "名称空间", key: "namespace", filter: { type: "text", placeholder: "以命名空间过滤" }, width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
     {
       title: "状态",
       dataIndex: "状态",
       key: "status",
+      filter: { type: "status", placeholder: "以状态过滤", options: DEPLOYMENT_STATUS_FILTER_OPTIONS },
       width: TABLE_COL_WIDTH.status,
       render: (value: DeploymentStatus) => <Tag color={状态颜色[value]}>{value}</Tag>,
       ...getSortableColumnProps("status"),
@@ -623,16 +675,18 @@ export default function DeploymentsPage() {
       title: "启用状态",
       dataIndex: "启用状态",
       key: "state",
+      filter: { type: "status", placeholder: "以启用状态过滤", options: DEPLOYMENT_STATE_FILTER_OPTIONS },
       width: TABLE_COL_WIDTH.status,
       render: (value: "启用" | "禁用") => <Tag color={value === "禁用" ? "default" : "green"}>{value}</Tag>,
       ...getSortableColumnProps("state"),
     },
-    { title: "副本", dataIndex: "副本数", key: "replicas", width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
-    { title: "就绪", dataIndex: "就绪数", key: "readyReplicas", width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
+    { title: "副本", dataIndex: "副本数", key: "replicas", filter: { type: "text", placeholder: "过滤" }, width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
+    { title: "就绪", dataIndex: "就绪数", key: "readyReplicas", filter: { type: "text", placeholder: "过滤" }, width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
     {
       title: "可用",
       dataIndex: "可用数",
       key: "availableReplicas",
+      filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.available,
       ...getSortableColumnProps("availableReplicas"),
     },
@@ -640,6 +694,7 @@ export default function DeploymentsPage() {
       title: "策略",
       dataIndex: "策略",
       key: "strategy",
+      filter: { type: "text", placeholder: "以策略过滤" },
       width: TABLE_COL_WIDTH.strategy,
       ...getSortableColumnProps("strategy"),
     },
@@ -647,6 +702,7 @@ export default function DeploymentsPage() {
       title: "修订版本",
       dataIndex: "修订版本",
       key: "revision",
+      filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.revision,
       ...getSortableColumnProps("revision"),
     },
@@ -654,6 +710,7 @@ export default function DeploymentsPage() {
       title: "创建时间",
       dataIndex: "创建时间",
       key: "createdAt",
+      filter: { type: "text", placeholder: "以时间过滤" },
       width: TABLE_COL_WIDTH.time,
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
       ...getSortableColumnProps("createdAt"),
@@ -661,6 +718,7 @@ export default function DeploymentsPage() {
     {
       title: "操作",
       key: "actions",
+      required: true,
       width: TABLE_COL_WIDTH.actionCompact,
       fixed: "right",
       align: "left",
@@ -693,53 +751,19 @@ export default function DeploymentsPage() {
           titleSuffix={<ResourceAddButton onClick={openAddModal} aria-label="创建Deployment" />}
         />
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <Row gutter={[12, 12]} align="middle">
-            <Col xs={24} sm={12} md={6} lg={4}>
-              <ClusterSelect
-                value={clusterId}
-                onChange={(v) => {
-                  onClusterChange(v);
-                  resetPage();
-                }}
-                options={clusterOptions}
-                loading={clustersQuery.isLoading}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={5} lg={4}>
-              <NamespaceSelect
-                value={namespace}
-                onChange={(v) => {
-                  onNamespaceChange(v);
-                  resetPage();
-                }}
-                knownNamespaces={knownNamespaces}
-                clusterId={clusterId}
-                disabled={namespaceDisabled}
-                placeholder={namespacePlaceholder}
-              />
-            </Col>
-            <Col xs={24} sm={16} md={7} lg={6}>
-              <Input
-                prefix={<SearchOutlined />}
-                allowClear
-                placeholder="按名称/标签搜索（示例：app-a app=web env=prod）"
-                value={keywordInput}
-                onChange={(e) => setKeywordInput(e.target.value)}
-                onPressEnter={handleSearch}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={4} lg={3}>
-              <Space>
-                <Button
-                  icon={<SearchOutlined />}
-                  type="primary"
-                  onClick={handleSearch}
-                >
-                  查询
-                </Button>
-              </Space>
-            </Col>
-          </Row>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              resetPage();
+            }}
+          />
           {!isInitializing && !accessToken ? <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" /> : null}
           {query.isError ? (
             <Alert
@@ -780,8 +804,21 @@ export default function DeploymentsPage() {
           <ResourceTable<DeploymentRow>
             bordered
             rowKey="key"
+            tableKey="workloads.deployments"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
             columns={antd列}
-            dataSource={表格前数据}
+            dataSource={表格数据}
             loading={{ spinning: query.isLoading && !query.data, description: "Deployment 数据加载中..." }}
             onChange={(paginationInfo, filters, sorter, extra) =>
               handleTableChange(paginationInfo, filters, sorter, extra, tableBusy)
