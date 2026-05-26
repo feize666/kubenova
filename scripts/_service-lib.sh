@@ -384,7 +384,9 @@ check_service_status() {
   if [[ "${USE_TMUX:-false}" == "true" ]] && command -v tmux >/dev/null 2>&1 && tmux_session_exists "$session_name"; then
     pid="$(listener_pid "$port" || true)"
     if [[ -n "$pid" ]]; then
-      echo "$pid" >"$pid_file"
+      if [[ "${SERVICE_STATUS_ADOPT:-true}" == "true" ]]; then
+        echo "$pid" >"$pid_file"
+      fi
       echo "[$name] 运行 pid=$pid port=$port health=$(health_text "$health_url") tmux=$session_name"
     else
       echo "[$name] tmux=$session_name 存在，port=$port 无监听"
@@ -395,11 +397,21 @@ check_service_status() {
   pid="$(listener_pid "$port" || true)"
   if [[ -n "$pid" ]]; then
     if service_matches_pid "$name" "$pid"; then
-      echo "$pid" >"$pid_file"
+      if [[ "${SERVICE_STATUS_ADOPT:-true}" == "true" ]]; then
+        echo "$pid" >"$pid_file"
+      fi
       if service_is_starting "$pid" "$port"; then
-        echo "[$name] 启动中 pid=$pid port=$port adopted=true"
+        if [[ "${SERVICE_STATUS_ADOPT:-true}" == "true" ]]; then
+          echo "[$name] 启动中 pid=$pid port=$port adopted=true"
+        else
+          echo "[$name] 启动中 pid=$pid port=$port detected=true"
+        fi
       else
-        echo "[$name] 运行 pid=$pid port=$port health=$(health_text "$health_url") adopted=true"
+        if [[ "${SERVICE_STATUS_ADOPT:-true}" == "true" ]]; then
+          echo "[$name] 运行 pid=$pid port=$port health=$(health_text "$health_url") adopted=true"
+        else
+          echo "[$name] 运行 pid=$pid port=$port health=$(health_text "$health_url") detected=true"
+        fi
       fi
     else
       echo "[$name] 未受管 pid=$pid port=$port health=$(health_text "$health_url")"
