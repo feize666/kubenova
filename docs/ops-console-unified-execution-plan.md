@@ -56,3 +56,5 @@ Current delivery order:
 - `cd frontend && npm run lint -- --max-warnings=0`: passed.
 - `cd backend/control-api && npm run test -- --runInBand --passWithNoTests`: passed, 25 suites / 87 tests.
 - `cd backend/runtime-gateway && go test ./...`: passed.
+- `node --check frontend/scripts/performance-switching.mjs`: passed.
+- `cd frontend && PERF_USER=admin@local.dev PERF_PASS=admin123456 PERF_SAMPLE_COUNT=1 npm run e2e:performance:switching`: blocked because Playwright is not installed in current dependencies; script failed with an actionable install message.

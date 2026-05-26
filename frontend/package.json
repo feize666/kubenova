@@ -11,7 +11,8 @@
     "lint": "eslint",
     "e2e:filters": "node ./scripts/filter-regression.mjs",
     "e2e:filters:matrix": "node ./scripts/filter-regression-matrix.mjs",
-    "e2e:filters:list": "FILTER_MODE=list node ./scripts/filter-regression-matrix.mjs"
+    "e2e:filters:list": "FILTER_MODE=list node ./scripts/filter-regression-matrix.mjs",
+    "e2e:performance:switching": "node ./scripts/performance-switching.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.1",

@@ -44,4 +44,5 @@ pnpm-debug.log*
 .codex/
 .playwright-mcp/
 .run/
+artifacts/
 AGENTS.md
