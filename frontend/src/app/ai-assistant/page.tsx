@@ -1366,6 +1366,7 @@ export default function AiAssistantPage() {
 
   return (
     <div
+      className="ops-workbench-shell ops-workbench-shell--ai"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -1381,7 +1382,7 @@ export default function AiAssistantPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div>
             <Typography.Title level={3} style={{ margin: 0 }}>
-              AIOps中台
+              AIOps
             </Typography.Title>
             <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0" }}>
               通过告警接入、智能诊断、ChatOps 会话和可执行建议形成闭环运维。

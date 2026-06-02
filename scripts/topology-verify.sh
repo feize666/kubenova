@@ -2,10 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FEATURE_DIR="$ROOT_DIR/.codex/specs/resource-topology-headlamp-parity"
+FEATURE_DIR="${TOPOLOGY_SPEC_DIR:-$ROOT_DIR/.codex/specs/ops-console-unified-experience}"
 TASKS_FILE="$FEATURE_DIR/tasks.md"
 TOPOLOGY_FILE="$ROOT_DIR/frontend/src/app/network/topology/page.tsx"
 CLEANUP_FILE="$ROOT_DIR/scripts/topology-clean-artifacts.sh"
+SERVICE_FILE="$ROOT_DIR/scripts/service.sh"
 AUTH_CLIENT_FILE="$ROOT_DIR/frontend/src/lib/api/client.ts"
 AUTH_CONTEXT_FILE="$ROOT_DIR/frontend/src/components/auth-context.tsx"
 SHELL_LAYOUT_FILE="$ROOT_DIR/frontend/src/components/shell-layout.tsx"
@@ -48,6 +49,7 @@ check_pattern() {
 check_file "tasks file" "$TASKS_FILE"
 check_file "topology page" "$TOPOLOGY_FILE"
 check_file "cleanup script" "$CLEANUP_FILE"
+check_file "service entrypoint" "$SERVICE_FILE"
 check_file "auth client" "$AUTH_CLIENT_FILE"
 check_file "auth context" "$AUTH_CONTEXT_FILE"
 check_file "shell layout" "$SHELL_LAYOUT_FILE"
@@ -58,8 +60,8 @@ if [[ "$failures" -eq 0 ]]; then
   check_pattern "focus / layout / detail paths" "focusedNodeId|focusedNamespaceId|focusVisibleNodeIds|layoutViewportKey|detailRequest|ResourceDetailDrawer" "$TOPOLOGY_FILE"
   check_pattern "fallback / timeout / auth-expired symbols" "service-unavailable|network-timeout|集群服务暂不可达|网络或超时异常|拓扑数据不可用|导航超时，点击重试|navigationTimeoutRef|navigationRetryRef|AUTH_EXPIRED_EVENT|aiops:auth-expired|authExpiredHandled|resetAuthExpiryState" \
     "$TOPOLOGY_FILE" "$AUTH_CLIENT_FILE" "$AUTH_CONTEXT_FILE" "$SHELL_LAYOUT_FILE"
-  check_pattern "cleanup command hooks" "topology:clean-artifacts|topology:clean-artifacts:dry-run|topology:verify" "$ROOT_DIR/package.json"
-  check_pattern "task list markers" "3\\.1|3\\.2|3\\.3|6\\.1|6\\.2|6\\.3" "$TASKS_FILE"
+  check_pattern "cleanup command hooks" "topology-artifacts|topology verify|topology clean|topology-verify\\.sh" "$SERVICE_FILE"
+  check_pattern "task list markers" "5\\.1|5\\.2|5\\.3|5\\.4|12\\.5" "$TASKS_FILE"
 fi
 
 if [[ "$failures" -gt 0 ]]; then

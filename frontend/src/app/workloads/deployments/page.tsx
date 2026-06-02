@@ -2,6 +2,7 @@
 
 import {
   DeleteOutlined,
+  EditOutlined,
   EyeOutlined,
   FileTextOutlined,
   ReloadOutlined,
@@ -15,6 +16,8 @@ import {
   App,
   Card,
   Dropdown,
+  Form,
+  Input,
   InputNumber,
   Modal,
   Space,
@@ -44,10 +47,15 @@ import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import {
   applyWorkloadActionById,
   applyWorkloadAction,
+  buildWorkloadSafeEditPatch,
   disableWorkload,
   enableWorkload,
+  formatWorkloadKeyValueText,
   getWorkloads,
+  getWorkloadPrimaryImage,
+  patchWorkloadById,
   type WorkloadItem,
+  type WorkloadSafeEditValues,
   type WorkloadsListResponse,
   type WorkloadState,
   type WorkloadStatus,
@@ -184,6 +192,11 @@ interface ScaleConvergenceViewState {
   round: ScaleConvergenceRound;
 }
 
+type DeploymentEditFormValues = Required<
+  Pick<WorkloadSafeEditValues, "image" | "labelsText" | "annotationsText">
+> &
+  Pick<WorkloadSafeEditValues, "replicas">;
+
 function extractScaleSnapshot(item: WorkloadItem): { observedReplicas: number; readyReplicas: number } {
   const { current, desired } = parseReplicaPair(item.replicas);
   return {
@@ -239,6 +252,9 @@ export default function DeploymentsPage() {
   const [目标副本, set目标副本] = useState<number>(1);
   const [scaleConvergence, setScaleConvergence] = useState<ScaleConvergenceViewState | null>(null);
   const [yaml目标, setYaml目标] = useState<ResourceIdentity | null>(null);
+  const [editTarget, setEditTarget] = useState<WorkloadItem | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editForm] = Form.useForm<DeploymentEditFormValues>();
   const page = pagination.pageIndex + 1;
   const pageSize = pagination.pageSize;
 
@@ -598,10 +614,64 @@ export default function DeploymentsPage() {
     set目标副本(row.副本数);
   };
 
+  const openEditModal = (row: DeploymentRow) => {
+    const item = sourceItems.find((candidate) => {
+      if (row.id && candidate.id) {
+        return candidate.id === row.id;
+      }
+      return candidate.name === row.原始名称 && candidate.clusterId === row.集群 && candidate.namespace === row.名称空间;
+    });
+    if (!item?.id) {
+      void message.warning("缺少资源 ID，无法打开结构化编辑");
+      return;
+    }
+    setEditTarget(item);
+    editForm.resetFields();
+    editForm.setFieldsValue({
+      replicas: row.副本数,
+      image: getWorkloadPrimaryImage(item, "Deployment"),
+      labelsText: formatWorkloadKeyValueText(item.labels),
+      annotationsText: formatWorkloadKeyValueText(item.annotations),
+    });
+  };
+
+  const closeEditModal = () => {
+    setEditTarget(null);
+    editForm.resetFields();
+  };
+
+  const submitEditModal = async () => {
+    if (!editTarget?.id) {
+      return;
+    }
+    let values: DeploymentEditFormValues;
+    try {
+      values = await editForm.validateFields();
+    } catch {
+      return;
+    }
+    setEditSubmitting(true);
+    try {
+      const patch = buildWorkloadSafeEditPatch(editTarget, "Deployment", values, {
+        includeReplicas: true,
+        includeImage: true,
+      });
+      await patchWorkloadById(editTarget.id, patch, accessToken!);
+      void message.success(`${editTarget.name} 更新成功`);
+      closeEditModal();
+      await refreshDeploymentSnapshots(editTarget.id);
+    } catch (err) {
+      void message.error(err instanceof Error ? err.message : "更新失败，请重试");
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
   const buildRowActions = (row: DeploymentRow): MenuProps["items"] => {
     const active = row.资源状态 === "active";
     return buildResourceActionMenuItems([
       { key: "describe", icon: <EyeOutlined />, label: "描述" },
+      { key: "edit", icon: <EditOutlined />, label: "编辑", disabled: !row.id },
       { key: "scale", icon: <RetweetOutlined />, label: "扩缩容" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
       { key: "restart", icon: <ReloadOutlined />, label: "重启", disabled: !active },
@@ -619,6 +689,10 @@ export default function DeploymentsPage() {
     }
     if (key === "scale") {
       openScaleModal(row);
+      return;
+    }
+    if (key === "edit") {
+      openEditModal(row);
       return;
     }
     if (key === "yaml") {
@@ -863,6 +937,31 @@ export default function DeploymentsPage() {
           void query.refetch();
         }}
       />
+      <Modal
+        title="编辑 Deployment"
+        open={Boolean(editTarget)}
+        onCancel={closeEditModal}
+        onOk={() => void submitEditModal()}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={editSubmitting}
+        destroyOnHidden
+      >
+        <Form form={editForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item label="副本数" name="replicas" rules={[{ required: true, message: "请输入副本数" }]}>
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item label="主容器镜像" name="image">
+            <Input placeholder="registry.example.com/app:tag" />
+          </Form.Item>
+          <Form.Item label="Labels" name="labelsText">
+            <Input.TextArea rows={4} placeholder={"app=web\nenv=prod"} />
+          </Form.Item>
+          <Form.Item label="Annotations" name="annotationsText">
+            <Input.TextArea rows={4} placeholder={"description=frontend\nowner=team-a"} />
+          </Form.Item>
+        </Form>
+      </Modal>
       {renderPodLikeResourceActionStyles({
         triggerClassName: POD_ACTION_TRIGGER_CLASS,
         menuClassName: POD_ACTION_MENU_CLASS,

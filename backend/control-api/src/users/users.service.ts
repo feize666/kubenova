@@ -425,10 +425,20 @@ export class UsersService {
     const userId = this.requireActorUserId(actor);
     const normalizedTableKey = this.normalizeTableKey(tableKey);
     const key = this.toTablePreferenceKey(normalizedTableKey);
+    const repo = this.preferenceRepo();
+    if (!repo) {
+      return {
+        tableKey: normalizedTableKey,
+        value: null,
+        updatedAt: null,
+      };
+    }
 
-    const row = await this.preferenceRepo().findUnique({
-      where: { userId_key: { userId, key } },
-    });
+    const row = await this.readTablePreference(() =>
+      repo.findUnique({
+        where: { userId_key: { userId, key } },
+      }),
+    );
 
     if (!row) {
       return {
@@ -457,17 +467,31 @@ export class UsersService {
     }
 
     const key = this.toTablePreferenceKey(normalizedTableKey);
-    const row = await this.preferenceRepo().upsert({
-      where: { userId_key: { userId, key } },
-      create: {
+    const repo = this.preferenceRepo();
+    if (!repo) {
+      return this.toTablePreferenceResponse(normalizedTableKey, {
+        id: 'volatile',
         userId,
         key,
         value: body.value,
-      },
-      update: {
-        value: body.value,
-      },
-    });
+        updatedAt: new Date(),
+      });
+    }
+    const row = await this.writeTablePreference(
+      () =>
+        repo.upsert({
+          where: { userId_key: { userId, key } },
+          create: {
+            userId,
+            key,
+            value: body.value,
+          },
+          update: {
+            value: body.value,
+          },
+        }),
+      { userId, key, value: body.value },
+    );
 
     return this.toTablePreferenceResponse(normalizedTableKey, row);
   }
@@ -805,12 +829,22 @@ export class UsersService {
   private preferenceRepo(): {
     findUnique: (args: unknown) => Promise<UserPreferenceRecord | null>;
     upsert: (args: unknown) => Promise<UserPreferenceRecord>;
-  } {
-    return (this.prisma as unknown as { userPreference: unknown })
-      .userPreference as {
+  } | null {
+    const repo = (this.prisma as unknown as { userPreference?: unknown })
+      .userPreference as
+      | {
       findUnique: (args: unknown) => Promise<UserPreferenceRecord | null>;
       upsert: (args: unknown) => Promise<UserPreferenceRecord>;
-    };
+        }
+      | undefined;
+    if (
+      !repo ||
+      typeof repo.findUnique !== 'function' ||
+      typeof repo.upsert !== 'function'
+    ) {
+      return null;
+    }
+    return repo;
   }
 
   private requireActorUserId(actor: Actor | undefined): string {
@@ -888,6 +922,56 @@ export class UsersService {
     return (
       maybePrismaError.name === 'PrismaClientValidationError' ||
       ['P2000', 'P2002', 'P2003', 'P2011', 'P2012'].includes(maybePrismaError.code ?? '')
+    );
+  }
+
+  private async readTablePreference(
+    read: () => Promise<UserPreferenceRecord | null>,
+  ): Promise<UserPreferenceRecord | null> {
+    try {
+      return await read();
+    } catch (error) {
+      if (this.isPreferenceStoreUnavailable(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async writeTablePreference(
+    write: () => Promise<UserPreferenceRecord>,
+    fallback: { userId: string; key: string; value: unknown },
+  ): Promise<UserPreferenceRecord> {
+    try {
+      return await write();
+    } catch (error) {
+      if (this.isPreferenceStoreUnavailable(error)) {
+        return {
+          id: 'volatile',
+          userId: fallback.userId,
+          key: fallback.key,
+          value: fallback.value,
+          updatedAt: new Date(),
+        };
+      }
+      throw error;
+    }
+  }
+
+  private isPreferenceStoreUnavailable(error: unknown): boolean {
+    const maybePrismaError = error as {
+      code?: string;
+      message?: string;
+      name?: string;
+    };
+    const message = maybePrismaError.message ?? '';
+    return (
+      maybePrismaError.code === 'P2021' ||
+      maybePrismaError.code === 'P2022' ||
+      maybePrismaError.name === 'PrismaClientUnknownRequestError' ||
+      message.includes('UserPreference') ||
+      message.includes('userPreference') ||
+      message.includes('user_preferences')
     );
   }
 

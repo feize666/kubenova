@@ -13,6 +13,7 @@ import {
   Row,
   Select,
   Space,
+  Switch,
   Tag,
   Typography,
   message,
@@ -37,9 +38,10 @@ import {
   createConfig,
   deleteConfig,
   getConfigs,
+  updateConfig,
   type ConfigResourceItem,
 } from "@/lib/api/configs";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { getDynamicResourceDetail, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -68,6 +70,71 @@ interface SecretFormValues {
   clusterId: string;
   type: string;
   entries: KVPair[];
+  labelEntries: KVPair[];
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every((item) => typeof item === "string")
+  );
+}
+
+function toEntries(value: Record<string, string> | undefined): KVPair[] {
+  const entries = Object.entries(value ?? {}).map(([key, entryValue]) => ({ key, value: entryValue }));
+  return entries.length ? entries : [{ key: "", value: "" }];
+}
+
+function toRecord(entries: KVPair[] | undefined): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const entry of entries ?? []) {
+    const key = entry.key?.trim();
+    if (key) {
+      result[key] = entry.value ?? "";
+    }
+  }
+  return result;
+}
+
+function decodeBase64(value: string): string {
+  try {
+    const binary = window.atob(value);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return value;
+  }
+}
+
+function encodeBase64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return window.btoa(binary);
+}
+
+function readSecretDetail(raw: unknown): {
+  data: Record<string, string>;
+  labels: Record<string, string>;
+  type: string;
+} {
+  if (!raw || typeof raw !== "object") {
+    return { data: {}, labels: {}, type: "Opaque" };
+  }
+  const obj = raw as Record<string, unknown>;
+  const metadata = obj.metadata && typeof obj.metadata === "object" ? (obj.metadata as Record<string, unknown>) : {};
+  const data = isStringRecord(obj.data)
+    ? Object.fromEntries(Object.entries(obj.data).map(([key, value]) => [key, decodeBase64(value)]))
+    : {};
+  return {
+    data,
+    labels: isStringRecord(metadata.labels) ? metadata.labels : {},
+    type: typeof obj.type === "string" ? obj.type : "Opaque",
+  };
 }
 
 export default function SecretsPage() {
@@ -90,6 +157,9 @@ export default function SecretsPage() {
     });
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingTarget, setEditingTarget] = useState<ConfigResourceItem | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [secretValuesVisible, setSecretValuesVisible] = useState(false);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<SecretFormValues>();
 
@@ -164,6 +234,23 @@ export default function SecretsPage() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateConfig>[1] }) =>
+      updateConfig(id, payload, accessToken!),
+    onSuccess: async () => {
+      void message.success("Secret 更新成功");
+      setModalOpen(false);
+      setEditingTarget(null);
+      setSecretValuesVisible(false);
+      form.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["configs", "secrets"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "更新失败，请重试");
+    },
+  });
+
   const handleModalSubmit = async () => {
     let values: SecretFormValues;
     try {
@@ -171,11 +258,27 @@ export default function SecretsPage() {
     } catch {
       return;
     }
-    const secretData: Record<string, string> = {};
-    for (const entry of values.entries ?? []) {
-      if (entry.key) {
-        secretData[entry.key] = entry.value ?? "";
-      }
+    const plainSecretData = toRecord(values.entries);
+    const secretData = editingTarget
+      ? Object.fromEntries(Object.entries(plainSecretData).map(([key, value]) => [key, encodeBase64(value)]))
+      : plainSecretData;
+    const labels = editingTarget
+      ? toRecord(values.labelEntries)
+      : {
+          ...toRecord(values.labelEntries),
+          type: values.type,
+        };
+    if (editingTarget) {
+      updateMutation.mutate({
+        id: editingTarget.id,
+        payload: {
+          namespace: values.namespace,
+          data: secretData,
+          dataKeys: Object.keys(secretData),
+          labels,
+        },
+      });
+      return;
     }
     createMutation.mutate({
       clusterId: values.clusterId,
@@ -183,9 +286,61 @@ export default function SecretsPage() {
       kind: "Secret",
       name: values.name,
       data: secretData,
-      // type is stored as a label on the backend
-      labels: { type: values.type },
+      dataKeys: Object.keys(secretData),
+      labels,
     });
+  };
+
+  const handleOpenCreate = () => {
+    setEditingTarget(null);
+    setSecretValuesVisible(false);
+    form.resetFields();
+    form.setFieldValue("type", "Opaque");
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = async (row: ConfigResourceItem) => {
+    if (!accessToken) {
+      return;
+    }
+    setEditingTarget(row);
+    setSecretValuesVisible(false);
+    setModalOpen(true);
+    setEditLoading(true);
+    form.setFieldsValue({
+      name: row.name,
+      namespace: row.namespace,
+      clusterId: row.clusterId,
+      type: "Opaque",
+      entries: [{ key: "", value: "" }],
+      labelEntries: toEntries(row.labels),
+    });
+    try {
+      const detail = await getDynamicResourceDetail(
+        {
+          clusterId: row.clusterId,
+          group: "",
+          version: "v1",
+          resource: "secrets",
+          namespace: row.namespace,
+          name: row.name,
+        },
+        accessToken,
+      );
+      const parsed = readSecretDetail(detail.raw);
+      form.setFieldsValue({
+        name: row.name,
+        namespace: row.namespace,
+        clusterId: row.clusterId,
+        type: parsed.type,
+        entries: toEntries(parsed.data),
+        labelEntries: toEntries(parsed.labels),
+      });
+    } catch (err) {
+      void message.error(err instanceof Error ? err.message : "读取 Secret 详情失败");
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const clusterOptions = (clustersQuery.data?.items ?? []).map((c) => ({
@@ -323,6 +478,7 @@ export default function SecretsPage() {
               name: row.name,
             })
           }
+          onEdit={() => void handleOpenEdit(row)}
           onDelete={() => deleteMutation.mutate(row.id)}
         />
       ),
@@ -333,7 +489,7 @@ export default function SecretsPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/configs/secrets"
-        titleSuffix={<ResourceAddButton title="创建Secret" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+        titleSuffix={<ResourceAddButton title="创建Secret" onClick={handleOpenCreate} />}
       />
 
       <Card>
@@ -402,16 +558,18 @@ export default function SecretsPage() {
       </Card>
 
       <Modal
-        title="添加 Secret"
+        title={editingTarget ? "编辑 Secret" : "添加 Secret"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setEditingTarget(null);
+          setSecretValuesVisible(false);
           form.resetFields();
         }}
-        okText="创建"
+        okText={editingTarget ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || editLoading}
         destroyOnHidden
         width={600}
       >
@@ -421,14 +579,14 @@ export default function SecretsPage() {
             name="name"
             rules={[{ required: true, message: "请输入 Secret 名称" }]}
           >
-            <Input placeholder="例如：my-secret" />
+            <Input disabled={Boolean(editingTarget)} placeholder="例如：my-secret" />
           </Form.Item>
           <Form.Item
             label="名称空间"
             name="namespace"
             rules={[{ required: true, message: "请输入名称空间" }]}
           >
-            <Input placeholder="例如：default" />
+            <Input disabled={Boolean(editingTarget)} placeholder="例如：default" />
           </Form.Item>
           <Form.Item
             label="所属集群"
@@ -439,6 +597,7 @@ export default function SecretsPage() {
               placeholder="请选择集群"
               options={clusterOptions}
               loading={clustersQuery.isLoading}
+              disabled={Boolean(editingTarget)}
               showSearch
               filterOption={(input, option) =>
                 (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
@@ -451,8 +610,57 @@ export default function SecretsPage() {
             initialValue="Opaque"
             rules={[{ required: true, message: "请选择 Secret 类型" }]}
           >
-            <Select options={SECRET_TYPE_OPTIONS} placeholder="请选择类型" />
+            <Select options={SECRET_TYPE_OPTIONS} placeholder="请选择类型" disabled={Boolean(editingTarget)} />
           </Form.Item>
+          <Form.Item label="标签">
+            <Form.List name="labelEntries" initialValue={[{ key: "", value: "" }]}>
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <Row key={key} gutter={8} style={{ marginBottom: 8 }}>
+                      <Col flex="1">
+                        <Form.Item {...restField} name={[name, "key"]} style={{ marginBottom: 0 }}>
+                          <Input placeholder="标签键（Key）" />
+                        </Form.Item>
+                      </Col>
+                      <Col flex="1">
+                        <Form.Item {...restField} name={[name, "value"]} style={{ marginBottom: 0 }}>
+                          <Input placeholder="标签值（Value）" />
+                        </Form.Item>
+                      </Col>
+                      <Col>
+                        <Button
+                          type="text"
+                          danger
+                          icon={<MinusCircleOutlined />}
+                          onClick={() => remove(name)}
+                          disabled={fields.length === 1}
+                        />
+                      </Col>
+                    </Row>
+                  ))}
+                  <Button
+                    type="dashed"
+                    onClick={() => add({ key: "", value: "" })}
+                    icon={<PlusOutlined />}
+                    style={{ width: "100%" }}
+                  >
+                    添加标签
+                  </Button>
+                </>
+              )}
+            </Form.List>
+          </Form.Item>
+          {editingTarget ? (
+            <Form.Item label="Secret 现值显示">
+              <Switch
+                checked={secretValuesVisible}
+                checkedChildren="显示"
+                unCheckedChildren="遮蔽"
+                onChange={setSecretValuesVisible}
+              />
+            </Form.Item>
+          ) : null}
           <Form.Item label="键值对数据">
             <Form.List name="entries" initialValue={[{ key: "", value: "" }]}>
               {(fields, { add, remove }) => (
@@ -475,7 +683,15 @@ export default function SecretsPage() {
                           name={[name, "value"]}
                           style={{ marginBottom: 0 }}
                         >
-                          <Input.Password placeholder="值（Value）" />
+                          {editingTarget ? (
+                            secretValuesVisible ? (
+                              <Input placeholder="值（Value）" />
+                            ) : (
+                              <Input.Password placeholder="值（Value）" visibilityToggle={false} />
+                            )
+                          ) : (
+                            <Input.Password placeholder="值（Value）" />
+                          )}
                         </Form.Item>
                       </Col>
                       <Col>

@@ -19,11 +19,10 @@ export function DetailSection({
       size="small"
       variant="borderless"
       style={{
-        borderRadius: 16,
-        border: "1px solid var(--color-border, rgba(59, 130, 246, 0.15))",
-        background:
-          "linear-gradient(180deg, color-mix(in srgb, var(--color-card-high, #1a2234) 78%, transparent) 0%, color-mix(in srgb, var(--color-card, #111827) 92%, transparent) 100%)",
-        boxShadow: "0 10px 28px rgba(2, 8, 23, 0.14)",
+        borderRadius: 8,
+        border: "1px solid var(--ops-border-subtle, var(--color-border, rgba(59, 130, 246, 0.15)))",
+        background: "var(--ops-surface-raised, var(--color-card, #111827))",
+        boxShadow: "var(--ops-shadow-subtle, 0 10px 28px rgba(2, 8, 23, 0.14))",
       }}
       styles={{
         header: { paddingBlock: 14, paddingInline: 18 },

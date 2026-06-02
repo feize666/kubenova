@@ -34,7 +34,9 @@ const routes = [
   "/workloads/pods",
   "/network/services",
   "/network/topology",
+  "/observability",
   "/observability/cluster-health",
+  "/aiops",
   "/ai-assistant",
 ];
 

@@ -2,6 +2,7 @@
 
 import {
   DeleteOutlined,
+  EditOutlined,
   EyeOutlined,
   FileTextOutlined,
   PlusOutlined,
@@ -53,9 +54,12 @@ import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
   applyWorkloadActionById,
+  buildWorkloadSafeEditPatch,
   createWorkload,
   deleteWorkload,
+  formatWorkloadKeyValueText,
   getWorkloadsByKind,
+  getWorkloadPrimaryImage,
   patchWorkloadById,
   type WorkloadListItem,
 } from "@/lib/api/workloads";
@@ -100,7 +104,10 @@ interface FormValues {
   name: string;
   namespace: string;
   clusterId: string;
-  replicas: number;
+  replicas?: number;
+  image?: string;
+  labelsText?: string;
+  annotationsText?: string;
   scheduling?: SchedulingConfig;
   probes?: ProbeConfig;
 }
@@ -299,7 +306,7 @@ export default function DaemonSetsPage() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingItem] = useState<WorkloadListItem | null>(null);
+  const [editingItem, setEditingItem] = useState<WorkloadListItem | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<FormValues>();
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -400,6 +407,7 @@ export default function DaemonSetsPage() {
 
   const handleModalCancel = () => {
     setModalOpen(false);
+    setEditingItem(null);
     form.resetFields();
   };
 
@@ -415,9 +423,12 @@ export default function DaemonSetsPage() {
     try {
       const spec = buildDaemonSetSpec(values);
       if (editingItem) {
+        const patch = buildWorkloadSafeEditPatch(editingItem, "DaemonSet", values, {
+          includeImage: true,
+        });
         await patchWorkloadById(
           editingItem.id,
-          { namespace: values.namespace, replicas: values.replicas, ...(spec ? { spec } : {}) },
+          patch,
           accessToken!,
         );
         void message.success("DaemonSet 更新成功");
@@ -436,6 +447,7 @@ export default function DaemonSetsPage() {
         void message.success("DaemonSet 创建成功");
       }
       setModalOpen(false);
+      setEditingItem(null);
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey });
     } catch (err) {
@@ -465,6 +477,20 @@ export default function DaemonSetsPage() {
       kind: urlKind || "DaemonSet",
       name: item.name,
     };
+  };
+
+  const openEditModal = (item: WorkloadListItem) => {
+    setEditingItem(item);
+    form.resetFields();
+    form.setFieldsValue({
+      name: item.name,
+      namespace: item.namespace,
+      clusterId: item.clusterId,
+      image: getWorkloadPrimaryImage(item, "DaemonSet"),
+      labelsText: formatWorkloadKeyValueText(item.labels),
+      annotationsText: formatWorkloadKeyValueText(item.annotations),
+    });
+    setModalOpen(true);
   };
 
   const actionMutation = useMutation({
@@ -514,6 +540,7 @@ export default function DaemonSetsPage() {
     const active = item.state === "active";
     return buildResourceActionMenuItems([
       { key: "describe", icon: <EyeOutlined />, label: "描述" },
+      { key: "edit", icon: <EditOutlined />, label: "编辑" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
       { key: "scale", icon: <RetweetOutlined />, label: "扩缩容" },
       { key: "restart", icon: <ReloadOutlined />, label: "重启", disabled: !active },
@@ -531,6 +558,10 @@ export default function DaemonSetsPage() {
     }
     if (key === "yaml") {
       setYamlTarget(resolveIdentity(item));
+      return;
+    }
+    if (key === "edit") {
+      openEditModal(item);
       return;
     }
     if (key === "scale") {
@@ -710,7 +741,7 @@ export default function DaemonSetsPage() {
             name="namespace"
             rules={[{ required: true, message: "请输入名称空间" }]}
           >
-            <Input placeholder="例如：kube-system" />
+            <Input placeholder="例如：kube-system" disabled={Boolean(editingItem)} />
           </Form.Item>
           <Form.Item
             label="集群"
@@ -726,9 +757,24 @@ export default function DaemonSetsPage() {
               optionFilterProp="label"
             />
           </Form.Item>
-          <Form.Item label="节点数（预期）" name="replicas">
-            <InputNumber min={0} style={{ width: "100%" }} placeholder="由调度器决定，可留空" />
-          </Form.Item>
+          {!editingItem ? (
+            <Form.Item label="节点数（预期）" name="replicas">
+              <InputNumber min={0} style={{ width: "100%" }} placeholder="由调度器决定，可留空" />
+            </Form.Item>
+          ) : null}
+          {editingItem ? (
+            <>
+              <Form.Item label="主容器镜像" name="image">
+                <Input placeholder="registry.example.com/agent:tag" />
+              </Form.Item>
+              <Form.Item label="Labels" name="labelsText">
+                <Input.TextArea rows={4} placeholder={"app=agent\ncomponent=node"} />
+              </Form.Item>
+              <Form.Item label="Annotations" name="annotationsText">
+                <Input.TextArea rows={4} placeholder={"description=node-agent\nowner=team-a"} />
+              </Form.Item>
+            </>
+          ) : null}
           {!editingItem ? (
             <>
               <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>

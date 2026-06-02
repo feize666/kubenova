@@ -273,6 +273,17 @@ export class ClustersController {
     return this.ok(detail, requestId, { action: 'detail' });
   }
 
+  @Get(':id/nodes')
+  async nodes(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+    @Param('id') id: string,
+  ) {
+    const requestId = resolveRequestId(req, res);
+    const nodes = await this.clustersService.listNodes(id);
+    return this.ok(nodes, requestId, { action: 'nodes' });
+  }
+
   @Get(':id/kubeconfig/export')
   async exportKubeconfig(
     @Req() req: AuthenticatedRequest,

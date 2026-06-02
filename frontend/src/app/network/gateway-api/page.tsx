@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Tag, Typography, message } from "antd";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -22,8 +22,11 @@ import {
   createDynamicResource,
   deleteDynamicResource,
   getDynamicResourceDetail,
+  getResourceDiscoveryCatalog,
   getDynamicResources,
   refreshResourceDiscovery,
+  updateDynamicResourceYaml,
+  type DiscoveryCatalogItem,
   type DynamicResourceIdentity,
   type DynamicResourceItem,
 } from "@/lib/api/resources";
@@ -33,14 +36,13 @@ import type { ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
-type GatewayKindKey = "gatewayclass" | "gateway" | "httproute";
+type GatewayKindKey = string;
 type DetailTarget = NonNullable<ResourceDetailDrawerProps["request"]>;
 
-const GATEWAY_KIND_OPTIONS: Array<{ label: string; value: GatewayKindKey }> = [
-  { label: "GatewayClass", value: "gatewayclass" },
-  { label: "Gateway", value: "gateway" },
-  { label: "HTTPRoute", value: "httproute" },
-];
+function readGatewayKindFromSearchParams(searchParams: ReturnType<typeof useSearchParams>): GatewayKindKey {
+  const value = searchParams.get("kind")?.trim().toLowerCase();
+  return value || "gatewayclass";
+}
 
 const GATEWAY_KIND_META: Record<
   GatewayKindKey,
@@ -67,7 +69,51 @@ const GATEWAY_KIND_META: Record<
     namespaced: true,
     description: "管理 HTTP 路由规则",
   },
+  grpcroute: {
+    title: "GRPCRoute",
+    resource: "grpcroutes",
+    version: "v1",
+    namespaced: true,
+    description: "管理 gRPC 路由规则",
+  },
+  tcproute: {
+    title: "TCPRoute",
+    resource: "tcproutes",
+    version: "v1alpha2",
+    namespaced: true,
+    description: "管理 TCP 路由规则",
+  },
+  tlsroute: {
+    title: "TLSRoute",
+    resource: "tlsroutes",
+    version: "v1alpha2",
+    namespaced: true,
+    description: "管理 TLS 路由规则",
+  },
+  udproute: {
+    title: "UDPRoute",
+    resource: "udproutes",
+    version: "v1alpha2",
+    namespaced: true,
+    description: "管理 UDP 路由规则",
+  },
+  referencegrant: {
+    title: "ReferenceGrant",
+    resource: "referencegrants",
+    version: "v1beta1",
+    namespaced: true,
+    description: "管理跨名称空间引用授权",
+  },
+  backendtlspolicy: {
+    title: "BackendTLSPolicy",
+    resource: "backendtlspolicies",
+    version: "v1alpha3",
+    namespaced: true,
+    description: "管理后端 TLS 策略",
+  },
 };
+
+const STRUCTURED_GATEWAY_KINDS = new Set(["gatewayclass", "gateway", "httproute"]);
 
 function getTextFilter(filters: HeadlampTableFilters, key: string) {
   const value = filters[key];
@@ -78,8 +124,83 @@ function textMatches(value: unknown, filterValue: string) {
   return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
 }
 
-function toGatewayDetailKind(kind: GatewayKindKey): string {
-  return GATEWAY_KIND_META[kind].title;
+function normalizeGatewayKindKey(kind: string) {
+  return kind.trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+function isStructuredGatewayKind(kind: GatewayKindKey) {
+  return STRUCTURED_GATEWAY_KINDS.has(normalizeGatewayKindKey(kind));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function asNumber(value: unknown, fallback?: number) {
+  return typeof value === "number" ? value : fallback;
+}
+
+function asStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function buildGatewayKindMetaFromDiscovery(item: DiscoveryCatalogItem) {
+  const key = normalizeGatewayKindKey(item.kind);
+  return {
+    key,
+    meta: {
+      title: item.kind,
+      resource: item.resource,
+      version: item.version,
+      namespaced: item.namespaced,
+      description: `管理 ${item.kind} 资源`,
+    },
+  };
+}
+
+function buildGatewayDynamicIdentity(kindMeta: (typeof GATEWAY_KIND_META)[GatewayKindKey], row: GatewayRow): DynamicResourceIdentity {
+  return {
+    clusterId: row.clusterId,
+    group: "gateway.networking.k8s.io",
+    version: kindMeta.version,
+    resource: kindMeta.resource,
+    namespace: row.namespace || undefined,
+    name: row.name,
+  };
+}
+
+function buildGatewayDynamicDetailTarget(kindMeta: (typeof GATEWAY_KIND_META)[GatewayKindKey], row: GatewayRow): DetailTarget {
+  const identity = buildGatewayDynamicIdentity(kindMeta, row);
+  return {
+    kind: "dynamic",
+    id: [
+      "dynamic",
+      identity.clusterId,
+      identity.group,
+      identity.version,
+      identity.resource,
+      identity.namespace ?? "",
+      identity.name,
+    ].join(":"),
+    kindLabel: kindMeta.title,
+    apiVersion: row.apiVersion,
+    namespace: row.namespace,
+    name: row.name,
+    label: row.name,
+    snapshot: { labels: row.labels },
+  };
 }
 
 type GatewayRow = DynamicResourceItem;
@@ -129,11 +250,14 @@ export default function GatewayApiPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [kind, setKind] = useState<GatewayKindKey>("gatewayclass");
+  const [kind, setKind] = useState<GatewayKindKey>(() => readGatewayKindFromSearchParams(searchParams));
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
+  const [dynamicYamlTarget, setDynamicYamlTarget] = useState<DynamicResourceIdentity | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingRow, setEditingRow] = useState<GatewayRow | null>(null);
+  const [editingSpec, setEditingSpec] = useState<Record<string, unknown>>({});
   const [createForm] = Form.useForm<GatewayFormValues & HttpRouteFormValues>();
   const {
     sortBy,
@@ -147,8 +271,8 @@ export default function GatewayApiPage() {
     defaultPageSize: 10,
   });
 
-  const kindMeta = GATEWAY_KIND_META[kind];
-  const canCreate = Boolean(clusterId);
+  const baseKindMeta = GATEWAY_KIND_META[normalizeGatewayKindKey(kind)] ?? GATEWAY_KIND_META.gatewayclass;
+  const canCreate = Boolean(clusterId) && isStructuredGatewayKind(kind);
 
   const clustersQuery = useQuery({
     queryKey: ["gateway-api", "clusters", accessToken],
@@ -170,10 +294,43 @@ export default function GatewayApiPage() {
     enabled: Boolean(accessToken) && Boolean(clusterId),
   });
 
+  const discoveryQuery = useQuery({
+    queryKey: ["gateway-api", "discovery", clusterId || "none", accessToken],
+    queryFn: () => getResourceDiscoveryCatalog(clusterId!, accessToken ?? undefined),
+    enabled: Boolean(accessToken) && Boolean(clusterId),
+  });
+
+  const gatewayKindMap = useMemo(() => {
+    const next = new Map<string, (typeof GATEWAY_KIND_META)[GatewayKindKey]>();
+    for (const [key, meta] of Object.entries(GATEWAY_KIND_META)) {
+      next.set(key, meta);
+    }
+    for (const item of discoveryQuery.data?.items ?? []) {
+      if (item.group !== "gateway.networking.k8s.io") continue;
+      const discovered = buildGatewayKindMetaFromDiscovery(item);
+      next.set(discovered.key, discovered.meta);
+    }
+    return next;
+  }, [discoveryQuery.data?.items]);
+
+  const gatewayKindOptions = useMemo(
+    () =>
+      Array.from(gatewayKindMap.entries())
+        .map(([value, meta]) => ({
+          label: `${meta.title} (${meta.version})`,
+          value,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [gatewayKindMap],
+  );
+  const kindMeta = gatewayKindMap.get(normalizeGatewayKindKey(kind)) ?? baseKindMeta;
+
   const listQuery = useQuery({
     queryKey: [
       "gateway-api",
       kind,
+      kindMeta.version,
+      kindMeta.resource,
       clusterId || "all",
       namespace,
       keyword,
@@ -190,12 +347,13 @@ export default function GatewayApiPage() {
           group: "gateway.networking.k8s.io",
           version: kindMeta.version,
           resource: kindMeta.resource,
-          namespace: namespace || undefined,
+          namespace: kindMeta.namespaced ? namespace || undefined : undefined,
           keyword: keyword || undefined,
           page: pagination.pageIndex + 1,
           pageSize: pagination.pageSize,
           sortBy: sortBy || undefined,
           sortOrder: sortOrder || undefined,
+          missingAsEmpty: true,
         },
         accessToken ?? undefined,
       ),
@@ -242,6 +400,7 @@ export default function GatewayApiPage() {
         kind: identity.resource,
         name: identity.name,
       });
+      setDynamicYamlTarget(identity);
       setYamlOpen(true);
     },
     onError: (error) => {
@@ -278,6 +437,95 @@ export default function GatewayApiPage() {
     },
     onError: (error) => {
       void message.error(error instanceof Error ? error.message : "创建失败，请重试");
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ row, body }: { row: GatewayRow; body: Record<string, unknown> }) =>
+      updateDynamicResourceYaml(
+        {
+          ...buildGatewayDynamicIdentity(kindMeta, row),
+          yaml: JSON.stringify(body, null, 2),
+        },
+        accessToken ?? undefined,
+      ),
+    onSuccess: async () => {
+      void message.success(`${kindMeta.title} 更新成功`);
+      setCreateOpen(false);
+      setEditingRow(null);
+      setEditingSpec({});
+      createForm.resetFields();
+      await listQuery.refetch();
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : "更新失败，请重试");
+    },
+  });
+
+  const openStructuredEditMutation = useMutation({
+    mutationFn: (row: GatewayRow) => getDynamicResourceDetail(buildGatewayDynamicIdentity(kindMeta, row), accessToken ?? undefined),
+    onSuccess: (detail, row) => {
+      const raw = asRecord(detail.raw);
+      const spec = asRecord(raw.spec);
+      setEditingRow(row);
+      setEditingSpec(spec);
+      createForm.resetFields();
+      if (normalizeGatewayKindKey(kind) === "gatewayclass") {
+        const parametersRef = asRecord(spec.parametersRef);
+        createForm.setFieldsValue({
+          name: row.name,
+          namespace: row.namespace,
+          controllerName: asString(spec.controllerName),
+          parametersGroup: asString(parametersRef.group),
+          parametersKind: asString(parametersRef.kind),
+          parametersName: asString(parametersRef.name),
+        });
+      } else if (normalizeGatewayKindKey(kind) === "gateway") {
+        const address = asRecordArray(spec.addresses)[0] ?? {};
+        const listener = asRecordArray(spec.listeners)[0] ?? {};
+        const allowedRoutes = asRecord(listener.allowedRoutes);
+        const allowedNamespaces = asRecord(allowedRoutes.namespaces);
+        const selector = asRecord(allowedNamespaces.selector);
+        const firstExpression = asRecordArray(selector.matchExpressions)[0] ?? {};
+        createForm.setFieldsValue({
+          name: row.name,
+          namespace: row.namespace,
+          gatewayClassName: asString(spec.gatewayClassName),
+          addressType: asString(address.type),
+          addresses: asString(address.value),
+          listenerName: asString(listener.name) || "http",
+          listenerPort: asNumber(listener.port, 80),
+          listenerProtocol: asString(listener.protocol) || "HTTP",
+          listenerHostname: asString(listener.hostname),
+          allowedRoutesFrom: (asString(allowedNamespaces.from) as GatewayFormValues["allowedRoutesFrom"]) || "Selector",
+          allowedRoutesNamespaces: asStringArray(firstExpression.values).join(" "),
+        });
+      } else {
+        const parentRef = asRecordArray(spec.parentRefs)[0] ?? {};
+        const rule = asRecordArray(spec.rules)[0] ?? {};
+        const match = asRecordArray(rule.matches)[0] ?? {};
+        const path = asRecord(match.path);
+        const backend = asRecordArray(rule.backendRefs)[0] ?? {};
+        const headerFilter = asRecordArray(rule.filters).find((filter) => asString(filter.type) === "RequestHeaderModifier");
+        const headerAdd = asRecordArray(asRecord(asRecord(headerFilter).requestHeaderModifier).add)[0] ?? {};
+        createForm.setFieldsValue({
+          name: row.name,
+          namespace: row.namespace,
+          parentGatewayName: asString(parentRef.name),
+          hostnames: asStringArray(spec.hostnames).join(" "),
+          matchPath: asString(path.value) || "/",
+          pathType: asString(path.type) || "PathPrefix",
+          backendServiceName: asString(backend.name),
+          backendServicePort: asNumber(backend.port, 80),
+          backendWeight: asNumber(backend.weight),
+          headerName: asString(headerAdd.name),
+          headerValue: asString(headerAdd.value),
+        });
+      }
+      setCreateOpen(true);
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : "读取资源详情失败");
     },
   });
 
@@ -337,12 +585,39 @@ export default function GatewayApiPage() {
     setMergedFilters(parsed);
     setKeyword(parsed.filter((item) => !item.includes("=")).join(" "));
   };
+  const urlExtraParams = useMemo(() => ({ kind }), [kind]);
   useSyncResourceFilterUrlState({
     clusterId,
     namespace,
     keyword,
     path: "/network/gateway-api",
+    extraParams: urlExtraParams,
   });
+  const selectedGatewayKind = normalizeGatewayKindKey(kind);
+
+  const handleOpenCreate = () => {
+    if (!clusterId) {
+      void message.error("请先选择集群后再新增资源");
+      return;
+    }
+    if (!isStructuredGatewayKind(kind)) {
+      void message.info(`${kindMeta.title} 请使用 YAML 创建或编辑`);
+      return;
+    }
+    setEditingRow(null);
+    setEditingSpec({});
+    createForm.resetFields();
+    setCreateOpen(true);
+  };
+
+  const handleOpenEdit = (row: GatewayRow) => {
+    if (!isStructuredGatewayKind(kind)) {
+      void message.info(`${kindMeta.title} 请使用 YAML 编辑`);
+      openYamlMutation.mutate(buildGatewayDynamicIdentity(kindMeta, row));
+      return;
+    }
+    openStructuredEditMutation.mutate(row);
+  };
 
   const handleCreateSubmit = async () => {
     let values: GatewayFormValues & HttpRouteFormValues;
@@ -352,7 +627,161 @@ export default function GatewayApiPage() {
       return;
     }
 
-    if (kind === "gateway") {
+    const normalizedKind = normalizeGatewayKindKey(kind);
+
+    if (editingRow) {
+      if (normalizedKind === "gatewayclass") {
+        const nextSpec: Record<string, unknown> = {
+          ...editingSpec,
+          controllerName: values.controllerName || values.gatewayClassName,
+        };
+        if (values.parametersGroup && values.parametersKind && values.parametersName) {
+          nextSpec.parametersRef = {
+            group: values.parametersGroup,
+            kind: values.parametersKind,
+            name: values.parametersName,
+          };
+        } else {
+          delete nextSpec.parametersRef;
+        }
+        updateMutation.mutate({
+          row: editingRow,
+          body: {
+            apiVersion: `gateway.networking.k8s.io/${kindMeta.version}`,
+            kind: kindMeta.title,
+            metadata: {
+              name: editingRow.name,
+              ...(editingRow.labels ? { labels: editingRow.labels } : {}),
+            },
+            spec: nextSpec,
+          },
+        });
+        return;
+      }
+
+      if (normalizedKind === "gateway") {
+        const addressValue = values.addresses?.trim();
+        const nextSpec: Record<string, unknown> = {
+          ...editingSpec,
+          gatewayClassName: values.gatewayClassName,
+        };
+        if (values.addressType && addressValue) {
+          nextSpec.addresses = [{ type: values.addressType, value: addressValue }];
+        } else {
+          delete nextSpec.addresses;
+        }
+        const listeners = asRecordArray(editingSpec.listeners);
+        const firstListener: Record<string, unknown> = { ...(listeners[0] ?? {}) };
+        firstListener.name = values.listenerName || "http";
+        firstListener.port = values.listenerPort || 80;
+        firstListener.protocol = values.listenerProtocol || "HTTP";
+        if (values.listenerHostname?.trim()) {
+          firstListener.hostname = values.listenerHostname.trim();
+        } else {
+          delete firstListener.hostname;
+        }
+        if (values.allowedRoutesNamespaces?.trim()) {
+          firstListener.allowedRoutes = {
+            namespaces: {
+              from: values.allowedRoutesFrom || "Selector",
+              ...(values.allowedRoutesFrom === "Selector"
+                ? {
+                    selector: {
+                      matchExpressions: [
+                        {
+                          key: "kubernetes.io/metadata.name",
+                          operator: "In",
+                          values: values.allowedRoutesNamespaces.split(/\s+/).filter(Boolean),
+                        },
+                      ],
+                    },
+                  }
+                : {}),
+            },
+          };
+        } else {
+          delete firstListener.allowedRoutes;
+        }
+        nextSpec.listeners = [firstListener, ...listeners.slice(1)];
+        updateMutation.mutate({
+          row: editingRow,
+          body: {
+            apiVersion: `gateway.networking.k8s.io/${kindMeta.version}`,
+            kind: kindMeta.title,
+            metadata: {
+              name: editingRow.name,
+              namespace: editingRow.namespace,
+              ...(editingRow.labels ? { labels: editingRow.labels } : {}),
+            },
+            spec: nextSpec,
+          },
+        });
+        return;
+      }
+
+      if (normalizedKind === "httproute") {
+        const hostnames = values.hostnames ? values.hostnames.split(/\s+/).filter(Boolean) : [];
+        const nextSpec: Record<string, unknown> = { ...editingSpec };
+        nextSpec.parentRefs = [{ ...(asRecordArray(editingSpec.parentRefs)[0] ?? {}), name: values.parentGatewayName }];
+        if (hostnames.length > 0) {
+          nextSpec.hostnames = hostnames;
+        } else {
+          delete nextSpec.hostnames;
+        }
+        const rules = asRecordArray(editingSpec.rules);
+        const firstRule: Record<string, unknown> = { ...(rules[0] ?? {}) };
+        firstRule.matches = [
+          {
+            ...(asRecordArray(firstRule.matches)[0] ?? {}),
+            path: { type: values.pathType || "PathPrefix", value: values.matchPath || "/" },
+          },
+        ];
+        firstRule.backendRefs = [
+          {
+            ...(asRecordArray(firstRule.backendRefs)[0] ?? {}),
+            name: values.backendServiceName || "kubernetes",
+            port: values.backendServicePort || 80,
+            ...(values.backendWeight !== undefined ? { weight: values.backendWeight } : {}),
+          },
+          ...asRecordArray(firstRule.backendRefs).slice(1),
+        ];
+        const otherFilters = asRecordArray(firstRule.filters).filter(
+          (filter) => asString(filter.type) !== "RequestHeaderModifier",
+        );
+        if (values.headerName && values.headerValue) {
+          firstRule.filters = [
+            ...otherFilters,
+            {
+              type: "RequestHeaderModifier",
+              requestHeaderModifier: {
+                add: [{ name: values.headerName, value: values.headerValue }],
+              },
+            },
+          ];
+        } else if (otherFilters.length > 0) {
+          firstRule.filters = otherFilters;
+        } else {
+          delete firstRule.filters;
+        }
+        nextSpec.rules = [firstRule, ...rules.slice(1)];
+        updateMutation.mutate({
+          row: editingRow,
+          body: {
+            apiVersion: `gateway.networking.k8s.io/${kindMeta.version}`,
+            kind: kindMeta.title,
+            metadata: {
+              name: editingRow.name,
+              namespace: editingRow.namespace,
+              ...(editingRow.labels ? { labels: editingRow.labels } : {}),
+            },
+            spec: nextSpec,
+          },
+        });
+        return;
+      }
+    }
+
+    if (normalizedKind === "gateway") {
       const addressValue = values.addresses?.trim();
       createMutation.mutate({
         clusterId,
@@ -408,7 +837,7 @@ export default function GatewayApiPage() {
       return;
     }
 
-    if (kind === "gatewayclass") {
+    if (normalizedKind === "gatewayclass") {
       createMutation.mutate({
         clusterId,
         group: "gateway.networking.k8s.io",
@@ -437,7 +866,7 @@ export default function GatewayApiPage() {
       return;
     }
 
-    if (kind === "httproute") {
+    if (normalizedKind === "httproute") {
       const hostnames = values.hostnames ? values.hostnames.split(/\s+/).filter(Boolean) : [];
       createMutation.mutate({
         clusterId,
@@ -498,18 +927,7 @@ export default function GatewayApiPage() {
       render: (value: string, row) =>
         row.id ? (
           <Typography.Link
-            onClick={() =>
-              setDetailTarget({
-                kind: toGatewayDetailKind(kind),
-                id: row.id,
-                kindLabel: kindMeta.title,
-                apiVersion: row.apiVersion,
-                namespace: row.namespace,
-                name: row.name,
-                label: row.name,
-                snapshot: { labels: row.labels },
-              })
-            }
+            onClick={() => setDetailTarget(buildGatewayDynamicDetailTarget(kindMeta, row))}
           >
             {value}
           </Typography.Link>
@@ -579,6 +997,7 @@ export default function GatewayApiPage() {
               name: row.name,
             })
           }
+          extraActions={[{ key: "edit", label: "编辑", onClick: () => handleOpenEdit(row) }]}
           onDelete={() =>
             deleteMutation.mutate({
               clusterId: row.clusterId,
@@ -600,19 +1019,12 @@ export default function GatewayApiPage() {
         path="/network/gateway-api"
         titleZh="Gateway API"
         titleEn="Gateway API"
-        description="管理 GatewayClass、Gateway 与 HTTPRoute 资源。"
+        description="管理 Gateway API 资源。"
         titleSuffix={
           <Button
             type="primary"
             disabled={!canCreate}
-            onClick={() => {
-              if (!clusterId) {
-                void message.error("请先选择集群后再新增资源");
-                return;
-              }
-              createForm.resetFields();
-              setCreateOpen(true);
-            }}
+            onClick={handleOpenCreate}
           >
             新增资源
           </Button>
@@ -622,13 +1034,13 @@ export default function GatewayApiPage() {
       <Card>
         <Row gutter={[12, 12]} style={{ marginBottom: 14 }}>
           <Col span={24}>
-            <Segmented
+            <Select
               value={kind}
-              options={GATEWAY_KIND_OPTIONS}
-              block
+              options={gatewayKindOptions}
               style={{ width: "100%" }}
+              loading={discoveryQuery.isLoading}
               onChange={(value) => {
-                setKind(value as GatewayKindKey);
+                setKind(value);
                 resetPage();
                 setKeyword("");
                 setKeywordInput("");
@@ -643,8 +1055,8 @@ export default function GatewayApiPage() {
           clusterOptions={clusterOptions}
           clusterLoading={clustersQuery.isLoading}
           knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
+          namespaceDisabled={namespaceDisabled || !kindMeta.namespaced}
+          namespacePlaceholder={!kindMeta.namespaced ? "集群级资源" : namespacePlaceholder}
           onClusterChange={(value) => {
             onClusterChange(value);
             resetPage();
@@ -697,16 +1109,7 @@ export default function GatewayApiPage() {
           onRow={(record) => ({
             onClick: () => {
               if (record.id) {
-                setDetailTarget({
-                  kind: toGatewayDetailKind(kind),
-                  id: record.id,
-                  kindLabel: kindMeta.title,
-                  apiVersion: record.apiVersion,
-                  namespace: record.namespace,
-                  name: record.name,
-                  label: record.name,
-                  snapshot: { labels: record.labels },
-                });
+                setDetailTarget(buildGatewayDynamicDetailTarget(kindMeta, record));
               }
             },
           })}
@@ -723,32 +1126,40 @@ export default function GatewayApiPage() {
 
       <ResourceYamlDrawer
         open={yamlOpen}
-        onClose={() => setYamlOpen(false)}
+        onClose={() => {
+          setYamlOpen(false);
+          setDynamicYamlTarget(null);
+        }}
         token={accessToken ?? undefined}
         identity={yamlTarget}
+        dynamicIdentity={dynamicYamlTarget}
         onUpdated={() => void listQuery.refetch()}
       />
 
       <Modal
-        title={`新增 ${kindMeta.title}`}
+        title={editingRow ? `编辑 ${kindMeta.title}` : `新增 ${kindMeta.title}`}
         open={createOpen}
         onOk={() => void handleCreateSubmit()}
-        onCancel={() => setCreateOpen(false)}
-        okText="创建"
+        onCancel={() => {
+          setCreateOpen(false);
+          setEditingRow(null);
+          setEditingSpec({});
+        }}
+        okText={editingRow ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || openStructuredEditMutation.isPending}
         destroyOnHidden
       >
         <Form form={createForm} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item label="名称" name="name" rules={[{ required: true, message: "请输入名称" }]}>
-            <Input />
+            <Input disabled={Boolean(editingRow)} />
           </Form.Item>
-          {kind !== "gatewayclass" ? (
+          {selectedGatewayKind !== "gatewayclass" ? (
             <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
-              <Input placeholder="default" />
+              <Input disabled={Boolean(editingRow)} placeholder="default" />
             </Form.Item>
           ) : null}
-          {kind === "gatewayclass" ? (
+          {selectedGatewayKind === "gatewayclass" ? (
             <>
               <Form.Item label="控制器名称" name="controllerName" rules={[{ required: true, message: "请输入控制器名称" }]}>
                 <Input placeholder="例如：example.com/gateway-controller" />
@@ -764,7 +1175,7 @@ export default function GatewayApiPage() {
               </Form.Item>
             </>
           ) : null}
-          {kind === "gateway" ? (
+          {selectedGatewayKind === "gateway" ? (
             <>
               <Form.Item label="GatewayClass 名称" name="gatewayClassName" rules={[{ required: true, message: "请输入 GatewayClass 名称" }]}>
                 <Input placeholder="例如：istio" />
@@ -802,7 +1213,7 @@ export default function GatewayApiPage() {
               </Form.Item>
             </>
           ) : null}
-          {kind === "httproute" ? (
+          {selectedGatewayKind === "httproute" ? (
             <>
               <Form.Item label="父 Gateway 名称" name="parentGatewayName" rules={[{ required: true, message: "请输入父 Gateway 名称" }]}>
                 <Input placeholder="例如：istio" />

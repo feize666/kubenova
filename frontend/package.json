@@ -9,6 +9,7 @@
     "start": "next start",
     "start:stable": "HOSTNAME=0.0.0.0 PORT=${PORT:-3000} node --max-old-space-size=2048 .next/standalone/server.js",
     "lint": "eslint",
+    "check:navigation": "node ./scripts/check-navigation.mjs",
     "e2e:filters": "node ./scripts/filter-regression.mjs",
     "e2e:filters:matrix": "node ./scripts/filter-regression-matrix.mjs",
     "e2e:filters:list": "FILTER_MODE=list node ./scripts/filter-regression-matrix.mjs",

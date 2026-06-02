@@ -301,7 +301,7 @@ export default function HomePage() {
           <div style={{ marginTop: 12 }}>
             <Space wrap>
               <Link href="/network/topology">
-                <Button type="primary">查看资源全景图</Button>
+                <Button type="primary">查看资源拓扑</Button>
               </Link>
               <Link href="/inspection">
                 <Button>查看资源巡检</Button>

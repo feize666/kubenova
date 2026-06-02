@@ -2,6 +2,7 @@
 
 import {
   CheckCircleOutlined,
+  ClockCircleOutlined,
   CloudServerOutlined,
   DeleteOutlined,
   DisconnectOutlined,
@@ -12,13 +13,15 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Button,
   Card,
   Col,
+  Descriptions,
   Dropdown,
+  Drawer,
   Form,
   Input,
   Modal,
@@ -26,6 +29,7 @@ import {
   Row,
   Select,
   Space,
+  Statistic,
   Tag,
   Tooltip,
   Typography,
@@ -60,8 +64,11 @@ import {
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import type { ClusterPayload } from "@/lib/api/clusters";
 import {
+  getClusterHealthDetail,
   getClusterHealthList,
+  probeClusterHealth,
   type ClusterHealthListItem,
+  type HealthProbeSource,
   type RuntimeStatus,
 } from "@/lib/api/cluster-health";
 import type { Cluster } from "@/lib/api/types";
@@ -170,6 +177,34 @@ function UsageBar({ value, color }: { value: number; color: string }) {
   );
 }
 
+function formatHealthTime(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString("zh-CN") : "未探测";
+}
+
+function formatLatency(value: number | null | undefined) {
+  return typeof value === "number" ? `${value}ms` : "-";
+}
+
+function sourceText(source: HealthProbeSource | null | undefined) {
+  if (source === "manual") return "手动触发";
+  if (source === "event") return "事件触发";
+  if (source === "auto") return "自动探测";
+  return "未记录";
+}
+
+function runtimeStatusText(status: RuntimeStatus) {
+  if (status === "running") return "运行中";
+  if (status === "offline") return "离线";
+  if (status === "checking") return "探测中";
+  if (status === "disabled") return "已停用";
+  return "离线模式";
+}
+
+function resolveProbeFailureReason(reason?: string | null) {
+  const normalizedReason = reason?.trim();
+  return normalizedReason ? normalizedReason : "暂未返回失败原因";
+}
+
 export default function ClustersPage() {
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
@@ -194,6 +229,7 @@ export default function ClustersPage() {
   // Per-row action loading states
   const [togglingId, setTogglingId] = useState<string>("");
   const [healthResults, setHealthResults] = useState<Record<string, ClusterHealthListItem>>({});
+  const [healthDetailCluster, setHealthDetailCluster] = useState<ClusterTableRecord | null>(null);
 
   const queryKey = queryKeys.clusters.list({
     keyword: keyword.trim(),
@@ -221,6 +257,11 @@ export default function ClustersPage() {
       ),
     enabled: !isInitializing && Boolean(accessToken),
   });
+  const healthDetailQuery = useQuery({
+    queryKey: ["cluster-health-detail", healthDetailCluster?.id, accessToken],
+    queryFn: () => getClusterHealthDetail(healthDetailCluster?.id ?? "", accessToken),
+    enabled: Boolean(accessToken && healthDetailCluster?.id),
+  });
 
   const tableData = useMemo<ClusterTableRecord[]>(() => {
     // 已删除的集群完全不显示，直接从列表过滤掉
@@ -236,15 +277,18 @@ export default function ClustersPage() {
     const versionFilter = typeof tableFilters.kubernetesVersion === "string" ? tableFilters.kubernetesVersion.toLowerCase() : "";
     const stateFilter = typeof tableFilters.state === "string" ? tableFilters.state : "";
     const kubeconfigFilter = typeof tableFilters.hasKubeconfig === "string" ? tableFilters.hasKubeconfig : "";
+    const reasonFilter = typeof tableFilters.healthReason === "string" ? tableFilters.healthReason.toLowerCase() : "";
     return tableData.filter((row) => {
       const runtimeStatus = resolveRuntimeStatus(row, healthResults[row.id]).kind;
+      const health = healthResults[row.id];
       const matchName = nameFilter ? row.name.toLowerCase().includes(nameFilter) : true;
       const matchEnv = envFilter ? (row.environment ?? "").toLowerCase().includes(envFilter) : true;
       const matchProvider = providerFilter ? (row.provider ?? "").toLowerCase().includes(providerFilter) : true;
       const matchVersion = versionFilter ? (row.kubernetesVersion ?? "").toLowerCase().includes(versionFilter) : true;
       const matchState = stateFilter ? runtimeStatus === stateFilter : true;
       const matchKubeconfig = kubeconfigFilter ? String(Boolean(row.hasKubeconfig)) === kubeconfigFilter : true;
-      return matchName && matchEnv && matchProvider && matchVersion && matchState && matchKubeconfig;
+      const matchReason = reasonFilter ? (health?.reason ?? "").toLowerCase().includes(reasonFilter) : true;
+      return matchName && matchEnv && matchProvider && matchVersion && matchState && matchKubeconfig && matchReason;
     });
   }, [
     healthResults,
@@ -254,8 +298,28 @@ export default function ClustersPage() {
     tableFilters.kubernetesVersion,
     tableFilters.name,
     tableFilters.provider,
+    tableFilters.healthReason,
     tableFilters.state,
   ]);
+
+  const healthStats = useMemo(() => {
+    const total = visibleTableData.length;
+    const counts = visibleTableData.reduce(
+      (acc, row) => {
+        const status = resolveRuntimeStatus(row, healthResults[row.id]).kind;
+        acc[status] += 1;
+        return acc;
+      },
+      {
+        running: 0,
+        offline: 0,
+        checking: 0,
+        disabled: 0,
+        "offline-mode": 0,
+      } satisfies Record<RuntimeStatus, number>,
+    );
+    return { total, ...counts };
+  }, [healthResults, visibleTableData]);
 
   const refetchList = async () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.clusters.all });
@@ -419,6 +483,24 @@ export default function ClustersPage() {
     }
   };
 
+  const manualProbeMutation = useMutation({
+    mutationFn: (clusterId: string) => probeClusterHealth(clusterId, accessToken),
+    onSuccess: async (result, clusterId) => {
+      void message.success(
+        result.ok
+          ? `探测成功，耗时 ${result.latencyMs ?? 0}ms`
+          : `探测失败：${resolveProbeFailureReason(result.reason)}`,
+      );
+      await refreshHealthSummaries(tableData);
+      if (healthDetailCluster?.id === clusterId) {
+        await healthDetailQuery.refetch();
+      }
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : "手动探测失败");
+    },
+  });
+
   const columns: Array<HeadlampResourceTableColumn<ClusterTableRecord>> = [
     {
       title: "集群名称",
@@ -526,6 +608,43 @@ export default function ClustersPage() {
       },
     },
     {
+      title: "最近探测",
+      key: "checkedAt",
+      width: TABLE_COL_WIDTH.time,
+      render: (_: unknown, row) => {
+        const health = healthResults[row.id];
+        return health?.checkedAt ? (
+          <Tooltip title={health.isStale ? "结果已过期" : "结果新鲜"}>
+            <Typography.Text type={health.isStale ? "warning" : undefined}>
+              {formatHealthTime(health.checkedAt)}
+            </Typography.Text>
+          </Tooltip>
+        ) : (
+          <Typography.Text type="secondary">未探测</Typography.Text>
+        );
+      },
+    },
+    {
+      title: "探测延迟",
+      key: "latencyMs",
+      width: 110,
+      render: (_: unknown, row) => formatLatency(healthResults[row.id]?.latencyMs),
+    },
+    {
+      title: "探测来源",
+      key: "healthSource",
+      width: 120,
+      render: (_: unknown, row) => sourceText(healthResults[row.id]?.source),
+    },
+    {
+      title: "失败原因",
+      key: "healthReason",
+      width: 220,
+      filter: { type: "text", placeholder: "以失败原因过滤" },
+      ellipsis: true,
+      render: (_: unknown, row) => healthResults[row.id]?.reason || "-",
+    },
+    {
       title: "接入状态",
       key: "hasKubeconfig",
       width: 120,
@@ -572,6 +691,17 @@ export default function ClustersPage() {
               }
             : null,
           {
+            key: "healthDetail",
+            icon: <ClockCircleOutlined />,
+            label: "健康详情",
+          },
+          {
+            key: "probe",
+            icon: <ReloadOutlined />,
+            label: "立即探测",
+            disabled: row.state === "disabled" || row.hasKubeconfig === false,
+          },
+          {
             key: "edit",
             icon: <EditOutlined />,
             label: "编辑",
@@ -594,6 +724,14 @@ export default function ClustersPage() {
             menu={{
               items,
               onClick: ({ key }) => {
+                if (key === "healthDetail") {
+                  setHealthDetailCluster(row);
+                  return;
+                }
+                if (key === "probe") {
+                  manualProbeMutation.mutate(row.id);
+                  return;
+                }
                 if (key === "edit") {
                   openEditModal(row);
                   return;
@@ -631,7 +769,7 @@ export default function ClustersPage() {
               className={POD_ACTION_TRIGGER_CLASS}
               icon={<MoreOutlined />}
               aria-label="操作"
-              loading={togglingId === row.id}
+              loading={togglingId === row.id || (manualProbeMutation.isPending && manualProbeMutation.variables === row.id)}
             />
           </Dropdown>
         );
@@ -660,6 +798,39 @@ export default function ClustersPage() {
           </Col>
         </Row>
       </Card>
+
+      <Row gutter={[12, 12]}>
+        <Col xs={24} md={6} xl={4}>
+          <Card>
+            <Statistic title="集群总数" value={healthStats.total} />
+          </Card>
+        </Col>
+        <Col xs={24} md={6} xl={4}>
+          <Card>
+            <Statistic title="运行中" value={healthStats.running} styles={{ content: { color: "#389e0d" } }} />
+          </Card>
+        </Col>
+        <Col xs={24} md={6} xl={4}>
+          <Card>
+            <Statistic title="离线" value={healthStats.offline} styles={{ content: { color: "#cf1322" } }} />
+          </Card>
+        </Col>
+        <Col xs={24} md={6} xl={4}>
+          <Card>
+            <Statistic title="探测中" value={healthStats.checking} styles={{ content: { color: "#1677ff" } }} />
+          </Card>
+        </Col>
+        <Col xs={24} md={6} xl={4}>
+          <Card>
+            <Statistic title="离线模式" value={healthStats["offline-mode"]} />
+          </Card>
+        </Col>
+        <Col xs={24} md={6} xl={4}>
+          <Card>
+            <Statistic title="已停用" value={healthStats.disabled} />
+          </Card>
+        </Col>
+      </Row>
 
       <Card>
         <ResourceFilterToolbar>
@@ -701,6 +872,11 @@ export default function ClustersPage() {
           rowKey="key"
           tableKey="business.clusters"
           columns={columns as ColumnsType<ClusterTableRecord>}
+          columnSettings={[
+            { key: "latencyMs", visible: false },
+            { key: "healthSource", visible: false },
+            { key: "healthReason", visible: false },
+          ]}
           dataSource={visibleTableData}
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -731,8 +907,80 @@ export default function ClustersPage() {
         onClose={() => setDetailOpen(false)}
         token={accessToken ?? undefined}
         cluster={selectedCluster}
+        runtimeStatus={
+          selectedCluster
+            ? resolveRuntimeStatus(selectedCluster, healthResults[selectedCluster.id]).kind
+            : undefined
+        }
         onRefreshRequest={() => void refetchList()}
       />
+
+      <Drawer
+        title={healthDetailCluster ? `健康详情 · ${healthDetailCluster.name}` : "健康详情"}
+        open={Boolean(healthDetailCluster)}
+        size="large"
+        onClose={() => setHealthDetailCluster(null)}
+        styles={{ wrapper: { width: "min(100vw, 840px)" } }}
+        extra={
+          healthDetailCluster ? (
+            <Button
+              icon={<ReloadOutlined />}
+              loading={manualProbeMutation.isPending && manualProbeMutation.variables === healthDetailCluster.id}
+              disabled={healthDetailCluster.state === "disabled" || healthDetailCluster.hasKubeconfig === false}
+              onClick={() => manualProbeMutation.mutate(healthDetailCluster.id)}
+            >
+              立即探测
+            </Button>
+          ) : null
+        }
+      >
+        {healthDetailQuery.isLoading ? <Typography.Text>加载中...</Typography.Text> : null}
+        {healthDetailQuery.isError ? (
+          <Alert
+            type="error"
+            showIcon
+            message="健康详情加载失败"
+            description={
+              healthDetailQuery.error instanceof Error ? healthDetailQuery.error.message : "请求失败，请稍后重试"
+            }
+          />
+        ) : null}
+        {healthDetailQuery.data ? (
+          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+            <Descriptions bordered size="small" column={1}>
+              <Descriptions.Item label="集群">{healthDetailQuery.data.summary.clusterName}</Descriptions.Item>
+              <Descriptions.Item label="运行状态">
+                {runtimeStatusText(healthDetailQuery.data.summary.runtimeStatus)}
+              </Descriptions.Item>
+              <Descriptions.Item label="最近探测">
+                {formatHealthTime(healthDetailQuery.data.summary.checkedAt)}
+              </Descriptions.Item>
+              <Descriptions.Item label="延迟">{formatLatency(healthDetailQuery.data.summary.latencyMs)}</Descriptions.Item>
+              <Descriptions.Item label="来源">{sourceText(healthDetailQuery.data.summary.source)}</Descriptions.Item>
+              <Descriptions.Item label="原因">{healthDetailQuery.data.summary.reason || "-"}</Descriptions.Item>
+              <Descriptions.Item label="超时预算">
+                {formatLatency(healthDetailQuery.data.detail.timeoutMs)}
+              </Descriptions.Item>
+              <Descriptions.Item label="连续失败次数">
+                {healthDetailQuery.data.detail.failureCount ?? "-"}
+              </Descriptions.Item>
+            </Descriptions>
+            <Card size="small" title="诊断详情">
+              <Typography.Paragraph
+                style={{
+                  marginBottom: 0,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-all",
+                  fontFamily: "monospace",
+                  fontSize: 12,
+                }}
+              >
+                {JSON.stringify(healthDetailQuery.data.detail.payload ?? {}, null, 2)}
+              </Typography.Paragraph>
+            </Card>
+          </Space>
+        ) : null}
+      </Drawer>
 
       <Modal
         title={editingCluster ? "编辑集群" : "添加集群"}

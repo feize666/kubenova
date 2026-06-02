@@ -20,7 +20,7 @@ import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-na
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
-import { createNetworkResource, deleteNetworkResource, getNetworkResources, type CreateNetworkResourcePayload, type NetworkResource } from "@/lib/api/network";
+import { applyNetworkResourceYaml, createNetworkResource, deleteNetworkResource, getNetworkResources, type CreateNetworkResourcePayload, type NetworkResource } from "@/lib/api/network";
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
@@ -33,6 +33,8 @@ type NetworkPolicyResource = NetworkResource & {
     egress?: Array<Record<string, unknown>>;
   };
 };
+
+type NamespacePeerDirection = "from" | "to";
 
 interface NetworkPolicyFormValues {
   name: string;
@@ -54,6 +56,38 @@ function textMatches(value: unknown, filterValue: string) {
   return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
 }
 
+function getSinglePodSelectorLabel(selector: Record<string, unknown> | undefined): [string, string] | null | undefined {
+  if (!selector || Object.keys(selector).length === 0) return undefined;
+  const matchLabels = selector.matchLabels;
+  if (!matchLabels || typeof matchLabels !== "object" || Array.isArray(matchLabels)) return null;
+  const entries = Object.entries(matchLabels as Record<string, unknown>);
+  if (entries.length !== 1 || typeof entries[0][1] !== "string") return null;
+  return [entries[0][0], entries[0][1]];
+}
+
+function getSingleNamespacePeer(rules: Array<Record<string, unknown>> | undefined, direction: NamespacePeerDirection) {
+  if (!rules || rules.length === 0) return undefined;
+  if (rules.length !== 1) return null;
+  const rule = rules[0];
+  const peers = rule[direction];
+  if (!Array.isArray(peers) || peers.length !== 1) return null;
+  const peer = peers[0];
+  if (!peer || typeof peer !== "object" || Array.isArray(peer)) return null;
+  const namespaceSelector = (peer as Record<string, unknown>).namespaceSelector;
+  if (!namespaceSelector || typeof namespaceSelector !== "object" || Array.isArray(namespaceSelector)) return null;
+  const matchLabels = (namespaceSelector as Record<string, unknown>).matchLabels;
+  if (!matchLabels || typeof matchLabels !== "object" || Array.isArray(matchLabels)) return null;
+  const namespaceName = (matchLabels as Record<string, unknown>)["kubernetes.io/metadata.name"];
+  return typeof namespaceName === "string" ? namespaceName : null;
+}
+
+function isSimpleNetworkPolicySpec(spec: NetworkPolicyResource["spec"]) {
+  const podLabel = getSinglePodSelectorLabel(spec?.podSelector);
+  const ingressNamespace = getSingleNamespacePeer(spec?.ingress, "from");
+  const egressNamespace = getSingleNamespacePeer(spec?.egress, "to");
+  return podLabel !== null && ingressNamespace !== null && egressNamespace !== null;
+}
+
 export default function NetworkPolicyPage() {
   const searchParams = useSearchParams();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
@@ -70,6 +104,7 @@ export default function NetworkPolicyPage() {
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<NetworkPolicyResource | null>(null);
   const [form] = Form.useForm<NetworkPolicyFormValues>();
   const {
     sortBy,
@@ -186,6 +221,111 @@ export default function NetworkPolicyPage() {
       void message.error(err instanceof Error ? err.message : "删除失败，请重试");
     },
   });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ item, values }: { item: NetworkPolicyResource; values: NetworkPolicyFormValues }) =>
+      applyNetworkResourceYaml(
+        {
+          clusterId: item.clusterId,
+          namespace: item.namespace,
+          kind: "NetworkPolicy",
+          name: item.name,
+          yaml: JSON.stringify(
+            {
+              apiVersion: "networking.k8s.io/v1",
+              kind: "NetworkPolicy",
+              metadata: {
+                name: item.name,
+                namespace: item.namespace,
+                ...(item.labels ? { labels: item.labels } : {}),
+              },
+              spec: {
+                podSelector:
+                  values.podSelectorKey && values.podSelectorValue
+                    ? { matchLabels: { [values.podSelectorKey]: values.podSelectorValue } }
+                    : {},
+                policyTypes: values.policyTypes ?? ["Ingress"],
+                ingress: values.ingressFromNamespace?.trim()
+                  ? [
+                      {
+                        from: [
+                          {
+                            namespaceSelector: {
+                              matchLabels: {
+                                "kubernetes.io/metadata.name": values.ingressFromNamespace.trim(),
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    ]
+                  : [],
+                egress: values.egressToNamespace?.trim()
+                  ? [
+                      {
+                        to: [
+                          {
+                            namespaceSelector: {
+                              matchLabels: {
+                                "kubernetes.io/metadata.name": values.egressToNamespace.trim(),
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    ]
+                  : [],
+              },
+            },
+            null,
+            2,
+          ),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async () => {
+      void message.success("NetworkPolicy 更新成功");
+      setModalOpen(false);
+      setEditingItem(null);
+      form.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["network", "NetworkPolicy"] });
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "更新失败，请重试");
+    },
+  });
+
+  const handleOpenCreate = () => {
+    setEditingItem(null);
+    form.resetFields();
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (item: NetworkPolicyResource) => {
+    if (!isSimpleNetworkPolicySpec(item.spec)) {
+      void message.info("复杂 NetworkPolicy 请使用 YAML 编辑");
+      setYamlTarget({
+        clusterId: item.clusterId,
+        namespace: item.namespace,
+        kind: "NetworkPolicy",
+        name: item.name,
+      });
+      return;
+    }
+    const podLabel = getSinglePodSelectorLabel(item.spec?.podSelector);
+    setEditingItem(item);
+    form.setFieldsValue({
+      name: item.name,
+      namespace: item.namespace,
+      clusterId: item.clusterId,
+      podSelectorKey: podLabel?.[0],
+      podSelectorValue: podLabel?.[1],
+      policyTypes: item.spec?.policyTypes ?? ["Ingress"],
+      ingressFromNamespace: getSingleNamespacePeer(item.spec?.ingress, "from") ?? "",
+      egressToNamespace: getSingleNamespacePeer(item.spec?.egress, "to") ?? "",
+    });
+    setModalOpen(true);
+  };
 
   const tableData = useMemo(
     () =>
@@ -312,6 +452,7 @@ export default function NetworkPolicyPage() {
               name: row.name,
             })
           }
+          extraActions={[{ key: "edit", label: "编辑", onClick: () => handleOpenEdit(row) }]}
           onDelete={() => deleteMutation.mutate(row.id)}
         />
       ),
@@ -323,6 +464,10 @@ export default function NetworkPolicyPage() {
     try {
       values = await form.validateFields();
     } catch {
+      return;
+    }
+    if (editingItem) {
+      updateMutation.mutate({ item: editingItem, values });
       return;
     }
     createMutation.mutate({
@@ -378,7 +523,7 @@ export default function NetworkPolicyPage() {
           embedded
           description="管理 Kubernetes NetworkPolicy 访问控制策略。"
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建NetworkPolicy" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建NetworkPolicy" onClick={handleOpenCreate} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}
@@ -448,27 +593,28 @@ export default function NetworkPolicyPage() {
       </Card>
 
       <Modal
-        title="添加 NetworkPolicy"
+        title={editingItem ? "编辑 NetworkPolicy" : "添加 NetworkPolicy"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setEditingItem(null);
           form.resetFields();
         }}
-        okText="创建"
+        okText={editingItem ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item label="策略名称" name="name" rules={[{ required: true, message: "请输入 NetworkPolicy 名称" }]}>
-            <Input placeholder="例如：allow-ingress" />
+            <Input disabled={Boolean(editingItem)} placeholder="例如：allow-ingress" />
           </Form.Item>
           <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
-            <Input placeholder="例如：default" />
+            <Input disabled={Boolean(editingItem)} placeholder="例如：default" />
           </Form.Item>
           <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
-            <Select placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} showSearch filterOption={(input, option) => (option?.label ?? "").toLowerCase().includes(input.toLowerCase())} />
+            <Select disabled={Boolean(editingItem)} placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} showSearch filterOption={(input, option) => (option?.label ?? "").toLowerCase().includes(input.toLowerCase())} />
           </Form.Item>
           <Form.Item label="Pod 标签键" name="podSelectorKey">
             <Input placeholder="例如：app" />

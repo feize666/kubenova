@@ -80,7 +80,7 @@ export default function LoginPage() {
   );
 
   useEffect(() => {
-    if (isAuthenticated && returnTo) {
+    if (isAuthenticated) {
       router.replace(returnTo || "/dashboard");
     }
   }, [isAuthenticated, returnTo, router]);

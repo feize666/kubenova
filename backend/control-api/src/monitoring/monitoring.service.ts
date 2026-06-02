@@ -196,6 +196,92 @@ export interface AlertsExportResult {
   data: string | Buffer;
 }
 
+export type ObservabilityEntityScope =
+  | 'cluster'
+  | 'namespace'
+  | 'workload'
+  | 'service'
+  | 'pod'
+  | 'node'
+  | 'network';
+
+export interface ObservabilitySourceStatus {
+  key: 'metrics' | 'logs' | 'traces' | 'events' | 'alerts' | 'slo';
+  label: string;
+  available: boolean;
+  degraded: boolean;
+  note: string;
+  deepLink?: string;
+}
+
+export interface ObservabilityEntityHealth {
+  scope: ObservabilityEntityScope;
+  label: string;
+  status: 'healthy' | 'warning' | 'critical' | 'unavailable';
+  total: number;
+  warning: number;
+  critical: number;
+  note?: string;
+  detailPath?: string;
+  signals: Record<
+    'metrics' | 'logs' | 'traces' | 'events' | 'alerts',
+    'available' | 'degraded' | 'unavailable'
+  >;
+  slo: {
+    targetPercent: number;
+    burnRate: number;
+    errorBudgetRemainingPercent: number;
+    status: 'healthy' | 'at-risk' | 'exhausted' | 'unavailable';
+  };
+  alertOwner: string;
+  runbookUrl: string | null;
+  notificationStatus: 'not-configured' | 'ready' | 'degraded';
+  deepLinks: Array<{
+    key: string;
+    label: string;
+    url: string | null;
+    available: boolean;
+  }>;
+}
+
+export interface ObservabilitySignalPanel {
+  key: 'metrics' | 'logs' | 'traces' | 'events' | 'alerts' | 'slo';
+  title: string;
+  status: 'available' | 'degraded' | 'unavailable';
+  summary: string;
+  updatedAt: string;
+  detailPath?: string;
+}
+
+export interface ObservabilitySummaryResponse {
+  range: MonitoringRange;
+  timestamp: string;
+  timeRange: {
+    from: string;
+    to: string;
+  };
+  healthScore: number;
+  activeAlerts: {
+    critical: number;
+    warning: number;
+    total: number;
+    source: AlertsResponse['dataSource'];
+    degraded: boolean;
+  };
+  sourceStatus: ObservabilitySourceStatus[];
+  entities: ObservabilityEntityHealth[];
+  signalPanels: ObservabilitySignalPanel[];
+  recentEvents: MonitoringEventItem[];
+  externalLinks: Array<{
+    key: string;
+    label: string;
+    url: string | null;
+    available: boolean;
+  }>;
+  degraded: boolean;
+  note?: string;
+}
+
 export interface CreateAlertRuleRequest {
   name: string;
   severity: 'critical' | 'warning' | 'info';
@@ -212,6 +298,9 @@ export interface UpdateAlertRuleRequest {
 
 @Injectable()
 export class MonitoringService {
+  private readonly liveMetricsFanoutLimit = 4;
+  private readonly liveMetricsTimeoutMs = 2500;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly clustersService: ClustersService,
@@ -285,6 +374,56 @@ export class MonitoringService {
     },
   ];
 
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    timeoutValue: T,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((resolve) => {
+          timer = setTimeout(() => resolve(timeoutValue), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  private async runBounded<TInput, TOutput>(
+    items: TInput[],
+    limit: number,
+    worker: (item: TInput) => Promise<TOutput>,
+  ): Promise<TOutput[]> {
+    const results: TOutput[] = [];
+    for (let index = 0; index < items.length; index += limit) {
+      const batch = items.slice(index, index + limit);
+      results.push(...(await Promise.all(batch.map((item) => worker(item)))));
+    }
+    return results;
+  }
+
+  private buildUnavailableLiveSnapshot(
+    clusterId: string,
+    note: string,
+  ): ClusterLiveUsageSnapshot {
+    return {
+      capturedAt: new Date().toISOString(),
+      source: 'none',
+      available: false,
+      freshnessWindowMs: 60_000,
+      cpuUsage: null,
+      memoryUsage: null,
+      pods: [],
+      history: [],
+      note: `cluster ${clusterId}: ${note}`,
+    };
+  }
+
   async getOverview(
     timeFilter: InspectionTimeFilter,
   ): Promise<MonitoringOverviewResponse> {
@@ -349,14 +488,20 @@ export class MonitoringService {
       where: { deletedAt: null, status: { not: 'deleted' } },
       select: { id: true },
     });
-    const liveSnapshots = await Promise.all(
-      activeClusters.map(async (row) => {
+    const liveSnapshots = await this.runBounded(
+      activeClusters,
+      this.liveMetricsFanoutLimit,
+      async (row) => {
         const kubeconfig = await this.clustersService.getKubeconfig(row.id);
         if (!kubeconfig) {
           return null;
         }
-        return this.liveMetricsService.getClusterSnapshot(row.id, kubeconfig);
-      }),
+        return this.withTimeout(
+          this.liveMetricsService.getClusterSnapshot(row.id, kubeconfig),
+          this.liveMetricsTimeoutMs,
+          this.buildUnavailableLiveSnapshot(row.id, 'live metrics timeout'),
+        );
+      },
     );
     const availableSnapshots = liveSnapshots.filter((snapshot) =>
       Boolean(snapshot?.available),
@@ -412,6 +557,405 @@ export class MonitoringService {
       degraded,
       note,
       liveSnapshot: availableSnapshots[0] ?? undefined,
+    };
+  }
+
+  async getObservabilitySummary(
+    timeFilter: InspectionTimeFilter,
+  ): Promise<ObservabilitySummaryResponse> {
+    const window = this.resolveTimeWindow(timeFilter, '24h');
+    const [overview, alerts, events, inspection] = await Promise.all([
+      this.getOverview(window),
+      this.getAlerts({
+        page: 1,
+        pageSize: 8,
+        status: 'firing',
+        range: window.range,
+        from: window.from,
+        to: window.to,
+      }),
+      this.getEvents(window),
+      this.getClusterInspection(undefined, undefined, window),
+    ]);
+    const [
+      namespaceTotal,
+      workloadTotal,
+      serviceTotal,
+      podTotal,
+      networkTotal,
+    ] = await Promise.all([
+      this.prisma.namespaceRecord.count({
+        where: {
+          state: { not: 'deleted' },
+          cluster: { deletedAt: null, status: { not: 'deleted' } },
+        },
+      }),
+      this.prisma.workloadRecord.count({
+        where: {
+          state: { not: 'deleted' },
+          cluster: { deletedAt: null, status: { not: 'deleted' } },
+        },
+      }),
+      this.prisma.networkResource.count({
+        where: {
+          state: { not: 'deleted' },
+          kind: 'Service',
+          cluster: { deletedAt: null, status: { not: 'deleted' } },
+        },
+      }),
+      this.prisma.workloadRecord.count({
+        where: {
+          state: { not: 'deleted' },
+          kind: 'Pod',
+          cluster: { deletedAt: null, status: { not: 'deleted' } },
+        },
+      }),
+      this.prisma.networkResource.count({
+        where: {
+          state: { not: 'deleted' },
+          cluster: { deletedAt: null, status: { not: 'deleted' } },
+        },
+      }),
+    ]);
+    const criticalAlerts = alerts.items.filter(
+      (item) => item.severity === 'critical',
+    ).length;
+    const warningAlerts = alerts.items.filter(
+      (item) => item.severity === 'warning',
+    ).length;
+    const inspectionByCategory = new Map<
+      InspectionIssue['category'],
+      { warning: number; critical: number }
+    >();
+    for (const item of inspection.items) {
+      const current = inspectionByCategory.get(item.category) ?? {
+        warning: 0,
+        critical: 0,
+      };
+      if (item.severity === 'critical') {
+        current.critical += 1;
+      } else if (item.severity === 'warning') {
+        current.warning += 1;
+      }
+      inspectionByCategory.set(item.category, current);
+    }
+
+    const hasMetrics = overview.usageDataSource === 'metrics-server';
+    const hasAlertSource = alerts.dataSource === 'monitoring-alert';
+    const externalLinkByKey = {
+      metrics: process.env.OBSERVABILITY_GRAFANA_URL,
+      logs: process.env.OBSERVABILITY_LOGS_URL,
+      traces: process.env.OBSERVABILITY_TRACES_URL,
+      alerts: process.env.OBSERVABILITY_ALERTS_URL,
+      slo: process.env.OBSERVABILITY_SLO_URL,
+      runbook: process.env.OBSERVABILITY_RUNBOOK_URL,
+    };
+    const buildSignals = (): ObservabilityEntityHealth['signals'] => ({
+      metrics: hasMetrics ? 'available' : 'degraded',
+      logs: 'available',
+      traces: externalLinkByKey.traces ? 'available' : 'unavailable',
+      events: events.degraded ? 'degraded' : 'available',
+      alerts: alerts.degraded ? 'degraded' : 'available',
+    });
+    const buildSlo = (
+      entityCritical: number,
+      entityWarning: number,
+    ): ObservabilityEntityHealth['slo'] => {
+      const burnRate = Math.min(10, entityCritical * 2 + entityWarning * 0.5);
+      const remaining = Math.max(0, Math.round(100 - burnRate * 10));
+      return {
+        targetPercent: 99.9,
+        burnRate,
+        errorBudgetRemainingPercent: remaining,
+        status: externalLinkByKey.slo
+          ? remaining <= 0
+            ? 'exhausted'
+            : remaining < 30
+              ? 'at-risk'
+              : 'healthy'
+          : 'unavailable',
+      };
+    };
+    const buildEntityDeepLinks = (scope: ObservabilityEntityScope) => [
+      {
+        key: 'metrics',
+        label: 'Grafana',
+        url: externalLinkByKey.metrics
+          ? `${externalLinkByKey.metrics}?var-scope=${scope}&from=${
+              window.from?.toISOString() ?? ''
+            }&to=${window.to?.toISOString() ?? ''}`
+          : null,
+        available: Boolean(externalLinkByKey.metrics),
+      },
+      {
+        key: 'logs',
+        label: 'Logs',
+        url: externalLinkByKey.logs ?? null,
+        available: Boolean(externalLinkByKey.logs),
+      },
+      {
+        key: 'traces',
+        label: 'Traces',
+        url: externalLinkByKey.traces ?? null,
+        available: Boolean(externalLinkByKey.traces),
+      },
+      {
+        key: 'alerts',
+        label: 'Alertmanager',
+        url: externalLinkByKey.alerts ?? null,
+        available: Boolean(externalLinkByKey.alerts),
+      },
+      {
+        key: 'runbook',
+        label: 'Runbook',
+        url: externalLinkByKey.runbook ?? null,
+        available: Boolean(externalLinkByKey.runbook),
+      },
+    ];
+
+    const buildEntity = (
+      scope: ObservabilityEntityScope,
+      label: string,
+      total: number,
+      category?: InspectionIssue['category'],
+      detailPath?: string,
+    ): ObservabilityEntityHealth => {
+      const categoryStats = category
+        ? inspectionByCategory.get(category)
+        : undefined;
+      const warning = categoryStats?.warning ?? 0;
+      const critical = categoryStats?.critical ?? 0;
+      return {
+        scope,
+        label,
+        total,
+        warning,
+        critical,
+        status:
+          total === 0
+            ? 'unavailable'
+            : critical > 0
+              ? 'critical'
+              : warning > 0
+                ? 'warning'
+                : 'healthy',
+        detailPath,
+        signals: buildSignals(),
+        slo: buildSlo(critical, warning),
+        alertOwner: process.env.OBSERVABILITY_ALERT_OWNER ?? 'platform-sre',
+        runbookUrl: externalLinkByKey.runbook ?? null,
+        notificationStatus: externalLinkByKey.alerts
+          ? 'ready'
+          : 'not-configured',
+        deepLinks: buildEntityDeepLinks(scope),
+      };
+    };
+
+    const sourceStatus: ObservabilitySourceStatus[] = [
+      {
+        key: 'metrics',
+        label: 'Metrics',
+        available: hasMetrics,
+        degraded: !hasMetrics,
+        note: hasMetrics
+          ? 'metrics-server 数据可用'
+          : '未检测到 metrics-server live metrics，指标面板降级。',
+        deepLink: externalLinkByKey.metrics,
+      },
+      {
+        key: 'logs',
+        label: 'Logs',
+        available: true,
+        degraded: false,
+        note: 'Kubernetes Pod 日志查询入口可用。',
+        deepLink: externalLinkByKey.logs,
+      },
+      {
+        key: 'traces',
+        label: 'Traces',
+        available: Boolean(externalLinkByKey.traces),
+        degraded: !externalLinkByKey.traces,
+        note: externalLinkByKey.traces
+          ? 'Trace 后端深链已配置。'
+          : '未配置 Trace 后端深链，链路面板显示不可用。',
+        deepLink: externalLinkByKey.traces,
+      },
+      {
+        key: 'events',
+        label: 'Events',
+        available: events.total > 0,
+        degraded: events.degraded,
+        note: events.note ?? '监控事件源可用。',
+      },
+      {
+        key: 'alerts',
+        label: 'Alerts',
+        available: hasAlertSource,
+        degraded: alerts.degraded,
+        note: alerts.note ?? '告警源可用。',
+        deepLink: externalLinkByKey.alerts,
+      },
+      {
+        key: 'slo',
+        label: 'SLO',
+        available: Boolean(externalLinkByKey.slo),
+        degraded: !externalLinkByKey.slo,
+        note: externalLinkByKey.slo
+          ? 'SLO 后端深链已配置。'
+          : '未配置 SLO 后端，SLO 面板显示不可用。',
+        deepLink: externalLinkByKey.slo,
+      },
+    ];
+
+    const clusterCategory = inspectionByCategory.get('cluster');
+    const clusterIssues =
+      (clusterCategory?.warning ?? 0) + (clusterCategory?.critical ?? 0);
+    const entities: ObservabilityEntityHealth[] = [
+      buildEntity(
+        'cluster',
+        'Cluster',
+        overview.clusterTotal,
+        'cluster',
+        '/observability/cluster-health',
+      ),
+      buildEntity(
+        'namespace',
+        'Namespace',
+        namespaceTotal,
+        'namespace',
+        '/namespaces',
+      ),
+      buildEntity(
+        'workload',
+        'Workload',
+        workloadTotal,
+        'workload',
+        '/workloads/pods',
+      ),
+      buildEntity(
+        'service',
+        'Service',
+        serviceTotal,
+        'network',
+        '/network/services',
+      ),
+      buildEntity('pod', 'Pod', podTotal, 'workload', '/workloads/pods'),
+      buildEntity('node', 'Node', 0, 'cluster', '/clusters/nodes'),
+      buildEntity(
+        'network',
+        'Network',
+        networkTotal,
+        'network',
+        '/network/services',
+      ),
+    ].map((entity) =>
+      entity.scope === 'cluster'
+        ? {
+            ...entity,
+            warning:
+              overview.clusterTotal - overview.clusterHealthy + clusterIssues,
+          }
+        : entity,
+    );
+
+    const signalPanels: ObservabilitySignalPanel[] = [
+      {
+        key: 'metrics',
+        title: '指标',
+        status: hasMetrics ? 'available' : 'degraded',
+        summary: hasMetrics
+          ? `CPU ${overview.cpuUsagePercent}% / 内存 ${overview.memoryUsagePercent}%`
+          : '指标源不可用，资源页保留静态状态。',
+        updatedAt: overview.timestamp,
+      },
+      {
+        key: 'logs',
+        title: '日志',
+        status: 'available',
+        summary: 'Pod 日志查询与日志流入口可用。',
+        updatedAt: overview.timestamp,
+        detailPath: '/logs',
+      },
+      {
+        key: 'traces',
+        title: '链路',
+        status: externalLinkByKey.traces
+          ? 'available'
+          : 'unavailable',
+        summary: externalLinkByKey.traces
+          ? 'Trace 后端深链已配置。'
+          : '未配置 Trace 后端。',
+        updatedAt: overview.timestamp,
+      },
+      {
+        key: 'events',
+        title: '事件',
+        status: events.degraded ? 'degraded' : 'available',
+        summary: `${events.total} 条事件，来源 ${events.dataSource}`,
+        updatedAt: events.timestamp,
+      },
+      {
+        key: 'alerts',
+        title: '告警',
+        status: alerts.degraded ? 'degraded' : 'available',
+        summary: `${alerts.total} 条活跃告警，critical ${criticalAlerts} / warning ${warningAlerts}`,
+        updatedAt: alerts.timestamp,
+      },
+      {
+        key: 'slo',
+        title: 'SLO',
+        status: externalLinkByKey.slo
+          ? 'available'
+          : 'unavailable',
+        summary: externalLinkByKey.slo
+          ? 'SLO 后端深链已配置。'
+          : '未配置 SLO 后端。',
+        updatedAt: overview.timestamp,
+      },
+    ];
+
+    const degraded =
+      overview.degraded ||
+      alerts.degraded ||
+      events.degraded ||
+      sourceStatus.some((item) => item.degraded);
+
+    return {
+      range: window.range,
+      timestamp: new Date().toISOString(),
+      timeRange: {
+        from: (window.from ?? new Date()).toISOString(),
+        to: (window.to ?? new Date()).toISOString(),
+      },
+      healthScore: overview.healthScore,
+      activeAlerts: {
+        critical: criticalAlerts,
+        warning: warningAlerts,
+        total: alerts.total,
+        source: alerts.dataSource,
+        degraded: alerts.degraded,
+      },
+      sourceStatus,
+      entities,
+      signalPanels,
+      recentEvents: events.items.slice(0, 8),
+      externalLinks: sourceStatus.map((item) => ({
+        key: item.key,
+        label: item.label,
+        url: item.deepLink ?? null,
+        available: Boolean(item.deepLink),
+      })),
+      degraded,
+      note: [
+        overview.note,
+        alerts.note,
+        events.note,
+        degraded
+          ? '部分数据源不可用；页面按数据源隔离降级，其他面板继续可用。'
+          : undefined,
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   }
 

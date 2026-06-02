@@ -42,9 +42,11 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import {
+  bindPersistentVolumeClaim,
   createStorageResource,
   deleteStorageResource,
   getStorageResources,
+  resizePersistentVolumeClaim,
   type CreateStorageResourcePayload,
   type StorageResource,
 } from "@/lib/api/storage";
@@ -96,12 +98,28 @@ function textMatches(value: unknown, filterValue: string) {
   return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
 }
 
+function readSpecString(resource: StorageResource, key: string) {
+  if (!resource.spec || typeof resource.spec !== "object" || Array.isArray(resource.spec)) {
+    return "";
+  }
+  const value = resource.spec[key];
+  return typeof value === "string" ? value : "";
+}
+
 interface PvcFormValues {
   name: string;
   namespace: string;
   clusterId: string;
   capacity: string;
   storageClass: string;
+}
+
+interface PvcResizeFormValues {
+  capacity: string;
+}
+
+interface PvcBindFormValues {
+  volumeName: string;
 }
 
 export default function PvcPage() {
@@ -132,8 +150,12 @@ export default function PvcPage() {
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
+  const [resizeTarget, setResizeTarget] = useState<StorageResource | null>(null);
+  const [bindTarget, setBindTarget] = useState<StorageResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<PvcFormValues>();
+  const [resizeForm] = Form.useForm<PvcResizeFormValues>();
+  const [bindForm] = Form.useForm<PvcBindFormValues>();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
@@ -203,6 +225,60 @@ export default function PvcPage() {
     },
   });
 
+  const resizeMutation = useMutation({
+    mutationFn: (values: PvcResizeFormValues) => {
+      if (!resizeTarget) {
+        throw new Error("未选择 PVC");
+      }
+      return resizePersistentVolumeClaim(
+        {
+          clusterId: resizeTarget.clusterId,
+          namespace: resizeTarget.namespace || "default",
+          name: resizeTarget.name,
+          capacity: values.capacity,
+        },
+        accessToken || undefined,
+      );
+    },
+    onSuccess: async () => {
+      void message.success("PVC 扩容更新成功");
+      setResizeTarget(null);
+      resizeForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["storage", "PVC"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "扩容更新失败，请重试");
+    },
+  });
+
+  const bindMutation = useMutation({
+    mutationFn: (values: PvcBindFormValues) => {
+      if (!bindTarget) {
+        throw new Error("未选择 PVC");
+      }
+      return bindPersistentVolumeClaim(
+        {
+          clusterId: bindTarget.clusterId,
+          namespace: bindTarget.namespace || "default",
+          name: bindTarget.name,
+          volumeName: values.volumeName,
+        },
+        accessToken || undefined,
+      );
+    },
+    onSuccess: async () => {
+      void message.success("PVC 绑定更新成功");
+      setBindTarget(null);
+      bindForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["storage", "PVC"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "绑定更新失败，请重试");
+    },
+  });
+
   const handleModalSubmit = async () => {
     let values: PvcFormValues;
     try {
@@ -218,6 +294,36 @@ export default function PvcPage() {
       capacity: values.capacity,
       storageClass: values.storageClass,
     });
+  };
+
+  const handleOpenResize = (row: StorageResource) => {
+    setResizeTarget(row);
+    resizeForm.setFieldsValue({ capacity: row.capacity ?? "" });
+  };
+
+  const handleResizeSubmit = async () => {
+    let values: PvcResizeFormValues;
+    try {
+      values = await resizeForm.validateFields();
+    } catch {
+      return;
+    }
+    resizeMutation.mutate(values);
+  };
+
+  const handleOpenBind = (row: StorageResource) => {
+    setBindTarget(row);
+    bindForm.setFieldsValue({ volumeName: readSpecString(row, "volumeName") });
+  };
+
+  const handleBindSubmit = async () => {
+    let values: PvcBindFormValues;
+    try {
+      values = await bindForm.validateFields();
+    } catch {
+      return;
+    }
+    bindMutation.mutate(values);
   };
 
   const clusterOptions = (clustersQuery.data?.items ?? []).map((c) => ({
@@ -366,13 +472,11 @@ export default function PvcPage() {
               items,
               onClick: ({ key }) => {
                 if (key === "expand") {
-                  void message.info("请在 YAML 中调整 resources.requests.storage 完成 PVC 扩容。");
-                  setYamlTarget(identity);
+                  handleOpenResize(row);
                   return;
                 }
                 if (key === "bind") {
-                  void message.info("请在 YAML 中配置 volumeName 完成 PVC 绑定。");
-                  setYamlTarget(identity);
+                  handleOpenBind(row);
                   return;
                 }
                 if (key === "yaml") {
@@ -530,6 +634,52 @@ export default function PvcPage() {
             rules={[{ required: true, message: "请输入存储类" }]}
           >
             <Input placeholder="例如：standard" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={`扩容 PVC · ${resizeTarget?.name ?? ""}`}
+        open={Boolean(resizeTarget)}
+        onOk={() => void handleResizeSubmit()}
+        onCancel={() => {
+          setResizeTarget(null);
+          resizeForm.resetFields();
+        }}
+        okText="提交"
+        cancelText="取消"
+        confirmLoading={resizeMutation.isPending}
+        destroyOnHidden
+      >
+        <Form form={resizeForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            label="目标容量"
+            name="capacity"
+            rules={[{ required: true, message: "请输入目标容量" }]}
+          >
+            <Input placeholder="例如：20Gi" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={`绑定 PVC · ${bindTarget?.name ?? ""}`}
+        open={Boolean(bindTarget)}
+        onOk={() => void handleBindSubmit()}
+        onCancel={() => {
+          setBindTarget(null);
+          bindForm.resetFields();
+        }}
+        okText="提交"
+        cancelText="取消"
+        confirmLoading={bindMutation.isPending}
+        destroyOnHidden
+      >
+        <Form form={bindForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            label="PV 名称"
+            name="volumeName"
+            rules={[{ required: true, message: "请输入 PV 名称" }]}
+          >
+            <Input placeholder="例如：my-pv-001" />
           </Form.Item>
         </Form>
       </Modal>

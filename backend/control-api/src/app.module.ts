@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { AiAssistantModule } from './ai-assistant/ai-assistant.module';
+import { AiopsModule } from './aiops/aiops.module';
 import { AutoscalingModule } from './autoscaling/autoscaling.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -37,6 +38,7 @@ import { DatabaseModule } from './platform/database/database.module';
     }),
     DatabaseModule,
     AiAssistantModule,
+    AiopsModule,
     AutoscalingModule,
     AuthModule,
     ClustersModule,

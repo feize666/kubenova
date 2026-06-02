@@ -26,7 +26,12 @@ describe('NetworkService list online gate', () => {
     const clusterEventSyncService = {
       consumeClusterDirty: jest.fn().mockReturnValue(false),
     } as unknown as ClusterEventSyncService;
-    const k8sClientService = {} as K8sClientService;
+    const k8sClientService = {
+      getCoreApi: jest.fn(),
+      getDiscoveryApi: jest.fn(),
+      getNetworkingApi: jest.fn(),
+      getCustomObjectsApi: jest.fn(),
+    } as unknown as K8sClientService;
     const service = new NetworkService(
       networkRepository,
       clusterHealthService,
@@ -35,7 +40,13 @@ describe('NetworkService list online gate', () => {
       clusterEventSyncService,
       k8sClientService,
     );
-    return { service, networkRepository, clusterHealthService };
+    return {
+      service,
+      networkRepository,
+      clusterHealthService,
+      clustersService,
+      k8sClientService,
+    };
   }
 
   it('returns empty when no readable clusters', async () => {
@@ -91,6 +102,113 @@ describe('NetworkService list online gate', () => {
     ).toHaveBeenCalledWith('c-1');
     expect(networkRepository.list).toHaveBeenCalledWith(
       expect.objectContaining({ clusterId: 'c-1', clusterIds: undefined }),
+    );
+  });
+
+  it('lists NetworkPolicy from live cluster inventory', async () => {
+    const {
+      service,
+      networkRepository,
+      clusterHealthService,
+      clustersService,
+      k8sClientService,
+    } = build();
+    (clusterHealthService.assertClusterOnlineForRead as jest.Mock).mockResolvedValue(
+      undefined,
+    );
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
+    (k8sClientService.getNetworkingApi as jest.Mock).mockReturnValue({
+      listNetworkPolicyForAllNamespaces: jest.fn().mockResolvedValue({
+        items: [
+          {
+            metadata: {
+              name: 'allow-web',
+              namespace: 'default',
+              labels: { app: 'web' },
+              creationTimestamp: new Date('2026-01-02T03:04:05.000Z'),
+            },
+            spec: {
+              podSelector: { matchLabels: { app: 'web' } },
+              policyTypes: ['Ingress'],
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await service.list({
+      clusterId: 'c-1',
+      kind: 'NetworkPolicy',
+      page: '1',
+      pageSize: '20',
+    });
+
+    expect(networkRepository.list).not.toHaveBeenCalled();
+    expect(result.total).toBe(1);
+    expect(result.items[0]).toEqual(
+      expect.objectContaining({
+        id: 'live:c-1:NetworkPolicy:default:allow-web',
+        clusterId: 'c-1',
+        namespace: 'default',
+        kind: 'NetworkPolicy',
+        name: 'allow-web',
+        state: 'active',
+      }),
+    );
+    expect(result.items[0].spec).toEqual(
+      expect.objectContaining({
+        podSelector: { matchLabels: { app: 'web' } },
+        policyTypes: ['Ingress'],
+      }),
+    );
+  });
+
+  it('deletes live NetworkPolicy without requiring repository row', async () => {
+    const {
+      service,
+      networkRepository,
+      clusterHealthService,
+      clustersService,
+      k8sClientService,
+    } = build();
+    (clusterHealthService.assertClusterOnlineForRead as jest.Mock).mockResolvedValue(
+      undefined,
+    );
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
+    const deleteNamespacedNetworkPolicy = jest.fn().mockResolvedValue({});
+    (k8sClientService.getNetworkingApi as jest.Mock).mockReturnValue({
+      listNamespacedNetworkPolicy: jest.fn().mockResolvedValue({
+        items: [
+          {
+            metadata: {
+              name: 'allow-web',
+              namespace: 'default',
+              creationTimestamp: new Date('2026-01-02T03:04:05.000Z'),
+            },
+            spec: { podSelector: {}, policyTypes: ['Ingress'] },
+          },
+        ],
+      }),
+      deleteNamespacedNetworkPolicy,
+    });
+    (networkRepository as unknown as { setState?: jest.Mock }).setState =
+      jest.fn();
+
+    const result = await service.applyAction(
+      'live:c-1:NetworkPolicy:default:allow-web',
+      { action: 'delete' },
+    );
+
+    expect(deleteNamespacedNetworkPolicy).toHaveBeenCalledWith({
+      name: 'allow-web',
+      namespace: 'default',
+    });
+    expect((networkRepository as unknown as { setState: jest.Mock }).setState).not.toHaveBeenCalled();
+    expect(result.item).toEqual(
+      expect.objectContaining({
+        id: 'live:c-1:NetworkPolicy:default:allow-web',
+        state: 'deleted',
+      }),
     );
   });
 

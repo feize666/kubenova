@@ -10,7 +10,8 @@ Usage:
   bash scripts/service.sh <command> [options]
 
 Commands:
-  dev up [--no-gateway]        Start local development services
+  dev up [--no-gateway] [--stable-frontend|--dev-frontend]
+                                Start local development services
   dev down [service...]        Stop local development services
   dev restart [service...]     Restart local development services
   dev status                   Show local development service status
@@ -44,6 +45,11 @@ Services:
 Environment:
   FRONTEND_PORT, CONTROL_API_PORT, RUNTIME_GATEWAY_PORT, FRONTEND_BOOT_MODE,
   START_GATEWAY, USE_TMUX, RELEASE_ROOT, SYSTEMD_ENV_DIR
+
+Notes:
+  --stable-frontend runs the frontend from the Next standalone build. Prefer it
+  for release/browser regression because Next dev can restart under memory
+  pressure during large route sweeps.
 USAGE
 }
 

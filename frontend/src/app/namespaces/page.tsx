@@ -1,13 +1,11 @@
 "use client";
 
-import { DeleteOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   App,
   Button,
   Card,
-  Dropdown,
   Form,
   Input,
   Modal,
@@ -16,20 +14,14 @@ import {
   Tag,
   Typography,
 } from "antd";
-import type { MenuProps } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceTable } from "@/components/resource-table";
-import {
-  POD_ACTION_MENU_CLASS,
-  POD_ACTION_TRIGGER_CLASS,
-  renderPodLikeResourceActionStyles,
-  renderResourceActionTriggerButton,
-} from "@/components/resource-action-bar";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -187,37 +179,16 @@ export default function NamespacesPage() {
     onError: (err) => message.error(err instanceof Error ? err.message : "删除失败"),
   });
 
-  const buildRowActions = (): MenuProps["items"] => [
-    { key: "describe", label: "描述" },
-    { key: "yaml", label: "YAML" },
-    { type: "divider" },
-    { key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除" },
-  ];
-
-  const handleRowAction = (row: NamespaceListItem, key: string) => {
-    if (key === "describe") {
-      setDetailTarget({ kind: "Namespace", id: row.id });
-      return;
-    }
-    if (key === "yaml") {
-      setYamlTarget({
-        clusterId: row.clusterId,
-        namespace: row.namespace,
-        kind: "Namespace",
-        name: row.namespace,
-      });
-      return;
-    }
-    if (key === "delete") {
-      Modal.confirm({
-        title: "删除名称空间",
-        content: `确认删除 ${row.namespace} 吗？`,
-        okText: "确认",
-        cancelText: "取消",
-        okButtonProps: { danger: true },
-        onOk: () => mutateDelete.mutate(row.id),
-      });
-    }
+  const openEditModal = (row: NamespaceListItem) => {
+    setEditing(row);
+    form.setFieldsValue({
+      clusterId: row.clusterId,
+      namespace: row.namespace,
+      labelsText: Object.entries(row.labels ?? {})
+        .map(([labelKey, labelValue]) => `${labelKey}=${labelValue}`)
+        .join("\n"),
+    });
+    setOpen(true);
   };
 
   const tableData = useMemo(() => {
@@ -298,20 +269,29 @@ export default function NamespacesPage() {
       fixed: "right",
       required: true,
       render: (_, row) => (
-        <Dropdown
-          trigger={["click"]}
-          placement="bottomRight"
-          classNames={{ root: POD_ACTION_MENU_CLASS }}
-          menu={{
-            items: buildRowActions(),
-            onClick: ({ key }) => handleRowAction(row, String(key)),
-          }}
-        >
-          {renderResourceActionTriggerButton({
-            ariaLabel: "更多操作",
-            baseClassName: POD_ACTION_TRIGGER_CLASS,
-          })}
-        </Dropdown>
+        <ResourceRowActions
+          deleteLabel="删除"
+          deleteTitle="删除 Namespace"
+          deleteContent={`确认删除 Namespace「${row.namespace}」吗？此操作不可恢复。`}
+          ariaLabel={`${row.namespace} 更多操作`}
+          leadingActions={[
+            {
+              key: "detail",
+              label: "描述",
+              onClick: () => setDetailTarget({ kind: "Namespace", id: row.id }),
+            },
+          ]}
+          onYaml={() =>
+            setYamlTarget({
+              clusterId: row.clusterId,
+              namespace: row.namespace,
+              kind: "Namespace",
+              name: row.namespace,
+            })
+          }
+          onEdit={() => openEditModal(row)}
+          onDelete={() => mutateDelete.mutate(row.id)}
+        />
       ),
     },
   ];
@@ -417,13 +397,8 @@ export default function NamespacesPage() {
         token={accessToken || undefined}
       />
 
-      {renderPodLikeResourceActionStyles({
-        triggerClassName: POD_ACTION_TRIGGER_CLASS,
-        menuClassName: POD_ACTION_MENU_CLASS,
-      })}
-
       <Modal
-        title={editing ? "编辑 Namespace 标签" : "新建 Namespace"}
+        title={editing ? "编辑 Namespace" : "新建 Namespace"}
         open={open}
         onCancel={() => {
           if (!modalSubmitting) {

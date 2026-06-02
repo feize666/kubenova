@@ -26,6 +26,11 @@ const RENDER_PROFILES: Record<string, ResourceDetailRenderProfile> = {
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
     runtimeFields: ["phase", "restartCount", "image", "podIP", "nodeName"],
   },
+  node: {
+    title: "Node 详情",
+    overviewFields: ["clusterId", "kind", "name", "state", "createdAt", "updatedAt"],
+    runtimeFields: ["phase", "ready", "roles", "internalIP", "externalIP", "osImage", "kernelVersion", "containerRuntimeVersion", "cpuCapacity", "memoryCapacity", "unschedulable"],
+  },
   deployment: {
     title: "Deployment 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
@@ -151,6 +156,11 @@ const RENDER_PROFILES: Record<string, ResourceDetailRenderProfile> = {
     overviewFields: ["clusterId", "kind", "name", "state", "createdAt", "updatedAt"],
     runtimeFields: ["phase"],
   },
+  dynamic: {
+    title: "自定义资源详情",
+    overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
+    runtimeFields: ["phase"],
+  },
 };
 
 export function normalizeKind(kind: string): string {
@@ -166,6 +176,9 @@ export function normalizeKind(kind: string): string {
       return "deployment";
     case "pods":
       return "pod";
+    case "node":
+    case "nodes":
+      return "node";
     case "statefulsets":
       return "statefulset";
     case "daemonsets":
@@ -225,6 +238,10 @@ export function normalizeKind(kind: string): string {
       return "helmrelease";
     case "helmrepositories":
       return "helmrepository";
+    case "dynamic":
+    case "dynamicresource":
+    case "customresource":
+      return "dynamic";
     default:
       return value;
   }
@@ -347,6 +364,17 @@ export function buildRuntimeFieldMap(runtime: ResourceDetailRuntime): Record<str
     images: runtime.images,
     podIP: runtime.podIP,
     nodeName: runtime.nodeName,
+    ready: runtime.ready,
+    roles: runtime.roles?.join(", "),
+    internalIP: runtime.internalIP,
+    externalIP: runtime.externalIP,
+    osImage: runtime.osImage,
+    kernelVersion: runtime.kernelVersion,
+    containerRuntimeVersion: runtime.containerRuntimeVersion,
+    cpuCapacity: runtime.cpuCapacity,
+    memoryCapacity: runtime.memoryCapacity,
+    taints: runtime.taints?.join(", "),
+    unschedulable: runtime.unschedulable,
   };
 }
 

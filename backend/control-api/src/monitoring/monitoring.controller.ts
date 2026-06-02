@@ -60,6 +60,17 @@ export class MonitoringController {
     );
   }
 
+  @Get('observability/summary')
+  async getObservabilitySummary(
+    @Query('range') range?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.monitoringService.getObservabilitySummary(
+      this.parseTimeFilter(range, from, to, '24h'),
+    );
+  }
+
   @Get('events')
   async getEvents(
     @Query('range') range?: string,

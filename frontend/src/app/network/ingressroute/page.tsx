@@ -33,6 +33,7 @@ import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import {
+  applyNetworkResourceYaml,
   createNetworkResource,
   deleteNetworkResource,
   getNetworkResources,
@@ -95,6 +96,7 @@ export default function IngressRoutePage() {
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<IngressRouteResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<IngressRouteFormValues>();
   const {
@@ -187,11 +189,113 @@ export default function IngressRoutePage() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ item, values }: { item: IngressRouteResource; values: IngressRouteFormValues }) => {
+      const entryPoints = values.entryPoints
+        .split(",")
+        .map((entryPoint) => entryPoint.trim())
+        .filter(Boolean);
+      const middlewares = (values.middlewares ?? "")
+        .split(",")
+        .map((middleware) => middleware.trim())
+        .filter(Boolean)
+        .map((name) => ({ name }));
+      const nextSpec = JSON.parse(JSON.stringify(item.spec ?? {})) as NonNullable<IngressRouteResource["spec"]>;
+      const routes = Array.isArray(nextSpec.routes) ? [...nextSpec.routes] : [];
+      const firstRoute = { ...(routes[0] ?? {}) };
+      firstRoute.match = values.match;
+      firstRoute.kind = firstRoute.kind || "Rule";
+      firstRoute.services = [
+        {
+          ...(firstRoute.services?.[0] ?? {}),
+          name: values.serviceName,
+          port: Number(values.servicePort),
+        },
+        ...(firstRoute.services?.slice(1) ?? []),
+      ];
+      if (middlewares.length > 0) {
+        firstRoute.middlewares = middlewares;
+      } else {
+        delete firstRoute.middlewares;
+      }
+      routes[0] = firstRoute;
+      nextSpec.entryPoints = entryPoints;
+      nextSpec.routes = routes;
+      if (values.tlsSecretName?.trim()) {
+        nextSpec.tls = { ...(nextSpec.tls ?? {}), secretName: values.tlsSecretName.trim() };
+      } else {
+        delete nextSpec.tls;
+      }
+      return applyNetworkResourceYaml(
+        {
+          clusterId: item.clusterId,
+          namespace: item.namespace,
+          kind: "IngressRoute",
+          name: item.name,
+          yaml: JSON.stringify(
+            {
+              apiVersion: "traefik.io/v1alpha1",
+              kind: "IngressRoute",
+              metadata: {
+                name: item.name,
+                namespace: item.namespace,
+                ...(item.labels ? { labels: item.labels } : {}),
+              },
+              spec: nextSpec,
+            },
+            null,
+            2,
+          ),
+        },
+        accessToken || undefined,
+      );
+    },
+    onSuccess: async () => {
+      void message.success("IngressRoute 更新成功");
+      setModalOpen(false);
+      setEditingItem(null);
+      form.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["network", "IngressRoute"] });
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "更新失败，请重试");
+    },
+  });
+
+  const handleOpenCreate = () => {
+    setEditingItem(null);
+    form.resetFields();
+    form.setFieldsValue({ entryPoints: "web", match: "Host(`example.local`)", servicePort: 80 });
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (item: IngressRouteResource) => {
+    const firstRoute = item.spec?.routes?.[0];
+    const firstService = firstRoute?.services?.[0];
+    setEditingItem(item);
+    form.setFieldsValue({
+      name: item.name,
+      namespace: item.namespace,
+      clusterId: item.clusterId,
+      entryPoints: item.spec?.entryPoints?.join(",") ?? "web",
+      match: firstRoute?.match ?? "Host(`example.local`)",
+      serviceName: firstService?.name ?? "",
+      servicePort: Number(firstService?.port ?? 80),
+      middlewares: firstRoute?.middlewares?.map((middleware) => middleware.name).filter(Boolean).join(",") ?? "",
+      tlsSecretName: item.spec?.tls?.secretName ?? "",
+    });
+    setModalOpen(true);
+  };
+
   const handleModalSubmit = async () => {
     let values: IngressRouteFormValues;
     try {
       values = await form.validateFields();
     } catch {
+      return;
+    }
+    if (editingItem) {
+      updateMutation.mutate({ item: editingItem, values });
       return;
     }
 
@@ -404,6 +508,7 @@ export default function IngressRoutePage() {
               name: row.name,
             })
           }
+          extraActions={[{ key: "edit", label: "编辑", onClick: () => handleOpenEdit(row) }]}
           onDelete={() => deleteMutation.mutate(row.id)}
         />
       ),
@@ -418,7 +523,7 @@ export default function IngressRoutePage() {
           embedded
           description="管理 Traefik IngressRoute 入口规则、匹配表达式与中间件。"
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建IngressRoute" onClick={() => { form.resetFields(); form.setFieldsValue({ entryPoints: "web", match: "Host(`example.local`)", servicePort: 80 }); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建IngressRoute" onClick={handleOpenCreate} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}
@@ -482,27 +587,29 @@ export default function IngressRoutePage() {
       </Card>
 
       <Modal
-        title="添加 IngressRoute"
+        title={editingItem ? "编辑 IngressRoute" : "添加 IngressRoute"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setEditingItem(null);
           form.resetFields();
         }}
-        okText="创建"
+        okText={editingItem ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item label="路由名称" name="name" rules={[{ required: true, message: "请输入 IngressRoute 名称" }]}>
-            <Input placeholder="例如：web-route" />
+            <Input disabled={Boolean(editingItem)} placeholder="例如：web-route" />
           </Form.Item>
           <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
-            <Input placeholder="例如：default" />
+            <Input disabled={Boolean(editingItem)} placeholder="例如：default" />
           </Form.Item>
           <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
             <Select
+              disabled={Boolean(editingItem)}
               placeholder="请选择集群"
               options={clusterOptions}
               loading={clustersQuery.isLoading}

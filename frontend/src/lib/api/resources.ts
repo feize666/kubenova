@@ -275,6 +275,22 @@ export interface ResourceDetailRuntime {
   nodeSelector?: Record<string, string>;
   tolerations?: Array<Record<string, string>>;
   containerDetails?: ResourceDetailContainerSummary[];
+  controllerName?: string;
+  gatewayClassName?: string;
+  hostnames?: string[];
+  parentRefs?: string[];
+  backendRefs?: string[];
+  ready?: boolean;
+  roles?: string[];
+  internalIP?: string;
+  externalIP?: string;
+  osImage?: string;
+  kernelVersion?: string;
+  containerRuntimeVersion?: string;
+  cpuCapacity?: string;
+  memoryCapacity?: string;
+  taints?: string[];
+  unschedulable?: boolean;
   conditions?: Array<{
     type?: string;
     status?: string;
@@ -353,6 +369,8 @@ export interface ResourceDetailResponse {
   descriptor: ResourceDetailDescriptor;
   overview: ResourceDetailOverview;
   runtime: ResourceDetailRuntime;
+  rawSpec?: Record<string, unknown>;
+  rawStatus?: Record<string, unknown>;
   associations: ResourceAssociation[];
   network: ResourceDetailNetworkSummary;
   storage: ResourceDetailStorageSummary;
@@ -563,6 +581,10 @@ function normalizeResourceKind(kind: string): string {
     case "verticalpodautoscaler":
     case "verticalpodautoscalers":
       return "verticalpodautoscaler";
+    case "dynamic":
+    case "dynamicresource":
+    case "customresource":
+      return "dynamic";
     default:
       return value;
   }
@@ -782,6 +804,41 @@ export async function getResourceDetail(
                 : undefined,
             }))
         : undefined,
+      controllerName:
+        typeof runtimeRaw.controllerName === "string" ? runtimeRaw.controllerName : undefined,
+      gatewayClassName:
+        typeof runtimeRaw.gatewayClassName === "string" ? runtimeRaw.gatewayClassName : undefined,
+      hostnames: Array.isArray(runtimeRaw.hostnames)
+        ? runtimeRaw.hostnames.filter((item): item is string => typeof item === "string")
+        : undefined,
+      parentRefs: Array.isArray(runtimeRaw.parentRefs)
+        ? runtimeRaw.parentRefs.filter((item): item is string => typeof item === "string")
+        : undefined,
+      backendRefs: Array.isArray(runtimeRaw.backendRefs)
+        ? runtimeRaw.backendRefs.filter((item): item is string => typeof item === "string")
+        : undefined,
+      ready: typeof runtimeRaw.ready === "boolean" ? runtimeRaw.ready : undefined,
+      roles: Array.isArray(runtimeRaw.roles)
+        ? runtimeRaw.roles.filter((item): item is string => typeof item === "string")
+        : undefined,
+      internalIP: typeof runtimeRaw.internalIP === "string" ? runtimeRaw.internalIP : undefined,
+      externalIP: typeof runtimeRaw.externalIP === "string" ? runtimeRaw.externalIP : undefined,
+      osImage: typeof runtimeRaw.osImage === "string" ? runtimeRaw.osImage : undefined,
+      kernelVersion:
+        typeof runtimeRaw.kernelVersion === "string" ? runtimeRaw.kernelVersion : undefined,
+      containerRuntimeVersion:
+        typeof runtimeRaw.containerRuntimeVersion === "string"
+          ? runtimeRaw.containerRuntimeVersion
+          : undefined,
+      cpuCapacity:
+        typeof runtimeRaw.cpuCapacity === "string" ? runtimeRaw.cpuCapacity : undefined,
+      memoryCapacity:
+        typeof runtimeRaw.memoryCapacity === "string" ? runtimeRaw.memoryCapacity : undefined,
+      taints: Array.isArray(runtimeRaw.taints)
+        ? runtimeRaw.taints.filter((item): item is string => typeof item === "string")
+        : undefined,
+      unschedulable:
+        typeof runtimeRaw.unschedulable === "boolean" ? runtimeRaw.unschedulable : undefined,
       policyTypes: Array.isArray(runtimeRaw.policyTypes)
         ? runtimeRaw.policyTypes.filter((item): item is string => typeof item === "string")
         : undefined,
@@ -813,6 +870,8 @@ export async function getResourceDetail(
           }))
         : undefined,
     },
+    rawSpec: isObject(payloadData.rawSpec) ? payloadData.rawSpec : undefined,
+    rawStatus: isObject(payloadData.rawStatus) ? payloadData.rawStatus : undefined,
     associations: Array.isArray(payload.associations)
       ? payload.associations.filter((item): item is ResourceAssociation => isObject(item)).map((item) => ({
           id: typeof item.id === "string" ? item.id : undefined,
@@ -1173,6 +1232,7 @@ export interface DynamicResourceQuery {
   pageSize?: number;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
+  missingAsEmpty?: boolean;
 }
 
 export interface DynamicResourceItem {
@@ -1221,6 +1281,7 @@ export interface DynamicResourceDetailResponse {
   name: string;
   yaml: string;
   raw: unknown;
+  detail?: ResourceDetailResponse;
   timestamp: string;
 }
 
@@ -1275,6 +1336,7 @@ export async function getDynamicResources(
       pageSize: query.pageSize,
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
+      missingAsEmpty: query.missingAsEmpty ? "true" : undefined,
     },
     token,
   });

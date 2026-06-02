@@ -6,7 +6,7 @@ export type ConfigState = "active" | "disabled" | "deleted";
 
 export interface ConfigResourceItem {
   id: string;
-  kind: ConfigKind;
+  kind: "ConfigMap" | "Secret";
   name: string;
   namespace: string;
   clusterId: string;
@@ -14,6 +14,19 @@ export interface ConfigResourceItem {
   updatedAt: string;
   state: ConfigState;
   version: number;
+  currentRev?: number;
+  labels?: Record<string, string>;
+  revisions?: ConfigRevisionItem[];
+}
+
+export interface ConfigRevisionItem {
+  id: string;
+  configId: string;
+  revision: number;
+  data: unknown;
+  changedBy: string | null;
+  changeNote: string | null;
+  createdAt: string;
 }
 
 export interface ConfigListResponse {
@@ -47,6 +60,7 @@ export interface CreateConfigPayload {
   namespace: string;
   kind: "ConfigMap" | "Secret";
   name: string;
+  dataKeys?: string[];
   data?: Record<string, string>;
   labels?: Record<string, string>;
 }
@@ -60,6 +74,28 @@ export interface ConfigMutationResponse {
 export function createConfig(payload: CreateConfigPayload, token: string) {
   return apiRequest<ConfigMutationResponse>(`/api/configs`, {
     method: "POST",
+    body: payload,
+    token,
+  });
+}
+
+export interface UpdateConfigPayload {
+  namespace?: string;
+  dataKeys?: string[];
+  data?: Record<string, string>;
+  labels?: Record<string, string>;
+}
+
+export function getConfig(id: string, token: string) {
+  return apiRequest<ConfigResourceItem>(`/api/configs/${id}`, {
+    method: "GET",
+    token,
+  });
+}
+
+export function updateConfig(id: string, payload: UpdateConfigPayload, token: string) {
+  return apiRequest<ConfigMutationResponse, UpdateConfigPayload>(`/api/configs/${id}`, {
+    method: "PATCH",
     body: payload,
     token,
   });

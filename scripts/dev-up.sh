@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dev-up.sh — 一键启动所有开发服务
-# 用法: bash scripts/dev-up.sh [--no-gateway]
+# 用法: bash scripts/dev-up.sh [--no-gateway] [--stable-frontend|--dev-frontend]
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,6 +33,8 @@ service_lib_init
 for arg in "$@"; do
   case "$arg" in
     --no-gateway) START_GATEWAY="false" ;;
+    --stable-frontend) FRONTEND_BOOT_MODE="stable" ;;
+    --dev-frontend) FRONTEND_BOOT_MODE="dev" ;;
   esac
 done
 
@@ -113,6 +115,27 @@ clean_frontend_dev_cache() {
   fi
 }
 
+frontend_sources_newer_than() {
+  local marker="$1"
+  local paths=(
+    "$FRONTEND_DIR/src"
+    "$FRONTEND_DIR/public"
+    "$FRONTEND_DIR/package.json"
+    "$FRONTEND_DIR/package-lock.json"
+    "$FRONTEND_DIR/next.config.ts"
+    "$FRONTEND_DIR/next.config.js"
+    "$FRONTEND_DIR/tsconfig.json"
+  )
+  local path
+  for path in "${paths[@]}"; do
+    [[ -e "$path" ]] || continue
+    if find "$path" -newer "$marker" -print -quit 2>/dev/null | grep -q .; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 prepare_control_api_deps() {
   local nest_bin="$CONTROL_API_DIR/node_modules/.bin/nest"
   if [[ -f "$nest_bin" ]]; then
@@ -133,6 +156,25 @@ prepare_frontend_standalone() {
   fi
 
   local server_js="$FRONTEND_DIR/.next/standalone/server.js"
+  if [[ -f "$server_js" ]]; then
+    if frontend_sources_newer_than "$server_js"; then
+      echo "[预检] 检测到前端源码比 standalone 包更新，正在重建稳定包..."
+      rm -rf "$FRONTEND_DIR/.next/standalone"
+    else
+      if [[ ! -d "$FRONTEND_DIR/.next/standalone/.next/static" || ! -d "$FRONTEND_DIR/.next/standalone/public" ]]; then
+        echo "[预检] 正在同步前端静态资源到 standalone 包..."
+        rm -rf "$FRONTEND_DIR/.next/standalone/.next/static" "$FRONTEND_DIR/.next/standalone/public"
+        mkdir -p "$FRONTEND_DIR/.next/standalone/.next"
+        cp -a "$FRONTEND_DIR/.next/static" "$FRONTEND_DIR/.next/standalone/.next/"
+        if [[ -d "$FRONTEND_DIR/public" ]]; then
+          cp -a "$FRONTEND_DIR/public" "$FRONTEND_DIR/.next/standalone/"
+        fi
+        echo "[预检] 前端静态资源同步完成"
+      fi
+      return
+    fi
+  fi
+
   if [[ -f "$server_js" ]]; then
     if [[ ! -d "$FRONTEND_DIR/.next/standalone/.next/static" || ! -d "$FRONTEND_DIR/.next/standalone/public" ]]; then
       echo "[预检] 正在同步前端静态资源到 standalone 包..."
@@ -291,18 +333,26 @@ start_if_not_running() {
     local pid
     pid="$(cat "$pid_file")"
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      if is_healthy "$health_url"; then
-        echo "[$name] 已在运行（pid=$pid, 端口=$port）"
-        return
+      if [[ "$name" == "frontend" && "$FRONTEND_BOOT_MODE" == "dev" ]] && is_frontend_standalone_process "$pid"; then
+        echo "[$name] pid=$pid 是旧 standalone 前端，当前以 dev 模式启动，正在重启为源码直跑..."
+        terminate_pid "$pid"
+        rm -f "$child_pid_file"
+        wait_for_port_free "$port" 10 || true
+        rm -f "$pid_file"
+      else
+        if is_healthy "$health_url"; then
+          echo "[$name] 已在运行（pid=$pid, 端口=$port）"
+          return
+        fi
+        if service_is_starting "$pid" "$port"; then
+          echo "[$name] 启动中（pid=$pid, 端口=$port）"
+          return
+        fi
+        echo "[$name] pid=$pid 仍在，但健康检查失败，正在重启..."
+        terminate_pid "$pid"
+        rm -f "$child_pid_file"
+        wait_for_port_free "$port" 10 || true
       fi
-      if service_is_starting "$pid" "$port"; then
-        echo "[$name] 启动中（pid=$pid, 端口=$port）"
-        return
-      fi
-      echo "[$name] pid=$pid 仍在，但健康检查失败，正在重启..."
-      terminate_pid "$pid"
-      rm -f "$child_pid_file"
-      wait_for_port_free "$port" 10 || true
     fi
     rm -f "$pid_file"
   fi
