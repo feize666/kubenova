@@ -40,9 +40,10 @@ import {
   createConfig,
   deleteConfig,
   getConfigs,
+  updateConfig,
   type ConfigResourceItem,
 } from "@/lib/api/configs";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { getDynamicResourceDetail, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -63,6 +64,44 @@ interface ConfigMapFormValues {
   namespace: string;
   clusterId: string;
   entries: KVPair[];
+  labelEntries: KVPair[];
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every((item) => typeof item === "string")
+  );
+}
+
+function toEntries(value: Record<string, string> | undefined): KVPair[] {
+  const entries = Object.entries(value ?? {}).map(([key, entryValue]) => ({ key, value: entryValue }));
+  return entries.length ? entries : [{ key: "", value: "" }];
+}
+
+function toRecord(entries: KVPair[] | undefined): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const entry of entries ?? []) {
+    const key = entry.key?.trim();
+    if (key) {
+      result[key] = entry.value ?? "";
+    }
+  }
+  return result;
+}
+
+function readConfigMapDetail(raw: unknown): { data: Record<string, string>; labels: Record<string, string> } {
+  if (!raw || typeof raw !== "object") {
+    return { data: {}, labels: {} };
+  }
+  const obj = raw as Record<string, unknown>;
+  const metadata = obj.metadata && typeof obj.metadata === "object" ? (obj.metadata as Record<string, unknown>) : {};
+  return {
+    data: isStringRecord(obj.data) ? obj.data : {},
+    labels: isStringRecord(metadata.labels) ? metadata.labels : {},
+  };
 }
 
 export default function ConfigMapsPage() {
@@ -85,6 +124,8 @@ export default function ConfigMapsPage() {
     });
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingTarget, setEditingTarget] = useState<ConfigResourceItem | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<ConfigMapFormValues>();
 
@@ -147,6 +188,22 @@ export default function ConfigMapsPage() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof updateConfig>[1] }) =>
+      updateConfig(id, payload, accessToken!),
+    onSuccess: async () => {
+      void message.success("ConfigMap 更新成功");
+      setModalOpen(false);
+      setEditingTarget(null);
+      form.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["configs", "configmaps"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "更新失败，请重试");
+    },
+  });
+
   const handleModalSubmit = async () => {
     let values: ConfigMapFormValues;
     try {
@@ -154,18 +211,28 @@ export default function ConfigMapsPage() {
     } catch {
       return;
     }
-    const data: Record<string, string> = {};
-    for (const entry of values.entries ?? []) {
-      if (entry.key) {
-        data[entry.key] = entry.value ?? "";
-      }
+    const configData = toRecord(values.entries);
+    const labels = toRecord(values.labelEntries);
+    if (editingTarget) {
+      updateMutation.mutate({
+        id: editingTarget.id,
+        payload: {
+          namespace: values.namespace,
+          data: configData,
+          dataKeys: Object.keys(configData),
+          labels,
+        },
+      });
+      return;
     }
     createMutation.mutate({
       clusterId: values.clusterId,
       namespace: values.namespace,
       kind: "ConfigMap",
       name: values.name,
-      data,
+      data: configData,
+      dataKeys: Object.keys(configData),
+      labels,
     });
   };
 
@@ -232,8 +299,50 @@ export default function ConfigMapsPage() {
   });
 
   const handleOpenCreate = () => {
+    setEditingTarget(null);
     form.resetFields();
     setModalOpen(true);
+  };
+
+  const handleOpenEdit = async (row: ConfigResourceItem) => {
+    if (!accessToken) {
+      return;
+    }
+    setEditingTarget(row);
+    setModalOpen(true);
+    setEditLoading(true);
+    form.setFieldsValue({
+      name: row.name,
+      namespace: row.namespace,
+      clusterId: row.clusterId,
+      entries: [{ key: "", value: "" }],
+      labelEntries: toEntries(row.labels),
+    });
+    try {
+      const detail = await getDynamicResourceDetail(
+        {
+          clusterId: row.clusterId,
+          group: "",
+          version: "v1",
+          resource: "configmaps",
+          namespace: row.namespace,
+          name: row.name,
+        },
+        accessToken,
+      );
+      const parsed = readConfigMapDetail(detail.raw);
+      form.setFieldsValue({
+        name: row.name,
+        namespace: row.namespace,
+        clusterId: row.clusterId,
+        entries: toEntries(parsed.data),
+        labelEntries: toEntries(parsed.labels),
+      });
+    } catch (err) {
+      void message.error(err instanceof Error ? err.message : "读取 ConfigMap 详情失败");
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const handleOpenYaml = (row: ConfigResourceItem) => {
@@ -326,6 +435,7 @@ export default function ConfigMapsPage() {
           deleteTitle="删除 ConfigMap"
           deleteContent={`确认删除 ConfigMap「${row.name}」吗？此操作不可恢复。`}
           onYaml={() => handleOpenYaml(row)}
+          onEdit={() => void handleOpenEdit(row)}
           onDelete={() => void handleDelete(row)}
         />
       ),
@@ -405,16 +515,17 @@ export default function ConfigMapsPage() {
       </Card>
 
       <Modal
-        title="添加 ConfigMap"
+        title={editingTarget ? "编辑 ConfigMap" : "添加 ConfigMap"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setEditingTarget(null);
           form.resetFields();
         }}
-        okText="创建"
+        okText={editingTarget ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || editLoading}
         destroyOnHidden
         width={600}
       >
@@ -424,14 +535,14 @@ export default function ConfigMapsPage() {
             name="name"
             rules={[{ required: true, message: "请输入 ConfigMap 名称" }]}
           >
-            <Input placeholder="例如：app-config" />
+            <Input disabled={Boolean(editingTarget)} placeholder="例如：app-config" />
           </Form.Item>
           <Form.Item
             label="名称空间"
             name="namespace"
             rules={[{ required: true, message: "请输入名称空间" }]}
           >
-            <Input placeholder="例如：default" />
+            <Input disabled={Boolean(editingTarget)} placeholder="例如：default" />
           </Form.Item>
           <Form.Item
             label="所属集群"
@@ -442,11 +553,51 @@ export default function ConfigMapsPage() {
               placeholder="请选择集群"
               options={clusterOptions}
               loading={clustersQuery.isLoading}
+              disabled={Boolean(editingTarget)}
               showSearch
               filterOption={(input, option) =>
                 (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
               }
             />
+          </Form.Item>
+          <Form.Item label="标签">
+            <Form.List name="labelEntries" initialValue={[{ key: "", value: "" }]}>
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <Row key={key} gutter={8} style={{ marginBottom: 8 }}>
+                      <Col flex="1">
+                        <Form.Item {...restField} name={[name, "key"]} style={{ marginBottom: 0 }}>
+                          <Input placeholder="标签键（Key）" />
+                        </Form.Item>
+                      </Col>
+                      <Col flex="1">
+                        <Form.Item {...restField} name={[name, "value"]} style={{ marginBottom: 0 }}>
+                          <Input placeholder="标签值（Value）" />
+                        </Form.Item>
+                      </Col>
+                      <Col>
+                        <Button
+                          type="text"
+                          danger
+                          icon={<MinusCircleOutlined />}
+                          onClick={() => remove(name)}
+                          disabled={fields.length === 1}
+                        />
+                      </Col>
+                    </Row>
+                  ))}
+                  <Button
+                    type="dashed"
+                    onClick={() => add({ key: "", value: "" })}
+                    icon={<PlusOutlined />}
+                    style={{ width: "100%" }}
+                  >
+                    添加标签
+                  </Button>
+                </>
+              )}
+            </Form.List>
           </Form.Item>
           <Form.Item label="键值对数据">
             <Form.List name="entries" initialValue={[{ key: "", value: "" }]}>

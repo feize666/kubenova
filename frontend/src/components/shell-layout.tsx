@@ -22,7 +22,7 @@ import { Avatar, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Skeleton, Sp
 import type { MenuProps } from "antd";
 import { usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useState, memo } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useAuth } from "@/components/auth-context";
 import { getNavDisplayLabel, getTitleFromPath, filterNavSectionsByRole } from "@/config/navigation";
 import { useThemeMode } from "@/components/theme-context";
@@ -36,18 +36,24 @@ const SIDEBAR_OPEN_SECTION_KEY = "kubenova.nav.sidebar.openSection.v2";
 const SIDEBAR_SECTION_ORDER = [
   "section-overview",
   "section-resource-panorama",
-  "section-clusters",
+  "section-cluster-domain",
   "section-workloads",
   "section-network",
-  "section-configs",
   "section-storage-config",
-  "section-autoscaling",
-  "section-helm",
-  "section-iam-security",
+  "section-configs",
+  "section-app-delivery",
   "section-observability",
   "section-intelligence",
+  "section-iam-security",
   "section-system-management",
 ] as const;
+
+type SidebarOpenSectionKey = string | null;
+
+type StoredSidebarOpenState = {
+  openSectionKey: SidebarOpenSectionKey;
+  updatedAt?: number;
+};
 
 function logNavigationMetric(name: string, detail: Record<string, unknown>) {
   if (process.env.NODE_ENV !== "development") return;
@@ -64,16 +70,15 @@ function logNavigationMetric(name: string, detail: Record<string, unknown>) {
 const sectionIconMap: Record<string, React.ReactNode> = {
   "section-overview": <HomeOutlined />,
   "section-resource-panorama": <PartitionOutlined />,
-  "section-clusters": <NodeIndexOutlined />,
+  "section-cluster-domain": <NodeIndexOutlined />,
   "section-workloads": <DeploymentUnitOutlined />,
   "section-network": <PartitionOutlined />,
-  "section-autoscaling": <DeploymentUnitOutlined />,
-  "section-helm": <DeploymentUnitOutlined />,
   "section-storage-config": <DatabaseOutlined />,
   "section-configs": <SettingOutlined />,
-  "section-iam-security": <SafetyOutlined />,
+  "section-app-delivery": <BranchesOutlined />,
   "section-observability": <MonitorOutlined />,
   "section-intelligence": <BranchesOutlined />,
+  "section-iam-security": <SafetyOutlined />,
   "section-system-management": <SettingOutlined />,
 };
 
@@ -99,6 +104,38 @@ function findActiveSectionKey(
     }
   }
   return undefined;
+}
+
+function readStoredSidebarOpenState(): StoredSidebarOpenState | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const raw = window.localStorage.getItem(SIDEBAR_OPEN_SECTION_KEY);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredSidebarOpenState>;
+    if (typeof parsed.openSectionKey === "string" || parsed.openSectionKey === null) {
+      return {
+        openSectionKey: parsed.openSectionKey,
+        updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : undefined,
+      };
+    }
+  } catch {
+    return { openSectionKey: raw };
+  }
+  return null;
+}
+
+function writeStoredSidebarOpenState(openSectionKey: SidebarOpenSectionKey) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(
+    SIDEBAR_OPEN_SECTION_KEY,
+    JSON.stringify({ openSectionKey, updatedAt: Date.now() }),
+  );
 }
 
 function shouldHideIssueLauncher(node: HTMLElement) {
@@ -155,18 +192,25 @@ const AppSider = memo(function AppSider({
     [visibleSections],
   );
   const sectionKeySet = useMemo(() => new Set(sectionKeys), [sectionKeys]);
+  const directTopLevelPathSet = useMemo(
+    () =>
+      new Set(
+        visibleSections
+          .filter((section) => section.items.length === 0 && section.path)
+          .map((section) => section.path as string),
+      ),
+    [visibleSections],
+  );
   const activeSectionKey = useMemo(
     () => findActiveSectionKey(pathname, visibleSections),
     [pathname, visibleSections],
   );
-  const [openSectionKey, setOpenSectionKey] = useState<string | undefined>();
+  const activeExpandableSectionKey =
+    activeSectionKey && sectionKeySet.has(activeSectionKey) ? activeSectionKey : undefined;
+  const [openSectionKey, setOpenSectionKey] = useState<SidebarOpenSectionKey>(null);
   const [sidebarStateRestored, setSidebarStateRestored] = useState(false);
-  const effectiveOpenSectionKey =
-    openSectionKey && sectionKeySet.has(openSectionKey)
-      ? openSectionKey
-      : activeSectionKey && sectionKeySet.has(activeSectionKey)
-        ? activeSectionKey
-        : undefined;
+  const previousPathnameRef = useRef(pathname);
+  const effectiveOpenSectionKey = openSectionKey && sectionKeySet.has(openSectionKey) ? openSectionKey : null;
   const expandedSectionKeys = effectiveOpenSectionKey ? [effectiveOpenSectionKey] : [];
 
   // items 根据 role 过滤后生成
@@ -216,25 +260,50 @@ const AppSider = memo(function AppSider({
   );
 
   useEffect(() => {
+    if (sidebarStateRestored) {
+      return undefined;
+    }
     const timer = window.setTimeout(() => {
-      setOpenSectionKey(window.localStorage.getItem(SIDEBAR_OPEN_SECTION_KEY) || undefined);
+      const storedState = readStoredSidebarOpenState();
+      const storedOpenSectionKey = storedState?.openSectionKey;
+      if (storedOpenSectionKey && sectionKeySet.has(storedOpenSectionKey)) {
+        setOpenSectionKey(storedOpenSectionKey);
+      } else if (storedOpenSectionKey === null) {
+        setOpenSectionKey(null);
+      } else {
+        setOpenSectionKey(activeExpandableSectionKey ?? null);
+      }
       setSidebarStateRestored(true);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [activeExpandableSectionKey, sectionKeySet, sidebarStateRestored]);
+
+  useEffect(() => {
+    if (!sidebarStateRestored || !openSectionKey || sectionKeySet.has(openSectionKey)) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setOpenSectionKey(activeExpandableSectionKey ?? null), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeExpandableSectionKey, openSectionKey, sectionKeySet, sidebarStateRestored]);
+
+  useEffect(() => {
+    if (!sidebarStateRestored) {
+      return undefined;
+    }
+    const previousPathname = previousPathnameRef.current;
+    if (previousPathname === pathname) {
+      return undefined;
+    }
+    previousPathnameRef.current = pathname;
+    const timer = window.setTimeout(() => setOpenSectionKey(activeExpandableSectionKey ?? null), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeExpandableSectionKey, pathname, sidebarStateRestored]);
 
   useEffect(() => {
     if (!sidebarStateRestored) {
       return;
     }
-    if (typeof window === "undefined") {
-      return;
-    }
-    if (effectiveOpenSectionKey) {
-      window.localStorage.setItem(SIDEBAR_OPEN_SECTION_KEY, effectiveOpenSectionKey);
-      return;
-    }
-    window.localStorage.removeItem(SIDEBAR_OPEN_SECTION_KEY);
+    writeStoredSidebarOpenState(effectiveOpenSectionKey);
   }, [effectiveOpenSectionKey, sidebarStateRestored]);
 
   return (
@@ -306,9 +375,12 @@ const AppSider = memo(function AppSider({
         onOpenChange={(keys) => {
           const expandedRaw = (keys as string[]).filter((key) => sectionKeySet.has(key));
           const latestKey = expandedRaw[expandedRaw.length - 1];
-          setOpenSectionKey(latestKey);
+          setOpenSectionKey(latestKey ?? null);
         }}
         onClick={({ key }) => {
+          if (directTopLevelPathSet.has(String(key))) {
+            setOpenSectionKey(null);
+          }
           logNavigationMetric("sidebar-click", { key, pathname });
         }}
         style={{

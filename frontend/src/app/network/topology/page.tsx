@@ -6,6 +6,7 @@ import {
   BranchesOutlined,
   CheckOutlined,
   DownOutlined,
+  FileTextOutlined,
   FilterOutlined,
   MinusOutlined,
   PlusOutlined,
@@ -38,12 +39,21 @@ import ReactFlow, {
   type Edge,
   type Node,
   type NodeProps,
+  type NodeTypes,
 } from "reactflow";
 import { useAuth } from "@/components/auth-context";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
+import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { RuntimeStatusPill } from "@/components/visual-system";
 import { getClusters } from "@/lib/api/clusters";
 import { getNetworkResources, type NetworkResource } from "@/lib/api/network";
+import {
+  getDynamicResourceDetail,
+  getDynamicResources,
+  type DynamicResourceIdentity,
+  type DynamicResourceItem,
+  type ResourceIdentity,
+} from "@/lib/api/resources";
 import { getWorkloadsByKind, type WorkloadListItem } from "@/lib/api/workloads";
 
 const { Text, Title } = Typography;
@@ -167,6 +177,42 @@ const TOKEN = {
     icon: "◌",
     label: "EndpointSlice",
   },
+  networkpolicy: {
+    border: "#0891b2",
+    borderAlpha: "rgba(8,145,178,0.38)",
+    bg: "#ecfeff",
+    text: "#155e75",
+    tag: "#0891b2",
+    icon: "◍",
+    label: "NetworkPolicy",
+  },
+  gatewayclass: {
+    border: "#7c3aed",
+    borderAlpha: "rgba(124,58,237,0.38)",
+    bg: "#f5f3ff",
+    text: "#6d28d9",
+    tag: "#7c3aed",
+    icon: "◇",
+    label: "GatewayClass",
+  },
+  gateway: {
+    border: "#0d9488",
+    borderAlpha: "rgba(13,148,136,0.38)",
+    bg: "#f0fdfa",
+    text: "#0f766e",
+    tag: "#0d9488",
+    icon: "◆",
+    label: "Gateway",
+  },
+  httproute: {
+    border: "#2563eb",
+    borderAlpha: "rgba(37,99,235,0.38)",
+    bg: "#eff6ff",
+    text: "#1d4ed8",
+    tag: "#2563eb",
+    icon: "⇆",
+    label: "HTTPRoute",
+  },
   deployment: {
     border: "#0ea5e9",
     borderAlpha: "rgba(14,165,233,0.4)",
@@ -214,6 +260,10 @@ const SOURCE_TOKEN_KEYS = [
   "ingressroute",
   "endpoints",
   "endpointslice",
+  "networkpolicy",
+  "gatewayclass",
+  "gateway",
+  "httproute",
   "deployment",
   "statefulset",
   "daemonset",
@@ -227,11 +277,15 @@ type GroupSectionKey = "network" | "workload" | "pod" | "other";
 type TopologyViewMode = "namespace-overview" | "namespace-stack" | "resource-focus" | "free";
 const RESOURCE_DOMAIN_KEYS = ["network", "workload"] as const satisfies readonly ResourceDomainKey[];
 const STACK_TOKEN_ORDER: TokenKey[] = [
+  "gatewayclass",
+  "gateway",
+  "httproute",
   "service",
   "ingress",
   "ingressroute",
   "endpoints",
   "endpointslice",
+  "networkpolicy",
   "deployment",
   "statefulset",
   "daemonset",
@@ -243,6 +297,10 @@ const NETWORK_STACK_KEYS = new Set<TokenKey>([
   "ingressroute",
   "endpoints",
   "endpointslice",
+  "networkpolicy",
+  "gatewayclass",
+  "gateway",
+  "httproute",
 ]);
 const WORKLOAD_STACK_KEYS = new Set<TokenKey>(["deployment", "statefulset", "daemonset"]);
 
@@ -253,7 +311,7 @@ interface TopoNodeData {
   status?: "Running" | "Pending" | "Failed" | "Unknown";
   replicas?: string;
   caption?: string;
-  raw?: NetworkResource | WorkloadListItem | Record<string, unknown>;
+  raw?: unknown;
 }
 
 type DetailRelationItem = {
@@ -298,7 +356,46 @@ type TopologyResourceDetailRequest = {
     labels?: Record<string, string>;
   };
 };
+type TopologyYamlTarget = {
+  identity: ResourceIdentity | null;
+  dynamicIdentity?: DynamicResourceIdentity | null;
+};
 type TopologyFailureCategory = "service-unavailable" | "network-timeout" | "auth" | "unknown";
+type GatewayKindKey = "gatewayclass" | "gateway" | "httproute";
+type GatewayTopologyResource = DynamicResourceItem & {
+  group: "gateway.networking.k8s.io";
+  version: "v1";
+  resource: "gatewayclasses" | "gateways" | "httproutes";
+  spec?: Record<string, unknown>;
+  statusJson?: Record<string, unknown>;
+};
+type GatewayTopologyResult = {
+  items: GatewayTopologyResource[];
+  unavailableKinds: Array<"GatewayClass" | "Gateway" | "HTTPRoute">;
+};
+
+const GATEWAY_TOPOLOGY_META: Record<
+  GatewayKindKey,
+  { kind: "GatewayClass" | "Gateway" | "HTTPRoute"; resource: "gatewayclasses" | "gateways" | "httproutes"; tokenKey: SourceKey }
+> = {
+  gatewayclass: {
+    kind: "GatewayClass",
+    resource: "gatewayclasses",
+    tokenKey: "gatewayclass",
+  },
+  gateway: {
+    kind: "Gateway",
+    resource: "gateways",
+    tokenKey: "gateway",
+  },
+  httproute: {
+    kind: "HTTPRoute",
+    resource: "httproutes",
+    tokenKey: "httproute",
+  },
+};
+
+const GATEWAY_TOPOLOGY_KINDS = Object.keys(GATEWAY_TOPOLOGY_META) as GatewayKindKey[];
 
 function resolveErrorStatus(error: unknown): number | null {
   if (!error || typeof error !== "object") return null;
@@ -356,6 +453,7 @@ function resolveNetworkTokenKey(kind: string): SourceKey {
   if (normalized === "ingress") return "ingress";
   if (normalized === "endpoints") return "endpoints";
   if (normalized === "endpointslice") return "endpointslice";
+  if (normalized === "networkpolicy") return "networkpolicy";
   return "service";
 }
 
@@ -377,7 +475,17 @@ const RESOURCE_DOMAIN_META: Record<
     label: "网络资源域",
     shortLabel: "网络域",
     icon: <RadarChartOutlined />,
-    keys: ["service", "ingress", "ingressroute", "endpoints", "endpointslice"],
+    keys: [
+      "service",
+      "ingress",
+      "ingressroute",
+      "endpoints",
+      "endpointslice",
+      "networkpolicy",
+      "gatewayclass",
+      "gateway",
+      "httproute",
+    ],
   },
   workload: {
     label: "工作负载域",
@@ -573,6 +681,141 @@ function extractEndpointTargetPodNames(resource: NetworkResource): string[] {
   return Array.from(names);
 }
 
+function extractNetworkPolicyPodSelector(resource: NetworkResource): Record<string, string> {
+  const podSelector = toObject(toObject(resource.spec).podSelector);
+  return toStringRecord(podSelector.matchLabels);
+}
+
+function networkPolicySelectsAllPods(resource: NetworkResource): boolean {
+  const spec = toObject(resource.spec);
+  if (!Object.prototype.hasOwnProperty.call(spec, "podSelector")) return false;
+  const podSelector = toObject(spec.podSelector);
+  const matchLabels = toStringRecord(podSelector.matchLabels);
+  return Object.keys(matchLabels).length === 0 && toArray(podSelector.matchExpressions).length === 0;
+}
+
+function extractNetworkPolicyPeerSelectors(resource: NetworkResource): Record<string, string>[] {
+  const spec = toObject(resource.spec);
+  const selectors: Record<string, string>[] = [];
+  const collectPeers = (peers: unknown[]) => {
+    peers.forEach((peer) => {
+      const podSelector = toObject(toObject(peer).podSelector);
+      const matchLabels = toStringRecord(podSelector.matchLabels);
+      if (Object.keys(matchLabels).length > 0) selectors.push(matchLabels);
+    });
+  };
+
+  toArray(spec.ingress).forEach((rule) => collectPeers(toArray(toObject(rule).from)));
+  toArray(spec.egress).forEach((rule) => collectPeers(toArray(toObject(rule).to)));
+  return selectors;
+}
+
+function extractGatewayClassName(resource: GatewayTopologyResource): string | undefined {
+  return toStringValue(toObject(resource.spec).gatewayClassName);
+}
+
+function extractHttpRouteGatewayRefs(resource: GatewayTopologyResource): string[] {
+  const refs = new Set<string>();
+  for (const parentRef of toArray(toObject(resource.spec).parentRefs)) {
+    const parent = toObject(parentRef);
+    const kind = toStringValue(parent.kind) ?? "Gateway";
+    if (kind !== "Gateway") continue;
+    const name = toStringValue(parent.name);
+    if (!name) continue;
+    const namespace = toStringValue(parent.namespace) ?? resource.namespace;
+    refs.add(`${namespace}/${name}`);
+  }
+  return Array.from(refs);
+}
+
+function extractHttpRouteBackendRefs(resource: GatewayTopologyResource): string[] {
+  const refs = new Set<string>();
+  for (const rule of toArray(toObject(resource.spec).rules)) {
+    for (const backendRef of toArray(toObject(rule).backendRefs)) {
+      const backend = toObject(backendRef);
+      const kind = toStringValue(backend.kind) ?? "Service";
+      if (kind !== "Service") continue;
+      const name = toStringValue(backend.name);
+      if (!name) continue;
+      const namespace = toStringValue(backend.namespace) ?? resource.namespace;
+      refs.add(`${namespace}/${name}`);
+    }
+  }
+  return Array.from(refs);
+}
+
+async function getGatewayTopologyResources(clusterId: string, token: string): Promise<GatewayTopologyResult> {
+  const lists = await Promise.all(
+    GATEWAY_TOPOLOGY_KINDS.map(async (kindKey) => {
+      const meta = GATEWAY_TOPOLOGY_META[kindKey];
+      try {
+        const list = await getDynamicResources(
+          {
+            clusterId,
+            group: "gateway.networking.k8s.io",
+            version: "v1",
+            resource: meta.resource,
+            pageSize: 200,
+            missingAsEmpty: true,
+          },
+          token,
+        );
+        return {
+          items: list.items.map((item) => ({
+            ...item,
+            kind: meta.kind,
+            group: "gateway.networking.k8s.io" as const,
+            version: "v1" as const,
+            resource: meta.resource,
+          })),
+          unavailableKind: null,
+        };
+      } catch {
+        return {
+          items: [],
+          unavailableKind: meta.kind,
+        };
+      }
+    }),
+  );
+
+  const items = lists.flatMap((list) => list.items);
+  const unavailableKinds = lists
+    .map((list) => list.unavailableKind)
+    .filter((kind): kind is "GatewayClass" | "Gateway" | "HTTPRoute" => Boolean(kind));
+  const withDetails = await Promise.all(
+    items.map(async (item): Promise<GatewayTopologyResource> => {
+      try {
+        const detail = await getDynamicResourceDetail(
+          {
+            clusterId: item.clusterId,
+            group: item.group,
+            version: item.version,
+            resource: item.resource,
+            namespace: item.namespace || undefined,
+            name: item.name,
+          },
+          token,
+        );
+        const raw = toObject(detail.raw);
+        return {
+          ...item,
+          spec: toObject(raw.spec),
+          statusJson: toObject(raw.status),
+          labels: Object.keys(item.labels ?? {}).length > 0 ? item.labels : toStringRecord(toObject(raw.metadata).labels),
+        };
+      } catch {
+        return item;
+      }
+    }),
+  );
+
+  return {
+    items: withDetails,
+    unavailableKinds,
+  };
+}
+
 function controllerOwnsPodName(controller: WorkloadListItem, podName: string): boolean {
   const normalizedPodName = podName.trim();
   if (!normalizedPodName) return false;
@@ -583,13 +826,48 @@ function controllerOwnsPodName(controller: WorkloadListItem, podName: string): b
 
 function resolveResourceDetailRequest(node: Node<TopoNodeData> | null): TopologyResourceDetailRequest | null {
   if (!node) return null;
-  if (node.data.tokenKey === "namespace" || node.data.tokenKey === "instancegroup" || node.data.tokenKey === "node") {
+  if (node.data.tokenKey === "instancegroup" || node.data.tokenKey === "node") {
     return null;
   }
 
-  const raw = (node.data.raw as { id?: unknown; kind?: unknown } | undefined) ?? undefined;
-  const id = typeof raw?.id === "string" ? raw.id.trim() : "";
-  const kind = typeof raw?.kind === "string" ? raw.kind.trim() : "";
+  const raw =
+    (node.data.raw as
+      | {
+          id?: unknown;
+          kind?: unknown;
+          clusterId?: unknown;
+          group?: unknown;
+          version?: unknown;
+          resource?: unknown;
+          namespace?: unknown;
+          name?: unknown;
+        }
+      | undefined) ?? undefined;
+  if (node.data.tokenKey === "namespace") {
+    const clusterId = typeof raw?.clusterId === "string" ? raw.clusterId.trim() : "";
+    const name = typeof raw?.name === "string" ? raw.name.trim() : node.data.label.trim();
+    if (!clusterId || !name) return null;
+    return {
+      id: ["dynamic", clusterId, "", "v1", "namespaces", "", name].join(":"),
+      kind: "dynamic",
+      label: node.data.label,
+    };
+  }
+  const rawId = typeof raw?.id === "string" ? raw.id.trim() : "";
+  const dynamicId =
+    raw?.group && raw?.version && raw?.resource && raw?.clusterId && raw?.name
+      ? [
+          "dynamic",
+          String(raw.clusterId),
+          String(raw.group),
+          String(raw.version),
+          String(raw.resource),
+          typeof raw.namespace === "string" ? raw.namespace : "",
+          String(raw.name),
+        ].join(":")
+      : "";
+  const id = dynamicId || rawId;
+  const kind = dynamicId ? "dynamic" : typeof raw?.kind === "string" ? raw.kind.trim() : "";
   if (!id || !kind) return null;
   const snapshot = {
     spec: (raw as { spec?: unknown } | undefined)?.spec as Record<string, unknown> | undefined,
@@ -608,6 +886,57 @@ function resolveResourceDetailRequest(node: Node<TopoNodeData> | null): Topology
             labels: snapshot.labels,
           }
         : undefined,
+  };
+}
+
+function resolveResourceYamlTarget(node: Node<TopoNodeData> | null): TopologyYamlTarget | null {
+  const request = resolveResourceDetailRequest(node);
+  if (!request) return null;
+  const raw =
+    (node?.data.raw as
+      | {
+          clusterId?: unknown;
+          group?: unknown;
+          version?: unknown;
+          resource?: unknown;
+          namespace?: unknown;
+          name?: unknown;
+          kind?: unknown;
+        }
+      | undefined) ?? undefined;
+  if (request.kind === "dynamic") {
+    const parts = request.id.split(":");
+    if (parts.length < 7 || parts[0] !== "dynamic") return null;
+    const dynamicIdentity: DynamicResourceIdentity = {
+      clusterId: parts[1] ?? "",
+      group: parts[2] ?? "",
+      version: parts[3] ?? "",
+      resource: parts[4] ?? "",
+      namespace: parts[5] || undefined,
+      name: parts.slice(6).join(":"),
+    };
+    return {
+      identity: {
+        clusterId: dynamicIdentity.clusterId,
+        namespace: dynamicIdentity.namespace ?? "",
+        kind: dynamicIdentity.resource,
+        name: dynamicIdentity.name,
+      },
+      dynamicIdentity,
+    };
+  }
+  const clusterId = typeof raw?.clusterId === "string" ? raw.clusterId.trim() : "";
+  const namespace = typeof raw?.namespace === "string" ? raw.namespace.trim() : "";
+  const kind = typeof raw?.kind === "string" ? raw.kind.trim() : request.kind;
+  const name = typeof raw?.name === "string" ? raw.name.trim() : request.label ?? "";
+  if (!clusterId || !kind || !name) return null;
+  return {
+    identity: {
+      clusterId,
+      namespace,
+      kind,
+      name,
+    },
   };
 }
 
@@ -780,12 +1109,14 @@ function buildFlowGraph(
   clusterName: string,
   clusterId: string,
   networkResources: NetworkResource[],
+  gatewayResources: GatewayTopologyResource[],
   deployments: WorkloadListItem[],
   statefulsets: WorkloadListItem[],
   daemonsets: WorkloadListItem[],
   groupMode: GroupMode,
 ): { nodes: Node<TopoNodeData>[]; edges: Edge[] } {
   const activeNetwork = networkResources.filter((item) => item.state !== "deleted");
+  const activeGateways = gatewayResources.filter((item) => item.state !== "deleted");
   const controllers = [
     ...deployments
       .filter((item) => item.state !== "deleted")
@@ -801,6 +1132,7 @@ function buildFlowGraph(
   const namespaces = Array.from(
     new Set([
       ...activeNetwork.map((item) => item.namespace),
+      ...activeGateways.map((item) => item.namespace).filter(Boolean),
       ...controllers.map((item) => item.namespace),
     ]),
   ).sort();
@@ -815,6 +1147,9 @@ function buildFlowGraph(
   const namespaceSummaries = new Map<string, NamespaceSummary>();
   const networkNodeIdByResourceId = new Map<string, string>();
   const serviceNodeIdByNamespaceName = new Map<string, string>();
+  const gatewayNodeIdByNamespaceName = new Map<string, string>();
+  const gatewayClassNodeIdByName = new Map<string, string>();
+  const gatewayNodeIdByResourceId = new Map<string, string>();
   const controllerNodeIdById = new Map<string, string>();
   const controllersByNamespace = new Map<string, WorkloadListItem[]>();
   const hasSemanticEdge = new Set<string>();
@@ -846,6 +1181,7 @@ function buildFlowGraph(
 
   namespaces.forEach((namespace) => {
     const namespaceNetwork = activeNetwork.filter((item) => item.namespace === namespace);
+    const namespaceGateway = activeGateways.filter((item) => item.namespace === namespace);
     const namespaceControllers = controllers.filter((item) => item.namespace === namespace);
     const podReplicaCount = namespaceControllers.reduce((total, item) => total + Math.max(item.replicas ?? 0, 0), 0);
     const readyReplicaCount = namespaceControllers.reduce(
@@ -854,7 +1190,7 @@ function buildFlowGraph(
     );
     namespaceSummaries.set(namespace, {
       resourceCount: namespaceNetwork.length + namespaceControllers.length + podReplicaCount,
-      networkCount: namespaceNetwork.length,
+      networkCount: namespaceNetwork.length + namespaceGateway.length,
       workloadCount: namespaceControllers.length,
       podReplicaCount,
       readyReplicaCount,
@@ -878,6 +1214,9 @@ function buildFlowGraph(
           raw: summary
             ? {
                 namespace,
+                clusterId,
+                kind: "Namespace",
+                name: namespace,
                 podCount: summary.resourceCount,
                 readyPods: summary.readyReplicaCount,
                 pendingPods: summary.pendingReplicaCount,
@@ -886,7 +1225,7 @@ function buildFlowGraph(
                 podReplicaCount: summary.podReplicaCount,
                 mode: "namespace",
               }
-            : { namespace, mode: "namespace" },
+            : { namespace, clusterId, kind: "Namespace", name: namespace, mode: "namespace" },
         },
       });
       pushEdge(
@@ -920,6 +1259,33 @@ function buildFlowGraph(
     networkNodeIdByResourceId.set(resource.id, networkNodeId);
     if (normalizeResourceKind(resource.kind) === "service") {
       serviceNodeIdByNamespaceName.set(`${resource.namespace}/${resource.name}`, networkNodeId);
+    }
+  });
+
+  activeGateways.forEach((resource) => {
+    const tokenKey = GATEWAY_TOPOLOGY_KINDS.map((key) => GATEWAY_TOPOLOGY_META[key]).find(
+      (item) => item.kind === resource.kind,
+    )?.tokenKey;
+    if (!tokenKey) return;
+    const gatewayNodeId = `gateway-${resource.resource}-${resource.id}`;
+    nodes.push({
+      id: gatewayNodeId,
+      type: "topo",
+      position: { x: 0, y: 0 },
+      data: {
+        label: resource.name,
+        typeLabel: resource.kind,
+        tokenKey,
+        caption: resource.namespace || "cluster-scope",
+        raw: resource,
+      },
+    });
+    gatewayNodeIdByResourceId.set(resource.id, gatewayNodeId);
+    if (resource.kind === "GatewayClass") {
+      gatewayClassNodeIdByName.set(resource.name, gatewayNodeId);
+    }
+    if (resource.kind === "Gateway") {
+      gatewayNodeIdByNamespaceName.set(`${resource.namespace}/${resource.name}`, gatewayNodeId);
     }
   });
 
@@ -1187,6 +1553,53 @@ function buildFlowGraph(
         const controllerNodeId = controllerNodeIdById.get(controller.id);
         if (controllerNodeId) registerSemanticLink(sourceNodeId, controllerNodeId);
       });
+      return;
+    }
+
+    if (kind === "networkpolicy") {
+      const selectors = [extractNetworkPolicyPodSelector(resource), ...extractNetworkPolicyPeerSelectors(resource)].filter(
+        (selector) => Object.keys(selector).length > 0,
+      );
+      const selectsAllPods = networkPolicySelectsAllPods(resource);
+      if (selectors.length === 0 && !selectsAllPods) return;
+      controllers.forEach((controller) => {
+        if (controller.namespace !== resource.namespace) return;
+        const templateLabels = extractWorkloadTemplateLabels(controller);
+        const selectorLabels = extractWorkloadSelectorLabels(controller);
+        if (
+          !selectsAllPods &&
+          !selectors.some(
+            (selector) => labelsMatch(selector, templateLabels) || labelsMatch(selector, selectorLabels),
+          )
+        ) {
+          return;
+        }
+        const controllerNodeId = controllerNodeIdById.get(controller.id);
+        if (controllerNodeId) registerSemanticLink(sourceNodeId, controllerNodeId);
+      });
+    }
+  });
+
+  activeGateways.forEach((resource) => {
+    const sourceNodeId = gatewayNodeIdByResourceId.get(resource.id);
+    if (!sourceNodeId) return;
+
+    if (resource.kind === "Gateway") {
+      const className = extractGatewayClassName(resource);
+      const classNodeId = className ? gatewayClassNodeIdByName.get(className) : undefined;
+      if (classNodeId) registerSemanticLink(classNodeId, sourceNodeId);
+      return;
+    }
+
+    if (resource.kind === "HTTPRoute") {
+      extractHttpRouteGatewayRefs(resource).forEach((gatewayRef) => {
+        const gatewayNodeId = gatewayNodeIdByNamespaceName.get(gatewayRef);
+        if (gatewayNodeId) registerSemanticLink(gatewayNodeId, sourceNodeId);
+      });
+      extractHttpRouteBackendRefs(resource).forEach((serviceRef) => {
+        const serviceNodeId = serviceNodeIdByNamespaceName.get(serviceRef);
+        if (serviceNodeId) registerSemanticLink(sourceNodeId, serviceNodeId);
+      });
     }
   });
 
@@ -1197,6 +1610,27 @@ function buildFlowGraph(
     pushEdge(
       buildEdge(useNamespaceGroups ? namespaceId : clusterNodeId, networkNodeId, {
         style: useNamespaceGroups
+          ? {
+              strokeWidth: 0.98,
+              opacity: 0.28,
+            }
+          : {
+              strokeWidth: 0.92,
+              opacity: 0.2,
+            },
+        data: { topologyRole: "scope" },
+        markerEnd: undefined,
+      }),
+    );
+  });
+
+  activeGateways.forEach((resource) => {
+    const gatewayNodeId = gatewayNodeIdByResourceId.get(resource.id);
+    if (!gatewayNodeId || hasSemanticEdge.has(gatewayNodeId)) return;
+    const namespaceId = resource.namespace ? `ns-${resource.namespace}` : clusterNodeId;
+    pushEdge(
+      buildEdge(useNamespaceGroups && resource.namespace ? namespaceId : clusterNodeId, gatewayNodeId, {
+        style: useNamespaceGroups && resource.namespace
           ? {
               strokeWidth: 0.98,
               opacity: 0.28,
@@ -2067,8 +2501,6 @@ const TopoNode = memo(({ data, selected }: NodeProps<TopoNodeData>) => {
 
 TopoNode.displayName = "TopoNode";
 
-const nodeTypes = { topo: TopoNode };
-
 function minimapNodeColor(node: Node<TopoNodeData>): string {
   const raw = node.data.raw as { layoutLane?: unknown } | undefined;
   if (raw?.layoutLane) return "transparent";
@@ -2144,6 +2576,7 @@ function TopologyCanvas({
   onNodeDragStop: () => void;
   isNodeDragging: boolean;
 }) {
+  const [stableNodeTypes] = useState<NodeTypes>(() => ({ topo: TopoNode }));
   const { fitView, zoomIn, zoomOut, setViewport } = useReactFlow();
   const reactFlowWidth = useStore((store) => store.width);
   const reactFlowHeight = useStore((store) => store.height);
@@ -2282,7 +2715,7 @@ function TopologyCanvas({
       }}
       onMoveStart={() => suspendAutoViewport(960)}
       onMoveEnd={() => suspendAutoViewport(560)}
-      nodeTypes={nodeTypes}
+      nodeTypes={stableNodeTypes}
       minZoom={0.08}
       maxZoom={4}
       autoPanOnNodeDrag={false}
@@ -2300,6 +2733,7 @@ function TopologyCanvas({
           borderRadius: 16,
           width: 164,
           height: 100,
+          pointerEvents: "none",
         }}
         maskColor="var(--topology-overview-mask)"
       />
@@ -2362,8 +2796,11 @@ function NodeDetailPanel({
   onApplyQuickFilter,
   activeQuickAction,
   currentResourceActionLabel,
+  canOpenResourceDetail,
+  canOpenResourceYaml,
   onOpenCurrentResource,
   onOpenResourceDetail,
+  onOpenResourceYaml,
 }: {
   focusedNode: Node<TopoNodeData> | null;
   connections: DetailRelationItem[];
@@ -2385,8 +2822,11 @@ function NodeDetailPanel({
   onApplyQuickFilter: (action: "abnormal" | "group" | "highRisk") => void;
   activeQuickAction: "abnormal" | "group" | "highRisk" | null;
   currentResourceActionLabel: string | null;
+  canOpenResourceDetail: boolean;
+  canOpenResourceYaml: boolean;
   onOpenCurrentResource: () => void;
   onOpenResourceDetail: () => void;
+  onOpenResourceYaml: () => void;
 }) {
   const nodeData = focusedNode?.data ?? null;
   const token = nodeData ? TOKEN[nodeData.tokenKey] : null;
@@ -2493,9 +2933,14 @@ function NodeDetailPanel({
           </Title>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {!isGroupNode ? (
+          {canOpenResourceDetail ? (
             <Button size="small" type="primary" onClick={onOpenResourceDetail}>
               完整详情
+            </Button>
+          ) : null}
+          {canOpenResourceYaml ? (
+            <Button size="small" icon={<FileTextOutlined />} onClick={onOpenResourceYaml}>
+              YAML
             </Button>
           ) : null}
           {!isGroupNode && currentResourceActionLabel ? (
@@ -2808,6 +3253,7 @@ export default function NetworkTopologyPage() {
   const [groupModePanelOpen, setGroupModePanelOpen] = useState(false);
   const [expandedResourceDomains, setExpandedResourceDomains] = useState<ResourceDomainKey[]>([...RESOURCE_DOMAIN_KEYS]);
   const [detailRequest, setDetailRequest] = useState<TopologyResourceDetailRequest | null>(null);
+  const [yamlTarget, setYamlTarget] = useState<TopologyYamlTarget | null>(null);
   const [viewportVersion, setViewportVersion] = useState(0);
   const [isNodeDragging, setIsNodeDragging] = useState(false);
   const fitViewRef = useRef<(() => void) | null>(null);
@@ -2835,6 +3281,17 @@ export default function NetworkTopologyPage() {
     enabled: queryEnabled,
   });
 
+  const {
+    data: gatewayTopologyData,
+    isLoading: gatewayTopologyLoading,
+    error: gatewayTopologyError,
+    refetch: refetchGatewayTopology,
+  } = useQuery({
+    queryKey: ["topology-gateway-api", effectiveClusterId],
+    queryFn: () => getGatewayTopologyResources(effectiveClusterId!, token!),
+    enabled: queryEnabled,
+  });
+
   const { data: deploymentData, isLoading: deploymentLoading, error: deploymentError } = useQuery({
     queryKey: ["topology-deployments", effectiveClusterId],
     queryFn: () =>
@@ -2859,20 +3316,29 @@ export default function NetworkTopologyPage() {
   const isLoading =
     clustersLoading ||
     networkLoading ||
+    gatewayTopologyLoading ||
     deploymentLoading ||
     statefulSetLoading ||
     daemonSetLoading;
   const clusterDataUnavailable =
     !isLoading &&
     !!effectiveClusterId &&
-    (!!networkError || !!deploymentError || !!statefulSetError || !!daemonSetError);
-  const topologyErrors = [networkError, deploymentError, statefulSetError, daemonSetError].filter(Boolean);
+    (!!networkError || !!gatewayTopologyError || !!deploymentError || !!statefulSetError || !!daemonSetError);
+  const topologyErrors = [networkError, gatewayTopologyError, deploymentError, statefulSetError, daemonSetError].filter(Boolean);
   const unavailableCategory = resolveFailureCategory(topologyErrors);
   const unavailableSummary = topologyErrors.map(resolveErrorMessage).join(" | ");
+  const partialCoverageSummary = useMemo(() => {
+    const unavailableKinds = gatewayTopologyData?.unavailableKinds ?? [];
+    if (unavailableKinds.length === 0) return null;
+    return `Gateway API 部分资源不可用：${unavailableKinds.join(", ")}。拓扑已保留其他资源与关系。`;
+  }, [gatewayTopologyData?.unavailableKinds]);
 
   const namespaceOptions = useMemo(() => {
     const values = new Set<string>();
     (networkData?.items ?? []).forEach((item) => {
+      if (item.namespace) values.add(item.namespace);
+    });
+    (gatewayTopologyData?.items ?? []).forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
     (deploymentData?.items ?? []).forEach((item) => {
@@ -2891,7 +3357,7 @@ export default function NetworkTopologyPage() {
         .sort((left, right) => left.localeCompare(right))
         .map((value) => ({ value, label: value })),
     ];
-  }, [daemonSetData?.items, deploymentData?.items, networkData?.items, statefulSetData?.items]);
+  }, [daemonSetData?.items, deploymentData?.items, gatewayTopologyData?.items, networkData?.items, statefulSetData?.items]);
 
   const namespaceFilteredNetwork = useMemo(
     () =>
@@ -2899,6 +3365,13 @@ export default function NetworkTopologyPage() {
         ? networkData?.items ?? []
         : (networkData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
     [networkData?.items, selectedNamespace],
+  );
+  const namespaceFilteredGatewayTopology = useMemo(
+    () =>
+      selectedNamespace === ALL_NAMESPACE
+        ? gatewayTopologyData?.items ?? []
+        : (gatewayTopologyData?.items ?? []).filter((item) => !item.namespace || item.namespace === selectedNamespace),
+    [gatewayTopologyData?.items, selectedNamespace],
   );
   const namespaceFilteredDeployments = useMemo(
     () =>
@@ -2923,6 +3396,7 @@ export default function NetworkTopologyPage() {
   );
   const deferredSelectedCluster = useDeferredValue(selectedCluster);
   const deferredNamespaceFilteredNetwork = useDeferredValue(namespaceFilteredNetwork);
+  const deferredNamespaceFilteredGatewayTopology = useDeferredValue(namespaceFilteredGatewayTopology);
   const deferredNamespaceFilteredDeployments = useDeferredValue(namespaceFilteredDeployments);
   const deferredNamespaceFilteredStatefulSets = useDeferredValue(namespaceFilteredStatefulSets);
   const deferredNamespaceFilteredDaemonSets = useDeferredValue(namespaceFilteredDaemonSets);
@@ -2934,6 +3408,7 @@ export default function NetworkTopologyPage() {
       deferredSelectedCluster.name,
       deferredSelectedCluster.id,
       deferredNamespaceFilteredNetwork,
+      deferredNamespaceFilteredGatewayTopology,
       deferredNamespaceFilteredDeployments,
       deferredNamespaceFilteredStatefulSets,
       deferredNamespaceFilteredDaemonSets,
@@ -2953,6 +3428,7 @@ export default function NetworkTopologyPage() {
   }, [
     deferredSelectedCluster,
     deferredNamespaceFilteredNetwork,
+    deferredNamespaceFilteredGatewayTopology,
     deferredNamespaceFilteredDeployments,
     deferredNamespaceFilteredStatefulSets,
     deferredNamespaceFilteredDaemonSets,
@@ -3270,8 +3746,8 @@ export default function NetworkTopologyPage() {
     return namespace ? `ns-${namespace}` : null;
   }, [focusedNodeId, graphNodeMap, groupMode]);
   const focusedNode = useMemo(
-    () => (focusedNodeId ? graphNodeMap.get(focusedNodeId) ?? null : null),
-    [focusedNodeId, graphNodeMap],
+    () => (focusedNodeId && filteredNodeIds.has(focusedNodeId) ? graphNodeMap.get(focusedNodeId) ?? null : null),
+    [filteredNodeIds, focusedNodeId, graphNodeMap],
   );
   const topologyViewMode = useMemo<TopologyViewMode>(() => {
     if (groupMode !== "namespace") return "free";
@@ -3357,6 +3833,10 @@ export default function NetworkTopologyPage() {
   }, [focusedNodeId, groupMode, topologyViewMode, visibleEdges, visibleLayoutNodes]);
   const focusedResourceDetailRequest = useMemo(
     () => resolveResourceDetailRequest(focusedNode),
+    [focusedNode],
+  );
+  const focusedResourceYamlTarget = useMemo(
+    () => resolveResourceYamlTarget(focusedNode),
     [focusedNode],
   );
 
@@ -3600,6 +4080,10 @@ export default function NetworkTopologyPage() {
       { key: "endpointslice", label: "前往 EndpointSlice 页面", path: "/network/endpointslices" },
       { key: "ingress", label: "前往 Ingress 页面", path: "/network/ingress" },
       { key: "ingressroute", label: "前往 IngressRoute 页面", path: "/network/ingressroute" },
+      { key: "networkpolicy", label: "前往 NetworkPolicy 页面", path: "/network/networkpolicy" },
+      { key: "gatewayclass", label: "前往 Gateway API 页面", path: "/network/gateway-api?kind=gatewayclass" },
+      { key: "gateway", label: "前往 Gateway API 页面", path: "/network/gateway-api?kind=gateway" },
+      { key: "httproute", label: "前往 Gateway API 页面", path: "/network/gateway-api?kind=httproute" },
       { key: "deployment", label: "前往 Deployment 页面", path: "/workloads/deployments" },
       { key: "statefulset", label: "前往 StatefulSet 页面", path: "/workloads/statefulsets" },
       { key: "daemonset", label: "前往 DaemonSet 页面", path: "/workloads/daemonsets" },
@@ -3653,7 +4137,8 @@ export default function NetworkTopologyPage() {
       }
       const query = params.toString();
       startTransition(() => {
-        router.push(query ? `${target.path}?${query}` : target.path);
+        const joiner = target.path.includes("?") ? "&" : "?";
+        router.push(query ? `${target.path}${joiner}${query}` : target.path);
       });
     },
     [effectiveClusterId, focusNamespace, focusedNode?.data.label, focusedNode?.data.tokenKey, quickLinkDefinitions, router],
@@ -3683,11 +4168,13 @@ export default function NetworkTopologyPage() {
 
   const handleRefresh = useCallback(() => {
     refetch();
+    refetchGatewayTopology();
     setSelectedGroupSection(null);
     setFocusedNodeId(null);
     setDetailRequest(null);
+    setYamlTarget(null);
     setViewportVersion((current) => current + 1);
-  }, [refetch]);
+  }, [refetch, refetchGatewayTopology]);
 
   const handleClusterChange = useCallback(
     (value: string) => {
@@ -3700,6 +4187,7 @@ export default function NetworkTopologyPage() {
       setFocusedNodeId(null);
       setExpandedGroupIds([]);
       setDetailRequest(null);
+      setYamlTarget(null);
       setResourceFocusPanelOpen(false);
       setClusterPanelOpen(false);
       setViewportVersion((current) => current + 1);
@@ -3716,6 +4204,7 @@ export default function NetworkTopologyPage() {
     setFocusedNodeId(null);
     setExpandedGroupIds(value === ALL_NAMESPACE ? [] : [`ns-${value}`]);
     setDetailRequest(null);
+    setYamlTarget(null);
     setResourceFocusPanelOpen(false);
     setNamespacePanelOpen(false);
     setViewportVersion((current) => current + 1);
@@ -3726,11 +4215,15 @@ export default function NetworkTopologyPage() {
       availableResourceTypeKeys.length > 0 ? [...availableResourceTypeKeys] : [...SOURCE_TOKEN_KEYS],
     );
     setSelectedGroupSection(null);
+    setDetailRequest(null);
+    setYamlTarget(null);
   }, [availableResourceTypeKeys]);
 
   const handleResetResourceTypesToDefault = useCallback(() => {
     setSelectedResourceTypes([...availableResourceTypeKeys]);
     setSelectedGroupSection(null);
+    setDetailRequest(null);
+    setYamlTarget(null);
   }, [availableResourceTypeKeys]);
 
   const handleToggleResourceDomain = useCallback((domain: ResourceDomainKey) => {
@@ -3752,6 +4245,9 @@ export default function NetworkTopologyPage() {
       return Array.from(new Set([...current, ...keys]));
     });
     setSelectedGroupSection(null);
+    setFocusedNodeId(null);
+    setDetailRequest(null);
+    setYamlTarget(null);
   }, [effectiveSelectedResourceTypes]);
 
   const handleToggleResourceType = useCallback((value: SourceKey) => {
@@ -3763,6 +4259,9 @@ export default function NetworkTopologyPage() {
       return [...current, value];
     });
     setSelectedGroupSection(null);
+    setFocusedNodeId(null);
+    setDetailRequest(null);
+    setYamlTarget(null);
   }, []);
 
   const handleGroupModeChange = useCallback((value: GroupMode) => {
@@ -3773,6 +4272,7 @@ export default function NetworkTopologyPage() {
     setFocusedNodeId(null);
     setExpandedGroupIds([]);
     setDetailRequest(null);
+    setYamlTarget(null);
     setGroupModePanelOpen(false);
     setViewportVersion((current) => current + 1);
   }, []);
@@ -3780,6 +4280,9 @@ export default function NetworkTopologyPage() {
   const handleAbnormalFocusToggle = useCallback(() => {
     setResourceFilter((current) => (current === "abnormal" ? "all" : "abnormal"));
     setSelectedGroupSection(null);
+    setFocusedNodeId(null);
+    setDetailRequest(null);
+    setYamlTarget(null);
   }, []);
 
   const handleFitView = useCallback(() => {
@@ -3805,6 +4308,7 @@ export default function NetworkTopologyPage() {
     setActiveQuickAction(null);
     setExpandedGroupIds([]);
     setDetailRequest(null);
+    setYamlTarget(null);
     setClusterPanelOpen(false);
     setNamespacePanelOpen(false);
     setGroupModePanelOpen(false);
@@ -4034,7 +4538,7 @@ export default function NetworkTopologyPage() {
     GROUP_MODE_ITEMS.find((item) => item.value === groupMode)?.label ?? "名称空间";
   const toolbarShellStyle: React.CSSProperties = {
     padding: "8px 10px",
-    borderRadius: 18,
+    borderRadius: 8,
     border: "1px solid var(--topology-toolbar-shell-border)",
     background: "var(--topology-toolbar-shell-bg)",
     boxShadow: "var(--topology-toolbar-shell-shadow)",
@@ -4044,7 +4548,7 @@ export default function NetworkTopologyPage() {
     minHeight: 52,
     minWidth: 168,
     padding: "10px 14px",
-    borderRadius: 16,
+    borderRadius: 8,
     border: "1px solid var(--topology-toolbar-pill-border)",
     background: "var(--topology-toolbar-pill-bg)",
     boxShadow: "var(--topology-toolbar-pill-shadow)",
@@ -4129,7 +4633,7 @@ export default function NetworkTopologyPage() {
   );
 
   return (
-    <div className="topology-overview-page">
+    <div className="topology-overview-page ops-workbench-shell ops-workbench-shell--topology">
       <section className="topology-map-shell">
         <div className="topology-toolbar-stack" style={toolbarShellStyle}>
           <div className="topology-toolbar-row">
@@ -4302,6 +4806,15 @@ export default function NetworkTopologyPage() {
                   ))
                 )}
               </div>
+              {partialCoverageSummary ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  className="topology-partial-coverage-alert"
+                  title="拓扑覆盖不完整"
+                  description={partialCoverageSummary}
+                />
+              ) : null}
               <div className="topology-canvas-surface">
                 <ReactFlowProvider>
                   <TopologyCanvas
@@ -4345,6 +4858,8 @@ export default function NetworkTopologyPage() {
               onApplyQuickFilter={handleQuickFilter}
               activeQuickAction={activeQuickAction}
               currentResourceActionLabel={detailInteractionsDisabled ? null : currentResourceActionLabel}
+              canOpenResourceDetail={!detailInteractionsDisabled && Boolean(focusedResourceDetailRequest)}
+              canOpenResourceYaml={!detailInteractionsDisabled && Boolean(focusedResourceYamlTarget)}
               onOpenCurrentResource={() => {
                 if (detailInteractionsDisabled) return;
                 handleOpenCurrentResource();
@@ -4353,6 +4868,12 @@ export default function NetworkTopologyPage() {
                 if (detailInteractionsDisabled) return;
                 if (focusedResourceDetailRequest) {
                   setDetailRequest(focusedResourceDetailRequest);
+                }
+              }}
+              onOpenResourceYaml={() => {
+                if (detailInteractionsDisabled) return;
+                if (focusedResourceYamlTarget) {
+                  setYamlTarget(focusedResourceYamlTarget);
                 }
               }}
               isGroupExpanded={isFocusedGroupExpanded}
@@ -4372,6 +4893,7 @@ export default function NetworkTopologyPage() {
                 setSelectedGroupSection(null);
                 setFocusedNodeId(null);
                 setDetailRequest(null);
+                setYamlTarget(null);
               }}
             />
           ) : null}
@@ -4382,6 +4904,14 @@ export default function NetworkTopologyPage() {
           token={token}
           request={detailRequest}
           onNavigateRequest={(request) => setDetailRequest(request)}
+        />
+        <ResourceYamlDrawer
+          open={Boolean(yamlTarget)}
+          onClose={() => setYamlTarget(null)}
+          token={token}
+          identity={yamlTarget?.identity ?? null}
+          dynamicIdentity={yamlTarget?.dynamicIdentity ?? null}
+          onUpdated={handleRefresh}
         />
       </section>
       <style jsx global>{`
@@ -4429,7 +4959,7 @@ export default function NetworkTopologyPage() {
           gap: 10px;
           min-width: 0;
           border: 1px solid var(--topology-jump-button-border);
-          border-radius: 16px;
+          border-radius: 8px;
           padding: 8px 14px 8px 11px;
           background: var(--topology-jump-button-bg);
           color: var(--topology-jump-button-text);
@@ -4453,7 +4983,7 @@ export default function NetworkTopologyPage() {
         .topology-current-resource-button__halo {
           position: absolute;
           inset: 1px;
-          border-radius: 14px;
+          border-radius: 6px;
           background: linear-gradient(135deg, rgba(255,255,255,0.38), rgba(255,255,255,0));
           pointer-events: none;
         }
@@ -4466,7 +4996,7 @@ export default function NetworkTopologyPage() {
           justify-content: center;
           width: 26px;
           height: 26px;
-          border-radius: 999px;
+          border-radius: 7px;
           background: var(--topology-jump-button-icon-bg);
           color: var(--topology-jump-button-icon);
           font-size: 13px;
@@ -4498,6 +5028,12 @@ export default function NetworkTopologyPage() {
           font-size: 13px;
           line-height: 1.2;
           font-weight: 700;
+        }
+
+        .topology-partial-coverage-alert {
+          margin: 0 14px 12px;
+          border-color: rgba(245, 158, 11, 0.32);
+          background: color-mix(in srgb, var(--topology-overview-panel) 88%, #f59e0b 12%);
         }
       `}</style>
     </div>

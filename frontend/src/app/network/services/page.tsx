@@ -26,6 +26,7 @@ import { ResourceTable } from "@/components/resource-table";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import {
+  applyNetworkResourceYaml,
   createNetworkResource,
   deleteNetworkResource,
   getNetworkResources,
@@ -88,6 +89,7 @@ export default function ServicesPage() {
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<NetworkResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<ServiceFormValues>();
 
@@ -163,11 +165,77 @@ export default function ServicesPage() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ item, values }: { item: NetworkResource; values: ServiceFormValues }) =>
+      applyNetworkResourceYaml(
+        {
+          clusterId: item.clusterId,
+          namespace: item.namespace,
+          kind: "Service",
+          name: item.name,
+          yaml: JSON.stringify(
+            {
+              apiVersion: "v1",
+              kind: "Service",
+              metadata: {
+                name: item.name,
+                namespace: item.namespace,
+                ...(item.labels ? { labels: item.labels } : {}),
+              },
+              spec: {
+                ...((item.spec ?? {}) as Record<string, unknown>),
+                type: values.type,
+              },
+            },
+            null,
+            2,
+          ),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async () => {
+      void message.success("Service 更新成功");
+      setModalOpen(false);
+      setEditingItem(null);
+      form.resetFields();
+      await queryClient.invalidateQueries({
+        queryKey: ["network", "Service"],
+      });
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "更新失败，请重试");
+    },
+  });
+
+  const handleOpenCreate = () => {
+    setEditingItem(null);
+    form.resetFields();
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (item: NetworkResource) => {
+    setEditingItem(item);
+    form.setFieldsValue({
+      name: item.name,
+      namespace: item.namespace,
+      clusterId: item.clusterId,
+      type:
+        item.spec?.type === "NodePort" || item.spec?.type === "LoadBalancer"
+          ? item.spec.type
+          : "ClusterIP",
+    });
+    setModalOpen(true);
+  };
+
   const handleModalSubmit = async () => {
     let values: ServiceFormValues;
     try {
       values = await form.validateFields();
     } catch {
+      return;
+    }
+    if (editingItem) {
+      updateMutation.mutate({ item: editingItem, values });
       return;
     }
     createMutation.mutate({
@@ -298,6 +366,7 @@ export default function ServicesPage() {
               name: row.name,
             })
           }
+          extraActions={[{ key: "edit", label: "编辑", onClick: () => handleOpenEdit(row) }]}
           onDelete={() => deleteMutation.mutate(row.id)}
         />
       ),
@@ -312,7 +381,7 @@ export default function ServicesPage() {
           embedded
           description="管理集群 Service 访问策略、端口映射与服务暴露方式。"
           style={{ marginBottom: 8 }}
-          titleSuffix={<ResourceAddButton title="创建Service" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建Service" onClick={handleOpenCreate} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}
@@ -376,16 +445,17 @@ export default function ServicesPage() {
       </Card>
 
       <Modal
-        title="添加 Service"
+        title={editingItem ? "编辑 Service" : "添加 Service"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setEditingItem(null);
           form.resetFields();
         }}
-        okText="创建"
+        okText={editingItem ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
@@ -394,14 +464,14 @@ export default function ServicesPage() {
             name="name"
             rules={[{ required: true, message: "请输入服务名称" }]}
           >
-            <Input placeholder="例如：my-service" />
+            <Input disabled={Boolean(editingItem)} placeholder="例如：my-service" />
           </Form.Item>
           <Form.Item
             label="名称空间"
             name="namespace"
             rules={[{ required: true, message: "请输入名称空间" }]}
           >
-            <Input placeholder="例如：default" />
+            <Input disabled={Boolean(editingItem)} placeholder="例如：default" />
           </Form.Item>
           <Form.Item
             label="所属集群"
@@ -409,6 +479,7 @@ export default function ServicesPage() {
             rules={[{ required: true, message: "请选择集群" }]}
           >
             <Select
+              disabled={Boolean(editingItem)}
               placeholder="请选择集群"
               options={clusterOptions}
               loading={clustersQuery.isLoading}

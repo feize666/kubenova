@@ -2,23 +2,28 @@
 
 import { DownloadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Drawer, Input, Space, Typography } from "antd";
+import { Alert, Button, Input, Space, Typography } from "antd";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  getDynamicResourceDetail,
   getResourceYaml,
+  updateDynamicResourceYaml,
   updateResourceYaml,
+  type DynamicResourceIdentity,
   type ResourceIdentity,
 } from "@/lib/api/resources";
 
 import { getClusters } from "@/lib/api/clusters";
 
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { OpsDrawerShell } from "@/components/ops";
 
 interface ResourceYamlDrawerProps {
   open: boolean;
   onClose: () => void;
   token?: string;
   identity: ResourceIdentity | null;
+  dynamicIdentity?: DynamicResourceIdentity | null;
   onUpdated?: () => void;
 }
 
@@ -51,15 +56,44 @@ export function ResourceYamlDrawer({
   onClose,
   token,
   identity,
+  dynamicIdentity,
   onUpdated,
 }: ResourceYamlDrawerProps) {
   const [yamlText, setYamlText] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const isDynamic = Boolean(dynamicIdentity);
 
   const query = useQuery({
-    queryKey: ["resource-yaml", identity?.clusterId, identity?.namespace, identity?.kind, identity?.name, token],
-    queryFn: () => getResourceYaml(identity!, token),
-    enabled: open && Boolean(identity?.clusterId && identity?.namespace && identity?.kind && identity?.name),
+    queryKey: [
+      "resource-yaml",
+      isDynamic ? "dynamic" : "core",
+      dynamicIdentity?.clusterId ?? identity?.clusterId,
+      dynamicIdentity?.group,
+      dynamicIdentity?.version,
+      dynamicIdentity?.resource ?? identity?.kind,
+      dynamicIdentity?.namespace ?? identity?.namespace,
+      dynamicIdentity?.name ?? identity?.name,
+      token,
+    ],
+    queryFn: async () => {
+      if (dynamicIdentity) {
+        const detail = await getDynamicResourceDetail(dynamicIdentity, token);
+        return {
+          clusterId: detail.clusterId,
+          namespace: detail.namespace,
+          kind: detail.kind || dynamicIdentity.resource,
+          name: detail.name,
+          yaml: detail.yaml,
+          updatedAt: detail.timestamp,
+        };
+      }
+      return getResourceYaml(identity!, token);
+    },
+    enabled:
+      open &&
+      (dynamicIdentity
+        ? Boolean(dynamicIdentity.clusterId && dynamicIdentity.version && dynamicIdentity.resource && dynamicIdentity.name)
+        : Boolean(identity?.clusterId && identity?.namespace && identity?.kind && identity?.name)),
   });
   const clusterQuery = useQuery({
     queryKey: ["resource-yaml", "clusters", token],
@@ -95,12 +129,18 @@ export function ResourceYamlDrawer({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      if (!identity) {
+      if (!identity && !dynamicIdentity) {
         throw new Error("资源标识缺失，无法提交 YAML");
       }
       const normalized = yamlText.trim();
       if (!normalized) {
         throw new Error("YAML 内容不能为空");
+      }
+      if (dynamicIdentity) {
+        return updateDynamicResourceYaml({ ...dynamicIdentity, yaml: normalized }, token);
+      }
+      if (!identity) {
+        throw new Error("资源标识缺失，无法提交 YAML");
       }
       return updateResourceYaml({ ...identity, yaml: normalized }, token);
     },
@@ -127,12 +167,15 @@ export function ResourceYamlDrawer({
   const downloadDisabled = query.isLoading || !identity || !yamlText.trim();
 
   return (
-    <Drawer
+    <OpsDrawerShell
       title={title}
       size="large"
       open={open}
       destroyOnHidden
-      styles={{ body: { padding: 24 } }}
+      variant="editor"
+      styles={{
+        body: { padding: 24 },
+      }}
       onClose={() => {
         mutation.reset();
         setLocalError(null);
@@ -167,7 +210,7 @@ export function ResourceYamlDrawer({
             集群 {getClusterDisplayName(clusterMap, identity.clusterId)} · 名称空间 {identity.namespace} · 资源 {identity.kind}/{identity.name}
           </Typography.Text>
         ) : null}
-        {errorMessage ? <Alert type="error" showIcon message={errorMessage} /> : null}
+        {errorMessage ? <Alert type="error" showIcon title={errorMessage} /> : null}
         <Input.TextArea
           value={yamlText}
           onChange={(e) => setYamlText(e.target.value)}
@@ -178,6 +221,6 @@ export function ResourceYamlDrawer({
           disabled={query.isLoading}
         />
       </Space>
-    </Drawer>
+    </OpsDrawerShell>
   );
 }

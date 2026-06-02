@@ -6,6 +6,7 @@ describe('ClustersController', () => {
   function createController() {
     const clustersService = {
       list: jest.fn(),
+      listNodes: jest.fn(),
       getKubeconfig: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
@@ -105,5 +106,50 @@ describe('ClustersController', () => {
       message: '离线模式，无法验证真实连接状态',
     });
     expect(resp.meta.action).toBe('health');
+  });
+
+  it('nodes returns worker node inventory envelope', async () => {
+    const { controller, clustersService } = createController();
+    clustersService.listNodes.mockResolvedValue({
+      items: [
+        {
+          id: 'c-1:node-a',
+          name: 'node-a',
+          role: 'worker',
+          roles: ['worker'],
+          ready: true,
+          internalIP: '10.0.0.1',
+          externalIP: null,
+          osImage: 'Ubuntu',
+          kernelVersion: '6.8.0',
+          containerRuntimeVersion: 'containerd://1.7',
+          cpuCapacity: '8',
+          memoryCapacity: '32Gi',
+          cpuUsagePercent: null,
+          memoryUsagePercent: null,
+          taints: [],
+          age: '2026-01-01T00:00:00.000Z',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      total: 1,
+      clusterId: 'c-1',
+      degraded: false,
+      degradationReason: null,
+      timestamp: '2026-01-01T00:00:00.000Z',
+    });
+
+    const req = { headers: {} } as any;
+    const res = {
+      getHeader: jest.fn().mockReturnValue(undefined),
+      setHeader: jest.fn(),
+    } as any;
+
+    const resp = await controller.nodes(req, res, 'c-1');
+
+    expect(clustersService.listNodes).toHaveBeenCalledWith('c-1');
+    expect(resp.data.total).toBe(1);
+    expect(resp.data.items[0].cpuUsagePercent).toBeNull();
+    expect(resp.meta.action).toBe('nodes');
   });
 });

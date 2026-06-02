@@ -1,4 +1,5 @@
 jest.mock('@kubernetes/client-node', () => ({
+  dumpYaml: jest.fn((value: unknown) => JSON.stringify(value)),
   KubernetesObjectApi: {
     makeApiClient: jest.fn((kc: { __api?: unknown }) => kc.__api),
   },
@@ -165,6 +166,26 @@ describe('ResourcesService detail aggregation', () => {
     const service = buildService(prisma);
     const detail = await service.getDetail('deployment', 'wl-deploy-1');
 
+    expect(detail.rawSpec).toEqual({
+      template: {
+        spec: {
+          volumes: [
+            {
+              name: 'data',
+              persistentVolumeClaim: { claimName: 'web-data' },
+            },
+          ],
+          containers: [{ name: 'app', image: 'nginx:1.27' }],
+        },
+      },
+    });
+    expect(detail.rawStatus).toEqual({
+      phase: 'Running',
+      replicas: 2,
+      readyReplicas: 2,
+      availableReplicas: 2,
+      image: 'nginx:1.27',
+    });
     expect(detail.descriptor.sections).toEqual([
       'overview',
       'runtime',
@@ -418,6 +439,173 @@ describe('ResourcesService detail aggregation', () => {
       ]),
     );
     expect(detail.descriptor.sections).not.toContain('storage');
+  });
+
+  it('exposes Gateway API spec fields in runtime detail', async () => {
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'gwc-1',
+          clusterId: 'cluster-a',
+          namespace: '',
+          kind: 'GatewayClass',
+          name: 'nginx',
+          state: 'accepted',
+          spec: { controllerName: 'gateway.nginx.org/nginx-gateway-controller' },
+          statusJson: { conditions: [{ type: 'Accepted', status: 'True' }] },
+          labels: null,
+          annotations: null,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'gw-1',
+            clusterId: 'cluster-a',
+            namespace: 'default',
+            kind: 'Gateway',
+            name: 'public',
+            state: 'active',
+            spec: { gatewayClassName: 'nginx' },
+            statusJson: {},
+            labels: null,
+            annotations: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    };
+
+    const service = buildService(prisma);
+    const detail = await service.getDetail('gatewayclass', 'gwc-1');
+
+    expect(detail.runtime.controllerName).toBe(
+      'gateway.nginx.org/nginx-gateway-controller',
+    );
+    expect(detail.runtime.conditions).toEqual([
+      expect.objectContaining({ type: 'Accepted', status: 'True' }),
+    ]);
+    expect(detail.associations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'Gateway',
+          name: 'public',
+        }),
+      ]),
+    );
+  });
+
+  it('builds live Node detail with readiness, roles, addresses, capacity, and events', async () => {
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    };
+    const readNode = jest.fn().mockResolvedValue({
+      metadata: {
+        name: 'worker-a',
+        labels: { 'node-role.kubernetes.io/worker': '' },
+        creationTimestamp: now,
+      },
+      spec: {
+        unschedulable: false,
+        taints: [{ key: 'dedicated', value: 'apps', effect: 'NoSchedule' }],
+      },
+      status: {
+        addresses: [
+          { type: 'InternalIP', address: '10.0.0.10' },
+          { type: 'ExternalIP', address: '203.0.113.10' },
+        ],
+        capacity: { cpu: '8', memory: '32768Mi' },
+        nodeInfo: {
+          osImage: 'Ubuntu 24.04',
+          kernelVersion: '6.8.0',
+          containerRuntimeVersion: 'containerd://1.7.0',
+          kubeletVersion: 'v1.30.1',
+        },
+        conditions: [{ type: 'Ready', status: 'True' }],
+      },
+    });
+    const listEventForAllNamespaces = jest.fn().mockResolvedValue({
+      items: [
+        {
+          metadata: { uid: 'node-event' },
+          type: 'Normal',
+          reason: 'NodeReady',
+          message: 'Node worker-a is ready',
+          involvedObject: { kind: 'Node', name: 'worker-a' },
+          lastTimestamp: '2026-04-16T10:05:00.000Z',
+        },
+      ],
+    });
+    const service = buildService(prisma, {
+      clustersService: {
+        getKubeconfig: jest.fn().mockResolvedValue('kubeconfig-a'),
+      },
+      k8sClientService: {
+        getCoreApi: jest.fn().mockReturnValue({
+          readNode,
+          listEventForAllNamespaces,
+        }),
+        getDiscoveryApi: jest.fn().mockReturnValue({}),
+        getNetworkingApi: jest.fn().mockReturnValue({}),
+        getCustomObjectsApi: jest.fn().mockReturnValue({}),
+      },
+    });
+
+    const detail = await service.getDetail(
+      'node',
+      'live-node:cluster-a:worker-a',
+    );
+
+    expect(readNode).toHaveBeenCalledWith({ name: 'worker-a' });
+    expect(detail.overview.kind).toBe('Node');
+    expect(detail.runtime.ready).toBe(true);
+    expect(detail.runtime.roles).toEqual(['worker']);
+    expect(detail.runtime.internalIP).toBe('10.0.0.10');
+    expect(detail.runtime.externalIP).toBe('203.0.113.10');
+    expect(detail.runtime.cpuCapacity).toBe('8');
+    expect(detail.runtime.memoryCapacity).toBe('32768Mi');
+    expect(detail.runtime.taints).toEqual(['dedicated=apps:NoSchedule']);
+    expect(detail.runtime.conditions).toEqual([
+      expect.objectContaining({ type: 'Ready', status: 'True' }),
+    ]);
+    expect(listEventForAllNamespaces).toHaveBeenCalledWith({
+      fieldSelector: 'involvedObject.kind=Node,involvedObject.name=worker-a',
+      limit: 30,
+    });
+    expect(detail.events.items[0]).toEqual(
+      expect.objectContaining({
+        id: 'node-event',
+        reason: 'NodeReady',
+      }),
+    );
   });
 
   it('keeps storage detail schema isolated from network section', async () => {
@@ -959,8 +1147,12 @@ describe('ResourcesService dynamic listing', () => {
       list: jest.fn(),
     };
     const k8sClientService = {
+      getCoreApi: jest.fn().mockReturnValue({
+        listNamespacedEvent: jest.fn().mockResolvedValue({ items: [] }),
+        listEventForAllNamespaces: jest.fn().mockResolvedValue({ items: [] }),
+      }),
       createClient: jest.fn((kubeconfig: string) => ({
-        __api: kubeconfig === 'kubeconfig-a'
+            __api: kubeconfig === 'kubeconfig-a'
           ? {
               list: jest.fn().mockResolvedValue({
                 items: [
@@ -973,6 +1165,25 @@ describe('ResourcesService dynamic listing', () => {
                     status: { phase: 'Running' },
                   },
                 ],
+              }),
+              read: jest.fn().mockResolvedValue({
+                apiVersion: 'example.com/v1',
+                kind: 'Widget',
+                metadata: {
+                  name: 'widget-a',
+                  namespace: 'default',
+                  labels: { app: 'widget' },
+                  creationTimestamp: new Date('2026-04-16T10:00:00.000Z'),
+                },
+                spec: {
+                  size: 'small',
+                  gatewayClassName: 'edge',
+                  rules: [{ backendRefs: [{ name: 'web', port: 80 }] }],
+                },
+                status: {
+                  phase: 'Ready',
+                  conditions: [{ type: 'Available', status: 'True' }],
+                },
               }),
             }
           : {
@@ -987,6 +1198,16 @@ describe('ResourcesService dynamic listing', () => {
                     status: { state: 'Pending' },
                   },
                 ],
+              }),
+              read: jest.fn().mockResolvedValue({
+                apiVersion: 'example.com/v1',
+                kind: 'Widget',
+                metadata: {
+                  name: 'widget-b',
+                  namespace: 'default',
+                  creationTimestamp: '2026-04-16T10:01:00.000Z',
+                },
+                status: { state: 'Pending' },
               }),
             },
       })),
@@ -1132,5 +1353,184 @@ describe('ResourcesService dynamic listing', () => {
         clusterId: 'cluster-a',
       }),
     );
+  });
+
+  it('returns an empty dynamic list for optional missing capabilities', async () => {
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      apiResourceCapability: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+    };
+
+    const { service, clustersService } = buildDynamicService(prisma);
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig-a',
+    );
+
+    const result = await service.listDynamicResources({
+      clusterId: 'cluster-a',
+      group: 'gateway.networking.k8s.io',
+      version: 'v1',
+      resource: 'gatewayclasses',
+      missingAsEmpty: 'true',
+    });
+
+    expect(clustersService.getKubeconfig).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        clusterId: 'cluster-a',
+        group: 'gateway.networking.k8s.io',
+        version: 'v1',
+        resource: 'gatewayclasses',
+        total: 0,
+        items: [],
+      }),
+    );
+  });
+
+  it('returns standard drawer detail for dynamic resources', async () => {
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      apiResourceCapability: {
+        findFirst: jest.fn().mockResolvedValue({
+          clusterId: 'cluster-a',
+          group: 'example.com',
+          version: 'v1',
+          resource: 'widgets',
+          kind: 'Widget',
+          namespaced: true,
+        }),
+      },
+    };
+    const { service, clustersService } = buildDynamicService(prisma);
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig-a',
+    );
+
+    const result = await service.getDynamicResourceDetail({
+      clusterId: 'cluster-a',
+      group: 'example.com',
+      version: 'v1',
+      resource: 'widgets',
+      namespace: 'default',
+      name: 'widget-a',
+    });
+
+    expect(result.detail.overview).toEqual(
+      expect.objectContaining({
+        id: 'dynamic:cluster-a:example.com:v1:widgets:default:widget-a',
+        clusterId: 'cluster-a',
+        namespace: 'default',
+        kind: 'Widget',
+        name: 'widget-a',
+        state: 'Ready',
+        createdAt: '2026-04-16T10:00:00.000Z',
+      }),
+    );
+    expect(result.detail.runtime).toEqual(
+      expect.objectContaining({
+        phase: 'Ready',
+        conditions: [expect.objectContaining({ type: 'Available', status: 'True' })],
+      }),
+    );
+    expect(result.detail.metadata.labels).toEqual({ app: 'widget' });
+
+    const drawerDetail = await service.getDetail(
+      'dynamic',
+      'dynamic:cluster-a:example.com:v1:widgets:default:widget-a',
+    );
+    expect(drawerDetail.overview.kind).toBe('Widget');
+    expect(drawerDetail.runtime.phase).toBe('Ready');
+    expect(drawerDetail.rawSpec).toEqual({
+      size: 'small',
+      gatewayClassName: 'edge',
+      rules: [{ backendRefs: [{ name: 'web', port: 80 }] }],
+    });
+    expect(drawerDetail.rawStatus).toEqual(
+      expect.objectContaining({
+        phase: 'Ready',
+        conditions: [expect.objectContaining({ type: 'Available', status: 'True' })],
+      }),
+    );
+  });
+
+  it('adds Gateway API runtime and relations for dynamic fallback detail', async () => {
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      apiResourceCapability: {
+        findFirst: jest.fn().mockResolvedValue({
+          clusterId: 'cluster-a',
+          group: 'gateway.networking.k8s.io',
+          version: 'v1',
+          resource: 'gateways',
+          kind: 'Gateway',
+          namespaced: true,
+        }),
+      },
+    };
+    const { service, clustersService } = buildDynamicService(prisma);
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig-a',
+    );
+
+    const detail = await service.getDetail(
+      'dynamic',
+      'dynamic:cluster-a:gateway.networking.k8s.io:v1:gateways:default:widget-a',
+    );
+
+    expect(detail.runtime.gatewayClassName).toBe('edge');
+    expect(detail.associations).toEqual([
+      expect.objectContaining({
+        kind: 'GatewayClass',
+        name: 'edge',
+        associationType: 'gateway-class',
+      }),
+    ]);
   });
 });

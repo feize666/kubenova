@@ -10,6 +10,7 @@
 bash scripts/service.sh install-deps
 bash scripts/service.sh db-init
 bash scripts/service.sh dev up
+bash scripts/service.sh dev up --stable-frontend
 bash scripts/service.sh dev status
 ```
 
@@ -23,7 +24,7 @@ bash scripts/service.sh prod status
 
 ## 统一入口
 
-- `service.sh dev up [--no-gateway]`：启动开发环境服务
+- `service.sh dev up [--no-gateway] [--stable-frontend|--dev-frontend]`：启动开发环境服务；发布/浏览器回归优先用 `--stable-frontend` 避免 Next dev 大路由扫测时重启
 - `service.sh dev down [service...]`：停止开发环境服务
 - `service.sh dev restart [service...]`：重启开发环境服务
 - `service.sh dev status`：查看开发环境状态
@@ -65,6 +66,7 @@ bash scripts/service.sh prod status
 | --- | --- |
 | `bash scripts/dev-up.sh` | `bash scripts/service.sh dev up` |
 | `bash scripts/dev-up.sh --no-gateway` | `bash scripts/service.sh dev up --no-gateway` |
+| `FRONTEND_BOOT_MODE=stable bash scripts/dev-up.sh` | `bash scripts/service.sh dev up --stable-frontend` |
 | `bash scripts/dev-down.sh [service]` | `bash scripts/service.sh dev down [service]` |
 | `bash scripts/dev-status.sh` | `bash scripts/service.sh dev status` |
 | `bash scripts/prod-up.sh` | `bash scripts/service.sh prod up` |

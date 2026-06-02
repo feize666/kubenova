@@ -1,12 +1,15 @@
 "use client";
 
-import { ArrowLeftOutlined } from "@ant-design/icons";
-import { Alert, Button, Drawer, Empty, Skeleton, Space, Typography } from "antd";
+import { ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
+import { Alert, Button, Empty, Skeleton, Space, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
+import type { DynamicResourceIdentity, ResourceIdentity, ResourceDetailResponse } from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { OpsDrawerShell } from "@/components/ops";
+import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceDetailContent } from "./renderers";
 import type { ResourceDetailDrawerProps } from "./types";
 import { getKindTitle, getRenderProfile, normalizeKind } from "./utils";
@@ -19,11 +22,70 @@ interface NavigationState {
   stack: DetailRequest[];
 }
 
+interface DetailYamlTarget {
+  identity: ResourceIdentity;
+  dynamicIdentity?: DynamicResourceIdentity;
+}
+
 function getRequestKey(request: { kind: string; id: string } | null | undefined) {
   if (!request) return "";
   const kind = normalizeKind(String(request.kind ?? ""));
   const id = String(request.id ?? "").trim();
   return kind && id ? `${kind}:${id}` : "";
+}
+
+function parseDynamicYamlTarget(id: string): DetailYamlTarget | null {
+  const parts = id.split(":");
+  if (parts.length < 7 || parts[0] !== "dynamic") {
+    return null;
+  }
+  const dynamicIdentity: DynamicResourceIdentity = {
+    clusterId: parts[1] ?? "",
+    group: parts[2] ?? "",
+    version: parts[3] ?? "",
+    resource: parts[4] ?? "",
+    namespace: parts[5] || undefined,
+    name: parts.slice(6).join(":"),
+  };
+  if (!dynamicIdentity.clusterId || !dynamicIdentity.version || !dynamicIdentity.resource || !dynamicIdentity.name) {
+    return null;
+  }
+  return {
+    identity: {
+      clusterId: dynamicIdentity.clusterId,
+      namespace: dynamicIdentity.namespace ?? "",
+      kind: dynamicIdentity.resource,
+      name: dynamicIdentity.name,
+    },
+    dynamicIdentity,
+  };
+}
+
+function buildDetailYamlTarget(
+  detail: ResourceDetailResponse | undefined,
+  activeRequest: DetailRequest | null,
+): DetailYamlTarget | null {
+  if (!detail || !activeRequest) {
+    return null;
+  }
+  if (normalizeKind(activeRequest.kind) === "dynamic") {
+    return parseDynamicYamlTarget(activeRequest.id);
+  }
+  const detailKind = normalizeKind(detail.overview.kind || detail.descriptor.resourceKind || activeRequest.kind);
+  if (["node", "helmrelease", "helmrepository"].includes(detailKind)) {
+    return null;
+  }
+  if (!detail.overview.clusterId || !detail.overview.kind || !detail.overview.name) {
+    return null;
+  }
+  return {
+    identity: {
+      clusterId: detail.overview.clusterId,
+      namespace: detailKind === "namespace" ? detail.overview.name : detail.overview.namespace || "default",
+      kind: detail.overview.kind,
+      name: detail.overview.name,
+    },
+  };
 }
 
 export function ResourceDetailDrawer({
@@ -38,6 +100,7 @@ export function ResourceDetailDrawer({
 }: ResourceDetailDrawerProps) {
   const requestKey = getRequestKey(request);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(null);
+  const [yamlOpen, setYamlOpen] = useState(false);
   const navigationStateActiveKey = getRequestKey(navigationState?.activeRequest);
   const hasActiveNavigationState = Boolean(
     navigationState &&
@@ -86,6 +149,7 @@ export function ResourceDetailDrawer({
 
   const handleClose = () => {
     setNavigationState(null);
+    setYamlOpen(false);
     onClose();
   };
 
@@ -101,6 +165,7 @@ export function ResourceDetailDrawer({
   });
   const clusterMap = Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name]));
   const hasDetailData = Boolean(query.data);
+  const yamlTarget = buildDetailYamlTarget(query.data, activeRequest);
 
   const title = (() => {
     if (!activeRequest) {
@@ -119,21 +184,18 @@ export function ResourceDetailDrawer({
   })();
 
   return (
-    <Drawer
+    <OpsDrawerShell
       title={title}
       size="large"
       open={open}
       destroyOnHidden
       onClose={handleClose}
+      variant="detail"
+      widthPx={width}
       classNames={{
         wrapper: "resource-detail-drawer-wrapper",
       }}
       styles={{
-        wrapper: {
-          width: width ? `min(50vw, ${width}px)` : "min(50vw, 960px)",
-          minWidth: width ?? 720,
-          maxWidth: "none",
-        },
         body: {
           display: "flex",
           flexDirection: "column",
@@ -152,6 +214,11 @@ export function ResourceDetailDrawer({
           <Button onClick={() => void query.refetch()} loading={query.isFetching} disabled={!activeRequest}>
             刷新
           </Button>
+          {yamlTarget ? (
+            <Button icon={<FileTextOutlined />} onClick={() => setYamlOpen(true)}>
+              YAML
+            </Button>
+          ) : null}
           {extra}
         </Space>
       }
@@ -175,7 +242,7 @@ export function ResourceDetailDrawer({
           <Alert
             type="error"
             showIcon
-            message="资源详情加载失败"
+            title="资源详情加载失败"
             description={query.error.message}
             action={
               <Button size="small" onClick={() => void query.refetch()}>
@@ -202,6 +269,14 @@ export function ResourceDetailDrawer({
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无详情数据" />
         )}
       </div>
-    </Drawer>
+      <ResourceYamlDrawer
+        open={yamlOpen}
+        onClose={() => setYamlOpen(false)}
+        token={token}
+        identity={yamlTarget?.identity ?? null}
+        dynamicIdentity={yamlTarget?.dynamicIdentity ?? null}
+        onUpdated={() => void query.refetch()}
+      />
+    </OpsDrawerShell>
   );
 }

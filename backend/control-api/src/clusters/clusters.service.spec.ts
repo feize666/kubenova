@@ -113,6 +113,7 @@ describe('ClustersService detail', () => {
     expect(detail.displayName).toBe('杭州生产集群');
     expect(detail.nodeSummary.total).toBe(2);
     expect(detail.nodeSummary.ready).toBe(1);
+    expect(detail.nodeSummary.degraded).toBe(false);
     expect(detail.platform.cniPlugin).toBe('calico');
     expect(detail.platform.criRuntime).toBe('containerd');
     expect(detail.runtimeStatus).toBe('running');
@@ -123,5 +124,44 @@ describe('ClustersService detail', () => {
     await expect(service.getDetail('')).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+
+  it('returns degraded node inventory when kubeconfig is missing', async () => {
+    const { service } = buildService();
+    const repository = (
+      service as unknown as { repository: { findById: jest.Mock } }
+    ).repository;
+    repository.findById.mockResolvedValue({
+      ...BASE_RECORD,
+      kubeconfig: undefined,
+    });
+
+    const nodes = await service.listNodes('c-001');
+
+    expect(nodes.items).toEqual([]);
+    expect(nodes.total).toBe(0);
+    expect(nodes.degraded).toBe(true);
+    expect(nodes.degradationReason).toContain('kubeconfig');
+  });
+
+  it('marks cluster detail node summary degraded when kubeconfig is missing', async () => {
+    const { service, prismaMock } = buildService();
+    const repository = (
+      service as unknown as { repository: { findById: jest.Mock } }
+    ).repository;
+    repository.findById.mockResolvedValue({
+      ...BASE_RECORD,
+      kubeconfig: undefined,
+    });
+    (
+      prismaMock.clusterHealthSnapshot.findUnique as jest.Mock
+    ).mockResolvedValue(null);
+
+    const detail = await service.getDetail('c-001');
+
+    expect(detail.nodeSummary.items).toEqual([]);
+    expect(detail.nodeSummary.degraded).toBe(true);
+    expect(detail.nodeSummary.degradationReason).toContain('kubeconfig');
+    expect(detail.runtimeStatus).toBe('offline-mode');
   });
 });

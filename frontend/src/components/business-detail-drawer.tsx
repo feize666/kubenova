@@ -1,8 +1,9 @@
 "use client";
 
-import { Drawer, Empty, Space, Typography } from "antd";
+import { Empty, Space, Typography } from "antd";
 import type { ReactNode } from "react";
 import { DetailDescriptions, DetailSection } from "@/components/resource-detail/section-primitives";
+import { OpsDrawerShell } from "@/components/ops";
 
 export type BusinessDetailItem = {
   key: string;
@@ -33,7 +34,7 @@ export function BusinessDetailDrawer({
   onClose,
 }: BusinessDetailDrawerProps) {
   return (
-    <Drawer
+    <OpsDrawerShell
       title={
         <Space orientation="vertical" size={2}>
           <Typography.Text strong>{title}</Typography.Text>
@@ -48,6 +49,7 @@ export function BusinessDetailDrawer({
       onClose={onClose}
       destroyOnHidden
       size="large"
+      variant="business"
       styles={{
         body: { padding: 24 },
       }}
@@ -63,6 +65,6 @@ export function BusinessDetailDrawer({
           ))}
         </Space>
       )}
-    </Drawer>
+    </OpsDrawerShell>
   );
 }

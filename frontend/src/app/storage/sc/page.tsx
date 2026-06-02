@@ -43,6 +43,7 @@ import {
   createStorageResource,
   deleteStorageResource,
   getStorageResources,
+  updateStorageClassMutableFields,
   type CreateStorageResourcePayload,
   type StorageResource,
 } from "@/lib/api/storage";
@@ -65,6 +66,14 @@ interface ScFormValues {
   allowVolumeExpansion: "true" | "false";
 }
 
+interface ScEditFormValues {
+  name: string;
+  provisioner: string;
+  bindingMode: string;
+  reclaimPolicy: string;
+  allowVolumeExpansion: "true" | "false";
+}
+
 function defaultTag(isDefault: boolean) {
   return isDefault ? <Tag color="green">默认</Tag> : <Tag>普通</Tag>;
 }
@@ -76,6 +85,23 @@ function getTextFilter(filters: HeadlampTableFilters, key: string) {
 
 function textMatches(value: unknown, filterValue: string) {
   return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
+function readSpecString(resource: StorageResource, key: string) {
+  if (!resource.spec || typeof resource.spec !== "object" || Array.isArray(resource.spec)) {
+    return "";
+  }
+  const value = resource.spec[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readAllowVolumeExpansion(resource: StorageResource) {
+  return Boolean(
+    resource.spec &&
+      typeof resource.spec === "object" &&
+      !Array.isArray(resource.spec) &&
+      (resource.spec as { allowVolumeExpansion?: boolean }).allowVolumeExpansion,
+  );
 }
 
 export default function StorageClassPage() {
@@ -102,9 +128,11 @@ export default function StorageClassPage() {
     defaultPageSize: 10,
   });
   const [modalOpen, setModalOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<StorageResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [form] = Form.useForm<ScFormValues>();
+  const [editForm] = Form.useForm<ScEditFormValues>();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
@@ -216,6 +244,54 @@ export default function StorageClassPage() {
     },
   });
 
+  const editMutation = useMutation({
+    mutationFn: (values: ScEditFormValues) => {
+      if (!editTarget) {
+        throw new Error("未选择 StorageClass");
+      }
+      return updateStorageClassMutableFields(
+        {
+          clusterId: editTarget.clusterId,
+          namespace: "default",
+          name: editTarget.name,
+          allowVolumeExpansion: values.allowVolumeExpansion === "true",
+        },
+        accessToken || undefined,
+      );
+    },
+    onSuccess: async () => {
+      void message.success("StorageClass 更新成功");
+      setEditTarget(null);
+      editForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["storage", "SC"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "更新失败，请重试");
+    },
+  });
+
+  const handleOpenEdit = (row: StorageResource) => {
+    setEditTarget(row);
+    editForm.setFieldsValue({
+      name: row.name,
+      provisioner: readSpecString(row, "provisioner"),
+      bindingMode: row.bindingMode ?? readSpecString(row, "volumeBindingMode"),
+      reclaimPolicy: readSpecString(row, "reclaimPolicy"),
+      allowVolumeExpansion: readAllowVolumeExpansion(row) ? "true" : "false",
+    });
+  };
+
+  const handleEditSubmit = async () => {
+    let values: ScEditFormValues;
+    try {
+      values = await editForm.validateFields();
+    } catch {
+      return;
+    }
+    editMutation.mutate(values);
+  };
+
   const columns: HeadlampResourceTableColumn<StorageResource>[] = [
     {
       title: "名称",
@@ -308,31 +384,11 @@ export default function StorageClassPage() {
       render: (_: unknown, row: StorageResource) => {
         const actions: ResourceMenuItem[] = [
           {
-            key: "expand",
+            key: "edit",
             icon: <SettingOutlined />,
-            label: "扩容配置",
+            label: "编辑",
             onClick: () => {
-              void message.info("请在 YAML 中设置 allowVolumeExpansion 以调整扩容能力。");
-              setYamlTarget({
-                clusterId: row.clusterId,
-                namespace: "default",
-                kind: "StorageClass",
-                name: row.name,
-              });
-            },
-          },
-          {
-            key: "bind",
-            icon: <FileTextOutlined />,
-            label: "绑定模式",
-            onClick: () => {
-              void message.info("请在 YAML 中调整 volumeBindingMode。");
-              setYamlTarget({
-                clusterId: row.clusterId,
-                namespace: "default",
-                kind: "StorageClass",
-                name: row.name,
-              });
+              handleOpenEdit(row);
             },
           },
           {
@@ -535,6 +591,42 @@ export default function StorageClassPage() {
             />
           </Form.Item>
           <Form.Item label="允许扩容" name="allowVolumeExpansion" initialValue="false">
+            <Select
+              options={[
+                { label: "否", value: "false" },
+                { label: "是", value: "true" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={`编辑 StorageClass · ${editTarget?.name ?? ""}`}
+        open={Boolean(editTarget)}
+        onCancel={() => {
+          setEditTarget(null);
+          editForm.resetFields();
+        }}
+        onOk={() => void handleEditSubmit()}
+        confirmLoading={editMutation.isPending}
+        okText="提交"
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item label="名称" name="name">
+            <Input disabled />
+          </Form.Item>
+          <Form.Item label="Provisioner" name="provisioner">
+            <Input disabled />
+          </Form.Item>
+          <Form.Item label="绑定模式" name="bindingMode">
+            <Input disabled />
+          </Form.Item>
+          <Form.Item label="回收策略" name="reclaimPolicy">
+            <Input disabled />
+          </Form.Item>
+          <Form.Item label="允许扩容" name="allowVolumeExpansion" rules={[{ required: true, message: "请选择扩容能力" }]}>
             <Select
               options={[
                 { label: "否", value: "false" },

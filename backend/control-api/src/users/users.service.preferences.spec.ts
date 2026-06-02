@@ -103,4 +103,72 @@ describe('UsersService table preferences', () => {
       service.saveTablePreference(actor, 'workloads', {}),
     ).rejects.toThrow(BadRequestException);
   });
+
+  it('falls back to null preference when preference table is unavailable', async () => {
+    const prisma = {
+      userPreference: {
+        findUnique: jest.fn(async () => {
+          const error = new Error('The table `public.UserPreference` does not exist');
+          Object.assign(error, { code: 'P2021' });
+          throw error;
+        }),
+        upsert: jest.fn(),
+      },
+    };
+    const service = new UsersService(prisma as never);
+
+    await expect(
+      service.getTablePreference(actor, 'workloads'),
+    ).resolves.toEqual({
+      tableKey: 'workloads',
+      value: null,
+      updatedAt: null,
+    });
+  });
+
+  it('accepts writes without failing when preference table is unavailable', async () => {
+    const prisma = {
+      userPreference: {
+        findUnique: jest.fn(),
+        upsert: jest.fn(async () => {
+          const error = new Error('The table `public.UserPreference` does not exist');
+          Object.assign(error, { code: 'P2021' });
+          throw error;
+        }),
+      },
+    };
+    const service = new UsersService(prisma as never);
+
+    await expect(
+      service.saveTablePreference(actor, 'workloads', {
+        value: { columnVisibility: { name: true } },
+      }),
+    ).resolves.toEqual({
+      tableKey: 'workloads',
+      value: { columnVisibility: { name: true } },
+      updatedAt: expect.any(String),
+    });
+  });
+
+  it('falls back when Prisma client has no preference delegate', async () => {
+    const service = new UsersService({} as never);
+
+    await expect(
+      service.getTablePreference(actor, 'workloads'),
+    ).resolves.toEqual({
+      tableKey: 'workloads',
+      value: null,
+      updatedAt: null,
+    });
+
+    await expect(
+      service.saveTablePreference(actor, 'workloads', {
+        value: { filterRowVisible: true },
+      }),
+    ).resolves.toEqual({
+      tableKey: 'workloads',
+      value: { filterRowVisible: true },
+      updatedAt: expect.any(String),
+    });
+  });
 });

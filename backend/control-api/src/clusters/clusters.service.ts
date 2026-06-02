@@ -101,6 +101,32 @@ export interface ClusterDetailNodeItem {
   kubeletVersion?: string;
 }
 
+export interface ClusterNodeListItem extends ClusterDetailNodeItem {
+  id: string;
+  roles: string[];
+  internalIP: string | null;
+  externalIP: string | null;
+  osImage: string | null;
+  kernelVersion: string | null;
+  containerRuntimeVersion: string | null;
+  cpuCapacity: string | null;
+  memoryCapacity: string | null;
+  cpuUsagePercent: number | null;
+  memoryUsagePercent: number | null;
+  taints: string[];
+  age: string | null;
+  createdAt: string | null;
+}
+
+export interface ClusterNodeListResponse {
+  items: ClusterNodeListItem[];
+  total: number;
+  clusterId: string;
+  degraded: boolean;
+  degradationReason: string | null;
+  timestamp: string;
+}
+
 export interface ClusterDetailResponse {
   id: string;
   name: string;
@@ -117,6 +143,8 @@ export interface ClusterDetailResponse {
     ready: number;
     notReady: number;
     items: ClusterDetailNodeItem[];
+    degraded: boolean;
+    degradationReason: string | null;
   };
   platform: {
     cniPlugin: string | null;
@@ -246,7 +274,7 @@ export class ClustersService implements OnModuleInit {
               ? 'offline-mode'
               : 'checking';
 
-    const nodeInventory = await this.fetchNodeInventory(kubeconfig);
+    const nodeInventory = await this.fetchNodeInventory(record.id, kubeconfig);
     const detailJson = this.parseClusterHealthDetail(
       healthSnapshot?.detailJson,
     );
@@ -263,6 +291,8 @@ export class ClustersService implements OnModuleInit {
         ready: nodeInventory.items.filter((item) => item.ready).length,
         notReady: nodeInventory.items.filter((item) => !item.ready).length,
         items: nodeInventory.items,
+        degraded: nodeInventory.degraded,
+        degradationReason: nodeInventory.degradationReason,
       },
       platform: {
         cniPlugin: this.pickClusterPlatformValue(detailJson, 'cniPlugin'),
@@ -278,6 +308,25 @@ export class ClustersService implements OnModuleInit {
         region: profile?.region ?? null,
         environmentType: profile?.environmentType ?? null,
       },
+    };
+  }
+
+  async listNodes(id: string): Promise<ClusterNodeListResponse> {
+    const record = await this.mustFind(id);
+    if (record.state === 'deleted') {
+      throw new BadRequestException('已删除的集群不可查看工作节点');
+    }
+
+    const kubeconfig = await this.getKubeconfig(record.id);
+    const nodeInventory = await this.fetchNodeInventory(record.id, kubeconfig);
+
+    return {
+      items: nodeInventory.items,
+      total: nodeInventory.items.length,
+      clusterId: record.id,
+      degraded: nodeInventory.degraded,
+      degradationReason: nodeInventory.degradationReason,
+      timestamp: new Date().toISOString(),
     };
   }
 
@@ -1119,18 +1168,24 @@ export class ClustersService implements OnModuleInit {
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   }
 
-  private async fetchNodeInventory(
-    kubeconfig: string | null,
-  ): Promise<{ items: ClusterDetailNodeItem[] }> {
+  private async fetchNodeInventory(clusterId: string, kubeconfig: string | null): Promise<{
+    items: ClusterNodeListItem[];
+    degraded: boolean;
+    degradationReason: string | null;
+  }> {
     if (!kubeconfig) {
-      return { items: [] };
+      return {
+        items: [],
+        degraded: true,
+        degradationReason: '该集群未配置 kubeconfig，无法读取实时节点清单',
+      };
     }
 
     try {
       const coreApi = this.k8sClientService.getCoreApi(kubeconfig);
       const resp = await coreApi.listNode();
       const items = resp.items
-        .map((node) => {
+        .map((node): ClusterNodeListItem | null => {
           const name = node.metadata?.name?.trim() ?? '';
           if (!name) {
             return null;
@@ -1145,17 +1200,53 @@ export class ClustersService implements OnModuleInit {
             labels['node-role.kubernetes.io/master'] !== undefined
               ? 'control-plane'
               : 'worker';
+          const roleKeys = Object.keys(labels)
+            .filter((key) => key.startsWith('node-role.kubernetes.io/'))
+            .map((key) => key.replace('node-role.kubernetes.io/', '').trim())
+            .filter(Boolean);
+          const roles = roleKeys.length > 0 ? roleKeys : [role];
+          const addresses = node.status?.addresses ?? [];
+          const findAddress = (type: string) =>
+            addresses.find((address) => address.type === type)?.address ?? null;
+          const taints = (node.spec?.taints ?? []).map((taint) => {
+            const value = taint.value ? `=${taint.value}` : '';
+            return `${taint.key}${value}:${taint.effect}`;
+          });
+          const createdAt = node.metadata?.creationTimestamp
+            ? node.metadata.creationTimestamp.toISOString()
+            : null;
           return {
+            id: `${clusterId}:${name}`,
             name,
             role,
+            roles,
             ready,
             kubeletVersion: node.status?.nodeInfo?.kubeletVersion ?? undefined,
+            internalIP: findAddress('InternalIP'),
+            externalIP: findAddress('ExternalIP'),
+            osImage: node.status?.nodeInfo?.osImage ?? null,
+            kernelVersion: node.status?.nodeInfo?.kernelVersion ?? null,
+            containerRuntimeVersion:
+              node.status?.nodeInfo?.containerRuntimeVersion ?? null,
+            cpuCapacity: node.status?.capacity?.cpu ?? null,
+            memoryCapacity: node.status?.capacity?.memory ?? null,
+            cpuUsagePercent: null,
+            memoryUsagePercent: null,
+            taints,
+            age: createdAt,
+            createdAt,
           };
         })
-        .filter((item) => item !== null) as ClusterDetailNodeItem[];
-      return { items };
-    } catch {
-      return { items: [] };
+        .filter((item): item is ClusterNodeListItem => item !== null);
+      return { items, degraded: false, degradationReason: null };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      this.logger.warn(`fetch node inventory failed: ${message}`);
+      return {
+        items: [],
+        degraded: true,
+        degradationReason: `读取 Kubernetes 节点清单失败：${message}`,
+      };
     }
   }
 

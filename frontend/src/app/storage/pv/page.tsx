@@ -36,6 +36,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import {
+  bindPersistentVolume,
   createStorageResource,
   deleteStorageResource,
   getStorageResources,
@@ -91,12 +92,34 @@ function textMatches(value: unknown, filterValue: string) {
   return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
 }
 
+function readClaimRef(resource: StorageResource) {
+  const claimRef =
+    resource.spec &&
+    typeof resource.spec === "object" &&
+    !Array.isArray(resource.spec) &&
+    typeof resource.spec.claimRef === "object" &&
+    resource.spec.claimRef &&
+    !Array.isArray(resource.spec.claimRef)
+      ? (resource.spec.claimRef as Record<string, unknown>)
+      : null;
+
+  return {
+    namespace: typeof claimRef?.namespace === "string" ? claimRef.namespace : "default",
+    name: typeof claimRef?.name === "string" ? claimRef.name : "",
+  };
+}
+
 interface PvFormValues {
   name: string;
   clusterId: string;
   capacity: string;
   accessModes: string[];
   storageClass: string;
+}
+
+interface PvBindFormValues {
+  claimNamespace: string;
+  claimName: string;
 }
 
 const ACCESS_MODE_OPTIONS = [
@@ -130,9 +153,11 @@ export default function PvPage() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [bindTarget, setBindTarget] = useState<StorageResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [form] = Form.useForm<PvFormValues>();
+  const [bindForm] = Form.useForm<PvBindFormValues>();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
@@ -203,6 +228,34 @@ export default function PvPage() {
     },
   });
 
+  const bindMutation = useMutation({
+    mutationFn: (values: PvBindFormValues) => {
+      if (!bindTarget) {
+        throw new Error("未选择 PV");
+      }
+      return bindPersistentVolume(
+        {
+          clusterId: bindTarget.clusterId,
+          namespace: bindTarget.namespace || "default",
+          name: bindTarget.name,
+          claimNamespace: values.claimNamespace,
+          claimName: values.claimName,
+        },
+        accessToken || undefined,
+      );
+    },
+    onSuccess: async () => {
+      void message.success("PV 绑定更新成功");
+      setBindTarget(null);
+      bindForm.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["storage", "PV"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "绑定更新失败，请重试");
+    },
+  });
+
   const handleModalSubmit = async () => {
     let values: PvFormValues;
     try {
@@ -218,6 +271,25 @@ export default function PvPage() {
       accessModes: values.accessModes,
       storageClass: values.storageClass,
     });
+  };
+
+  const handleOpenBind = (row: StorageResource) => {
+    const claimRef = readClaimRef(row);
+    setBindTarget(row);
+    bindForm.setFieldsValue({
+      claimNamespace: claimRef.namespace,
+      claimName: claimRef.name,
+    });
+  };
+
+  const handleBindSubmit = async () => {
+    let values: PvBindFormValues;
+    try {
+      values = await bindForm.validateFields();
+    } catch {
+      return;
+    }
+    bindMutation.mutate(values);
   };
 
   const clusterOptions = (clustersQuery.data?.items ?? []).map((c) => ({
@@ -379,13 +451,7 @@ export default function PvPage() {
                   return;
                 }
                 if (key === "bind") {
-                  void message.info("请在 YAML 中配置 claimRef 完成 PV 绑定。");
-                  setYamlTarget({
-                    clusterId: row.clusterId,
-                    namespace: row.namespace || "default",
-                    kind: "PersistentVolume",
-                    name: row.name,
-                  });
+                  handleOpenBind(row);
                   return;
                 }
                 if (key === "yaml") {
@@ -547,6 +613,36 @@ export default function PvPage() {
             name="storageClass"
           >
             <Input placeholder="例如：standard" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title={`绑定 PV · ${bindTarget?.name ?? ""}`}
+        open={Boolean(bindTarget)}
+        onOk={() => void handleBindSubmit()}
+        onCancel={() => {
+          setBindTarget(null);
+          bindForm.resetFields();
+        }}
+        okText="提交"
+        cancelText="取消"
+        confirmLoading={bindMutation.isPending}
+        destroyOnHidden
+      >
+        <Form form={bindForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            label="PVC 名称空间"
+            name="claimNamespace"
+            rules={[{ required: true, message: "请输入 PVC 名称空间" }]}
+          >
+            <Input placeholder="例如：default" />
+          </Form.Item>
+          <Form.Item
+            label="PVC 名称"
+            name="claimName"
+            rules={[{ required: true, message: "请输入 PVC 名称" }]}
+          >
+            <Input placeholder="例如：my-pvc" />
           </Form.Item>
         </Form>
       </Modal>

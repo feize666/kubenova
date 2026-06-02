@@ -15,7 +15,11 @@ import {
   DetailSection,
   TagList,
 } from "./section-primitives";
-import { buildHeadlampDetailSections } from "./detail-section-builders";
+import {
+  buildHeadlampDetailSections,
+  buildSpecSection,
+  buildStatusSection,
+} from "./detail-section-builders";
 import type { ResourceDetailRendererProps } from "./types";
 import {
   buildOverviewFieldMap,
@@ -36,6 +40,24 @@ type NavigateRequest =
     ? T
     : never;
 
+function renderSpecStatusSections({
+  detail,
+  snapshot,
+  onNavigateRequest,
+}: ResourceDetailRendererProps): ReactNode[] {
+  const context = {
+    detail,
+    snapshot,
+    specSnapshot: detail.rawSpec ?? snapshot?.spec,
+    statusSnapshot: detail.rawStatus ?? snapshot?.status,
+    onNavigateRequest,
+  };
+  return [
+    buildSpecSection(context),
+    buildStatusSection(context),
+  ];
+}
+
 const ASSOCIATION_TYPE_META: Record<string, { label: string; color: string }> =
   {
     "routes-to-service": { label: "Ingress 转发", color: "green" },
@@ -44,6 +66,8 @@ const ASSOCIATION_TYPE_META: Record<string, { label: string; color: string }> =
     "service-endpoints": { label: "服务端点", color: "gold" },
     "service-endpointslice": { label: "端点切片", color: "volcano" },
     "backend-service": { label: "后端服务", color: "blue" },
+    "gateway-class": { label: "GatewayClass", color: "geekblue" },
+    "uses-gateway-class": { label: "使用 GatewayClass", color: "geekblue" },
     "tls-secret": { label: "TLS 证书", color: "magenta" },
     "route-middleware": { label: "路由中间件", color: "geekblue" },
     "owned-pod": { label: "拥有 Pod", color: "purple" },
@@ -1243,6 +1267,86 @@ function PodHighlightsSection({
   );
 }
 
+function NodeHighlightsSection({ detail }: ResourceDetailRendererProps) {
+  if (
+    normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) !==
+    "node"
+  ) {
+    return null;
+  }
+
+  const roles = detail.runtime.roles ?? [];
+  const taints = detail.runtime.taints ?? [];
+  const summaryItems = [
+    {
+      key: "ready",
+      label: "Ready",
+      value:
+        detail.runtime.ready === undefined
+          ? "未知"
+          : detail.runtime.ready
+            ? "True"
+            : "False",
+    },
+    roles.length > 0
+      ? { key: "roles", label: "角色", value: <TagList items={roles} color="blue" /> }
+      : null,
+    detail.runtime.internalIP
+      ? { key: "internalIP", label: "Internal IP", value: detail.runtime.internalIP }
+      : null,
+    detail.runtime.externalIP
+      ? { key: "externalIP", label: "External IP", value: detail.runtime.externalIP }
+      : null,
+    detail.runtime.cpuCapacity
+      ? { key: "cpu", label: "CPU 容量", value: detail.runtime.cpuCapacity }
+      : null,
+    detail.runtime.memoryCapacity
+      ? { key: "memory", label: "内存容量", value: detail.runtime.memoryCapacity }
+      : null,
+    detail.runtime.containerRuntimeVersion
+      ? {
+          key: "runtime",
+          label: "CRI Runtime",
+          value: detail.runtime.containerRuntimeVersion,
+        }
+      : null,
+    detail.runtime.osImage
+      ? { key: "osImage", label: "OS Image", value: detail.runtime.osImage }
+      : null,
+    detail.runtime.unschedulable !== undefined
+      ? {
+          key: "schedulable",
+          label: "调度状态",
+          value: detail.runtime.unschedulable ? "不可调度" : "可调度",
+        }
+      : null,
+  ].filter(Boolean) as Array<{
+    key: string;
+    label: string;
+    value: ReactNode;
+  }>;
+
+  return (
+    <DetailSection
+      title="Node 高频区"
+      subtitle="先看就绪、角色、地址、容量和调度状态"
+    >
+      <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+        <DetailDescriptions items={summaryItems} emptyText="暂无 Node 摘要" />
+        {taints.length > 0 ? (
+          <div>
+            <Typography.Text strong>Taints</Typography.Text>
+            <div style={{ marginTop: 8 }}>
+              <TagList items={taints} color="gold" />
+            </div>
+          </div>
+        ) : null}
+        {renderConditionsSection(detail.runtime.conditions)}
+      </Space>
+    </DetailSection>
+  );
+}
+
 function WorkloadHighlightsSection({
   detail,
 }: ResourceDetailRendererProps) {
@@ -2259,7 +2363,8 @@ function GatewayClassHighlightsSection({ detail }: ResourceDetailRendererProps) 
     return null;
   }
 
-  const spec =
+  const controllerName =
+    detail.runtime.controllerName ??
     detail.metadata.annotations["gateway.networking.k8s.io/controller-name"] ??
     "";
   const gateways = detail.associations.filter(
@@ -2278,8 +2383,8 @@ function GatewayClassHighlightsSection({ detail }: ResourceDetailRendererProps) 
               detail.overview.kind
                 ? { key: "kind", label: "Kind", value: detail.overview.kind }
                 : null,
-              spec
-                ? { key: "controller", label: "Controller", value: spec }
+              controllerName
+                ? { key: "controller", label: "Controller", value: controllerName }
                 : null,
               detail.runtime.phase
                 ? { key: "phase", label: "阶段", value: detail.runtime.phase }
@@ -2325,6 +2430,7 @@ function GatewayHighlightsSection({ detail }: ResourceDetailRendererProps) {
   const hostnameCount = detail.network.endpoints.filter(
     (item) => item.kind === "gateway-listener" && item.hostname,
   ).length;
+  const listenerHostnames = detail.runtime.hostnames ?? [];
   const allowedRoutesFrom = Array.from(
     new Set(
       listenerEndpoints.flatMap((item) =>
@@ -2349,6 +2455,13 @@ function GatewayHighlightsSection({ detail }: ResourceDetailRendererProps) {
                     value: detail.overview.namespace,
                   }
                 : null,
+              detail.runtime.gatewayClassName
+                ? {
+                    key: "gatewayClassName",
+                    label: "GatewayClass",
+                    value: detail.runtime.gatewayClassName,
+                  }
+                : null,
               listenerNames.length > 0
                 ? {
                     key: "listeners",
@@ -2356,8 +2469,14 @@ function GatewayHighlightsSection({ detail }: ResourceDetailRendererProps) {
                     value: <TagList items={listenerNames} color="blue" />,
                   }
                 : null,
-              hostnameCount > 0
-                ? { key: "hostnames", label: "Hostname", value: hostnameCount }
+              listenerHostnames.length > 0
+                ? {
+                    key: "hostnames",
+                    label: "Hostname",
+                    value: <TagList items={listenerHostnames} color="green" />,
+                  }
+                : hostnameCount > 0
+                  ? { key: "hostnames", label: "Hostname", value: hostnameCount }
                 : null,
               allowedRoutesFrom.length > 0
                 ? {
@@ -2891,6 +3010,9 @@ function HttpRouteHighlightsSection({ detail }: ResourceDetailRendererProps) {
     return null;
   }
 
+  const runtimeParentRefs = detail.runtime.parentRefs ?? [];
+  const runtimeBackendRefs = detail.runtime.backendRefs ?? [];
+  const runtimeHostnames = detail.runtime.hostnames ?? [];
   const parentRefs = detail.associations.filter(
     (item) => item.associationType === "owner",
   );
@@ -2924,12 +3046,31 @@ function HttpRouteHighlightsSection({ detail }: ResourceDetailRendererProps) {
                     label: "父引用",
                     value: `${parentRefs.length} 项（见关系导航）`,
                   }
+                : runtimeParentRefs.length > 0
+                  ? {
+                      key: "parents",
+                      label: "父引用",
+                      value: <TagList items={runtimeParentRefs} color="gold" />,
+                    }
                 : null,
               backendRefs.length > 0
                 ? {
                     key: "backend",
                     label: "后端引用",
                     value: `${backendRefs.length} 项（见关系导航）`,
+                  }
+                : runtimeBackendRefs.length > 0
+                  ? {
+                      key: "backend",
+                      label: "后端引用",
+                      value: <TagList items={runtimeBackendRefs} color="cyan" />,
+                    }
+                : null,
+              runtimeHostnames.length > 0
+                ? {
+                    key: "hostnames",
+                    label: "Hostname",
+                    value: <TagList items={runtimeHostnames} color="green" />,
                   }
                 : null,
               detail.runtime.phase
@@ -3233,6 +3374,11 @@ export function ResourceDetailContent({
         {detail.descriptor.sections.includes("events") ? (
           <EventsSection detail={detail} />
         ) : null}
+        {renderSpecStatusSections({
+          detail,
+          snapshot,
+          onNavigateRequest,
+        })}
       </Space>
     );
   }
@@ -3262,6 +3408,11 @@ export function ResourceDetailContent({
         {detail.descriptor.sections.includes("events") ? (
           <EventsSection detail={detail} />
         ) : null}
+        {renderSpecStatusSections({
+          detail,
+          snapshot,
+          onNavigateRequest,
+        })}
       </Space>
     );
   }
@@ -3291,6 +3442,11 @@ export function ResourceDetailContent({
         {detail.descriptor.sections.includes("events") ? (
           <EventsSection detail={detail} />
         ) : null}
+        {renderSpecStatusSections({
+          detail,
+          snapshot,
+          onNavigateRequest,
+        })}
       </Space>
     );
   }
@@ -3388,6 +3544,7 @@ export function ResourceDetailContent({
         detail={detail}
         onNavigateRequest={onNavigateRequest}
       />
+      <NodeHighlightsSection detail={detail} />
       <WorkloadHighlightsSection
         detail={detail}
         onNavigateRequest={onNavigateRequest}
@@ -3446,8 +3603,8 @@ export function ResourceDetailContent({
       {buildHeadlampDetailSections({
         detail,
         snapshot,
-        specSnapshot: snapshot?.spec,
-        statusSnapshot: snapshot?.status,
+        specSnapshot: detail.rawSpec ?? snapshot?.spec,
+        statusSnapshot: detail.rawStatus ?? snapshot?.status,
         onNavigateRequest,
       })}
 

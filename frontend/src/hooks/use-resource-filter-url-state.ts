@@ -14,6 +14,7 @@ type SyncFilterUrlOptions = {
   namespace: string;
   keyword: string;
   path?: string;
+  extraParams?: Record<string, string | undefined>;
 };
 type SearchParamsLike = {
   get: (name: string) => string | null;
@@ -27,6 +28,22 @@ function normalizeFilterValues(values: FilterUrlValues): URLSearchParams {
   if (clusterId) params.set("clusterId", clusterId);
   if (namespace) params.set("namespace", namespace);
   if (keyword) params.set("keyword", keyword);
+  return params;
+}
+
+function appendExtraParams(
+  params: URLSearchParams,
+  extraParams?: Record<string, string | undefined>,
+): URLSearchParams {
+  if (!extraParams) {
+    return params;
+  }
+  for (const [key, rawValue] of Object.entries(extraParams)) {
+    const value = rawValue?.trim();
+    if (value) {
+      params.set(key, value);
+    }
+  }
   return params;
 }
 
@@ -44,19 +61,26 @@ export function useSyncResourceFilterUrlState({
   namespace,
   keyword,
   path,
+  extraParams,
 }: SyncFilterUrlOptions) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    const nextQuery = normalizeFilterValues({ clusterId, namespace, keyword }).toString();
-    const currentQuery = normalizeFilterValues(readResourceFilterFromSearchParams(searchParams)).toString();
+    const nextQuery = appendExtraParams(
+      normalizeFilterValues({ clusterId, namespace, keyword }),
+      extraParams,
+    ).toString();
+    const currentQuery = appendExtraParams(
+      normalizeFilterValues(readResourceFilterFromSearchParams(searchParams)),
+      extraParams,
+    ).toString();
     const hasLegacyClusterParam = Boolean(searchParams.get("cluster")) && !Boolean(searchParams.get("clusterId"));
     if (nextQuery === currentQuery && !hasLegacyClusterParam) {
       return;
     }
     const basePath = path ?? pathname;
     router.replace(nextQuery ? `${basePath}?${nextQuery}` : basePath, { scroll: false });
-  }, [clusterId, namespace, keyword, path, pathname, router, searchParams]);
+  }, [clusterId, namespace, keyword, path, pathname, router, searchParams, extraParams]);
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { DeleteOutlined, EyeOutlined, FileTextOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EditOutlined, EyeOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import {
   Alert,
@@ -36,9 +36,12 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import {
+  buildWorkloadSafeEditPatch,
   createWorkload,
   deleteWorkload,
+  formatWorkloadKeyValueText,
   getWorkloadsByKind,
+  getWorkloadPrimaryImage,
   patchWorkloadById,
   type WorkloadListItem,
 } from "@/lib/api/workloads";
@@ -79,13 +82,16 @@ function selectMatches(value: unknown, filterValue: unknown) {
 }
 
 // CronJob 的 spec 可能含 schedule 字段
-type CronJobItem = WorkloadListItem & { spec?: { schedule?: string; lastScheduleTime?: string } };
+type CronJobItem = WorkloadListItem & { spec?: Record<string, unknown> & { schedule?: string; lastScheduleTime?: string } };
 
 interface FormValues {
   name: string;
   namespace: string;
   clusterId: string;
   schedule: string;
+  image?: string;
+  labelsText?: string;
+  annotationsText?: string;
 }
 
 export default function CronJobsPage() {
@@ -221,6 +227,7 @@ export default function CronJobsPage() {
 
   const handleModalCancel = () => {
     setModalOpen(false);
+    setEditingItem(null);
     form.resetFields();
   };
 
@@ -235,9 +242,13 @@ export default function CronJobsPage() {
     setSubmitting(true);
     try {
       if (editingItem) {
+        const patch = buildWorkloadSafeEditPatch(editingItem, "CronJob", values, {
+          includeImage: true,
+          includeSchedule: true,
+        });
         await patchWorkloadById(
           editingItem.id,
-          { namespace: values.namespace },
+          patch,
           accessToken!,
         );
         void message.success("CronJob 更新成功");
@@ -248,12 +259,14 @@ export default function CronJobsPage() {
             namespace: values.namespace,
             kind: "CronJob",
             name: values.name,
+            spec: { schedule: values.schedule },
           },
           accessToken!,
         );
         void message.success("CronJob 创建成功");
       }
       setModalOpen(false);
+      setEditingItem(null);
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey });
     } catch (err) {
@@ -273,9 +286,25 @@ export default function CronJobsPage() {
     }
   };
 
+  const openEditModal = (item: CronJobItem) => {
+    setEditingItem(item);
+    form.resetFields();
+    form.setFieldsValue({
+      name: item.name,
+      namespace: item.namespace,
+      clusterId: item.clusterId,
+      schedule: item.spec?.schedule ?? "",
+      image: getWorkloadPrimaryImage(item, "CronJob"),
+      labelsText: formatWorkloadKeyValueText(item.labels),
+      annotationsText: formatWorkloadKeyValueText(item.annotations),
+    });
+    setModalOpen(true);
+  };
+
   const buildRowActions = (): MenuProps["items"] =>
     buildResourceActionMenuItems([
       { key: "describe", icon: <EyeOutlined />, label: "描述" },
+      { key: "edit", icon: <EditOutlined />, label: "编辑" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
       { type: "divider" },
       { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true },
@@ -295,6 +324,10 @@ export default function CronJobsPage() {
         kind: "CronJob",
         name: row.name,
       });
+      return;
+    }
+    if (key === "edit") {
+      openEditModal(row);
       return;
     }
     if (key === "delete") {
@@ -483,7 +516,7 @@ export default function CronJobsPage() {
             name="namespace"
             rules={[{ required: true, message: "请输入名称空间" }]}
           >
-            <Input placeholder="例如：default" />
+            <Input placeholder="例如：default" disabled={Boolean(editingItem)} />
           </Form.Item>
           <Form.Item
             label="集群"
@@ -506,6 +539,19 @@ export default function CronJobsPage() {
           >
             <Input placeholder="例如：0 2 * * *（每天凌晨 2 点）" />
           </Form.Item>
+          {editingItem ? (
+            <>
+              <Form.Item label="主容器镜像" name="image">
+                <Input placeholder="registry.example.com/cronjob:tag" />
+              </Form.Item>
+              <Form.Item label="Labels" name="labelsText">
+                <Input.TextArea rows={4} placeholder={"job=report\nenv=prod"} />
+              </Form.Item>
+              <Form.Item label="Annotations" name="annotationsText">
+                <Input.TextArea rows={4} placeholder={"description=daily-report\nowner=team-a"} />
+              </Form.Item>
+            </>
+          ) : null}
         </Form>
       </Modal>
       <ResourceDetailDrawer

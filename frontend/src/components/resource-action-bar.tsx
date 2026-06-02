@@ -15,10 +15,10 @@ import {
   StopOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
-import { Button, Dropdown, Popconfirm, Space } from "antd";
+import { Button, Popconfirm, Space } from "antd";
 import type { MenuProps } from "antd";
-import { Modal } from "antd";
 import type { ReactNode } from "react";
+import { OpsActionDropdown, openOpsConfirm, renderOpsActionTriggerButton } from "@/components/ops";
 
 export interface ResourceActionItem {
   key: string;
@@ -159,12 +159,12 @@ export function openResourceActionConfirm(
   confirm: NonNullable<ResourceActionItem["confirm"]>,
   onConfirm: () => void,
 ) {
-  Modal.confirm({
+  openOpsConfirm({
     title: confirm.title,
-    content: confirm.description,
+    description: confirm.description,
     okText: confirm.okText ?? "确认",
     cancelText: confirm.cancelText ?? "取消",
-    okButtonProps: confirm.okDanger ? { danger: true } : undefined,
+    danger: confirm.okDanger,
     onOk: onConfirm,
   });
 }
@@ -184,14 +184,8 @@ export function renderResourceActionTriggerButton({
   icon?: ReactNode;
   baseClassName?: string;
 }) {
-  return (
-    <Button
-      size="small"
-      className={[baseClassName, className].filter(Boolean).join(" ")}
-      icon={icon ?? <MoreOutlined />}
-      aria-label={ariaLabel}
-    />
-  );
+  void baseClassName;
+  return renderOpsActionTriggerButton({ className, ariaLabel, icon: icon ?? <MoreOutlined /> });
 }
 
 export function renderPodLikeResourceActionStyles({
@@ -219,30 +213,27 @@ export function ResourceActionDropdown({
   const itemActions = actions.filter(isResourceActionItem);
 
   return (
-    <Dropdown
-      trigger={["click"]}
+    <OpsActionDropdown
+      items={items}
+      ariaLabel={ariaLabel}
+      className={[className, menuClassName].filter(Boolean).join(" ")}
       placement={placement}
-      classNames={{ root: [className, menuClassName].filter(Boolean).join(" ") }}
-      menu={{
-        items,
-        onClick: ({ key }) => {
-          const action = itemActions.find((item) => item.key === key);
-          if (!action || action.disabled) {
+      trigger={trigger ?? renderResourceActionTriggerButton({ ariaLabel, baseClassName: triggerClassName })}
+      onClick={({ key }) => {
+        const action = itemActions.find((item) => item.key === key);
+        if (!action || action.disabled) {
+          return;
+        }
+        if (action.confirm) {
+          if (!action.onClick) {
             return;
           }
-          if (action.confirm) {
-            if (!action.onClick) {
-              return;
-            }
-            openResourceActionConfirm(action.confirm, action.onClick);
-            return;
-          }
-          action.onClick?.();
-        },
+          openResourceActionConfirm(action.confirm, action.onClick);
+          return;
+        }
+        action.onClick?.();
       }}
-    >
-      {trigger ?? renderResourceActionTriggerButton({ ariaLabel, baseClassName: triggerClassName })}
-    </Dropdown>
+    />
   );
 }
 

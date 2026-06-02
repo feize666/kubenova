@@ -2,6 +2,7 @@
 
 import {
   DeleteOutlined,
+  EditOutlined,
   EyeOutlined,
   FileTextOutlined,
   PlusOutlined,
@@ -51,9 +52,12 @@ import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import {
   applyWorkloadActionById,
+  buildWorkloadSafeEditPatch,
   createWorkload,
   deleteWorkload,
+  formatWorkloadKeyValueText,
   getWorkloadsByKind,
+  getWorkloadPrimaryImage,
   patchWorkloadById,
   type WorkloadListItem,
 } from "@/lib/api/workloads";
@@ -105,6 +109,9 @@ interface FormValues {
   namespace: string;
   clusterId: string;
   replicas: number;
+  image?: string;
+  labelsText?: string;
+  annotationsText?: string;
   scheduling?: SchedulingConfig;
   probes?: ProbeConfig;
 }
@@ -309,7 +316,7 @@ export default function StatefulSetsPage() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingItem] = useState<WorkloadListItem | null>(null);
+  const [editingItem, setEditingItem] = useState<WorkloadListItem | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<FormValues>();
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -409,6 +416,7 @@ export default function StatefulSetsPage() {
 
   const handleModalCancel = () => {
     setModalOpen(false);
+    setEditingItem(null);
     form.resetFields();
   };
 
@@ -424,9 +432,13 @@ export default function StatefulSetsPage() {
     try {
       const spec = buildStatefulSetSpec(values);
       if (editingItem) {
+        const patch = buildWorkloadSafeEditPatch(editingItem, "StatefulSet", values, {
+          includeReplicas: true,
+          includeImage: true,
+        });
         await patchWorkloadById(
           editingItem.id,
-          { namespace: values.namespace, replicas: values.replicas, ...(spec ? { spec } : {}) },
+          patch,
           accessToken!,
         );
         void message.success("StatefulSet 更新成功");
@@ -445,6 +457,7 @@ export default function StatefulSetsPage() {
         void message.success("StatefulSet 创建成功");
       }
       setModalOpen(false);
+      setEditingItem(null);
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey });
     } catch (err) {
@@ -474,6 +487,21 @@ export default function StatefulSetsPage() {
       kind: urlKind || "StatefulSet",
       name: item.name,
     };
+  };
+
+  const openEditModal = (item: WorkloadListItem) => {
+    setEditingItem(item);
+    form.resetFields();
+    form.setFieldsValue({
+      name: item.name,
+      namespace: item.namespace,
+      clusterId: item.clusterId,
+      replicas: item.replicas,
+      image: getWorkloadPrimaryImage(item, "StatefulSet"),
+      labelsText: formatWorkloadKeyValueText(item.labels),
+      annotationsText: formatWorkloadKeyValueText(item.annotations),
+    });
+    setModalOpen(true);
   };
 
   const actionMutation = useMutation({
@@ -566,6 +594,7 @@ export default function StatefulSetsPage() {
     const active = item.state === "active";
     return buildResourceActionMenuItems([
       { key: "describe", icon: <EyeOutlined />, label: "描述" },
+      { key: "edit", icon: <EditOutlined />, label: "编辑" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
       { key: "scale", icon: <RetweetOutlined />, label: "扩缩容" },
       { key: "restart", icon: <ReloadOutlined />, label: "重启", disabled: !active },
@@ -583,6 +612,10 @@ export default function StatefulSetsPage() {
     }
     if (key === "yaml") {
       setYamlTarget(resolveIdentity(item));
+      return;
+    }
+    if (key === "edit") {
+      openEditModal(item);
       return;
     }
     if (key === "scale") {
@@ -801,7 +834,7 @@ export default function StatefulSetsPage() {
             name="namespace"
             rules={[{ required: true, message: "请输入名称空间" }]}
           >
-            <Input placeholder="例如：default" />
+            <Input placeholder="例如：default" disabled={Boolean(editingItem)} />
           </Form.Item>
           <Form.Item
             label="集群"
@@ -824,6 +857,19 @@ export default function StatefulSetsPage() {
           >
             <InputNumber min={0} style={{ width: "100%" }} placeholder="默认 1" />
           </Form.Item>
+          {editingItem ? (
+            <>
+              <Form.Item label="主容器镜像" name="image">
+                <Input placeholder="registry.example.com/app:tag" />
+              </Form.Item>
+              <Form.Item label="Labels" name="labelsText">
+                <Input.TextArea rows={4} placeholder={"app=web\nenv=prod"} />
+              </Form.Item>
+              <Form.Item label="Annotations" name="annotationsText">
+                <Input.TextArea rows={4} placeholder={"description=database\nowner=team-a"} />
+              </Form.Item>
+            </>
+          ) : null}
           {!editingItem ? (
             <>
               <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>

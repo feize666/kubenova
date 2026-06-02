@@ -167,7 +167,7 @@ is_frontend_standalone_process() {
   local pid="$1"
   local cwd
   cwd="$(process_cwd "$pid")"
-  [[ "$cwd" == *"/frontend/.next/standalone" || "$cwd" == *"/.next/standalone" ]]
+  [[ "$cwd" == *"/frontend/.next/standalone"* || "$cwd" == *"/.next/standalone"* ]]
 }
 
 is_control_api_process() {

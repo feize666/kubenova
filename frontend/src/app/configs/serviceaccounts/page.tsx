@@ -525,6 +525,7 @@ export default function ServiceAccountsPage() {
           deleteTitle="删除 ServiceAccount"
           deleteContent={`确认删除 ServiceAccount「${row.name}」吗？此操作不可恢复。`}
           onYaml={() => handleOpenYamlForRow(row)}
+          onEdit={() => handleOpenYamlForRow(row)}
           onDelete={() => void handleDeleteRow(row)}
           extraActions={[
             {

@@ -40,10 +40,24 @@ export interface ClusterProfileModel {
 }
 
 export interface ClusterDetailNodeModel {
+  id?: string;
   name: string;
   role: string;
+  roles?: string[];
   ready: boolean;
   kubeletVersion?: string;
+  internalIP?: string | null;
+  externalIP?: string | null;
+  osImage?: string | null;
+  kernelVersion?: string | null;
+  containerRuntimeVersion?: string | null;
+  cpuCapacity?: string | null;
+  memoryCapacity?: string | null;
+  cpuUsagePercent?: number | null;
+  memoryUsagePercent?: number | null;
+  taints?: string[];
+  age?: string | null;
+  createdAt?: string | null;
 }
 
 export interface ClusterDetailModel {
@@ -57,6 +71,8 @@ export interface ClusterDetailModel {
     ready: number;
     notReady: number;
     items: ClusterDetailNodeModel[];
+    degraded: boolean;
+    degradationReason: string | null;
   };
   platform: {
     cniPlugin: string | null;
@@ -69,6 +85,35 @@ export interface ClusterDetailModel {
     region: string | null;
     environmentType: ClusterEnvironmentType | null;
   };
+}
+
+export interface ClusterNodeListItemModel extends Required<Pick<ClusterDetailNodeModel, "id">> {
+  name: string;
+  role: string;
+  roles: string[];
+  ready: boolean;
+  kubeletVersion?: string;
+  internalIP: string | null;
+  externalIP: string | null;
+  osImage: string | null;
+  kernelVersion: string | null;
+  containerRuntimeVersion: string | null;
+  cpuCapacity: string | null;
+  memoryCapacity: string | null;
+  cpuUsagePercent: number | null;
+  memoryUsagePercent: number | null;
+  taints: string[];
+  age: string | null;
+  createdAt: string | null;
+}
+
+export interface ClusterNodeListModel {
+  items: ClusterNodeListItemModel[];
+  total: number;
+  clusterId: string;
+  degraded: boolean;
+  degradationReason: string | null;
+  timestamp: string;
 }
 
 export type RegistryConnectorType = "harbor" | "oci";

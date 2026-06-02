@@ -10,9 +10,12 @@ type ResourceRowActionsProps = {
   deleteTitle: string;
   deleteContent: string;
   onYaml: () => void;
+  onEdit?: () => void;
   onDelete: () => void;
+  leadingActions?: ResourceActionItem[];
   extraActions?: ResourceActionItem[];
   className?: string;
+  ariaLabel?: string;
 };
 
 export function ResourceRowActions({
@@ -20,12 +23,17 @@ export function ResourceRowActions({
   deleteTitle,
   deleteContent,
   onYaml,
+  onEdit,
   onDelete,
+  leadingActions = [],
   extraActions = [],
   className,
+  ariaLabel = "更多操作",
 }: ResourceRowActionsProps) {
   const actions: ResourceActionItem[] = [
+    ...leadingActions,
     { key: "yaml", label: "YAML", onClick: onYaml },
+    ...(onEdit ? [{ key: "edit", label: "编辑", onClick: onEdit }] : []),
     ...extraActions,
     {
       key: "delete",
@@ -42,6 +50,6 @@ export function ResourceRowActions({
     },
   ];
   return (
-    <ResourceActionDropdown actions={actions} ariaLabel="更多操作" className={className} />
+    <ResourceActionDropdown actions={actions} ariaLabel={ariaLabel} className={className} />
   );
 }

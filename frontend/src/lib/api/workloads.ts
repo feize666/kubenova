@@ -35,6 +35,7 @@ export interface WorkloadItem {
   statusJson?: Record<string, unknown>;
   observedState?: WorkloadObservedScaleState | null;
   labels?: Record<string, string>;
+  annotations?: Record<string, string>;
   createdAt?: string;
   updatedAt?: string;
   readyReplicas?: number;
@@ -275,6 +276,7 @@ function mapRecordToWorkloadItem(item: Record<string, unknown>): WorkloadItem {
   const statusJson = parseJsonRecord(item.statusJson);
   const observedState = parseObservedState(item.observedState);
   const labels = parseStringRecord(item.labels);
+  const annotations = parseStringRecord(item.annotations);
   const image = readString(item.image) ?? readString(statusJson?.image);
   const createdAt = readString(item.createdAt);
   const updatedAt = readString(item.updatedAt);
@@ -299,6 +301,7 @@ function mapRecordToWorkloadItem(item: Record<string, unknown>): WorkloadItem {
     statusJson,
     observedState,
     labels,
+    annotations,
     createdAt,
     updatedAt,
     readyReplicas,
@@ -401,6 +404,7 @@ export interface WorkloadListItem {
   statusJson?: Record<string, unknown>;
   observedState?: WorkloadObservedScaleState | null;
   labels?: Record<string, string>;
+  annotations?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 }
@@ -769,7 +773,187 @@ export interface WorkloadPatchPayload {
   name?: string;
   replicas?: number;
   spec?: Record<string, unknown>;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
   state?: 'active' | 'disabled' | 'deleted';
+}
+
+export interface WorkloadSafeEditValues {
+  replicas?: number | null;
+  image?: string;
+  labelsText?: string;
+  annotationsText?: string;
+  schedule?: string;
+}
+
+export interface WorkloadSafeEditOptions {
+  includeReplicas?: boolean;
+  includeImage?: boolean;
+  includeSchedule?: boolean;
+}
+
+type EditableWorkloadItem = {
+  kind?: string;
+  name: string;
+  replicas?: number | string;
+  image?: string;
+  spec?: Record<string, unknown>;
+  statusJson?: Record<string, unknown>;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function cloneRecord(value: Record<string, unknown> | undefined): Record<string, unknown> {
+  return value ? JSON.parse(JSON.stringify(value)) as Record<string, unknown> : {};
+}
+
+function readNestedRecord(root: Record<string, unknown> | undefined, path: string[]): Record<string, unknown> | undefined {
+  let current: unknown = root;
+  for (const key of path) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[key];
+  }
+  return isRecord(current) ? current : undefined;
+}
+
+function ensureNestedRecord(root: Record<string, unknown>, path: string[]): Record<string, unknown> {
+  let current = root;
+  for (const key of path) {
+    if (!isRecord(current[key])) {
+      current[key] = {};
+    }
+    current = current[key] as Record<string, unknown>;
+  }
+  return current;
+}
+
+function readFirstContainerImage(spec: Record<string, unknown> | undefined, containerPath: string[]): string | undefined {
+  const holder = readNestedRecord(spec, containerPath);
+  const containers = holder?.containers;
+  if (!Array.isArray(containers)) {
+    return undefined;
+  }
+  const first = containers.find(isRecord);
+  const image = first?.image;
+  return typeof image === "string" && image.trim() ? image : undefined;
+}
+
+function setFirstContainerImage(
+  spec: Record<string, unknown>,
+  containerPath: string[],
+  fallbackName: string,
+  image: string,
+) {
+  const holder = ensureNestedRecord(spec, containerPath);
+  const current = Array.isArray(holder.containers) ? holder.containers : [];
+  const containers = current.map((container) => (isRecord(container) ? { ...container } : container));
+  const firstRecord = containers.findIndex(isRecord);
+  if (firstRecord >= 0) {
+    (containers[firstRecord] as Record<string, unknown>).image = image;
+  } else {
+    containers.unshift({ name: fallbackName || "main", image });
+  }
+  holder.containers = containers;
+}
+
+function getContainerPath(kind: string): string[] {
+  if (kind === "CronJob") {
+    return ["jobTemplate", "spec", "template", "spec"];
+  }
+  return ["template", "spec"];
+}
+
+function getWorkloadKindName(item: { kind?: string }, fallback: string): string {
+  return typeof item.kind === "string" && item.kind.trim() ? item.kind : fallback;
+}
+
+export function formatWorkloadKeyValueText(values?: Record<string, string>): string {
+  return Object.entries(values ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+export function parseWorkloadKeyValueText(text?: string): Record<string, string> | undefined {
+  const lines = (text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return undefined;
+  }
+  return lines.reduce<Record<string, string>>((acc, line, index) => {
+    const separator = line.indexOf("=");
+    if (separator <= 0) {
+      throw new Error(`第 ${index + 1} 行需使用 key=value`);
+    }
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (!key) {
+      throw new Error(`第 ${index + 1} 行缺少 key`);
+    }
+    acc[key] = value;
+    return acc;
+  }, {});
+}
+
+export function getWorkloadPrimaryImage(item: EditableWorkloadItem, kind: string): string {
+  const normalizedKind = getWorkloadKindName(item, kind);
+  return (
+    readFirstContainerImage(item.spec, getContainerPath(normalizedKind)) ??
+    item.image ??
+    (typeof item.statusJson?.image === "string" ? item.statusJson.image : "") ??
+    ""
+  );
+}
+
+export function getWorkloadSchedule(item: EditableWorkloadItem): string {
+  const schedule = item.spec?.schedule;
+  return typeof schedule === "string" ? schedule : "";
+}
+
+export function buildWorkloadSafeEditPatch(
+  item: EditableWorkloadItem,
+  kind: string,
+  values: WorkloadSafeEditValues,
+  options: WorkloadSafeEditOptions,
+): WorkloadPatchPayload {
+  const patch: WorkloadPatchPayload = {};
+  const nextSpec = cloneRecord(item.spec);
+  let specChanged = false;
+
+  if (options.includeReplicas && typeof values.replicas === "number" && Number.isFinite(values.replicas)) {
+    patch.replicas = Math.max(0, Math.trunc(values.replicas));
+  }
+
+  const image = values.image?.trim();
+  if (options.includeImage && image) {
+    setFirstContainerImage(nextSpec, getContainerPath(kind), item.name, image);
+    specChanged = true;
+  }
+
+  const schedule = values.schedule?.trim();
+  if (options.includeSchedule && schedule) {
+    nextSpec.schedule = schedule;
+    specChanged = true;
+  }
+
+  if (values.labelsText !== undefined) {
+    patch.labels = parseWorkloadKeyValueText(values.labelsText) ?? {};
+  }
+  if (values.annotationsText !== undefined) {
+    patch.annotations = parseWorkloadKeyValueText(values.annotationsText) ?? {};
+  }
+  if (specChanged) {
+    patch.spec = nextSpec;
+  }
+  return patch;
 }
 
 export function patchWorkloadById(id: string, body: WorkloadPatchPayload, token?: string) {

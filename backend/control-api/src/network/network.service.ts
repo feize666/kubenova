@@ -123,7 +123,11 @@ export class NetworkService {
     const page = this.parsePositiveInt(query.page, 1);
     const pageSize = this.parsePositiveInt(query.pageSize, 20);
     const kind = query.kind?.trim();
-    if (kind === 'Ingress' || kind === 'IngressRoute') {
+    if (
+      kind === 'Ingress' ||
+      kind === 'IngressRoute' ||
+      kind === 'NetworkPolicy'
+    ) {
       const liveItems = await this.listLiveIngressResources({
         clusterId: normalizedClusterId,
         clusterIds: readableClusterIds,
@@ -332,7 +336,10 @@ export class NetworkService {
     body: NetworkActionRequest,
     actor?: { username?: string; role?: PlatformRole },
   ): Promise<NetworkMutationResponse> {
-    const existing = await this.networkRepository.findById(id);
+    const liveRef = this.parseLiveId(id);
+    const existing = liveRef
+      ? await this.getLiveNetworkResourceByRef(liveRef)
+      : await this.networkRepository.findById(id);
     if (!existing) {
       throw new NotFoundException(`NetworkResource ${id} 不存在`);
     }
@@ -344,6 +351,20 @@ export class NetworkService {
         throw new BadRequestException('资源已删除');
       }
       await this.deleteNetworkResourceInCluster(existing);
+      if (liveRef) {
+        const timestamp = new Date().toISOString();
+        const item = {
+          ...existing,
+          state: 'deleted' as const,
+          updatedAt: timestamp,
+        };
+        this.audit(actor, 'delete', id, 'success', reason);
+        return {
+          item,
+          message: `${item.kind} ${item.name} 已删除`,
+          timestamp,
+        };
+      }
       const item = await this.networkRepository.setState(id, 'deleted');
       this.audit(actor, 'delete', id, 'success', reason);
       return {
@@ -351,6 +372,10 @@ export class NetworkService {
         message: `${item.kind} ${item.name} 已删除`,
         timestamp: new Date().toISOString(),
       };
+    }
+
+    if (liveRef) {
+      throw new BadRequestException('实时资源不支持 enable/disable 操作');
     }
 
     if (action === 'disable') {

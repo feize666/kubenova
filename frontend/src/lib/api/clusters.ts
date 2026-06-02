@@ -1,6 +1,6 @@
 import { ApiError, CONTROL_API_BASE, apiRequest, extractApiError } from "./client";
 import type { Cluster, ClusterListResponse, GetClustersParams, QueryParams } from "./types";
-import type { ClusterDetailModel } from "@/lib/contracts/domain";
+import type { ClusterDetailModel, ClusterNodeListModel } from "@/lib/contracts/domain";
 import { getClusterHealthList, type RuntimeStatus } from "./cluster-health";
 
 export async function getClusters(params: GetClustersParams = {}, token: string): Promise<ClusterListResponse> {
@@ -47,6 +47,9 @@ export async function getClusters(params: GetClustersParams = {}, token: string)
         item.hasKubeconfig !== false &&
         onlineIds.has(item.id),
     );
+    if (onlineSelectable.length === 0) {
+      return { ...result, items: visibleItems, total: visibleItems.length };
+    }
     return {
       ...result,
       items: onlineSelectable,
@@ -55,8 +58,8 @@ export async function getClusters(params: GetClustersParams = {}, token: string)
   } catch {
     return {
       ...result,
-      items: [],
-      total: 0,
+      items: visibleItems,
+      total: visibleItems.length,
     };
   }
 }
@@ -119,6 +122,13 @@ export async function enableCluster(id: string, token: string): Promise<Cluster>
 
 export async function getClusterDetail(id: string, token?: string): Promise<ClusterDetailModel> {
   return apiRequest<ClusterDetailModel>(`/api/clusters/${id}`, {
+    method: "GET",
+    token,
+  });
+}
+
+export async function getClusterNodes(id: string, token?: string): Promise<ClusterNodeListModel> {
+  return apiRequest<ClusterNodeListModel>(`/api/clusters/${id}/nodes`, {
     method: "GET",
     token,
   });

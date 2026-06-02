@@ -40,6 +40,7 @@ import {
 
 type DetailSource =
   | 'workload'
+  | 'node'
   | 'network'
   | 'storage'
   | 'config'
@@ -82,6 +83,7 @@ type DetailContext = {
 };
 
 const LIVE_NETWORK_DETAIL_KINDS = new Set([
+  'Node',
   'Service',
   'Endpoints',
   'EndpointSlice',
@@ -374,6 +376,7 @@ export interface DynamicResourceQuery {
   pageSize?: string;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
+  missingAsEmpty?: string;
 }
 
 export interface DynamicResourceIdentity {
@@ -409,6 +412,14 @@ export class ResourcesService {
       scalable: false,
       imageMutable: false,
       detailSource: 'workload',
+    },
+    node: {
+      kind: 'Node',
+      apiVersion: 'v1',
+      namespaced: false,
+      scalable: false,
+      imageMutable: false,
+      detailSource: 'node',
     },
     deployment: {
       kind: 'Deployment',
@@ -811,13 +822,34 @@ export class ResourcesService {
     const sortBy = this.normalizeDynamicSortBy(query.sortBy);
     const sortOrder = query.sortOrder === 'asc' ? 'asc' : 'desc';
     const normalizedQueryClusterId = query.clusterId?.trim();
+    const missingAsEmpty = this.parseBooleanLike(query.missingAsEmpty);
     if (normalizedQueryClusterId) {
-      const capability = await this.findDynamicCapability({
-        clusterId: normalizedQueryClusterId,
-        group: query.group,
-        version: query.version,
-        resource: query.resource,
-      });
+      let capability: Awaited<ReturnType<typeof this.findDynamicCapability>>;
+      try {
+        capability = await this.findDynamicCapability({
+          clusterId: normalizedQueryClusterId,
+          group: query.group,
+          version: query.version,
+          resource: query.resource,
+        });
+      } catch (error) {
+        if (!missingAsEmpty || !(error instanceof NotFoundException)) {
+          throw error;
+        }
+        return {
+          clusterId: normalizedQueryClusterId,
+          group: query.group?.trim() ?? '',
+          version: query.version?.trim() ?? '',
+          resource: query.resource?.trim() ?? '',
+          kind: '',
+          namespaced: false,
+          page,
+          pageSize,
+          total: 0,
+          items: [],
+          timestamp: new Date().toISOString(),
+        };
+      }
       const namespace =
         capability.namespaced && query.namespace?.trim()
           ? query.namespace.trim()
@@ -1054,6 +1086,228 @@ export class ResourcesService {
     });
   }
 
+  private async buildDynamicResourceFallbackDetail(input: {
+    clusterId: string;
+    group: string;
+    version: string;
+    resource: string;
+    kind: string;
+    namespace: string;
+    name: string;
+    raw: Record<string, unknown>;
+  }): Promise<ResourceDetailResponse> {
+    const metadata = this.toObject(input.raw.metadata);
+    const spec = this.toObject(input.raw.spec);
+    const status = this.toObject(input.raw.status);
+    const createdAt =
+      this.normalizeDetailTimestamp(
+        this.toMaybeTimestamp(metadata.creationTimestamp),
+      ) ?? new Date().toISOString();
+    const associations = this.buildDynamicFallbackAssociations({
+      kind: input.kind,
+      namespace: input.namespace,
+      spec,
+    });
+    const state =
+      this.toMaybeString(status.phase) ??
+      this.toMaybeString(status.state) ??
+      this.toMaybeString(status.reason) ??
+      (this.toMaybeTimestamp(metadata.deletionTimestamp) ? 'Terminating' : 'Active');
+    const base: DetailResourceRecord = {
+      id: this.buildDynamicDetailId(input),
+      clusterId: input.clusterId,
+      namespace: input.namespace || null,
+      kind: input.kind,
+      name: input.name,
+      state,
+      createdAt: this.parseDateSafe(createdAt) ?? new Date(),
+      updatedAt: this.parseDateSafe(createdAt) ?? new Date(),
+      spec: spec as Prisma.JsonValue,
+      statusJson: status as Prisma.JsonValue,
+      labels: this.toObject(metadata.labels) as Prisma.JsonValue,
+      annotations: this.toObject(metadata.annotations) as Prisma.JsonValue,
+      replicas: null,
+      readyReplicas: null,
+      storageClass: null,
+    };
+    const conditions = this.toArray(status.conditions)
+      .map((condition) => this.toObject(condition))
+      .filter((condition) => Object.keys(condition).length > 0)
+      .map((condition) => ({
+        type: this.toMaybeString(condition.type),
+        status: this.toMaybeString(condition.status),
+        reason: this.toMaybeString(condition.reason),
+        message: this.toMaybeString(condition.message),
+        lastTransitionTime: this.normalizeDetailTimestamp(
+          this.toMaybeString(condition.lastTransitionTime),
+        ),
+      }));
+
+    return {
+      descriptor: {
+        resourceKind: input.kind,
+        sections: ['overview', 'runtime', 'events', 'metadata'],
+        fieldsBySection: {
+          overview: [...RESOURCE_DETAIL_FIELDS_BY_SECTION.overview],
+          runtime: ['phase', 'conditions'],
+          associations: [],
+          network: [],
+          storage: [],
+          events: ['items'],
+          metadata: ['labels', 'annotations', 'ownerReferences'],
+        },
+        version: RESOURCE_DETAIL_DESCRIPTOR_VERSION,
+      },
+      overview: this.buildOverview(base),
+      runtime: {
+        phase: state,
+        images: [],
+        ...this.buildGatewayRuntime(input.kind, spec),
+        ...(conditions.length > 0 ? { conditions } : {}),
+      },
+      rawSpec: spec,
+      rawStatus: status,
+      associations,
+      network: {
+        clusterIPs: [],
+        podIPs: [],
+        nodeNames: [],
+        endpoints: [],
+        networkPipelines: [],
+      },
+      storage: {
+        storageClasses: [],
+        persistentVolumeClaims: [],
+        persistentVolumes: [],
+        storageClassDetails: [],
+        volumes: [],
+        mounts: [],
+        storagePipelines: [],
+      },
+      events: await this.buildEventsSummary(base),
+      metadata: this.buildMetadata(base, {
+        workloads: [],
+        networkResources: [],
+        storageResources: [],
+        configResources: [],
+      }),
+      relationships: [],
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private buildDynamicFallbackAssociations(input: {
+    kind: string;
+    namespace: string;
+    spec: Record<string, unknown>;
+  }): ResourceAssociation[] {
+    const associations: ResourceAssociation[] = [];
+    const add = (
+      kind: string,
+      name: string | undefined,
+      namespace: string | undefined,
+      associationType: string,
+    ) => {
+      if (!name) return;
+      const key = `${kind}:${namespace ?? ''}:${name}:${associationType}`;
+      if (
+        associations.some(
+          (item) =>
+            `${item.kind}:${item.namespace ?? ''}:${item.name}:${item.associationType}` ===
+            key,
+        )
+      ) {
+        return;
+      }
+      associations.push({
+        kind,
+        name,
+        ...(namespace ? { namespace } : {}),
+        associationType,
+      });
+    };
+
+    if (input.kind === 'Gateway') {
+      add(
+        'GatewayClass',
+        this.toMaybeString(input.spec.gatewayClassName),
+        undefined,
+        'gateway-class',
+      );
+      return associations;
+    }
+
+    if (input.kind === 'HTTPRoute') {
+      for (const parentRef of this.toArray(input.spec.parentRefs)) {
+        const parent = this.toObject(parentRef);
+        add(
+          this.toMaybeString(parent.kind) ?? 'Gateway',
+          this.toMaybeString(parent.name),
+          this.toMaybeString(parent.namespace) ?? input.namespace,
+          'owner',
+        );
+      }
+      for (const rule of this.toArray(input.spec.rules)) {
+        const ruleObj = this.toObject(rule);
+        for (const backendRef of this.toArray(ruleObj.backendRefs)) {
+          const backend = this.toObject(backendRef);
+          const kind = this.toMaybeString(backend.kind) ?? 'Service';
+          if (kind !== 'Service') {
+            continue;
+          }
+          add(
+            'Service',
+            this.toMaybeString(backend.name),
+            this.toMaybeString(backend.namespace) ?? input.namespace,
+            'backend-service',
+          );
+        }
+      }
+    }
+
+    return associations;
+  }
+
+  private buildDynamicDetailId(input: {
+    clusterId: string;
+    group: string;
+    version: string;
+    resource: string;
+    namespace: string;
+    name: string;
+  }): string {
+    return [
+      'dynamic',
+      input.clusterId,
+      input.group,
+      input.version,
+      input.resource,
+      input.namespace,
+      input.name,
+    ].join(':');
+  }
+
+  private parseDynamicDetailId(id: string): DynamicResourceIdentity | null {
+    if (!id.startsWith('dynamic:')) {
+      return null;
+    }
+    const payload = id.slice('dynamic:'.length);
+    const [clusterId, group, version, resource, namespace, ...rest] =
+      payload.split(':');
+    const name = rest.join(':');
+    if (!clusterId || !version || !resource || !name) {
+      return null;
+    }
+    return {
+      clusterId,
+      group,
+      version,
+      resource,
+      namespace,
+      name,
+    };
+  }
+
   async getDynamicResourceDetail(identity: DynamicResourceIdentity): Promise<{
     clusterId: string;
     group: string;
@@ -1064,6 +1318,7 @@ export class ResourcesService {
     name: string;
     yaml: string;
     raw: unknown;
+    detail: ResourceDetailResponse;
     timestamp: string;
   }> {
     const { capability, clusterId, namespace, name } =
@@ -1077,6 +1332,17 @@ export class ResourcesService {
         ...(namespace ? { namespace } : {}),
       },
     });
+    const raw = this.toRecord(obj);
+    const detail = await this.buildDynamicResourceFallbackDetail({
+      clusterId,
+      group: capability.group,
+      version: capability.version,
+      resource: capability.resource,
+      kind: capability.kind,
+      namespace,
+      name,
+      raw,
+    });
     return {
       clusterId,
       group: capability.group,
@@ -1085,8 +1351,9 @@ export class ResourcesService {
       kind: capability.kind,
       namespace,
       name,
-      yaml: k8s.dumpYaml(this.sanitizeForManifest(this.toRecord(obj))),
+      yaml: k8s.dumpYaml(this.sanitizeForManifest(raw)),
       raw: obj,
+      detail,
       timestamp: new Date().toISOString(),
     };
   }
@@ -1449,6 +1716,16 @@ export class ResourcesService {
     if (normalizedKind === 'helmrepository') {
       return this.buildHelmRepositoryDetail(id);
     }
+    if (normalizedKind === 'dynamic' || normalizedKind === 'customresource') {
+      const identity = this.parseDynamicDetailId(id);
+      if (!identity) {
+        throw new BadRequestException(
+          'dynamic 详情 id 必须为 dynamic:clusterId:group:version:resource:namespace:name',
+        );
+      }
+      const dynamicDetail = await this.getDynamicResourceDetail(identity);
+      return dynamicDetail.detail;
+    }
 
     const meta = this.resolveKind(kindRaw);
     if (!meta.detailSource) {
@@ -1485,6 +1762,8 @@ export class ResourcesService {
       descriptor,
       overview,
       runtime,
+      rawSpec: this.toObject(base.spec),
+      rawStatus: this.toObject(base.statusJson),
       associations,
       network,
       storage,
@@ -1702,6 +1981,9 @@ export class ResourcesService {
       base.kind === 'NetworkPolicy'
         ? this.buildNetworkPolicyRuntime(spec, status)
         : {};
+    const nodeRuntime =
+      base.kind === 'Node' ? this.buildNodeRuntime(spec, status) : {};
+    const gatewayRuntime = this.buildGatewayRuntime(base.kind, spec);
     const images = this.toStringArray(status.images ?? status.containerImages);
     const conditions = this.toArray(status.conditions)
       .map((condition) => this.toObject(condition))
@@ -1735,6 +2017,8 @@ export class ResourcesService {
       nodeSelector: this.toStringMap(podSpec.nodeSelector),
       tolerations: this.summarizeTolerations(podSpec.tolerations),
       containerDetails: this.summarizeContainers(podSpec, status),
+      ...nodeRuntime,
+      ...gatewayRuntime,
       ...networkPolicyRuntime,
       ...(conditions.length > 0 ? { conditions } : {}),
     };
@@ -1911,6 +2195,50 @@ export class ResourcesService {
           middlewareRef.namespace ?? namespace,
           'route-middleware',
         );
+      }
+    }
+
+    if (base.kind === 'GatewayClass') {
+      for (const networkResource of context.networkResources) {
+        if (networkResource.kind !== 'Gateway') {
+          continue;
+        }
+        const spec = this.toObject(networkResource.spec);
+        if (this.toMaybeString(spec.gatewayClassName) === base.name) {
+          add(
+            'Gateway',
+            networkResource.name,
+            networkResource.namespace ?? undefined,
+            'uses-gateway-class',
+          );
+        }
+      }
+    }
+
+    if (base.kind === 'Gateway') {
+      const spec = this.toObject(base.spec);
+      const gatewayClassName = this.toMaybeString(spec.gatewayClassName);
+      if (gatewayClassName) {
+        add('GatewayClass', gatewayClassName, undefined, 'gateway-class');
+      }
+    }
+
+    if (base.kind === 'HTTPRoute') {
+      const spec = this.toObject(base.spec);
+      for (const parentRef of this.toArray(spec.parentRefs)) {
+        const parent = this.toObject(parentRef);
+        const parentName = this.toMaybeString(parent.name);
+        if (parentName) {
+          add(
+            'Gateway',
+            parentName,
+            this.toMaybeString(parent.namespace) ?? namespace,
+            'owner',
+          );
+        }
+      }
+      for (const serviceName of this.extractHttpRouteServiceNames(base.spec)) {
+        add('Service', serviceName, namespace, 'backend-service');
       }
     }
 
@@ -3458,6 +3786,8 @@ export class ResourcesService {
       'service-endpoints': '服务端点',
       'service-endpointslice': '端点切片',
       'backend-service': '后端服务',
+      'gateway-class': 'GatewayClass',
+      'uses-gateway-class': '使用 GatewayClass',
       'tls-secret': 'TLS 证书',
       'route-middleware': '路由中间件',
       'owned-pod': '拥有 Pod',
@@ -3484,6 +3814,8 @@ export class ResourcesService {
       'service-endpoints': 'gold',
       'service-endpointslice': 'volcano',
       'backend-service': 'blue',
+      'gateway-class': 'geekblue',
+      'uses-gateway-class': 'geekblue',
       'tls-secret': 'magenta',
       'route-middleware': 'geekblue',
       'owned-pod': 'purple',
@@ -4213,6 +4545,10 @@ export class ResourcesService {
       return this.mapWorkloadRow(row);
     }
 
+    if (detailSource === 'node') {
+      return this.findLiveNodeDetailResource(id);
+    }
+
     if (detailSource === 'network') {
       const liveResource = await this.findLiveNetworkDetailResource(meta, id);
       if (liveResource) {
@@ -4477,6 +4813,85 @@ export class ResourcesService {
     };
   }
 
+  private async findLiveNodeDetailResource(
+    id: string,
+  ): Promise<DetailResourceRecord | null> {
+    const ref = this.parseLiveNodeId(id);
+    if (!ref) {
+      return null;
+    }
+    const apis = await this.getClusterApis(ref.clusterId);
+    if (!apis) {
+      return null;
+    }
+
+    const item = await apis.coreApi.readNode({ name: ref.name });
+    const metadata = item.metadata ?? {};
+    const status = item.status ?? {};
+    const spec = item.spec ?? {};
+    const labels = metadata.labels ?? {};
+    const roles = this.extractNodeRoles(labels);
+    const readyCondition = (status.conditions ?? []).find(
+      (condition: { type?: string }) => condition.type === 'Ready',
+    );
+    const ready = readyCondition?.status === 'True';
+    const addresses = status.addresses ?? [];
+    const findAddress = (type: string) =>
+      addresses.find((address: { type?: string }) => address.type === type)
+        ?.address;
+    const taints = (spec.taints ?? []).map(
+      (taint: { key?: string; value?: string; effect?: string }) => {
+        const value = taint.value ? `=${taint.value}` : '';
+        return `${taint.key ?? ''}${value}:${taint.effect ?? ''}`;
+      },
+    );
+    const nodeInfo = (status.nodeInfo ?? {}) as {
+      osImage?: string;
+      kernelVersion?: string;
+      containerRuntimeVersion?: string;
+      kubeletVersion?: string;
+    };
+
+    return {
+      id,
+      clusterId: ref.clusterId,
+      namespace: null,
+      kind: 'Node',
+      name: ref.name,
+      state: ready ? 'Ready' : 'NotReady',
+      createdAt: metadata.creationTimestamp ?? new Date(),
+      updatedAt: metadata.creationTimestamp ?? new Date(),
+      spec: ({
+        providerID: spec.providerID,
+        podCIDR: spec.podCIDR,
+        podCIDRs: spec.podCIDRs,
+        unschedulable: spec.unschedulable,
+        taints: spec.taints ?? [],
+      } as unknown) as Prisma.JsonValue,
+      statusJson: ({
+        phase: ready ? 'Ready' : 'NotReady',
+        ready,
+        roles,
+        internalIP: findAddress('InternalIP'),
+        externalIP: findAddress('ExternalIP'),
+        osImage: nodeInfo.osImage,
+        kernelVersion: nodeInfo.kernelVersion,
+        containerRuntimeVersion: nodeInfo.containerRuntimeVersion,
+        kubeletVersion: nodeInfo.kubeletVersion,
+        cpuCapacity: status.capacity?.cpu,
+        memoryCapacity: status.capacity?.memory,
+        taints,
+        unschedulable: Boolean(spec.unschedulable),
+        conditions: status.conditions ?? [],
+      } as unknown) as Prisma.JsonValue,
+      labels: labels as Prisma.JsonValue,
+      annotations: (metadata.annotations ?? null) as Prisma.JsonValue | null,
+      replicas: null,
+      readyReplicas: null,
+      storageClass: null,
+    };
+  }
+
   private async findLiveAutoscalingDetailResource(
     meta: KindMeta,
     id: string,
@@ -4586,6 +5001,19 @@ export class ResourcesService {
       namespace,
       name,
     };
+  }
+
+  private parseLiveNodeId(id: string): { clusterId: string; name: string } | null {
+    if (!id.startsWith('live-node:')) {
+      return null;
+    }
+    const payload = id.slice('live-node:'.length);
+    const [clusterId, ...rest] = payload.split(':');
+    const name = rest.join(':');
+    if (!clusterId || !name) {
+      return null;
+    }
+    return { clusterId, name };
   }
 
   private isLiveNetworkRecord(base: DetailResourceRecord): boolean {
@@ -4899,6 +5327,38 @@ export class ResourcesService {
       }
     }
     return Array.from(names);
+  }
+
+  private extractHttpRouteServiceNames(spec: Prisma.JsonValue | null): string[] {
+    const specObj = this.toObject(spec);
+    const rules = this.toArray(specObj.rules);
+    const names = new Set<string>();
+    for (const rule of rules) {
+      const ruleObj = this.toObject(rule);
+      for (const backendRef of this.toArray(ruleObj.backendRefs)) {
+        const backend = this.toObject(backendRef);
+        const kind = this.toMaybeString(backend.kind) ?? 'Service';
+        const name = this.toMaybeString(backend.name);
+        if (kind === 'Service' && name) {
+          names.add(name);
+        }
+      }
+    }
+    return Array.from(names);
+  }
+
+  private extractNodeRoles(labels: Record<string, string>): string[] {
+    const roles = Object.keys(labels)
+      .filter((key) => key.startsWith('node-role.kubernetes.io/'))
+      .map((key) => key.replace('node-role.kubernetes.io/', '').trim())
+      .filter(Boolean);
+    if (roles.length > 0) {
+      return roles;
+    }
+    if (labels['node-role.kubernetes.io/master'] !== undefined) {
+      return ['control-plane'];
+    }
+    return ['worker'];
   }
 
   private extractIngressRouteMiddlewares(
@@ -5862,6 +6322,11 @@ export class ResourcesService {
     return group ? `${group}/${version}` : version;
   }
 
+  private parseBooleanLike(raw: string | undefined): boolean {
+    const value = raw?.trim().toLowerCase();
+    return value === 'true' || value === '1' || value === 'yes';
+  }
+
   private parsePositiveInt(raw: string | undefined, fallback: number): number {
     const parsed = Number.parseInt(raw ?? '', 10);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -6003,6 +6468,13 @@ export class ResourcesService {
     return typeof value === 'string' && value.trim() ? value : undefined;
   }
 
+  private toMaybeTimestamp(value: unknown): string | undefined {
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+    return this.toMaybeString(value);
+  }
+
   private toMaybeBoolean(value: unknown): boolean | undefined {
     return typeof value === 'boolean' ? value : undefined;
   }
@@ -6055,6 +6527,10 @@ export class ResourcesService {
     return this.toArray(value).filter(
       (item): item is string => typeof item === 'string' && item.length > 0,
     );
+  }
+
+  private dedupeStringArray(values: string[]): string[] {
+    return Array.from(new Set(values.filter((item) => item.trim())));
   }
 
   private toStringMap(value: unknown): Record<string, string> {
@@ -6196,6 +6672,105 @@ export class ResourcesService {
       ingressRules,
       egressRules,
     };
+  }
+
+  private buildNodeRuntime(
+    spec: Record<string, unknown>,
+    status: Record<string, unknown>,
+  ): Pick<
+    ResourceDetailRuntime,
+    | 'ready'
+    | 'roles'
+    | 'internalIP'
+    | 'externalIP'
+    | 'osImage'
+    | 'kernelVersion'
+    | 'containerRuntimeVersion'
+    | 'cpuCapacity'
+    | 'memoryCapacity'
+    | 'taints'
+    | 'unschedulable'
+  > {
+    return {
+      ready: this.toMaybeBoolean(status.ready),
+      roles: this.toStringArray(status.roles),
+      internalIP: this.toMaybeString(status.internalIP),
+      externalIP: this.toMaybeString(status.externalIP),
+      osImage: this.toMaybeString(status.osImage),
+      kernelVersion: this.toMaybeString(status.kernelVersion),
+      containerRuntimeVersion: this.toMaybeString(
+        status.containerRuntimeVersion,
+      ),
+      cpuCapacity: this.valueToString(status.cpuCapacity),
+      memoryCapacity: this.valueToString(status.memoryCapacity),
+      taints: this.toStringArray(status.taints),
+      unschedulable:
+        this.toMaybeBoolean(status.unschedulable) ??
+        this.toMaybeBoolean(spec.unschedulable),
+    };
+  }
+
+  private buildGatewayRuntime(
+    kind: string,
+    spec: Record<string, unknown>,
+  ): Pick<
+    ResourceDetailRuntime,
+    | 'controllerName'
+    | 'gatewayClassName'
+    | 'hostnames'
+    | 'parentRefs'
+    | 'backendRefs'
+  > {
+    if (kind === 'GatewayClass') {
+      return {
+        controllerName: this.toMaybeString(spec.controllerName),
+      };
+    }
+
+    if (kind === 'Gateway') {
+      const hostnames = this.toArray(spec.listeners)
+        .map((listener) =>
+          this.toMaybeString(this.toObject(listener).hostname),
+        )
+        .filter((item): item is string => Boolean(item));
+      return {
+        gatewayClassName: this.toMaybeString(spec.gatewayClassName),
+        hostnames: this.dedupeStringArray(hostnames),
+      };
+    }
+
+    if (kind === 'HTTPRoute') {
+      const hostnames = this.toStringArray(spec.hostnames);
+      const parentRefs = this.toArray(spec.parentRefs)
+        .map((item) => this.toObject(item))
+        .map((item) => {
+          const namespace = this.toMaybeString(item.namespace);
+          const name = this.toMaybeString(item.name);
+          if (!name) return undefined;
+          return namespace ? `${namespace}/${name}` : name;
+        })
+        .filter((item): item is string => Boolean(item));
+      const backendRefs = this.toArray(spec.rules).flatMap((rule) =>
+        this.toArray(this.toObject(rule).backendRefs)
+          .map((item) => this.toObject(item))
+          .map((item) => {
+            const namespace = this.toMaybeString(item.namespace);
+            const name = this.toMaybeString(item.name);
+            const port = this.valueToString(item.port);
+            if (!name) return undefined;
+            const target = namespace ? `${namespace}/${name}` : name;
+            return port ? `${target}:${port}` : target;
+          })
+          .filter((item): item is string => Boolean(item)),
+      );
+      return {
+        hostnames: this.dedupeStringArray(hostnames),
+        parentRefs: this.dedupeStringArray(parentRefs),
+        backendRefs: this.dedupeStringArray(backendRefs),
+      };
+    }
+
+    return {};
   }
 
   private summarizePvcDetail(

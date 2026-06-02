@@ -1,25 +1,15 @@
 "use client";
 
-import { Alert, Card, Space, Typography } from "antd";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { BootstrapScreen } from "@/components/bootstrap-screen";
 
 export default function MonitoringPage() {
-  return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card>
-        <Typography.Title level={3} style={{ marginTop: 0, marginBottom: 8 }}>
-          检测中心已下线
-        </Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          按当前产品策略，检测中心数据面板与独立入口已移除。
-        </Typography.Paragraph>
-      </Card>
+  const router = useRouter();
 
-      <Alert
-        type="info"
-        showIcon
-        message="可用入口"
-        description="请从左侧“可观测性”访问当前可用能力（如集群健康、资源巡检）。"
-      />
-    </Space>
-  );
+  useEffect(() => {
+    router.replace("/observability");
+  }, [router]);
+
+  return <BootstrapScreen title="正在跳转" description="正在前往可观测性..." />;
 }

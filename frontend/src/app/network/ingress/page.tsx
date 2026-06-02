@@ -27,6 +27,7 @@ import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import {
+  applyNetworkResourceYaml,
   createNetworkResource,
   deleteNetworkResource,
   getNetworkResources,
@@ -46,7 +47,16 @@ import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } fro
 
 type IngressResource = NetworkResource & {
   spec?: {
-    rules?: Array<{ host?: string; http?: { paths?: Array<{ path?: string; backend?: { service?: { name?: string } } }> } }>;
+    rules?: Array<{
+      host?: string;
+      http?: {
+        paths?: Array<{
+          path?: string;
+          pathType?: string;
+          backend?: { service?: { name?: string; port?: unknown } };
+        }>;
+      };
+    }>;
     tls?: unknown[];
   };
 };
@@ -98,6 +108,7 @@ export default function IngressPage() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<IngressResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<IngressFormValues>();
 
@@ -208,11 +219,93 @@ export default function IngressPage() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ item, values }: { item: IngressResource; values: IngressFormValues }) => {
+      const nextSpec = JSON.parse(JSON.stringify(item.spec ?? {})) as NonNullable<IngressResource["spec"]>;
+      const rules = Array.isArray(nextSpec.rules) ? [...nextSpec.rules] : [];
+      const firstRule = { ...(rules[0] ?? {}) };
+      const paths = Array.isArray(firstRule.http?.paths) ? [...firstRule.http.paths] : [];
+      const firstPath = { ...(paths[0] ?? {}) };
+      firstPath.path = values.path;
+      firstPath.backend = {
+        ...(firstPath.backend ?? {}),
+        service: {
+          ...(firstPath.backend?.service ?? {}),
+          name: values.serviceName,
+        },
+      };
+      paths[0] = firstPath;
+      firstRule.host = values.host;
+      firstRule.http = { ...(firstRule.http ?? {}), paths };
+      rules[0] = firstRule;
+      nextSpec.rules = rules;
+      return applyNetworkResourceYaml(
+        {
+          clusterId: item.clusterId,
+          namespace: item.namespace,
+          kind: "Ingress",
+          name: item.name,
+          yaml: JSON.stringify(
+            {
+              apiVersion: "networking.k8s.io/v1",
+              kind: "Ingress",
+              metadata: {
+                name: item.name,
+                namespace: item.namespace,
+                ...(item.labels ? { labels: item.labels } : {}),
+              },
+              spec: nextSpec,
+            },
+            null,
+            2,
+          ),
+        },
+        accessToken || undefined,
+      );
+    },
+    onSuccess: async () => {
+      void message.success("Ingress 更新成功");
+      setModalOpen(false);
+      setEditingItem(null);
+      form.resetFields();
+      await queryClient.invalidateQueries({ queryKey: ["network", "Ingress"] });
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "更新失败，请重试");
+    },
+  });
+
+  const handleOpenCreate = () => {
+    setEditingItem(null);
+    form.resetFields();
+    form.setFieldsValue({ path: "/" });
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (item: IngressResource) => {
+    const firstRule = item.spec?.rules?.[0];
+    const firstPath = firstRule?.http?.paths?.[0];
+    setEditingItem(item);
+    form.setFieldsValue({
+      name: item.name,
+      namespace: item.namespace,
+      clusterId: item.clusterId,
+      host: firstRule?.host ?? "",
+      path: firstPath?.path ?? "/",
+      serviceName: firstPath?.backend?.service?.name ?? "",
+    });
+    setModalOpen(true);
+  };
+
   const handleModalSubmit = async () => {
     let values: IngressFormValues;
     try {
       values = await form.validateFields();
     } catch {
+      return;
+    }
+    if (editingItem) {
+      updateMutation.mutate({ item: editingItem, values });
       return;
     }
     createMutation.mutate({
@@ -421,6 +514,7 @@ export default function IngressPage() {
               name: row.name,
             })
           }
+          extraActions={[{ key: "edit", label: "编辑", onClick: () => handleOpenEdit(row) }]}
           onDelete={() => deleteMutation.mutate(row.id)}
         />
       ),
@@ -435,7 +529,7 @@ export default function IngressPage() {
           embedded
           description="管理集群 Ingress 入口规则与域名路由。"
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建Ingress" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建Ingress" onClick={handleOpenCreate} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}
@@ -504,16 +598,17 @@ export default function IngressPage() {
       </Card>
 
       <Modal
-        title="添加 Ingress"
+        title={editingItem ? "编辑 Ingress" : "添加 Ingress"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setEditingItem(null);
           form.resetFields();
         }}
-        okText="创建"
+        okText={editingItem ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
@@ -522,14 +617,14 @@ export default function IngressPage() {
             name="name"
             rules={[{ required: true, message: "请输入 Ingress 名称" }]}
           >
-            <Input placeholder="例如：my-ingress" />
+            <Input disabled={Boolean(editingItem)} placeholder="例如：my-ingress" />
           </Form.Item>
           <Form.Item
             label="名称空间"
             name="namespace"
             rules={[{ required: true, message: "请输入名称空间" }]}
           >
-            <Input placeholder="例如：default" />
+            <Input disabled={Boolean(editingItem)} placeholder="例如：default" />
           </Form.Item>
           <Form.Item
             label="所属集群"
@@ -537,6 +632,7 @@ export default function IngressPage() {
             rules={[{ required: true, message: "请选择集群" }]}
           >
             <Select
+              disabled={Boolean(editingItem)}
               placeholder="请选择集群"
               options={clusterOptions}
               loading={clustersQuery.isLoading}

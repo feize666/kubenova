@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Empty, Space, Tag, Typography } from "antd";
+import { Empty, Space, Tag, Typography } from "antd";
 import type { ReactNode } from "react";
 import type { ResourceDetailEvent } from "@/lib/api/resources";
 import { StatusTag } from "@/components/status-tag";
@@ -155,7 +155,7 @@ export function buildSpecSection({ detail, specSnapshot }: DetailSectionBuilderC
   const fields = getOrderedFields(detail, "runtime", getRenderProfile(detail).runtimeFields);
   const runtimeValues = buildRuntimeFieldMap(detail.runtime);
   return (
-    <DetailSection title="Spec" subtitle="当前后端未提供完整 spec；先展示可用运行/配置摘要">
+    <DetailSection title="Spec" subtitle={specSnapshot ? "Kubernetes spec 只读摘要" : "当前仅展示可用运行/配置摘要"}>
       {specSnapshot ? (
         renderReadonlyObjectSummary(specSnapshot, "暂无 Spec 摘要")
       ) : (
@@ -241,21 +241,6 @@ export function buildEventsSection({ detail }: DetailSectionBuilderContext): Rea
   );
 }
 
-export function buildYamlSummarySection({ detail }: DetailSectionBuilderContext): ReactNode {
-  return (
-    <DetailSection title="YAML" subtitle="YAML 为独立入口；详情内仅放只读定位摘要">
-      <Alert
-        type="info"
-        showIcon
-        message="使用表格行操作里的 YAML 入口查看或编辑完整清单。"
-        description={`${detail.overview.kind}/${detail.overview.name}${
-          detail.overview.namespace ? ` · ${detail.overview.namespace}` : ""
-        }`}
-      />
-    </DetailSection>
-  );
-}
-
 export function buildHeadlampDetailSections(context: DetailSectionBuilderContext): ReactNode[] {
   const sections: ReactNode[] = [
     buildOverviewSection(context),
@@ -268,6 +253,5 @@ export function buildHeadlampDetailSections(context: DetailSectionBuilderContext
   if (context.detail.descriptor.sections.includes("events")) {
     sections.push(buildEventsSection(context));
   }
-  sections.push(buildYamlSummarySection(context));
   return sections;
 }

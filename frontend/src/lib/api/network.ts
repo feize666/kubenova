@@ -41,6 +41,21 @@ export interface CreateNetworkResourcePayload {
   spec?: Record<string, unknown>;
 }
 
+export interface UpdateNetworkResourcePayload {
+  namespace?: string;
+  spec?: Record<string, unknown>;
+  statusJson?: Record<string, unknown>;
+  labels?: Record<string, unknown>;
+}
+
+export interface ApplyNetworkResourceYamlPayload {
+  clusterId: string;
+  namespace: string;
+  kind: string;
+  name: string;
+  yaml: string;
+}
+
 export function getNetworkResources(params: NetworkListParams = {}, token?: string) {
   const query: Record<string, string | number> = {};
   if (params.kind) query.kind = params.kind;
@@ -57,6 +72,22 @@ export function getNetworkResources(params: NetworkListParams = {}, token?: stri
 export function createNetworkResource(body: CreateNetworkResourcePayload, token?: string) {
   return apiRequest<NetworkResource>('/api/network', {
     method: 'POST',
+    body,
+    token,
+  });
+}
+
+export function updateNetworkResource(id: string, body: UpdateNetworkResourcePayload, token?: string) {
+  return apiRequest<NetworkResource>(`/api/network/${id}`, {
+    method: 'PATCH',
+    body,
+    token,
+  });
+}
+
+export function applyNetworkResourceYaml(body: ApplyNetworkResourceYamlPayload, token?: string) {
+  return apiRequest<unknown, ApplyNetworkResourceYamlPayload>('/api/resources/yaml', {
+    method: 'PUT',
     body,
     token,
   });

@@ -5,7 +5,7 @@ export type NavItem = {
   canonicalNameEn?: string;
   canonicalNameZh?: string;
   description?: string;
-  domain?: "workloads" | "network" | "storage" | "configs";
+  domain?: "clusters" | "workloads" | "network" | "storage" | "configs";
   /** 需要的最低角色权限，不设置表示所有人可见 */
   requiredRole?: "admin";
 };
@@ -30,17 +30,47 @@ export const navSections: NavSection[] = [
   },
   {
     key: "section-resource-panorama",
-    label: "资源全景图",
+    label: "资源拓扑",
     path: "/network/topology",
     requiredRole: "admin",
     items: [],
   },
   {
-    key: "section-clusters",
-    label: "集群管理",
-    path: "/clusters",
+    key: "section-cluster-domain",
+    label: "集群域管理",
     requiredRole: "admin",
-    items: [],
+    items: [
+      {
+        key: "clusters",
+        path: "/clusters",
+        label: "集群管理",
+        canonicalNameEn: "Cluster",
+        canonicalNameZh: "集群管理",
+        description: "管理多集群接入、运行状态、同步状态与集群详情。",
+        domain: "clusters",
+        requiredRole: "admin",
+      },
+      {
+        key: "cluster-domain-namespaces",
+        path: "/namespaces",
+        label: "名称空间",
+        canonicalNameEn: "Namespace",
+        canonicalNameZh: "名称空间",
+        description: "管理集群租户隔离边界与资源配额作用域。",
+        domain: "clusters",
+        requiredRole: "admin",
+      },
+      {
+        key: "cluster-domain-nodes",
+        path: "/clusters/nodes",
+        label: "工作节点",
+        canonicalNameEn: "Node",
+        canonicalNameZh: "工作节点",
+        description: "查看集群工作节点、角色、就绪状态、IP、污点、版本和容量。",
+        domain: "clusters",
+        requiredRole: "admin",
+      },
+    ],
   },
   {
     key: "section-workloads",
@@ -108,16 +138,6 @@ export const navSections: NavSection[] = [
         canonicalNameZh: "定时任务",
         description: "管理周期性任务调度计划与执行历史。",
         domain: "workloads",
-      },
-      {
-        key: "workloads-namespaces",
-        path: "/namespaces",
-        label: "Namespace（名称空间）",
-        canonicalNameEn: "Namespace",
-        canonicalNameZh: "名称空间",
-        description: "管理集群租户隔离边界与资源配额作用域。",
-        domain: "workloads",
-        requiredRole: "admin",
       },
     ],
   },
@@ -245,22 +265,30 @@ export const navSections: NavSection[] = [
         description: "管理敏感配置数据与凭据引用。",
         domain: "configs",
       },
-      {
-        key: "configs-serviceaccounts",
-        path: "/configs/serviceaccounts",
-        label: "ServiceAccount（服务账户）",
-        canonicalNameEn: "ServiceAccount",
-        canonicalNameZh: "服务账户",
-        description: "管理工作负载访问 Kubernetes API 的身份。",
-        domain: "configs",
-        requiredRole: "admin",
-      },
     ],
   },
   {
-    key: "section-autoscaling",
-    label: "弹性伸缩",
+    key: "section-app-delivery",
+    label: "应用交付",
     items: [
+      {
+        key: "helm-apps",
+        path: "/workloads/helm",
+        label: "Helm 应用",
+        canonicalNameEn: "Helm Release",
+        canonicalNameZh: "Helm 应用",
+        description: "管理 Helm 应用发布、升级、回滚与卸载。",
+        domain: "workloads",
+      },
+      {
+        key: "helm-repositories",
+        path: "/workloads/helm/repositories",
+        label: "Helm 仓库",
+        canonicalNameEn: "Helm Repository",
+        canonicalNameZh: "Helm 仓库",
+        description: "管理 Helm Chart 仓库来源、同步状态与访问凭据。",
+        domain: "workloads",
+      },
       {
         key: "workloads-autoscaling-hpa",
         path: "/workloads/autoscaling/hpa",
@@ -282,37 +310,40 @@ export const navSections: NavSection[] = [
     ],
   },
   {
-    key: "section-helm",
-    label: "Helm",
-    items: [
-      { key: "helm-apps", path: "/workloads/helm", label: "Helm 应用" },
-      { key: "helm-repositories", path: "/workloads/helm/repositories", label: "Helm 仓库" },
-    ],
-  },
-  {
     key: "section-iam-security",
     label: "身份与安全",
     requiredRole: "admin",
     items: [
       { key: "users", path: "/users", label: "用户管理", requiredRole: "admin" },
       { key: "users-rbac", path: "/users/rbac", label: "访问控制", requiredRole: "admin" },
-      { key: "security", path: "/security", label: "安全管理", requiredRole: "admin" },
+      {
+        key: "configs-serviceaccounts",
+        path: "/configs/serviceaccounts",
+        label: "ServiceAccount（服务账户）",
+        canonicalNameEn: "ServiceAccount",
+        canonicalNameZh: "服务账户",
+        description: "管理工作负载访问 Kubernetes API 的身份。",
+        requiredRole: "admin",
+      },
+      { key: "security", path: "/security", label: "安全事件", requiredRole: "admin" },
     ],
   },
   {
     key: "section-observability",
     label: "可观测性",
     items: [
-      { key: "cluster-health", path: "/observability/cluster-health", label: "集群健康", requiredRole: "admin" },
+      { key: "observability-center", path: "/observability", label: "可观测性中心", requiredRole: "admin" },
       { key: "inspection", path: "/inspection", label: "资源巡检" },
     ],
   },
   {
     key: "section-intelligence",
-    label: "AIOps中台",
-    path: "/ai-assistant",
+    label: "AIOps",
     requiredRole: "admin",
-    items: [],
+    items: [
+      { key: "aiops-center", path: "/aiops", label: "事故中台", requiredRole: "admin" },
+      { key: "ai-assistant", path: "/ai-assistant", label: "AI 助手", requiredRole: "admin" },
+    ],
   },
   {
     key: "section-system-management",
@@ -408,7 +439,7 @@ export function getNavItemByPath(pathname: string): NavItem | undefined {
 
 const ENFORCED_CANONICAL_SECTION_KEYS = new Set([
   "section-workloads",
-  "section-autoscaling",
+  "section-app-delivery",
   "section-storage-config",
   "section-configs",
 ]);

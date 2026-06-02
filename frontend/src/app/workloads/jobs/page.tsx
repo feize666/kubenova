@@ -1,6 +1,6 @@
 "use client";
 
-import { DeleteOutlined, EyeOutlined, FileTextOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EditOutlined, EyeOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import {
   Alert,
@@ -37,9 +37,12 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import {
+  buildWorkloadSafeEditPatch,
   createWorkload,
   deleteWorkload,
+  formatWorkloadKeyValueText,
   getWorkloadsByKind,
+  getWorkloadPrimaryImage,
   patchWorkloadById,
   type WorkloadListItem,
 } from "@/lib/api/workloads";
@@ -84,6 +87,9 @@ interface FormValues {
   namespace: string;
   clusterId: string;
   replicas: number;
+  image?: string;
+  labelsText?: string;
+  annotationsText?: string;
 }
 
 export default function JobsPage() {
@@ -219,6 +225,7 @@ export default function JobsPage() {
 
   const handleModalCancel = () => {
     setModalOpen(false);
+    setEditingItem(null);
     form.resetFields();
   };
 
@@ -233,9 +240,13 @@ export default function JobsPage() {
     setSubmitting(true);
     try {
       if (editingItem) {
+        const patch = buildWorkloadSafeEditPatch(editingItem, "Job", values, {
+          includeReplicas: true,
+          includeImage: true,
+        });
         await patchWorkloadById(
           editingItem.id,
-          { namespace: values.namespace, replicas: values.replicas },
+          patch,
           accessToken!,
         );
         void message.success("Job 更新成功");
@@ -253,6 +264,7 @@ export default function JobsPage() {
         void message.success("Job 创建成功");
       }
       setModalOpen(false);
+      setEditingItem(null);
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey });
     } catch (err) {
@@ -272,9 +284,25 @@ export default function JobsPage() {
     }
   };
 
+  const openEditModal = (item: WorkloadListItem) => {
+    setEditingItem(item);
+    form.resetFields();
+    form.setFieldsValue({
+      name: item.name,
+      namespace: item.namespace,
+      clusterId: item.clusterId,
+      replicas: item.replicas,
+      image: getWorkloadPrimaryImage(item, "Job"),
+      labelsText: formatWorkloadKeyValueText(item.labels),
+      annotationsText: formatWorkloadKeyValueText(item.annotations),
+    });
+    setModalOpen(true);
+  };
+
   const buildRowActions = (): MenuProps["items"] =>
     buildResourceActionMenuItems([
       { key: "describe", icon: <EyeOutlined />, label: "描述" },
+      { key: "edit", icon: <EditOutlined />, label: "编辑" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
       { type: "divider" },
       { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true },
@@ -294,6 +322,10 @@ export default function JobsPage() {
         kind: "Job",
         name: row.name,
       });
+      return;
+    }
+    if (key === "edit") {
+      openEditModal(row);
       return;
     }
     if (key === "delete") {
@@ -463,7 +495,7 @@ export default function JobsPage() {
             name="namespace"
             rules={[{ required: true, message: "请输入名称空间" }]}
           >
-            <Input placeholder="例如：default" />
+            <Input placeholder="例如：default" disabled={Boolean(editingItem)} />
           </Form.Item>
           <Form.Item
             label="集群"
@@ -486,6 +518,19 @@ export default function JobsPage() {
           >
             <InputNumber min={1} style={{ width: "100%" }} placeholder="默认 1" />
           </Form.Item>
+          {editingItem ? (
+            <>
+              <Form.Item label="主容器镜像" name="image">
+                <Input placeholder="registry.example.com/job:tag" />
+              </Form.Item>
+              <Form.Item label="Labels" name="labelsText">
+                <Input.TextArea rows={4} placeholder={"job=batch\nenv=prod"} />
+              </Form.Item>
+              <Form.Item label="Annotations" name="annotationsText">
+                <Input.TextArea rows={4} placeholder={"description=batch-job\nowner=team-a"} />
+              </Form.Item>
+            </>
+          ) : null}
         </Form>
       </Modal>
       <ResourceDetailDrawer
