@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Typography, message } from "antd";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
+import { OpsFilterChip } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
@@ -960,7 +961,7 @@ export default function GatewayApiPage() {
         return entries.length > 0 ? (
           <Space wrap size={[4, 4]}>
             {entries.map(([key, value]) => (
-              <Tag key={`${row.id}-${key}`}>{`${key}=${value}`}</Tag>
+              <OpsFilterChip key={`${row.id}-${key}`} tone="neutral">{`${key}=${value}`}</OpsFilterChip>
             ))}
           </Space>
         ) : (

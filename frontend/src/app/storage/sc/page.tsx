@@ -15,7 +15,6 @@ import {
   Modal,
   Select,
   Space,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -23,6 +22,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
+import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
 import {
   buildResourceActionMenuItems,
   matchLabelExpressions,
@@ -53,7 +53,7 @@ import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
@@ -75,7 +75,7 @@ interface ScEditFormValues {
 }
 
 function defaultTag(isDefault: boolean) {
-  return isDefault ? <Tag color="green">默认</Tag> : <Tag>普通</Tag>;
+  return isDefault ? <OpsStatusTag tone="success">默认</OpsStatusTag> : <OpsFilterChip tone="neutral">普通</OpsFilterChip>;
 }
 
 function getTextFilter(filters: HeadlampTableFilters, key: string) {
@@ -182,7 +182,6 @@ export default function StorageClassPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels, mergedFilters) &&
           textMatches(item.name, getTextFilter(tableFilters, "name")) &&
           textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
@@ -350,7 +349,7 @@ export default function StorageClassPage() {
             row.spec &&
             (row.spec as { allowVolumeExpansion?: boolean }).allowVolumeExpansion,
         );
-        return allow ? <Tag color="blue">允许</Tag> : <Tag>不允许</Tag>;
+        return allow ? <OpsStatusTag tone="info">允许</OpsStatusTag> : <OpsFilterChip tone="neutral">不允许</OpsFilterChip>;
       },
     },
     {

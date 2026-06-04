@@ -23,7 +23,6 @@ import {
   Row,
   Select,
   Space,
-  Tag,
   Tooltip,
   Typography,
 } from "antd";
@@ -31,6 +30,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
+import { OpsFilterChip, OpsStatusTag, type OpsFilterChipTone } from "@/components/ops";
 import {
   POD_ACTION_MENU_CLASS,
   POD_ACTION_TRIGGER_CLASS,
@@ -134,6 +134,13 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
   },
 ];
 
+function roleChipTone(roleName: string): OpsFilterChipTone {
+  if (roleName === "admin") return "danger";
+  if (roleName === "operator") return "warning";
+  if (roleName === "read-only") return "info";
+  return "neutral";
+}
+
 // ---------- RoleCard ----------
 
 function RoleCards() {
@@ -159,9 +166,9 @@ function RoleCards() {
                   <Typography.Text strong style={{ color: role.color }}>
                     {role.label}
                   </Typography.Text>
-                  <Tag color={role.color} style={{ fontFamily: "monospace", fontSize: 11 }}>
+                  <OpsFilterChip tone={roleChipTone(role.name)} style={{ fontFamily: "monospace", fontSize: 11 }}>
                     {role.name}
-                  </Tag>
+                  </OpsFilterChip>
                 </Space>
               }
             >
@@ -184,9 +191,9 @@ function RoleCards() {
                 </Typography.Text>
                 <Space size={4} style={{ marginLeft: 4 }}>
                   {role.bindingKinds.map((kind) => (
-                    <Tag key={kind} style={{ fontSize: 11, margin: 0 }}>
+                    <OpsFilterChip key={kind} tone="neutral" style={{ fontSize: 11, margin: 0 }}>
                       {kind}
-                    </Tag>
+                    </OpsFilterChip>
                   ))}
                 </Space>
               </div>
@@ -501,24 +508,24 @@ function CreateRbacModal({ open, accessToken, onClose, onSuccess }: CreateRbacMo
 function stateTag(state: RbacState): React.ReactNode {
   if (state === "active") {
     return (
-      <Badge status="success" text={<Tag color="green">已启用</Tag>} />
+      <Badge status="success" text={<OpsStatusTag state="active" />} />
     );
   }
-  return <Badge status="warning" text={<Tag color="gold">已禁用</Tag>} />;
+  return <Badge status="warning" text={<OpsStatusTag state="disabled" />} />;
 }
 
 function kindTag(kind: string): React.ReactNode {
   if (kind === "ClusterRoleBinding") {
     return (
-      <Tag color="purple" style={{ fontFamily: "monospace" }}>
+      <OpsFilterChip tone="neutral" style={{ fontFamily: "monospace" }}>
         {kind}
-      </Tag>
+      </OpsFilterChip>
     );
   }
   return (
-    <Tag color="blue" style={{ fontFamily: "monospace" }}>
+    <OpsFilterChip tone="info" style={{ fontFamily: "monospace" }}>
       {kind}
-    </Tag>
+    </OpsFilterChip>
   );
 }
 
@@ -705,9 +712,9 @@ export default function RbacPage() {
               {value}
             </Typography.Link>
             {preset ? (
-              <Tag color={preset.color} style={{ fontSize: 11 }}>
+              <OpsFilterChip tone={roleChipTone(preset.name)} style={{ fontSize: 11 }}>
                 {preset.label}
-              </Tag>
+              </OpsFilterChip>
             ) : null}
           </Space>
         );
@@ -738,7 +745,7 @@ export default function RbacPage() {
       ...getSortableColumnProps("namespace", query.isLoading && !query.data),
       render: (value: string) =>
         value ? (
-          <Tag style={{ fontFamily: "monospace" }}>{value}</Tag>
+          <OpsFilterChip tone="neutral" style={{ fontFamily: "monospace" }}>{value}</OpsFilterChip>
         ) : (
           <Typography.Text type="secondary" italic>
             集群级
@@ -929,7 +936,7 @@ export default function RbacPage() {
           <Space>
             <span>角色绑定列表</span>
             {query.data ? (
-              <Tag color="blue">共 {query.data.total} 条</Tag>
+              <OpsFilterChip tone="info">共 {query.data.total} 条</OpsFilterChip>
             ) : null}
           </Space>
         }

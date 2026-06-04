@@ -9,7 +9,6 @@ import {
   Modal,
   Select,
   Space,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -26,6 +25,7 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { OpsStatusTag } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { useAuth } from "@/components/auth-context";
@@ -423,8 +423,8 @@ export default function EndpointSlicesPage() {
         const readiness = summarizeReadiness(row);
         return (
           <Space size={4} wrap>
-            <Tag color="green">就绪 {readiness.ready}/{readiness.total}</Tag>
-            <Tag color={readiness.terminating > 0 ? "orange" : "default"}>终止中 {readiness.terminating}</Tag>
+            <OpsStatusTag tone="success">就绪 {readiness.ready}/{readiness.total}</OpsStatusTag>
+            <OpsStatusTag tone={readiness.terminating > 0 ? "warning" : "neutral"}>终止中 {readiness.terminating}</OpsStatusTag>
           </Space>
         );
       },

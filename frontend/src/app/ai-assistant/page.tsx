@@ -37,7 +37,6 @@ import {
   Space,
   Spin,
   Statistic,
-  Tag,
   Tooltip,
   Typography,
   message,
@@ -50,6 +49,7 @@ import remarkGfm from "remark-gfm";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/components/auth-context";
 import { AiDeleteSessionDialog, type AiDeleteSessionTarget } from "@/components/ai/delete-session-dialog";
+import { OpsFilterChip, OpsIconActionButton, OpsStatusTag } from "@/components/ops";
 import {
   createSession,
   executeAction,
@@ -247,9 +247,13 @@ function MessageBubble({
           {attachments.length > 0 ? (
             <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
               {attachments.map((attachment) => (
-                <Tag key={attachment.id} color={attachment.category === "image" ? "blue" : "geekblue"} style={{ marginInlineEnd: 0 }}>
+                <OpsFilterChip
+                  key={attachment.id}
+                  tone={attachment.category === "image" ? "info" : "neutral"}
+                  style={{ marginInlineEnd: 0 }}
+                >
                   {attachment.fileName} · {formatFileSize(attachment.size)}
-                </Tag>
+                </OpsFilterChip>
               ))}
             </div>
           ) : null}
@@ -1390,26 +1394,26 @@ export default function AiAssistantPage() {
           </div>
           <Space>
             {!showAlertPanelInline ? (
-              <Button icon={<ApiOutlined />} onClick={() => setAlertDrawerOpen(true)} disabled={isInitializing || !accessToken}>
+              <OpsIconActionButton icon={<ApiOutlined />} onClick={() => setAlertDrawerOpen(true)} disabled={isInitializing || !accessToken}>
                 告警接入
-              </Button>
+              </OpsIconActionButton>
             ) : null}
-            <Button
+            <OpsIconActionButton
               icon={<ReloadOutlined />}
               loading={pingLoading}
               onClick={() => void refetchPing()}
               disabled={isInitializing || !accessToken}
             >
               检测中转站
-            </Button>
-            <Button
-              type="primary"
+            </OpsIconActionButton>
+            <OpsIconActionButton
+              opsTone="primary"
               icon={<SettingOutlined />}
               onClick={() => setSettingsOpen(true)}
               disabled={isInitializing || !accessToken}
             >
               模型设置
-            </Button>
+            </OpsIconActionButton>
           </Space>
         </div>
 
@@ -1433,9 +1437,9 @@ export default function AiAssistantPage() {
             <Card size="small">
               <Space orientation="vertical" size={4} style={{ width: "100%" }}>
                 <Typography.Text type="secondary">模型中转站</Typography.Text>
-                <Tag color={pingData?.ok ? "success" : "error"} style={{ width: "fit-content" }}>
+                <OpsStatusTag tone={pingData?.ok ? "success" : "danger"} className="ai-assistant-status-chip">
                   {pingData?.ok ? "在线" : "不可用"}
-                </Tag>
+                </OpsStatusTag>
                 <Typography.Text style={{ fontSize: 12 }} ellipsis>
                   {pingData?.config.modelName ?? "未配置模型"}
                 </Typography.Text>
@@ -1455,7 +1459,7 @@ export default function AiAssistantPage() {
                   告警接入模拟
                 </Space>
               }
-              extra={<Tag color="blue">Webhook</Tag>}
+              extra={<OpsFilterChip tone="info">Webhook</OpsFilterChip>}
               style={{
                 borderRadius: 12,
                 flex: 1,
@@ -1488,9 +1492,9 @@ export default function AiAssistantPage() {
               </Space>
             }
             extra={
-              <Tag color="processing">
+              <OpsStatusTag tone="processing">
                 {currentSessionId ? "会话中" : "待启动"}
-              </Tag>
+              </OpsStatusTag>
             }
             style={{
               borderRadius: 12,
@@ -1605,7 +1609,7 @@ export default function AiAssistantPage() {
                         value: cluster.id,
                       }))}
                     />
-                    {currentSession ? <Tag>{currentSession.title}</Tag> : null}
+                    {currentSession ? <OpsFilterChip tone="neutral">{currentSession.title}</OpsFilterChip> : null}
                   </Space>
                 </div>
 
@@ -1674,9 +1678,9 @@ export default function AiAssistantPage() {
                     <div style={{ marginBottom: 8 }}>
                       <Space wrap size={[6, 6]}>
                         {pendingAttachments.map((attachment) => (
-                          <Tag
+                          <OpsFilterChip
                             key={attachment.id}
-                            color={attachment.category === "image" ? "blue" : "geekblue"}
+                            tone={attachment.category === "image" ? "info" : "neutral"}
                             closable
                             onClose={(event) => {
                               event.preventDefault();
@@ -1684,12 +1688,12 @@ export default function AiAssistantPage() {
                             }}
                           >
                             {attachment.fileName} · {formatFileSize(attachment.size)}
-                          </Tag>
+                          </OpsFilterChip>
                         ))}
                         {voiceInputMeta ? (
-                          <Tag color="purple" icon={<AudioOutlined />}>
+                          <OpsFilterChip tone="warning" icon={<AudioOutlined />}>
                             语音转写 {voiceInputMeta.durationMs ? `${Math.round(voiceInputMeta.durationMs / 1000)}s` : ""}
-                          </Tag>
+                          </OpsFilterChip>
                         ) : null}
                       </Space>
                     </div>

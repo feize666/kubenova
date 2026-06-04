@@ -16,13 +16,12 @@ import {
   Select,
   Space,
   Statistic,
-  Tag,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ResourceFilterToolbarItem } from "@/components/resource-filter-toolbar";
+import { ResourceFilterToolbar, ResourceFilterToolbarItem } from "@/components/resource-filter-toolbar";
 import { ResourceFacetFilterButton } from "@/components/resource-facet-filter-button";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useAuth } from "@/components/auth-context";
@@ -63,6 +62,8 @@ import {
   renderResourceActionTriggerButton,
   type ResourceMenuItem,
 } from "@/components/resource-action-bar";
+import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
+import { OpsStatusTag } from "@/components/ops/ops-status";
 
 type AutoscalingConsoleProps = {
   defaultType?: AutoscalingType;
@@ -695,7 +696,9 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       dataIndex: "type",
       key: "type",
       width: 110,
-      render: (value: AutoscalingType) => <Tag color={value === "HPA" ? "processing" : "purple"}>{value}</Tag>,
+      render: (value: AutoscalingType) => (
+        <OpsFilterChip tone={value === "HPA" ? "info" : "neutral"}>{value}</OpsFilterChip>
+      ),
     },
     {
       title: "工作负载",
@@ -748,7 +751,9 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       key: "state",
       width: 120,
       render: (_, row) => (
-        <Tag color={row.state === "enabled" ? "success" : "default"}>{row.state === "enabled" ? "启用" : "停用"}</Tag>
+        <OpsStatusTag tone={row.state === "enabled" ? "success" : "neutral"}>
+          {row.state === "enabled" ? "启用" : "停用"}
+        </OpsStatusTag>
       ),
     },
     {
@@ -830,7 +835,9 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       dataIndex: "type",
       key: "type",
       width: 100,
-      render: (value: string) => <Tag color={value === "Warning" ? "red" : "default"}>{value || "-"}</Tag>,
+      render: (value: string) => (
+        <OpsStatusTag tone={value === "Warning" ? "danger" : "neutral"}>{value || "-"}</OpsStatusTag>
+      ),
     },
     { title: "原因", dataIndex: "reason", key: "reason", width: 180 },
     { title: "消息", dataIndex: "message", key: "message" },
@@ -845,35 +852,34 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       />
 
       <Card>
-        <div className="resource-filter-toolbar">
-          <div className="resource-filter-toolbar-controls">
-            <ResourceFilterToolbarItem width="auto">
-              <ResourceScopeFilterButton
-                clusterId={clusterId}
-                namespace={namespace}
-                clusterOptions={clusterOptions}
-                clusterLoading={clustersQuery.isLoading}
-                knownNamespaces={knownNamespaces}
-                namespaceDisabled={namespaceDisabled}
-                namespacePlaceholder={namespacePlaceholder}
-                onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-                  onScopeChange(nextClusterId, nextNamespace);
-                  resetPage();
-                }}
-              />
-            </ResourceFilterToolbarItem>
-            <ResourceFilterToolbarItem width="sm">
-              <ResourceFacetFilterButton
-                label="类型"
-                value={kind}
-                allLabel="全部类型"
-                options={[{ label: "全部类型", value: "" }, ...kindOptions]}
-                onChange={(value) => {
-                  setKind(value);
-                  resetPage();
-                }}
-              />
-            </ResourceFilterToolbarItem>
+        <ResourceFilterToolbar>
+          <ResourceFilterToolbarItem width="auto">
+            <ResourceScopeFilterButton
+              clusterId={clusterId}
+              namespace={namespace}
+              clusterOptions={clusterOptions}
+              clusterLoading={clustersQuery.isLoading}
+              knownNamespaces={knownNamespaces}
+              namespaceDisabled={namespaceDisabled}
+              namespacePlaceholder={namespacePlaceholder}
+              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                onScopeChange(nextClusterId, nextNamespace);
+                resetPage();
+              }}
+            />
+          </ResourceFilterToolbarItem>
+          <ResourceFilterToolbarItem width="sm">
+            <ResourceFacetFilterButton
+              label="类型"
+              value={kind}
+              allLabel="全部类型"
+              options={[{ label: "全部类型", value: "" }, ...kindOptions]}
+              onChange={(value) => {
+                setKind(value);
+                resetPage();
+              }}
+            />
+          </ResourceFilterToolbarItem>
           {!defaultType ? (
             <ResourceFilterToolbarItem width="sm">
               <ResourceFacetFilterButton
@@ -892,8 +898,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
               />
             </ResourceFilterToolbarItem>
           ) : null}
-          </div>
-        </div>
+        </ResourceFilterToolbar>
         
       </Card>
 

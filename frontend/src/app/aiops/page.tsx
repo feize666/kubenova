@@ -2,10 +2,11 @@
 
 import { ReloadOutlined, RobotOutlined, SafetyOutlined, WarningOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Descriptions, Drawer, Empty, Row, Select, Space, Statistic, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Col, Descriptions, Drawer, Empty, Row, Select, Space, Statistic, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import {
   approveAiopsRecommendation,
@@ -19,21 +20,21 @@ import {
 import type { MonitoringTimePreset } from "@/lib/api/monitoring";
 
 function severityTag(value: "critical" | "warning" | "info") {
-  if (value === "critical") return <Tag color="red">严重</Tag>;
-  if (value === "warning") return <Tag color="gold">风险</Tag>;
-  return <Tag color="blue">信息</Tag>;
+  if (value === "critical") return <OpsStatusTag tone="danger">严重</OpsStatusTag>;
+  if (value === "warning") return <OpsStatusTag tone="warning">风险</OpsStatusTag>;
+  return <OpsStatusTag tone="info">信息</OpsStatusTag>;
 }
 
 function statusTag(value: AiopsIncidentItem["status"]) {
-  if (value === "open") return <Tag color="red">待处理</Tag>;
-  if (value === "investigating") return <Tag color="processing">诊断中</Tag>;
-  return <Tag color="green">已缓解</Tag>;
+  if (value === "open") return <OpsStatusTag tone="danger">待处理</OpsStatusTag>;
+  if (value === "investigating") return <OpsStatusTag tone="processing">诊断中</OpsStatusTag>;
+  return <OpsStatusTag tone="success">已缓解</OpsStatusTag>;
 }
 
 function riskTag(value: AiopsRecommendationItem["riskLevel"]) {
-  if (value === "high") return <Tag color="red">高</Tag>;
-  if (value === "medium") return <Tag color="gold">中</Tag>;
-  return <Tag color="green">低</Tag>;
+  if (value === "high") return <OpsStatusTag tone="danger">高</OpsStatusTag>;
+  if (value === "medium") return <OpsStatusTag tone="warning">中</OpsStatusTag>;
+  return <OpsStatusTag tone="success">低</OpsStatusTag>;
 }
 
 export default function AiopsCenterPage() {
@@ -159,7 +160,9 @@ export default function AiopsCenterPage() {
         dataIndex: "approvalRequired",
         key: "approvalRequired",
         width: 100,
-        render: (value: boolean) => (value ? <Tag color="gold">需要</Tag> : <Tag color="green">无需</Tag>),
+        render: (value: boolean) => (
+          value ? <OpsStatusTag tone="warning">需要</OpsStatusTag> : <OpsStatusTag tone="success">无需</OpsStatusTag>
+        ),
       },
       {
         title: "回滚提示",
@@ -257,8 +260,8 @@ export default function AiopsCenterPage() {
                   <Space orientation="vertical" size={4}>
                     <Space>
                       <Typography.Text strong>{item.title}</Typography.Text>
-                      <Tag color="blue">{item.modelType}</Tag>
-                      <Tag>{item.confidence}%</Tag>
+                      <OpsFilterChip tone="info">{item.modelType}</OpsFilterChip>
+                      <OpsFilterChip tone="neutral">{item.confidence}%</OpsFilterChip>
                     </Space>
                     <Typography.Text type="secondary">{item.evidence.join(" / ")}</Typography.Text>
                   </Space>
@@ -338,7 +341,7 @@ export default function AiopsCenterPage() {
                   <Space>
                     <Typography.Text strong>{selectedCorrelationGroup.title}</Typography.Text>
                     {severityTag(selectedCorrelationGroup.severity)}
-                    <Tag>{selectedCorrelationGroup.incidentCount} 个事故</Tag>
+                    <OpsFilterChip tone="neutral">{selectedCorrelationGroup.incidentCount} 个事故</OpsFilterChip>
                   </Space>
                   <Typography.Text type="secondary">{selectedCorrelationGroup.evidence.join(" / ")}</Typography.Text>
                 </Space>
@@ -352,9 +355,9 @@ export default function AiopsCenterPage() {
                 <Space orientation="vertical" size={6}>
                   <Space>
                     <Typography.Text strong>{selectedRootCause.title}</Typography.Text>
-                    <Tag color="blue">{selectedRootCause.modelType}</Tag>
-                    <Tag>{selectedRootCause.confidence}%</Tag>
-                    <Tag>{selectedRootCause.humanState}</Tag>
+                    <OpsFilterChip tone="info">{selectedRootCause.modelType}</OpsFilterChip>
+                    <OpsFilterChip tone="neutral">{selectedRootCause.confidence}%</OpsFilterChip>
+                    <OpsFilterChip tone="neutral">{selectedRootCause.humanState}</OpsFilterChip>
                   </Space>
                   <Typography.Text type="secondary">{selectedRootCause.evidence.join(" / ")}</Typography.Text>
                 </Space>
@@ -393,16 +396,16 @@ export default function AiopsCenterPage() {
                           >
                             记录审批
                           </Button>
-                          <Tag color={record.precheckStatus === "pending" ? "gold" : "green"}>
+                          <OpsStatusTag tone={record.precheckStatus === "pending" ? "warning" : "success"}>
                             {record.precheckStatus === "pending" ? "等待 precheck" : "无需 precheck"}
-                          </Tag>
+                          </OpsStatusTag>
                         </Space>
                         {precheck ? (
                           <Space orientation="vertical" size={6} style={{ width: "100%" }}>
                             <Typography.Text strong>Precheck 结果：{precheck.status}</Typography.Text>
                             {precheck.checks.map((item) => (
                               <Space key={item.key} wrap>
-                                <Tag color={item.status === "passed" ? "green" : "red"}>{item.status}</Tag>
+                                <OpsStatusTag tone={item.status === "passed" ? "success" : "danger"}>{item.status}</OpsStatusTag>
                                 <Typography.Text>{item.label}</Typography.Text>
                                 <Typography.Text type="secondary">{item.message}</Typography.Text>
                               </Space>

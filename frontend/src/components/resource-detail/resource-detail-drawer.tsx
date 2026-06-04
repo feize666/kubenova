@@ -61,6 +61,61 @@ function parseDynamicYamlTarget(id: string): DetailYamlTarget | null {
   };
 }
 
+function hasSnapshot(snapshot: DetailRequest["snapshot"] | undefined): boolean {
+  return Boolean(
+    snapshot?.spec ||
+      snapshot?.status ||
+      (snapshot?.labels && Object.keys(snapshot.labels).length > 0),
+  );
+}
+
+function SnapshotBlock({
+  title,
+  value,
+}: {
+  title: string;
+  value: Record<string, unknown> | Record<string, string> | undefined;
+}) {
+  if (!value || Object.keys(value).length === 0) return null;
+  return (
+    <div
+      style={{
+        border: "1px solid var(--ant-color-border-secondary)",
+        borderRadius: 8,
+        overflow: "hidden",
+        background: "var(--ant-color-bg-container)",
+      }}
+    >
+      <div
+        style={{
+          padding: "8px 10px",
+          borderBottom: "1px solid var(--ant-color-border-secondary)",
+          color: "var(--ant-color-text-secondary)",
+          fontSize: 12,
+          fontWeight: 700,
+          textTransform: "uppercase",
+        }}
+      >
+        {title}
+      </div>
+      <pre
+        style={{
+          margin: 0,
+          maxHeight: 280,
+          overflow: "auto",
+          padding: 12,
+          fontSize: 12,
+          lineHeight: 1.5,
+          whiteSpace: "pre-wrap",
+          overflowWrap: "anywhere",
+        }}
+      >
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
 function buildDetailYamlTarget(
   detail: ResourceDetailResponse | undefined,
   activeRequest: DetailRequest | null,
@@ -166,6 +221,8 @@ export function ResourceDetailDrawer({
   const clusterMap = Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name]));
   const hasDetailData = Boolean(query.data);
   const yamlTarget = buildDetailYamlTarget(query.data, activeRequest);
+  const activeSnapshot = activeRequest?.snapshot;
+  const canShowSnapshotFallback = hasSnapshot(activeSnapshot);
 
   const title = (() => {
     if (!activeRequest) {
@@ -239,17 +296,29 @@ export function ResourceDetailDrawer({
             <Skeleton active paragraph={{ rows: 6 }} />
           </Space>
         ) : query.error instanceof Error ? (
-          <Alert
-            type="error"
-            showIcon
-            title="资源详情加载失败"
-            description={query.error.message}
-            action={
-              <Button size="small" onClick={() => void query.refetch()}>
-                重试
-              </Button>
-            }
-          />
+          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+            <Alert
+              type={canShowSnapshotFallback ? "warning" : "error"}
+              showIcon
+              title={canShowSnapshotFallback ? "资源详情加载失败，显示拓扑快照" : "资源详情加载失败"}
+              description={query.error.message}
+              action={
+                <Button size="small" onClick={() => void query.refetch()}>
+                  重试
+                </Button>
+              }
+            />
+            {canShowSnapshotFallback ? (
+              <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+                <Typography.Text type="secondary">
+                  快照来自拓扑数据，可能少于 API 详情。
+                </Typography.Text>
+                <SnapshotBlock title="Labels" value={activeSnapshot?.labels} />
+                <SnapshotBlock title="Spec" value={activeSnapshot?.spec} />
+                <SnapshotBlock title="Status" value={activeSnapshot?.status} />
+              </Space>
+            ) : null}
+          </Space>
         ) : query.data ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <Typography.Text type="secondary">
@@ -261,6 +330,7 @@ export function ResourceDetailDrawer({
               key={activeRequestKey}
               detail={query.data}
               snapshot={activeRequest?.snapshot}
+              clusterMap={clusterMap}
               onNavigateRequest={emitNavigateRequest}
             />
             {children}

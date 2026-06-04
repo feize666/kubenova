@@ -2,10 +2,11 @@
 
 import { ReloadOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Empty, Select, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Select, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { OpsFilterChip } from "@/components/ops";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -56,9 +57,9 @@ function renderRoles(roles: string[]) {
   return (
     <Space size={4} wrap>
       {visibleRoles.map((role) => (
-        <Tag key={role} color={role === "control-plane" || role === "master" ? "purple" : "blue"}>
+        <OpsFilterChip key={role} tone={role === "control-plane" || role === "master" ? "warning" : "info"}>
           {role}
-        </Tag>
+        </OpsFilterChip>
       ))}
     </Space>
   );
@@ -199,9 +200,9 @@ export default function ClusterNodesPage() {
         value.length > 0 ? (
           <Space size={4} wrap>
             {value.slice(0, 2).map((item) => (
-              <Tag key={item}>{item}</Tag>
+              <OpsFilterChip key={item} tone="neutral">{item}</OpsFilterChip>
             ))}
-            {value.length > 2 ? <Tag>+{value.length - 2}</Tag> : null}
+            {value.length > 2 ? <OpsFilterChip tone="neutral">+{value.length - 2}</OpsFilterChip> : null}
           </Space>
         ) : (
           <Typography.Text type="secondary">无</Typography.Text>

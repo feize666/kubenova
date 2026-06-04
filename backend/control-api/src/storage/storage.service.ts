@@ -105,8 +105,9 @@ export class StorageService {
         };
       }
     }
-    const shouldSync =
-      query.sync?.toLowerCase() !== 'false' && Boolean(clusterId);
+    const syncMode = query.sync?.toLowerCase();
+    const shouldSync = syncMode !== 'false';
+    const waitForSync = syncMode === 'foreground';
 
     const params: StorageListParams = {
       clusterId,
@@ -119,12 +120,15 @@ export class StorageService {
       sortBy: query.sortBy,
       sortOrder: query.sortOrder,
     };
+    if (waitForSync) {
+      await this.refreshStorageSyncState(shouldSync, clusterId, readableClusterIds, {
+        strict: Boolean(clusterId),
+      });
+    }
     const result = await this.storageRepository.list(params);
-    void this.refreshStorageSyncState(
-      shouldSync,
-      clusterId,
-      readableClusterIds,
-    );
+    if (!waitForSync) {
+      void this.refreshStorageSyncState(shouldSync, clusterId, readableClusterIds);
+    }
     return {
       ...result,
       timestamp: new Date().toISOString(),
@@ -135,20 +139,27 @@ export class StorageService {
     shouldSync: boolean,
     clusterId: string | undefined,
     readableClusterIds: string[] | undefined,
+    options?: { strict?: boolean },
   ): Promise<void> {
     if (!shouldSync) {
       return;
     }
 
-    if (clusterId) {
-      void this.ensureClusterStorageSynced(clusterId);
+    const targets = clusterId ? [clusterId] : readableClusterIds ?? [];
+    if (targets.length === 0) {
       return;
     }
 
-    if (readableClusterIds?.length) {
-      void Promise.allSettled(
-        readableClusterIds.map((item) => this.ensureClusterStorageSynced(item)),
+    const results = await Promise.allSettled(
+      targets.map((item) => this.ensureClusterStorageSynced(item)),
+    );
+    if (options?.strict) {
+      const rejected = results.find(
+        (item): item is PromiseRejectedResult => item.status === 'rejected',
       );
+      if (rejected) {
+        throw rejected.reason;
+      }
     }
   }
 

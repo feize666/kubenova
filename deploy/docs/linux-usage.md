@@ -86,7 +86,7 @@ go version
 适用系统：`Debian / Ubuntu`
 
 ```bash
-GO_VERSION=1.22.5
+GO_VERSION=1.25.0
 curl -fsSLO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
@@ -100,7 +100,7 @@ go version
 
 ##### 二进制安装
 ```bash
-GO_VERSION=1.22.5
+GO_VERSION=1.25.0
 curl -fsSLO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz

@@ -1,16 +1,16 @@
 "use client";
 
-import { Button, Checkbox, Divider, Input, Popover, Space, Tooltip } from "antd";
+import { Checkbox, Input, Popover, Space, Tooltip } from "antd";
 import {
   ClearOutlined,
   ColumnWidthOutlined,
   FilterOutlined,
-  ReloadOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import type { CheckboxChangeEvent } from "antd/es/checkbox";
 import type { ReactNode } from "react";
 import type { HeadlampTableState } from "@/lib/table/headlamp-table";
+import { OpsIconActionButton, OpsPopoverPanel } from "@/components/ops";
 
 export type ResourceTableToolbarProps<T extends object> = {
   table: Pick<
@@ -30,7 +30,7 @@ export type ResourceTableToolbarProps<T extends object> = {
 
 export function ResourceTableToolbar<T extends object>({ table, extra }: ResourceTableToolbarProps<T>) {
   const searchPanel = table.globalSearch ? (
-    <div className="resource-table-search-panel">
+    <OpsPopoverPanel title="搜索" subtitle="按关键字过滤当前表格" className="resource-table-search-panel">
       <Input
         allowClear
         autoFocus
@@ -40,18 +40,13 @@ export function ResourceTableToolbar<T extends object>({ table, extra }: Resourc
         value={table.globalSearch.value}
         onChange={(event) => table.globalSearch?.onChange(event.target.value)}
       />
-    </div>
+    </OpsPopoverPanel>
   ) : null;
 
   const columnPanel = (
-    <div className="resource-table-column-panel">
+    <OpsPopoverPanel title="显示列" onReset={table.resetColumnVisibility} resetText="重置" className="resource-table-column-panel">
       <div className="resource-table-column-panel-header">
-        <span>显示列</span>
-        <Button icon={<ReloadOutlined />} size="small" type="text" onClick={table.resetColumnVisibility}>
-          重置
-        </Button>
       </div>
-      <Divider />
       <div className="resource-table-column-list">
         {table.columnDescriptors.map((column) => (
           <Checkbox
@@ -64,7 +59,7 @@ export function ResourceTableToolbar<T extends object>({ table, extra }: Resourc
           </Checkbox>
         ))}
       </div>
-    </div>
+    </OpsPopoverPanel>
   );
 
   return (
@@ -79,7 +74,7 @@ export function ResourceTableToolbar<T extends object>({ table, extra }: Resourc
             overlayClassName="resource-table-search-popover"
           >
             <Tooltip title="搜索">
-              <Button
+              <OpsIconActionButton
                 className={["resource-table-icon-action", table.globalSearch.value ? "is-active" : ""]
                   .filter(Boolean)
                   .join(" ")}
@@ -87,12 +82,12 @@ export function ResourceTableToolbar<T extends object>({ table, extra }: Resourc
                 aria-label="搜索"
               >
                 搜索
-              </Button>
+              </OpsIconActionButton>
             </Tooltip>
           </Popover>
         ) : null}
         <Tooltip title="过滤">
-          <Button
+          <OpsIconActionButton
             className={["resource-table-icon-action", table.hasActiveFilters ? "is-active" : ""]
               .filter(Boolean)
               .join(" ")}
@@ -104,10 +99,10 @@ export function ResourceTableToolbar<T extends object>({ table, extra }: Resourc
             {table.activeFilterCount > 0 ? (
               <span className="resource-table-action-badge">{table.activeFilterCount}</span>
             ) : null}
-          </Button>
+          </OpsIconActionButton>
         </Tooltip>
         <Tooltip title="清空搜索和过滤">
-          <Button
+          <OpsIconActionButton
             className="resource-table-icon-action resource-table-icon-action-compact"
             disabled={!table.hasActiveFilters}
             icon={<ClearOutlined />}
@@ -121,9 +116,9 @@ export function ResourceTableToolbar<T extends object>({ table, extra }: Resourc
           trigger="click"
         >
           <Tooltip title="列设置">
-            <Button className="resource-table-icon-action" icon={<ColumnWidthOutlined />} aria-label="列设置">
+            <OpsIconActionButton className="resource-table-icon-action" icon={<ColumnWidthOutlined />} aria-label="列设置">
               列
-            </Button>
+            </OpsIconActionButton>
           </Tooltip>
         </Popover>
       </Space>

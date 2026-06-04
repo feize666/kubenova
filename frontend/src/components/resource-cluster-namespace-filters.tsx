@@ -1,8 +1,9 @@
 "use client";
 
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Space } from "antd";
+import { Space } from "antd";
 import type { ReactNode } from "react";
+import { OpsIconActionButton } from "@/components/ops";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
@@ -65,9 +66,9 @@ export function ResourceClusterNamespaceFilters({
       <ResourceFilterToolbar
         actions={
           showKeywordSearch ? (
-            <Button icon={<SearchOutlined />} type="primary" onClick={onSearch}>
+            <OpsIconActionButton icon={<SearchOutlined />} opsTone="primary" onClick={onSearch}>
               查询
-            </Button>
+            </OpsIconActionButton>
           ) : null
         }
       >

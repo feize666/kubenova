@@ -37,7 +37,7 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourcePageHeader } from "@/components/resource-page-header";
-import { ResourceFilterToolbarItem } from "@/components/resource-filter-toolbar";
+import { ResourceFilterToolbar, ResourceFilterToolbarItem } from "@/components/resource-filter-toolbar";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
@@ -160,7 +160,8 @@ export default function HelmPage() {
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
     [clustersQuery.data?.items],
   );
-  const selectedClusterReady = selectedCluster?.hasKubeconfig !== false;
+  const selectedClusterReady = selectedClusterId ? selectedCluster?.hasKubeconfig !== false : true;
+  const installQueryClusterId = installClusterId?.trim() || "";
 
   const releasesQuery = useQuery({
     queryKey: [
@@ -195,13 +196,13 @@ export default function HelmPage() {
   });
 
   const repositoriesQuery = useQuery({
-    queryKey: ["helm", "repositories", installClusterId || selectedClusterId, accessToken],
+    queryKey: ["helm", "repositories", installQueryClusterId || "none", accessToken],
     queryFn: () =>
       getHelmRepositories(
-        { clusterId: installClusterId || selectedClusterId, page: 1, pageSize: 200 },
+        { clusterId: installQueryClusterId, page: 1, pageSize: 200 },
         accessToken ?? undefined,
       ),
-    enabled: Boolean(accessToken) && Boolean(installClusterId || selectedClusterId),
+    enabled: Boolean(accessToken) && Boolean(installQueryClusterId),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
 
@@ -209,7 +210,7 @@ export default function HelmPage() {
     queryKey: [
       "helm",
       "charts",
-      installClusterId || selectedClusterId,
+      installQueryClusterId || "none",
       installRepositoryName,
       installChartKeyword,
       chartSearchMode,
@@ -218,7 +219,7 @@ export default function HelmPage() {
     queryFn: () =>
       getHelmCharts(
         {
-          clusterId: installClusterId || selectedClusterId,
+          clusterId: installQueryClusterId,
           repository: chartSearchMode === "repo" ? installRepositoryName : undefined,
           keyword: installChartKeyword.trim() || undefined,
           searchMode: chartSearchMode,
@@ -227,7 +228,7 @@ export default function HelmPage() {
       ),
     enabled:
       Boolean(accessToken) &&
-      Boolean(installClusterId || selectedClusterId) &&
+      Boolean(installQueryClusterId) &&
       (chartSearchMode !== "repo" || Boolean(installRepositoryName)),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
@@ -617,31 +618,39 @@ export default function HelmPage() {
         embedded
         style={{ marginBottom: 12 }}
         description="安装、升级、回滚与卸载 Helm Release。"
-        titleSuffix={<ResourceAddButton onClick={() => setInstallOpen(true)} aria-label="安装 Helm Release" />}
+        titleSuffix={
+          <ResourceAddButton
+            onClick={() => {
+              if (selectedClusterId) {
+                installForm.setFieldsValue({ clusterId: selectedClusterId });
+              }
+              setInstallOpen(true);
+            }}
+            aria-label="安装 Helm Release"
+          />
+        }
       />
 
       <Card>
-        <div className="resource-filter-toolbar" style={{ marginBottom: 12 }}>
-          <div className="resource-filter-toolbar-controls">
-            <ResourceFilterToolbarItem width="auto">
-              <ResourceScopeFilterButton
-                clusterId={selectedClusterId}
-                namespace={namespace}
-                clusterOptions={helmClusterOptions}
-                clusterLoading={clustersQuery.isLoading}
-                knownNamespaces={knownNamespaces}
-                namespaceDisabled={namespaceDisabled}
-                namespacePlaceholder={namespacePlaceholder}
-                onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-                  onScopeChange(nextClusterId, nextNamespace);
-                  resetPage();
-                  setSelectedRowId(null);
-                  setDetailTarget(null);
-                }}
-              />
-            </ResourceFilterToolbarItem>
-          </div>
-        </div>
+        <ResourceFilterToolbar className="resource-filter-toolbar--section">
+          <ResourceFilterToolbarItem width="auto">
+            <ResourceScopeFilterButton
+              clusterId={selectedClusterId}
+              namespace={namespace}
+              clusterOptions={helmClusterOptions}
+              clusterLoading={clustersQuery.isLoading}
+              knownNamespaces={knownNamespaces}
+              namespaceDisabled={namespaceDisabled}
+              namespacePlaceholder={namespacePlaceholder}
+              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                onScopeChange(nextClusterId, nextNamespace);
+                resetPage();
+                setSelectedRowId(null);
+                setDetailTarget(null);
+              }}
+            />
+          </ResourceFilterToolbarItem>
+        </ResourceFilterToolbar>
 
         {!isInitializing && !accessToken ? (
           <Alert

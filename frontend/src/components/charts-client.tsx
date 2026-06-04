@@ -1,11 +1,12 @@
 "use client";
 
 import { InfoCircleOutlined } from "@ant-design/icons";
-import { Card, Col, Empty, Row, Segmented, Space, Tag, Timeline, Tooltip, theme } from "antd";
+import { Card, Col, Empty, Row, Segmented, Space, Timeline, Tooltip, theme } from "antd";
 import type { EChartsOption } from "echarts";
 import * as echarts from "echarts/core";
 import { useMemo, useState } from "react";
 import ECharts from "@/components/echarts";
+import { OpsFilterChip } from "@/components/ops";
 import { useThemeMode } from "@/components/theme-context";
 import type { DashboardStats } from "@/lib/api/dashboard";
 
@@ -583,9 +584,9 @@ export function DashboardCharts({ stats }: { stats?: DashboardStats }) {
               </span>
             }
             extra={
-              <Tag color={isDark ? "processing" : "blue"} style={{ fontSize: 11 }}>
+              <OpsFilterChip tone="info" style={{ fontSize: 11 }}>
                 最近 24h
-              </Tag>
+              </OpsFilterChip>
             }
             styles={{ body: { paddingTop: 8 } }}
           >
@@ -626,9 +627,9 @@ export function DashboardCharts({ stats }: { stats?: DashboardStats }) {
               </span>
             }
             extra={
-              <Tag color="warning" style={{ fontSize: 11 }}>
+              <OpsFilterChip tone="warning" style={{ fontSize: 11 }}>
                 最近 7 天
-              </Tag>
+              </OpsFilterChip>
             }
             styles={{ body: { paddingTop: 12 } }}
           >

@@ -1,10 +1,11 @@
 "use client";
 
 import { AppstoreOutlined, DownOutlined } from "@ant-design/icons";
-import { Badge, Button, Divider, Popover, Space, Typography } from "antd";
+import { Badge, Button, Popover, Space, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { ClusterSelect, type ClusterOption } from "@/components/cluster-select";
 import { NamespaceSelect } from "@/components/namespace-select";
+import { OpsPopoverPanel } from "@/components/ops";
 
 type ResourceScopeFilterButtonProps = {
   clusterId: string;
@@ -78,11 +79,13 @@ export function ResourceScopeFilterButton({
   };
 
   const content = (
-    <div className="resource-scope-filter-panel">
-      <div className="resource-scope-filter-panel-title">
-        <Typography.Text strong>筛选范围</Typography.Text>
-        <Typography.Text type="secondary">应用后刷新列表</Typography.Text>
-      </div>
+    <OpsPopoverPanel
+      title="筛选范围"
+      subtitle="应用后刷新列表"
+      onReset={resetAndApply}
+      onApply={applyDraft}
+      className="resource-scope-filter-panel"
+    >
       <Space direction="vertical" size={10} style={{ width: "100%" }}>
         <div>
           <Typography.Text className="resource-scope-filter-label">集群</Typography.Text>
@@ -112,14 +115,7 @@ export function ResourceScopeFilterButton({
           </div>
         ) : null}
       </Space>
-      <Divider style={{ margin: "14px 0 12px" }} />
-      <Space className="resource-scope-filter-actions">
-        <Button onClick={resetAndApply}>重置</Button>
-        <Button type="primary" onClick={applyDraft}>
-          应用
-        </Button>
-      </Space>
-    </div>
+    </OpsPopoverPanel>
   );
 
   return (

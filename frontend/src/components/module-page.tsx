@@ -1,8 +1,9 @@
 "use client";
 
-import { Alert, Card, Col, Input, Row, Select, Space, Switch, Tag, Typography } from "antd";
+import { Alert, Card, Col, Input, Row, Select, Space, Switch, Typography } from "antd";
 import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
+import { OpsStatusTag, type OpsStatusTone } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { buildCompactTablePagination } from "@/lib/table/pagination";
@@ -80,17 +81,17 @@ export function useModuleTableState(defaultPageSize = 10): ModuleTableState {
   };
 }
 
-function statusColor(status: string): string {
+function statusTone(status: string): OpsStatusTone {
   if (status.includes("运行") || status.includes("就绪") || status.includes("已启用") || status.includes("正常")) {
-    return "green";
+    return "success";
   }
   if (status.includes("告警") || status.includes("异常") || status.includes("失败") || status.includes("高")) {
-    return "red";
+    return "danger";
   }
   if (status.includes("待") || status.includes("暂停") || status.includes("低")) {
-    return "gold";
+    return "warning";
   }
-  return "blue";
+  return "info";
 }
 
 export function ModulePage({
@@ -134,7 +135,7 @@ export function ModulePage({
       if (c && c.dataIndex === "status" && !c.render) {
         return {
           ...c,
-          render: (value: string) => <Tag color={statusColor(value)}>{value}</Tag>,
+          render: (value: string) => <OpsStatusTag tone={statusTone(value)}>{value}</OpsStatusTag>,
         };
       }
       return c;

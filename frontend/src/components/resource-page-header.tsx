@@ -1,8 +1,9 @@
 "use client";
 
-import { Card, Tag, Typography } from "antd";
+import { Card, Typography } from "antd";
 import type { CSSProperties, ReactNode } from "react";
 import { getNavItemByPath } from "@/config/navigation";
+import { OpsFilterChip, type OpsFilterChipTone } from "@/components/ops";
 
 type ResourcePageHeaderProps = {
   path: string;
@@ -19,6 +20,14 @@ type ResourcePageHeaderProps = {
   embedded?: boolean;
   style?: CSSProperties;
 };
+
+function mapFreshnessColor(color?: string): OpsFilterChipTone {
+  if (color === "green" || color === "success") return "success";
+  if (color === "gold" || color === "orange" || color === "warning") return "warning";
+  if (color === "red" || color === "volcano" || color === "error" || color === "danger") return "danger";
+  if (color === "default") return "neutral";
+  return "info";
+}
 
 export function ResourcePageHeader({
   path,
@@ -71,9 +80,9 @@ export function ResourcePageHeader({
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
           {freshness ? (
-            <Tag color={freshness.color ?? "blue"} style={{ margin: 0 }}>
+            <OpsFilterChip tone={mapFreshnessColor(freshness.color)} style={{ margin: 0 }}>
               {freshness.label}：{freshness.value ?? "-"}
-            </Tag>
+            </OpsFilterChip>
           ) : null}
           {extra ? <div>{extra}</div> : null}
         </div>

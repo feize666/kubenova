@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, Empty, Space, Tag, Typography } from "antd";
+import { Card, Empty, Space, Typography } from "antd";
 import { Fragment, useMemo } from "react";
 import type { ReactNode } from "react";
 import type {
@@ -9,8 +9,10 @@ import type {
   ResourceDetailNetworkEndpoint,
   ResourceDetailSection,
 } from "@/lib/api/resources";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { StatusTag } from "@/components/status-tag";
 import {
+  DetailTag,
   DetailDescriptions,
   DetailSection,
   TagList,
@@ -43,6 +45,7 @@ type NavigateRequest =
 function renderSpecStatusSections({
   detail,
   snapshot,
+  clusterMap,
   onNavigateRequest,
 }: ResourceDetailRendererProps): ReactNode[] {
   const context = {
@@ -50,6 +53,7 @@ function renderSpecStatusSections({
     snapshot,
     specSnapshot: detail.rawSpec ?? snapshot?.spec,
     statusSnapshot: detail.rawStatus ?? snapshot?.status,
+    clusterMap,
     onNavigateRequest,
   };
   return [
@@ -99,9 +103,9 @@ function renderConditionsSection(
         <SimpleListItem>
           <Space orientation="vertical" size={2} style={{ width: "100%" }}>
             <Space wrap size={8}>
-              {item.type ? <Tag color="blue">{item.type}</Tag> : null}
+              {item.type ? <DetailTag color="blue">{item.type}</DetailTag> : null}
               {item.status ? <StatusTag state={item.status} /> : null}
-              {item.reason ? <Tag color="geekblue">{item.reason}</Tag> : null}
+              {item.reason ? <DetailTag color="geekblue">{item.reason}</DetailTag> : null}
             </Space>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {[item.message, item.lastTransitionTime]
@@ -330,17 +334,17 @@ function renderContainerSummaries(
           <SimpleListItem>
             <Space orientation="vertical" size={4} style={{ width: "100%" }}>
               <Space wrap size={8}>
-                <Tag color="geekblue">{container.name}</Tag>
+                <DetailTag color="geekblue">{container.name}</DetailTag>
                 {container.image ? (
                   <Typography.Text strong>{container.image}</Typography.Text>
                 ) : null}
                 {container.probes && container.probes.length > 0 ? (
-                  <Tag color="green">probes {container.probes.join("/")}</Tag>
+                  <DetailTag color="green">probes {container.probes.join("/")}</DetailTag>
                 ) : null}
               </Space>
               <Space wrap size={[6, 6]}>
                 {(container.ports ?? []).map((port, index) => (
-                  <Tag key={`${container.name}-port-${index}`} color="blue">
+                  <DetailTag key={`${container.name}-port-${index}`} color="blue">
                     {[
                       port.name,
                       port.protocol ?? "TCP",
@@ -348,12 +352,12 @@ function renderContainerSummaries(
                     ]
                       .filter(Boolean)
                       .join(" ")}
-                  </Tag>
+                  </DetailTag>
                 ))}
                 {(container.env ?? []).slice(0, 12).map((env) => (
-                  <Tag key={`${container.name}-env-${env}`} color="cyan">
+                  <DetailTag key={`${container.name}-env-${env}`} color="cyan">
                     {env}
-                  </Tag>
+                  </DetailTag>
                 ))}
               </Space>
             </Space>
@@ -444,7 +448,7 @@ function renderPipelineObject(
       : null;
   return (
     <>
-      <Tag color={color}>{safeKind}</Tag>
+      <DetailTag color={color}>{safeKind}</DetailTag>
       {target && onNavigateRequest ? (
         <Typography.Link strong onClick={() => onNavigateRequest(target)}>
           {safeName}
@@ -675,13 +679,13 @@ function EndpointHighlightsSection({ detail }: ResourceDetailRendererProps) {
                       style={{ width: "100%" }}
                     >
                       <Space wrap size={8}>
-                        <Tag
+                        <DetailTag
                           color={kind === "endpointslice" ? "volcano" : "gold"}
                         >
                           {kind === "endpointslice"
                             ? "EndpointSlice"
                             : "Subset"}
-                        </Tag>
+                        </DetailTag>
                         <Typography.Text strong>{item.label}</Typography.Text>
                         <Typography.Text type="secondary">
                           {item.size} 个后端
@@ -890,9 +894,9 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
                     >
                       <Space wrap size={[8, 8]}>
                         {kind === "ingressroute" ? null : item.host ? (
-                          <Tag color="green">{item.host}</Tag>
+                          <DetailTag color="green">{item.host}</DetailTag>
                         ) : (
-                          <Tag>默认 Host</Tag>
+                          <DetailTag>默认 Host</DetailTag>
                         )}
                         {item.path ? (
                           <Typography.Text code>{item.path}</Typography.Text>
@@ -903,7 +907,7 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
                             未声明匹配规则
                           </Typography.Text>
                         )}
-                        <Tag color="blue">Backend</Tag>
+                        <DetailTag color="blue">Backend</DetailTag>
                         <Typography.Text strong>{item.name}</Typography.Text>
                         {item.namespace ? (
                           <Typography.Text type="secondary">
@@ -915,12 +919,12 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
                       {endpointEntryPoints.length > 0 ? (
                         <Space wrap size={[6, 6]}>
                           {endpointEntryPoints.map((entryPoint) => (
-                            <Tag
+                            <DetailTag
                               key={`${item.name}-${entryPoint}-${index}`}
                               color="cyan"
                             >
                               {entryPoint}
-                            </Tag>
+                            </DetailTag>
                           ))}
                         </Space>
                       ) : null}
@@ -928,12 +932,12 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
                       {item.ports && item.ports.length > 0 ? (
                         <Space wrap size={[6, 6]}>
                           {item.ports.map((port) => (
-                            <Tag
+                            <DetailTag
                               key={`${item.name}-${port.port}-${port.protocol ?? "tcp"}`}
                             >
                               {port.protocol ?? "TCP"} {port.port}
                               {port.targetPort ? ` -> ${port.targetPort}` : ""}
-                            </Tag>
+                            </DetailTag>
                           ))}
                         </Space>
                       ) : null}
@@ -953,7 +957,7 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
               renderItem={(item, index) => (
                 <SimpleListItem>
                   <Space wrap size={8}>
-                    <Tag color="green">{sourceKind}</Tag>
+                    <DetailTag color="green">{sourceKind}</DetailTag>
                     <Typography.Text strong>
                       {item.hostname ??
                         item.ip ??
@@ -975,7 +979,7 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
   );
 }
 
-function OverviewHeroSection({ detail }: ResourceDetailRendererProps) {
+function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps) {
   const runtimeHighlights = [
     detail.runtime.phase
       ? {
@@ -1018,11 +1022,11 @@ function OverviewHeroSection({ detail }: ResourceDetailRendererProps) {
     >
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <Space wrap size={[8, 8]}>
-          <Tag color="geekblue">{detail.overview.kind}</Tag>
+          <DetailTag color="geekblue">{detail.overview.kind}</DetailTag>
           {detail.overview.namespace ? (
-            <Tag>{detail.overview.namespace}</Tag>
+            <DetailTag>{detail.overview.namespace}</DetailTag>
           ) : (
-            <Tag>集群级</Tag>
+            <DetailTag>集群级</DetailTag>
           )}
           <StatusTag state={detail.overview.state} />
           {detail.runtime.phase ? (
@@ -1035,7 +1039,7 @@ function OverviewHeroSection({ detail }: ResourceDetailRendererProps) {
             {detail.overview.name}
           </Typography.Title>
           <Typography.Text type="secondary">
-            集群 {detail.overview.clusterId}
+            集群 {getClusterDisplayName(clusterMap ?? {}, detail.overview.clusterId)}
             {detail.overview.namespace
               ? ` / 名称空间 ${detail.overview.namespace}`
               : ""}
@@ -1491,7 +1495,7 @@ function ReplicaSetHighlightsSection({
   );
 }
 
-function JobHighlightsSection({ detail }: ResourceDetailRendererProps) {
+function JobHighlightsSection({ detail, clusterMap }: ResourceDetailRendererProps) {
   if (
     normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) !==
     "job"
@@ -1499,7 +1503,7 @@ function JobHighlightsSection({ detail }: ResourceDetailRendererProps) {
     return null;
   }
 
-  const overview = buildOverviewFieldMap(detail);
+  const overview = buildOverviewFieldMap(detail, clusterMap);
   const runtime = buildRuntimeFieldMap(detail.runtime);
   const ownedPods = detail.associations.filter(
     (item) => item.associationType === "owned-pod",
@@ -1556,7 +1560,7 @@ function JobHighlightsSection({ detail }: ResourceDetailRendererProps) {
   );
 }
 
-function CronJobHighlightsSection({ detail }: ResourceDetailRendererProps) {
+function CronJobHighlightsSection({ detail, clusterMap }: ResourceDetailRendererProps) {
   if (
     normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) !==
     "cronjob"
@@ -1565,7 +1569,7 @@ function CronJobHighlightsSection({ detail }: ResourceDetailRendererProps) {
   }
 
   const ownerJobs = detail.associations.filter((item) => item.kind === "Job");
-  const overview = buildOverviewFieldMap(detail);
+  const overview = buildOverviewFieldMap(detail, clusterMap);
   const scheduleHints = Object.entries(detail.metadata.annotations).filter(
     ([key]) => {
       const normalized = key.toLowerCase();
@@ -1669,13 +1673,13 @@ function NamespaceHighlightsSection({ detail }: ResourceDetailRendererProps) {
             <Typography.Text strong>关键资源分布</Typography.Text>
             <Space wrap size={8} style={{ marginTop: 8 }}>
               {relatedPolicies.length > 0 ? (
-                <Tag color="purple">NetworkPolicy {relatedPolicies.length}</Tag>
+                <DetailTag color="purple">NetworkPolicy {relatedPolicies.length}</DetailTag>
               ) : null}
               {relatedClaims.length > 0 ? (
-                <Tag color="gold">PVC {relatedClaims.length}</Tag>
+                <DetailTag color="gold">PVC {relatedClaims.length}</DetailTag>
               ) : null}
               {relatedConfigs.length > 0 ? (
-                <Tag color="blue">配置对象 {relatedConfigs.length}</Tag>
+                <DetailTag color="blue">配置对象 {relatedConfigs.length}</DetailTag>
               ) : null}
             </Space>
           </div>
@@ -2041,37 +2045,37 @@ function NetworkPolicyHighlightsSection({
                     const tags = [];
                     if (peer.namespaceSelector) {
                       tags.push(
-                        <Tag
+                        <DetailTag
                           color="purple"
                           key={`ns-${index}-${peer.namespaceSelector}`}
                         >
                           NS: {peer.namespaceSelector}
-                        </Tag>,
+                        </DetailTag>,
                       );
                     }
                     if (peer.podSelector) {
                       tags.push(
-                        <Tag
+                        <DetailTag
                           color="cyan"
                           key={`pod-${index}-${peer.podSelector}`}
                         >
                           Pod: {peer.podSelector}
-                        </Tag>,
+                        </DetailTag>,
                       );
                     }
                     if (peer.ipBlock) {
                       tags.push(
-                        <Tag color="gold" key={`ip-${index}-${peer.ipBlock}`}>
+                        <DetailTag color="gold" key={`ip-${index}-${peer.ipBlock}`}>
                           IPBlock: {peer.ipBlock}
-                        </Tag>,
+                        </DetailTag>,
                       );
                     }
                     return tags;
                   })}
                   {(rule.ports ?? []).map((port, portIndex) => (
-                    <Tag color="blue" key={`port-${index}-${portIndex}`}>
+                    <DetailTag color="blue" key={`port-${index}-${portIndex}`}>
                       {port.protocol ?? "TCP"} {port.port ?? "-"}
-                    </Tag>
+                    </DetailTag>
                   ))}
                 </Space>
               </Space>
@@ -2517,21 +2521,21 @@ function GatewayHighlightsSection({ detail }: ResourceDetailRendererProps) {
                     style={{ width: "100%" }}
                   >
                     <Space wrap size={8}>
-                      <Tag color="blue">
+                      <DetailTag color="blue">
                         {item.name || `Listener ${index + 1}`}
-                      </Tag>
+                      </DetailTag>
                       {item.hostname ? (
-                        <Tag color="green">{item.hostname}</Tag>
+                        <DetailTag color="green">{item.hostname}</DetailTag>
                       ) : null}
                       {item.allowedRoutesFrom ? (
-                        <Tag color="gold">
+                        <DetailTag color="gold">
                           允许路由: {item.allowedRoutesFrom}
-                        </Tag>
+                        </DetailTag>
                       ) : null}
                       {(item.ports ?? []).map((port, portIndex) => (
-                        <Tag color="cyan" key={`${item.name}-${portIndex}`}>
+                        <DetailTag color="cyan" key={`${item.name}-${portIndex}`}>
                           {formatEndpointPortLabel(port)}
-                        </Tag>
+                        </DetailTag>
                       ))}
                     </Space>
                   </Space>
@@ -2545,7 +2549,7 @@ function GatewayHighlightsSection({ detail }: ResourceDetailRendererProps) {
   );
 }
 
-function AutoscalingHighlightsSection({ detail }: ResourceDetailRendererProps) {
+function AutoscalingHighlightsSection({ detail, clusterMap }: ResourceDetailRendererProps) {
   const kind = normalizeKind(
     detail.descriptor.resourceKind || detail.overview.kind,
   );
@@ -2572,7 +2576,7 @@ function AutoscalingHighlightsSection({ detail }: ResourceDetailRendererProps) {
     },
   );
   const conditions = detail.runtime.conditions ?? [];
-  const overview = buildOverviewFieldMap(detail);
+  const overview = buildOverviewFieldMap(detail, clusterMap);
   const runtime = buildRuntimeFieldMap(detail.runtime);
 
   const summaryItems = [
@@ -2952,7 +2956,7 @@ function RelationshipNavigatorSection({
                   <Typography.Text type="secondary">
                     {meta.description}
                   </Typography.Text>
-                  <Tag>{group.items.length}</Tag>
+                  <DetailTag>{group.items.length}</DetailTag>
                 </Space>
                 <LimitedList
                   items={group.items}
@@ -2962,9 +2966,9 @@ function RelationshipNavigatorSection({
                         <Space wrap size={[6, 6]}>
                           <Typography.Text strong>{item.title}</Typography.Text>
                           {(item.tags ?? []).map((tag, index) => (
-                            <Tag key={`${item.key}-tag-${index}`} color={tag.color}>
+                            <DetailTag key={`${item.key}-tag-${index}`} color={tag.color}>
                               {tag.label}
-                            </Tag>
+                            </DetailTag>
                           ))}
                         </Space>
                         <Space wrap size={[6, 6]}>
@@ -3111,7 +3115,7 @@ function EventsSection({ detail }: ResourceDetailRendererProps) {
         : normalized.includes("normal")
           ? "success"
           : "default";
-    return <Tag color={color}>{type}</Tag>;
+    return <DetailTag color={color}>{type}</DetailTag>;
   };
   const renderObjectRef = (
     ref?: ResourceDetailEvent["involvedObject"],
@@ -3121,12 +3125,12 @@ function EventsSection({ detail }: ResourceDetailRendererProps) {
       return null;
     }
     return (
-      <Tag color="blue">
+      <DetailTag color="blue">
         {prefix} {ref.kind ? `${ref.kind}/` : ""}
         {ref.namespace ? `${ref.namespace}/` : ""}
         {ref.name ?? "-"}
         {ref.fieldPath ? ` · ${ref.fieldPath}` : ""}
-      </Tag>
+      </DetailTag>
     );
   };
 
@@ -3157,7 +3161,7 @@ function EventsSection({ detail }: ResourceDetailRendererProps) {
                       `事件 ${index + 1}`}
                   </Typography.Text>
                   {toEventText(item, ["count", "series.count"]) ? (
-                    <Tag>{`Count ${toEventText(item, ["count", "series.count"])}`}</Tag>
+                    <DetailTag>{`Count ${toEventText(item, ["count", "series.count"])}`}</DetailTag>
                   ) : null}
                   {toEventText(item, [
                     "lastTimestamp",
@@ -3291,6 +3295,7 @@ function MetadataSection({
 export function ResourceDetailContent({
   detail,
   snapshot,
+  clusterMap,
   onNavigateRequest,
 }: ResourceDetailRendererProps) {
   const profile = getRenderProfile(detail);
@@ -3318,6 +3323,7 @@ export function ResourceDetailContent({
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <OverviewHeroSection
           detail={detail}
+          clusterMap={clusterMap}
           onNavigateRequest={onNavigateRequest}
         />
         <StatusSnapshotSection
@@ -3329,7 +3335,7 @@ export function ResourceDetailContent({
               "补充概览",
               "保留 HPA/VPA 资源扩展信息",
               autoscalingSummaryFields,
-              buildOverviewFieldMap(detail),
+              buildOverviewFieldMap(detail, clusterMap),
             )
           : null}
         <RelationshipNavigatorSection
@@ -3353,6 +3359,7 @@ export function ResourceDetailContent({
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <OverviewHeroSection
           detail={detail}
+          clusterMap={clusterMap}
           onNavigateRequest={onNavigateRequest}
         />
         <StatusSnapshotSection
@@ -3377,6 +3384,7 @@ export function ResourceDetailContent({
         {renderSpecStatusSections({
           detail,
           snapshot,
+          clusterMap,
           onNavigateRequest,
         })}
       </Space>
@@ -3387,6 +3395,7 @@ export function ResourceDetailContent({
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <OverviewHeroSection
           detail={detail}
+          clusterMap={clusterMap}
           onNavigateRequest={onNavigateRequest}
         />
         <StatusSnapshotSection
@@ -3411,6 +3420,7 @@ export function ResourceDetailContent({
         {renderSpecStatusSections({
           detail,
           snapshot,
+          clusterMap,
           onNavigateRequest,
         })}
       </Space>
@@ -3421,6 +3431,7 @@ export function ResourceDetailContent({
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <OverviewHeroSection
           detail={detail}
+          clusterMap={clusterMap}
           onNavigateRequest={onNavigateRequest}
         />
         <StatusSnapshotSection
@@ -3445,6 +3456,7 @@ export function ResourceDetailContent({
         {renderSpecStatusSections({
           detail,
           snapshot,
+          clusterMap,
           onNavigateRequest,
         })}
       </Space>
@@ -3456,7 +3468,7 @@ export function ResourceDetailContent({
     profile.runtimeFields,
   );
   const runtimeValues = buildRuntimeFieldMap(detail.runtime);
-  const overviewValues = buildOverviewFieldMap(detail);
+  const overviewValues = buildOverviewFieldMap(detail, clusterMap);
 
   const runtimeDetailFields = runtimeFields.filter(
     (field) =>
@@ -3514,6 +3526,7 @@ export function ResourceDetailContent({
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OverviewHeroSection
         detail={detail}
+        clusterMap={clusterMap}
         onNavigateRequest={onNavigateRequest}
       />
 
@@ -3555,10 +3568,12 @@ export function ResourceDetailContent({
       />
       <JobHighlightsSection
         detail={detail}
+        clusterMap={clusterMap}
         onNavigateRequest={onNavigateRequest}
       />
       <CronJobHighlightsSection
         detail={detail}
+        clusterMap={clusterMap}
         onNavigateRequest={onNavigateRequest}
       />
       <NamespaceHighlightsSection detail={detail} />
@@ -3577,6 +3592,7 @@ export function ResourceDetailContent({
       <NetworkPolicyHighlightsSection detail={detail} />
       <AutoscalingHighlightsSection
         detail={detail}
+        clusterMap={clusterMap}
         onNavigateRequest={onNavigateRequest}
       />
       <StorageHighlightsSection
@@ -3605,6 +3621,7 @@ export function ResourceDetailContent({
         snapshot,
         specSnapshot: detail.rawSpec ?? snapshot?.spec,
         statusSnapshot: detail.rawStatus ?? snapshot?.status,
+        clusterMap,
         onNavigateRequest,
       })}
 

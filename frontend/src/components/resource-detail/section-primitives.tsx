@@ -1,7 +1,9 @@
 "use client";
 
-import { Card, Descriptions, Empty, Space, Tag, Typography } from "antd";
+import { Card, Descriptions, Empty, Space, Typography } from "antd";
+import type { TagProps } from "antd";
 import type { ReactNode } from "react";
+import { OpsFilterChip, type OpsFilterChipTone } from "@/components/ops";
 
 export function DetailSection({
   title,
@@ -76,6 +78,28 @@ export function DetailDescriptions({
   );
 }
 
+function mapTagColorToTone(color?: string): OpsFilterChipTone {
+  if (color === "green" || color === "success") return "success";
+  if (color === "gold" || color === "orange" || color === "warning") return "warning";
+  if (color === "red" || color === "volcano" || color === "error" || color === "danger") return "danger";
+  if (color === "default") return "neutral";
+  return "info";
+}
+
+export function DetailTag({
+  color = "default",
+  children,
+  ...props
+}: Omit<TagProps, "color"> & {
+  color?: string;
+}) {
+  return (
+    <OpsFilterChip {...props} tone={mapTagColorToTone(color)}>
+      {children}
+    </OpsFilterChip>
+  );
+}
+
 export function TagList({ items, color = "default" }: { items: string[]; color?: string }) {
   if (items.length === 0) {
     return <Typography.Text type="secondary">-</Typography.Text>;
@@ -84,9 +108,9 @@ export function TagList({ items, color = "default" }: { items: string[]; color?:
   return (
     <Space size={[6, 6]} wrap>
       {items.map((item) => (
-        <Tag key={item} color={color}>
+        <DetailTag key={item} color={color}>
           {item}
-        </Tag>
+        </DetailTag>
       ))}
     </Space>
   );

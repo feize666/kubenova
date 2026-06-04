@@ -6,6 +6,9 @@ export {
 } from "./ops-confirm-modal";
 export { OpsDrawerShell, type OpsDrawerShellProps } from "./ops-drawer-shell";
 export { OpsActionDropdown, renderOpsActionTriggerButton } from "./ops-action-dropdown";
+export { OpsIconActionButton } from "./ops-button";
+export { OpsFilterChip, type OpsFilterChipTone } from "./ops-filter-chip";
+export { OpsPopoverPanel } from "./ops-popover-panel";
 export {
   OpsSeverityPill,
   OpsStatusTag,

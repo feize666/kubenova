@@ -21,7 +21,6 @@ import {
   InputNumber,
   Modal,
   Space,
-  Tag,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
@@ -74,6 +73,7 @@ import {
   type ScaleConvergenceRound,
 } from "@/lib/workloads/scale-convergence";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
+import { OpsStatusTag } from "@/components/ops/ops-status";
 
 type WorkloadAction =
   | "scale"
@@ -115,11 +115,11 @@ type DeploymentRow = {
   labels?: Record<string, string>;
 };
 
-const 状态颜色: Record<DeploymentStatus, string> = {
+const 状态色调 = {
   运行中: "success",
   收敛中: "processing",
-  异常: "error",
-};
+  异常: "danger",
+} as const;
 
 const DEPLOYMENT_STATUS_FILTER_OPTIONS = [
   { label: "运行中", value: "运行中" },
@@ -742,7 +742,7 @@ export default function DeploymentsPage() {
       key: "status",
       filter: { type: "status", placeholder: "以状态过滤", options: DEPLOYMENT_STATUS_FILTER_OPTIONS },
       width: TABLE_COL_WIDTH.status,
-      render: (value: DeploymentStatus) => <Tag color={状态颜色[value]}>{value}</Tag>,
+      render: (value: DeploymentStatus) => <OpsStatusTag tone={状态色调[value]}>{value}</OpsStatusTag>,
       ...getSortableColumnProps("status"),
     },
     {
@@ -751,7 +751,9 @@ export default function DeploymentsPage() {
       key: "state",
       filter: { type: "status", placeholder: "以启用状态过滤", options: DEPLOYMENT_STATE_FILTER_OPTIONS },
       width: TABLE_COL_WIDTH.status,
-      render: (value: "启用" | "禁用") => <Tag color={value === "禁用" ? "default" : "green"}>{value}</Tag>,
+      render: (value: "启用" | "禁用") => (
+        <OpsStatusTag tone={value === "禁用" ? "neutral" : "success"}>{value}</OpsStatusTag>
+      ),
       ...getSortableColumnProps("state"),
     },
     { title: "副本", dataIndex: "副本数", key: "replicas", filter: { type: "text", placeholder: "过滤" }, width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },

@@ -8,6 +8,7 @@ import type {
   ResourceDetailSection,
   ResourceDetailStorageSummary,
 } from "@/lib/api/resources";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import type { ResourceDetailRenderProfile, SectionFieldMap } from "./types";
 
 const DEFAULT_SECTION_FIELDS: SectionFieldMap = {
@@ -340,10 +341,13 @@ export function humanizeFieldLabel(field: string): string {
     .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-export function buildOverviewFieldMap(detail: ResourceDetailResponse): Record<string, unknown> {
+export function buildOverviewFieldMap(
+  detail: ResourceDetailResponse,
+  clusterMap?: Record<string, string>,
+): Record<string, unknown> {
   return {
     id: detail.overview.id,
-    clusterId: detail.overview.clusterId,
+    clusterId: getClusterDisplayName(clusterMap ?? {}, detail.overview.clusterId),
     namespace: detail.overview.namespace,
     kind: detail.overview.kind,
     name: detail.overview.name,

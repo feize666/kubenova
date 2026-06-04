@@ -9,7 +9,6 @@ import {
   Modal,
   Select,
   Space,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -21,6 +20,7 @@ import {
   parseResourceSearchInput,
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { OpsFilterChip } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
@@ -427,7 +427,7 @@ export default function IngressRoutePage() {
         return (
           <Space size={[4, 4]} wrap>
             <Typography.Text ellipsis={{ tooltip: entryPoints[0] }}>{entryPoints[0]}</Typography.Text>
-            {entryPoints.length > 1 ? <Tag color="blue">+{entryPoints.length - 1}</Tag> : null}
+            {entryPoints.length > 1 ? <OpsFilterChip tone="info">+{entryPoints.length - 1}</OpsFilterChip> : null}
           </Space>
         );
       },
@@ -459,7 +459,7 @@ export default function IngressRoutePage() {
               {primary.name}
             </Typography.Link>
             <Typography.Text type="secondary">:{primary.port ?? "-"}</Typography.Text>
-            {services.length > 1 ? <Tag color="purple">+{services.length - 1}</Tag> : null}
+            {services.length > 1 ? <OpsFilterChip tone="info">+{services.length - 1}</OpsFilterChip> : null}
           </Space>
         );
       },
@@ -475,7 +475,7 @@ export default function IngressRoutePage() {
         return (
           <Space size={[4, 4]} wrap>
             <Typography.Text ellipsis={{ tooltip: middlewares[0] }}>{middlewares[0]}</Typography.Text>
-            {middlewares.length > 1 ? <Tag color="cyan">+{middlewares.length - 1}</Tag> : null}
+            {middlewares.length > 1 ? <OpsFilterChip tone="info">+{middlewares.length - 1}</OpsFilterChip> : null}
           </Space>
         );
       },

@@ -1,10 +1,11 @@
 "use client";
 
 import { LockOutlined, LoginOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Checkbox, Divider, Form, Input, Space, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Checkbox, Divider, Form, Input, Space, Typography } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { OpsFilterChip } from "@/components/ops";
 import { sanitizeInternalReturnTo } from "@/lib/login-return";
 
 type LoginForm = {
@@ -341,9 +342,9 @@ export default function LoginPage() {
                 统一进入集群、工作负载、网络、存储与 AI 运维能力，登录后可直接继续当前上下文。
               </Typography.Paragraph>
               <Space orientation="vertical" size={12}>
-                <Tag color="blue">统一状态视图</Tag>
-                <Tag color="cyan">终端与 AI 协同</Tag>
-                <Tag color="geekblue">集群级操作审计</Tag>
+                <OpsFilterChip tone="info">统一状态视图</OpsFilterChip>
+                <OpsFilterChip tone="info">终端与 AI 协同</OpsFilterChip>
+                <OpsFilterChip tone="neutral">集群级操作审计</OpsFilterChip>
               </Space>
             </div>
             <Typography.Text style={{ color: taglineColor, fontSize: 13 }}>

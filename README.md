@@ -53,6 +53,30 @@ flowchart LR
 - `PostgreSQL`：业务数据存储
 - `Redis`：缓存与队列
 
+### 技术栈与框架
+
+项目按前端控制台、控制面 API、运行时网关和部署工程分层组织，核心技术栈如下：
+
+| 层级 | 目录 | 技术栈 / 框架 | 主要用途 |
+| --- | --- | --- | --- |
+| 前端控制台 | `frontend` | Next.js 16、React 19、TypeScript、Ant Design 6、TanStack Query、TanStack Table | 管理控制台、资源列表、表单操作、主题与会话状态 |
+| 前端可视化与实时交互 | `frontend` | ECharts、Chart.js、React Flow、xterm.js、Socket.IO Client | 监控图表、拓扑/流程视图、终端和日志实时交互 |
+| 控制面 API | `backend/control-api` | Node.js、NestJS 11、TypeScript、Prisma 6、Swagger、class-validator、Zod | 认证、用户、集群、资源、监控、AIOps、AI 助手等业务 API |
+| 数据访问与异步能力 | `backend/control-api` | PostgreSQL、Redis、BullMQ、ioredis | 业务数据持久化、缓存、队列和后台任务 |
+| Kubernetes 集成 | `backend/control-api`、`backend/runtime-gateway` | `@kubernetes/client-node`、`client-go` | 集群资源同步、健康探测、日志、执行、实时流能力 |
+| 运行时网关 | `backend/runtime-gateway` | Go 1.25.0、go-chi、gorilla/websocket、Kubernetes client-go | WebSocket 网关、终端/日志流、健康检查、静态资源回退 |
+| AI 能力 | `backend/control-api` | OpenAI `chat/completions` 兼容接口、自定义模型配置 | AI 助手、ChatOps 会话、智能诊断和可执行建议 |
+| 测试与质量 | `frontend`、`backend/control-api`、`backend/runtime-gateway` | ESLint、Jest、ts-jest、Go test、Playwright 脚本 | 静态检查、单元测试、接口/页面回归验证 |
+| 部署与交付 | `deploy`、`k8s`、`scripts` | Docker、Docker Compose、Kustomize、systemd、nfpm、Shell | 本地开发、二进制发布、容器化部署、Kubernetes 部署和 Deb/RPM 打包 |
+
+运行时基础依赖：
+
+- Node.js 20：构建和运行 `frontend`、`backend/control-api`
+- Go 1.25.0：构建和运行 `backend/runtime-gateway`
+- PostgreSQL 16：控制面主数据库
+- Redis 7：缓存、队列和运行时协作
+- Kubernetes 集群：被纳管的业务集群
+
 ## 直接部署
 
 推荐 Linux 机器用 `Binary + systemd` 方式部署。按下面顺序执行：
@@ -138,7 +162,7 @@ go version
 适用系统：`Debian / Ubuntu`
 
 ```bash
-GO_VERSION=1.22.5
+GO_VERSION=1.25.0
 curl -fsSLO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
@@ -152,7 +176,7 @@ go version
 
 ##### 二进制安装
 ```bash
-GO_VERSION=1.22.5
+GO_VERSION=1.25.0
 curl -fsSLO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
