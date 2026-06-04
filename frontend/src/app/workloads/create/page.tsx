@@ -494,16 +494,17 @@ export default function WorkloadCreateWorkspacePage() {
     [clustersQuery.data?.items],
   );
 
-  const kind = Form.useWatch("kind", form) ?? initialKind;
-  const previewValues = Form.useWatch([], form) as Partial<WorkspaceFormValues> | undefined;
-  const clusterId = Form.useWatch("clusterId", form);
-  const namespace = Form.useWatch("namespace", form);
-  const mountPvc = Form.useWatch("mountPvc", form);
-  const createService = Form.useWatch("createService", form);
-  const createIngress = Form.useWatch("createIngress", form);
-  const networkMode = (Form.useWatch("networkMode", form) ?? "ingress") as "ingress" | "ingressroute";
-  const useExistingPvc = Form.useWatch(["pvcMount", "useExistingPvc"], form);
-  const storageSourceType = (Form.useWatch(["pvcMount", "storageSourceType"], form) ?? "PVC") as "PVC" | "PV" | "SC";
+  const watchOptions = useMemo(() => ({ form, preserve: true }), [form]);
+  const kind = Form.useWatch("kind", watchOptions) ?? initialKind;
+  const previewValues = Form.useWatch([], watchOptions) as Partial<WorkspaceFormValues> | undefined;
+  const clusterId = Form.useWatch("clusterId", watchOptions);
+  const namespace = Form.useWatch("namespace", watchOptions);
+  const mountPvc = Form.useWatch("mountPvc", watchOptions);
+  const createService = Form.useWatch("createService", watchOptions);
+  const createIngress = Form.useWatch("createIngress", watchOptions);
+  const networkMode = (Form.useWatch("networkMode", watchOptions) ?? "ingress") as "ingress" | "ingressroute";
+  const useExistingPvc = Form.useWatch(["pvcMount", "useExistingPvc"], watchOptions);
+  const storageSourceType = (Form.useWatch(["pvcMount", "storageSourceType"], watchOptions) ?? "PVC") as "PVC" | "PV" | "SC";
   const supportsReplicas = kind === "Deployment" || kind === "StatefulSet" || kind === "ReplicaSet";
   const previewSpec = buildWorkloadSpec(previewValues);
   const previewPayload = useMemo(
@@ -516,7 +517,7 @@ export default function WorkloadCreateWorkspacePage() {
   );
 
   const pvcQuery = useQuery({
-    queryKey: ["storage", "workspace-pvc", clusterId, namespace, accessToken],
+    queryKey: ["storage", "workspace-pvc", "foreground", clusterId, namespace, accessToken],
     queryFn: () =>
       getStorageResources(
         {
@@ -524,33 +525,36 @@ export default function WorkloadCreateWorkspacePage() {
           clusterId: clusterId || undefined,
           namespace: namespace?.trim() || undefined,
           pageSize: 200,
+          sync: "foreground",
         },
         accessToken,
       ),
-    enabled: Boolean(accessToken) && Boolean(clusterId) && Boolean(namespace),
+    enabled: Boolean(accessToken) && Boolean(clusterId) && Boolean(namespace?.trim()),
   });
 
   const storageClassQuery = useQuery({
-    queryKey: ["storage", "workspace-sc", clusterId, accessToken],
+    queryKey: ["storage", "workspace-sc", "foreground", clusterId, accessToken],
     queryFn: () =>
       getStorageResources(
         {
           kind: "SC",
           clusterId: clusterId || undefined,
           pageSize: 200,
+          sync: "foreground",
         },
         accessToken,
       ),
     enabled: Boolean(accessToken) && Boolean(clusterId),
   });
   const pvQuery = useQuery({
-    queryKey: ["storage", "workspace-pv", clusterId, accessToken],
+    queryKey: ["storage", "workspace-pv", "foreground", clusterId, accessToken],
     queryFn: () =>
       getStorageResources(
         {
           kind: "PV",
           clusterId: clusterId || undefined,
           pageSize: 200,
+          sync: "foreground",
         },
         accessToken,
       ),
@@ -559,8 +563,12 @@ export default function WorkloadCreateWorkspacePage() {
 
 
   const pvcOptions = useMemo(
-    () => (pvcQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.name })),
-    [pvcQuery.data?.items],
+    () =>
+      (pvcQuery.data?.items ?? []).map((item) => ({
+        label: `${item.name}（${clusterOptions.find((cluster) => cluster.value === item.clusterId)?.label ?? item.clusterId}/${item.namespace ?? "-"}）`,
+        value: item.name,
+      })),
+    [clusterOptions, pvcQuery.data?.items],
   );
   const selectedClusterLabel = useMemo(() => {
     const match = clusterOptions.find((item) => item.value === clusterId);
@@ -580,8 +588,12 @@ export default function WorkloadCreateWorkspacePage() {
     return `当前作用域：集群 ${selectedClusterLabel}`;
   }, [clusterId, namespace, selectedClusterLabel, storageSourceType]);
   const pvOptions = useMemo(
-    () => (pvQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.name })),
-    [pvQuery.data?.items],
+    () =>
+      (pvQuery.data?.items ?? []).map((item) => ({
+        label: `${item.name}（${clusterOptions.find((cluster) => cluster.value === item.clusterId)?.label ?? item.clusterId}）`,
+        value: item.name,
+      })),
+    [clusterOptions, pvQuery.data?.items],
   );
   const showPvcEmptyScopedState =
     Boolean(mountPvc) &&
@@ -609,11 +621,21 @@ export default function WorkloadCreateWorkspacePage() {
   const storageClassOptions = useMemo(
     () =>
       (storageClassQuery.data?.items ?? []).map((item) => ({
-        label: item.name,
+        label: `${item.name}（${clusterOptions.find((cluster) => cluster.value === item.clusterId)?.label ?? item.clusterId}）`,
         value: item.name,
       })),
-    [storageClassQuery.data?.items],
+    [clusterOptions, storageClassQuery.data?.items],
   );
+  const storageSelectionDisabled = !clusterId || (storageSourceType === "PVC" && !namespace?.trim());
+  const storageSelectionPlaceholder = !clusterId
+    ? "请先在基础信息选择集群"
+    : storageSourceType === "PVC" && !namespace?.trim()
+      ? "请先在基础信息填写名称空间"
+      : storageSourceType === "PVC"
+        ? "选择已有 PVC"
+        : storageSourceType === "PV"
+          ? "选择已有 PV"
+          : "选择 StorageClass";
 
   const previewYamlQuery = useQuery({
     queryKey: ["workloads", "workspace", "render-yaml", accessToken, currentStep, previewPayloadKey],
@@ -804,15 +826,26 @@ export default function WorkloadCreateWorkspacePage() {
     form.scrollToField(firstPath as never, { behavior: "smooth", block: "center" });
   };
 
+  const validateStepsBefore = async (targetStep: number): Promise<void> => {
+    const lastStep = Math.min(targetStep - 1, WORKSPACE_STEPS.length - 2);
+    for (let step = 0; step <= lastStep; step += 1) {
+      await validateStep(step);
+    }
+  };
+
   const handleStepChange = async (targetStep: number) => {
     if (targetStep < 0 || targetStep >= WORKSPACE_STEPS.length) return;
-    if (targetStep !== WORKSPACE_STEPS.length - 1) {
+    if (targetStep <= currentStep) {
       setCurrentStep(targetStep);
       return;
     }
 
     try {
-      await form.validateFields(getPreviewRequiredFields());
+      if (targetStep === WORKSPACE_STEPS.length - 1) {
+        await form.validateFields(getPreviewRequiredFields());
+      } else {
+        await validateStepsBefore(targetStep);
+      }
       setCurrentStep(targetStep);
     } catch (error) {
       routeToEarliestInvalidStep(error);
@@ -820,10 +853,16 @@ export default function WorkloadCreateWorkspacePage() {
   };
 
   const nextStep = async () => {
+    const targetStep = Math.min(currentStep + 1, WORKSPACE_STEPS.length - 1);
     try {
-      await validateStep(currentStep);
-      setCurrentStep((prev) => Math.min(prev + 1, WORKSPACE_STEPS.length - 1));
-    } catch {
+      if (targetStep === WORKSPACE_STEPS.length - 1) {
+        await form.validateFields(getPreviewRequiredFields());
+      } else {
+        await validateStepsBefore(targetStep);
+      }
+      setCurrentStep(targetStep);
+    } catch (error) {
+      routeToEarliestInvalidStep(error);
       return;
     }
   };
@@ -1074,8 +1113,9 @@ export default function WorkloadCreateWorkspacePage() {
                           rules={[{ required: true, message: "请选择 PVC" }]}
                         >
                           <Select
-                            placeholder="选择已有 PVC"
+                            placeholder={storageSelectionPlaceholder}
                             options={pvcOptions}
+                            disabled={storageSelectionDisabled}
                             loading={pvcQuery.isLoading}
                             showSearch
                             optionFilterProp="label"
@@ -1091,8 +1131,9 @@ export default function WorkloadCreateWorkspacePage() {
                             rules={[{ required: true, message: "请选择 PV" }]}
                           >
                             <Select
-                              placeholder="选择已有 PV"
+                              placeholder={storageSelectionPlaceholder}
                               options={pvOptions}
+                              disabled={storageSelectionDisabled}
                               loading={pvQuery.isLoading}
                               showSearch
                               optionFilterProp="label"
@@ -1112,8 +1153,9 @@ export default function WorkloadCreateWorkspacePage() {
                             rules={[{ required: true, message: "请选择 StorageClass" }]}
                           >
                             <Select
-                              placeholder="选择 StorageClass"
+                              placeholder={storageSelectionPlaceholder}
                               options={storageClassOptions}
+                              disabled={storageSelectionDisabled}
                               loading={storageClassQuery.isLoading}
                               showSearch
                               optionFilterProp="label"

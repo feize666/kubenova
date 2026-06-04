@@ -1,18 +1,16 @@
 "use client";
 
 import {
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
   LinkOutlined,
   ReloadOutlined,
-  WarningOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Descriptions, Drawer, Empty, Row, Select, Space, Statistic, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Col, Descriptions, Drawer, Empty, Row, Select, Space, Statistic, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import {
   getObservabilitySummary,
@@ -25,43 +23,31 @@ import type { MonitoringTimePreset } from "@/lib/api/monitoring";
 
 function sourceTag(item: ObservabilitySourceStatus) {
   if (item.available && !item.degraded) {
-    return (
-      <Tag color="green" icon={<CheckCircleOutlined />}>
-        可用
-      </Tag>
-    );
+    return <OpsStatusTag tone="success">可用</OpsStatusTag>;
   }
   if (item.available) {
-    return (
-      <Tag color="gold" icon={<WarningOutlined />}>
-        降级
-      </Tag>
-    );
+    return <OpsStatusTag tone="warning">降级</OpsStatusTag>;
   }
-  return (
-    <Tag color="red" icon={<ExclamationCircleOutlined />}>
-      不可用
-    </Tag>
-  );
+  return <OpsStatusTag tone="danger">不可用</OpsStatusTag>;
 }
 
 function signalTag(status: ObservabilitySignalPanel["status"]) {
-  if (status === "available") return <Tag color="green">可用</Tag>;
-  if (status === "degraded") return <Tag color="gold">降级</Tag>;
-  return <Tag color="red">不可用</Tag>;
+  if (status === "available") return <OpsStatusTag tone="success">可用</OpsStatusTag>;
+  if (status === "degraded") return <OpsStatusTag tone="warning">降级</OpsStatusTag>;
+  return <OpsStatusTag tone="danger">不可用</OpsStatusTag>;
 }
 
 function entityStatusTag(status: ObservabilityEntityHealth["status"]) {
-  if (status === "healthy") return <Tag color="green">健康</Tag>;
-  if (status === "warning") return <Tag color="gold">风险</Tag>;
-  if (status === "critical") return <Tag color="red">严重</Tag>;
-  return <Tag>暂无数据</Tag>;
+  if (status === "healthy") return <OpsStatusTag tone="success">健康</OpsStatusTag>;
+  if (status === "warning") return <OpsStatusTag tone="warning">风险</OpsStatusTag>;
+  if (status === "critical") return <OpsStatusTag tone="danger">严重</OpsStatusTag>;
+  return <OpsStatusTag tone="neutral">暂无数据</OpsStatusTag>;
 }
 
 function eventLevelTag(level: ObservabilityEvent["level"]) {
-  if (level === "CRITICAL") return <Tag color="red">CRITICAL</Tag>;
-  if (level === "WARN") return <Tag color="gold">WARN</Tag>;
-  return <Tag color="blue">INFO</Tag>;
+  if (level === "CRITICAL") return <OpsStatusTag tone="danger">CRITICAL</OpsStatusTag>;
+  if (level === "WARN") return <OpsStatusTag tone="warning">WARN</OpsStatusTag>;
+  return <OpsStatusTag tone="info">INFO</OpsStatusTag>;
 }
 
 export default function ObservabilityCenterPage() {
@@ -324,18 +310,18 @@ export default function ObservabilityCenterPage() {
               </Descriptions.Item>
               <Descriptions.Item label="告警 owner">{selectedEntity.alertOwner}</Descriptions.Item>
               <Descriptions.Item label="通知状态">
-                <Tag color={selectedEntity.notificationStatus === "ready" ? "green" : "gold"}>
+                <OpsStatusTag tone={selectedEntity.notificationStatus === "ready" ? "success" : "warning"}>
                   {selectedEntity.notificationStatus}
-                </Tag>
+                </OpsStatusTag>
               </Descriptions.Item>
               <Descriptions.Item label="SLO">
                 <Space wrap>
-                  <Tag>{selectedEntity.slo.targetPercent}%</Tag>
-                  <Tag>burn {selectedEntity.slo.burnRate}</Tag>
-                  <Tag>{selectedEntity.slo.errorBudgetRemainingPercent}% budget</Tag>
-                  <Tag color={selectedEntity.slo.status === "healthy" ? "green" : "gold"}>
+                  <OpsFilterChip tone="neutral">{selectedEntity.slo.targetPercent}%</OpsFilterChip>
+                  <OpsFilterChip tone="neutral">burn {selectedEntity.slo.burnRate}</OpsFilterChip>
+                  <OpsFilterChip tone="neutral">{selectedEntity.slo.errorBudgetRemainingPercent}% budget</OpsFilterChip>
+                  <OpsStatusTag tone={selectedEntity.slo.status === "healthy" ? "success" : "warning"}>
                     {selectedEntity.slo.status}
-                  </Tag>
+                  </OpsStatusTag>
                 </Space>
               </Descriptions.Item>
             </Descriptions>
@@ -343,9 +329,9 @@ export default function ObservabilityCenterPage() {
             <Card size="small" title="信号关联">
               <Space wrap>
                 {Object.entries(selectedEntity.signals).map(([key, value]) => (
-                  <Tag key={key} color={value === "available" ? "green" : value === "degraded" ? "gold" : "red"}>
+                  <OpsStatusTag key={key} tone={value === "available" ? "success" : value === "degraded" ? "warning" : "danger"}>
                     {key}: {value}
-                  </Tag>
+                  </OpsStatusTag>
                 ))}
               </Space>
             </Card>
@@ -358,7 +344,7 @@ export default function ObservabilityCenterPage() {
                       {item.label}
                     </Button>
                   ) : (
-                    <Tag key={item.key}>{item.label}: 未配置</Tag>
+                    <OpsFilterChip key={item.key} tone="neutral">{item.label}: 未配置</OpsFilterChip>
                   ),
                 )}
               </Space>

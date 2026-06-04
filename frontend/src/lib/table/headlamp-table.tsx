@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Input, Select, Tag } from "antd";
+import { Input, Select } from "antd";
 import type { ColumnType, ColumnsType } from "antd/es/table";
 import type { SortOrder as AntdSortOrder } from "antd/es/table/interface";
+import { OpsFilterChip } from "@/components/ops";
 import type {
   TableColumnVisibilityPreference,
   TablePreferences,
@@ -243,9 +244,9 @@ function renderColumnTitle<T extends object>(column: HeadlampResourceTableColumn
 
   return (
     <span className="resource-table-status-title">
-      <Tag bordered={false} color="processing">
+      <OpsFilterChip tone="info" bordered={false}>
         {column.title}
-      </Tag>
+      </OpsFilterChip>
     </span>
   );
 }

@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Divider, Input, Row, Space, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Col, Divider, Input, Row, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
+import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -20,13 +21,13 @@ import {
 } from "@/lib/api/system-update";
 
 function statusTag(status: string) {
-  if (status === "installed") return <Tag color="success">已安装</Tag>;
-  if (status === "installed-not-active") return <Tag color="warning">已安装未激活</Tag>;
+  if (status === "installed") return <OpsStatusTag tone="success">已安装</OpsStatusTag>;
+  if (status === "installed-not-active") return <OpsStatusTag tone="warning">已安装未激活</OpsStatusTag>;
   if (status === "installing" || status === "restarting" || status === "rollbacking") {
-    return <Tag color="processing">进行中</Tag>;
+    return <OpsStatusTag tone="processing">进行中</OpsStatusTag>;
   }
-  if (status === "failed") return <Tag color="error">失败</Tag>;
-  return <Tag>空闲</Tag>;
+  if (status === "failed") return <OpsStatusTag tone="danger">失败</OpsStatusTag>;
+  return <OpsStatusTag tone="neutral">空闲</OpsStatusTag>;
 }
 
 export default function SystemUpdatePage() {
@@ -142,7 +143,7 @@ export default function SystemUpdatePage() {
       filter: { type: "text", placeholder: "以操作过滤" },
       render: (v: string, record) => (
         <Typography.Link onClick={() => setDetailRecord(record)}>
-          <Tag>{v}</Tag>
+          <OpsFilterChip tone="neutral">{v}</OpsFilterChip>
         </Typography.Link>
       ),
     },
@@ -167,7 +168,7 @@ export default function SystemUpdatePage() {
           { label: "失败", value: "failed" },
         ],
       },
-      render: (v: string) => <Tag color={v === "success" ? "success" : "error"}>{v}</Tag>,
+      render: (v: string) => <OpsStatusTag tone={v === "success" ? "success" : "danger"}>{v}</OpsStatusTag>,
     },
     {
       title: "耗时(ms)",
@@ -226,44 +227,44 @@ export default function SystemUpdatePage() {
               <div>
                 <Typography.Text type="secondary">当前版本</Typography.Text>
                 <div>
-                  <Tag color="blue">{status?.runningVersion ?? "-"}</Tag>
+                  <OpsFilterChip tone="info">{status?.runningVersion ?? "-"}</OpsFilterChip>
                 </div>
               </div>
               <div>
                 <Typography.Text type="secondary">已安装版本</Typography.Text>
                 <div>
-                  <Tag color="geekblue">{status?.installedVersion ?? "-"}</Tag>
+                  <OpsFilterChip tone="info">{status?.installedVersion ?? "-"}</OpsFilterChip>
                 </div>
               </div>
               <div>
                 <Typography.Text type="secondary">最新版本</Typography.Text>
                 <div>
-                  <Tag color="gold">{status?.latestVersion ?? "-"}</Tag>
+                  <OpsFilterChip tone="warning">{status?.latestVersion ?? "-"}</OpsFilterChip>
                 </div>
               </div>
               <div>
                 <Typography.Text type="secondary">备份版本（回滚指针）</Typography.Text>
                 <div>
-                  <Tag color="cyan">{status?.backupVersion ?? "-"}</Tag>
+                  <OpsFilterChip tone="neutral">{status?.backupVersion ?? "-"}</OpsFilterChip>
                 </div>
               </div>
               <div>
                 <Typography.Text type="secondary">安装状态</Typography.Text>
-                <div>{status ? statusTag(status.installStatus) : <Tag>加载中</Tag>}</div>
+                <div>{status ? statusTag(status.installStatus) : <OpsStatusTag tone="neutral">加载中</OpsStatusTag>}</div>
               </div>
               <div>
                 <Typography.Text type="secondary">可安装状态</Typography.Text>
                 <div>
-                  <Tag color={status?.installable ? "success" : "error"}>
+                  <OpsStatusTag tone={status?.installable ? "success" : "danger"}>
                     {status?.installable ? "可安装" : "暂不可安装"}
-                  </Tag>
+                  </OpsStatusTag>
                 </div>
               </div>
               <Divider style={{ margin: "8px 0" }} />
               <div>
                 <Typography.Text type="secondary">回滚模式</Typography.Text>
                 <div>
-                  <Tag color="purple">{status?.releaseMode ?? "pointer-swap"}</Tag>
+                  <OpsFilterChip tone="neutral">{status?.releaseMode ?? "pointer-swap"}</OpsFilterChip>
                   <Typography.Text style={{ marginLeft: 8 }}>
                     目标 SLA: {status?.rollbackSlaTargetMs ?? 3000}ms
                   </Typography.Text>
@@ -272,9 +273,9 @@ export default function SystemUpdatePage() {
               <div>
                 <Typography.Text type="secondary">最近回滚耗时</Typography.Text>
                 <div>
-                  <Tag color={status?.rollbackSlaMet ? "success" : "error"}>
+                  <OpsStatusTag tone={status?.rollbackSlaMet ? "success" : "danger"}>
                     {status?.rollbackSlaLastMs ?? "-"} ms
-                  </Tag>
+                  </OpsStatusTag>
                   {status?.rollbackSlaMet !== null && status?.rollbackSlaMet !== undefined ? (
                     <Typography.Text style={{ marginLeft: 8 }}>
                       {status.rollbackSlaMet ? "达标" : "未达标"}
@@ -286,9 +287,17 @@ export default function SystemUpdatePage() {
               <div>
                 <Typography.Text type="secondary">发布后审计</Typography.Text>
                 <div>
-                  <Tag color={status?.postReleaseAudit.status === "failed" ? "error" : status?.postReleaseAudit.status === "passed" ? "success" : "processing"}>
+                  <OpsStatusTag
+                    tone={
+                      status?.postReleaseAudit.status === "failed"
+                        ? "danger"
+                        : status?.postReleaseAudit.status === "passed"
+                          ? "success"
+                          : "processing"
+                    }
+                  >
                     {status?.postReleaseAudit.status ?? "idle"}
-                  </Tag>
+                  </OpsStatusTag>
                   <Typography.Text style={{ marginLeft: 8 }}>
                     {status?.postReleaseAudit.lastSummary ?? "暂无结果"}
                   </Typography.Text>

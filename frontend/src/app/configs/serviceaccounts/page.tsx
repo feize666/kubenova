@@ -23,7 +23,7 @@ import { NetworkResourcePageFilters } from "@/components/network-resource-page-f
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import {
   matchLabelExpressions,
@@ -305,9 +305,9 @@ export default function ServiceAccountsPage() {
   const tableData = useMemo(
     () =>
       rowsRaw.filter(
-        (item) => hasKnownCluster(clusterMap, item.clusterId) && matchLabelExpressions(resolveItemLabels(item), mergedFilters),
+        (item) => matchLabelExpressions(resolveItemLabels(item), mergedFilters),
       ),
-    [clusterMap, rowsRaw, mergedFilters],
+    [rowsRaw, mergedFilters],
   );
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),

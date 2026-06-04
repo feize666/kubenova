@@ -30,7 +30,6 @@ import {
   Select,
   Space,
   Statistic,
-  Tag,
   Tooltip,
   Typography,
   message,
@@ -40,6 +39,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterDetailDrawer } from "@/components/cluster-detail-drawer";
+import { OpsFilterChip, type OpsFilterChipTone } from "@/components/ops";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
@@ -88,13 +88,13 @@ export type ClusterTableRecord = Cluster & { key: string };
 function resolveRuntimeStatus(
   row: ClusterTableRecord,
   health: ClusterHealthListItem | undefined,
-): { kind: RuntimeStatus; label: string; color: string; icon: React.ReactNode; reason?: string } {
+): { kind: RuntimeStatus; label: string; tone: OpsFilterChipTone; icon: React.ReactNode; reason?: string } {
   if (health) {
     if (health.runtimeStatus === "running") {
       return {
         kind: "running",
         label: "运行中",
-        color: "green",
+        tone: "success",
         icon: <CheckCircleOutlined />,
         reason: health.reason ?? undefined,
       };
@@ -103,7 +103,7 @@ function resolveRuntimeStatus(
       return {
         kind: "offline",
         label: "离线",
-        color: "red",
+        tone: "danger",
         icon: <ExclamationCircleOutlined />,
         reason: health.reason ?? undefined,
       };
@@ -112,7 +112,7 @@ function resolveRuntimeStatus(
       return {
         kind: "disabled",
         label: "已停用",
-        color: "default",
+        tone: "neutral",
         icon: <PauseCircleOutlined />,
         reason: health.reason ?? undefined,
       };
@@ -121,7 +121,7 @@ function resolveRuntimeStatus(
       return {
         kind: "offline-mode",
         label: "离线模式",
-        color: "processing",
+        tone: "info",
         icon: <DisconnectOutlined />,
         reason: health.reason ?? undefined,
       };
@@ -129,7 +129,7 @@ function resolveRuntimeStatus(
     return {
       kind: "checking",
       label: "探测中",
-      color: "processing",
+      tone: "warning",
       icon: <ReloadOutlined spin />,
       reason: health.reason ?? "等待最新探测结果",
     };
@@ -139,7 +139,7 @@ function resolveRuntimeStatus(
     return {
       kind: "disabled",
       label: "已停用",
-      color: "default",
+      tone: "neutral",
       icon: <PauseCircleOutlined />,
     };
   }
@@ -148,7 +148,7 @@ function resolveRuntimeStatus(
     return {
       kind: "offline-mode",
       label: "离线模式",
-      color: "processing",
+      tone: "info",
       icon: <DisconnectOutlined />,
     };
   }
@@ -156,7 +156,7 @@ function resolveRuntimeStatus(
   return {
     kind: "checking",
     label: "探测中",
-    color: "processing",
+    tone: "warning",
     icon: <ReloadOutlined spin />,
     reason: "等待首次健康快照",
   };
@@ -600,9 +600,9 @@ export default function ClustersPage() {
         );
         return (
           <Tooltip title={runtimeStatus.reason ?? `状态：${runtimeStatus.label}`}>
-            <Tag color={runtimeStatus.color} icon={runtimeStatus.icon}>
+            <OpsFilterChip tone={runtimeStatus.tone} icon={runtimeStatus.icon}>
               {runtimeStatus.label}
-            </Tag>
+            </OpsFilterChip>
           </Tooltip>
         );
       },
@@ -659,15 +659,15 @@ export default function ClustersPage() {
       render: (_: unknown, row: ClusterTableRecord) => {
         return row.hasKubeconfig ? (
           <Tooltip title="已配置 kubeconfig，工作负载数据将从集群实时同步">
-            <Tag color="green" icon={<CloudServerOutlined />}>
+            <OpsFilterChip tone="success" icon={<CloudServerOutlined />}>
               已接入
-            </Tag>
+            </OpsFilterChip>
           </Tooltip>
         ) : (
           <Tooltip title="当前未接入实时工作负载数据">
-            <Tag color="default" icon={<DisconnectOutlined />}>
+            <OpsFilterChip tone="neutral" icon={<DisconnectOutlined />}>
               离线模式
-            </Tag>
+            </OpsFilterChip>
           </Tooltip>
         );
       },

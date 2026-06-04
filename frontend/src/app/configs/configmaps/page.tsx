@@ -16,7 +16,6 @@ import {
   Row,
   Select,
   Space,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -25,6 +24,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
+import { OpsFilterChip } from "@/components/ops";
 import type { HeadlampTableFilters, HeadlampResourceTableColumn } from "@/components/resource-table";
 import {
   matchLabelExpressions,
@@ -35,7 +35,7 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
   createConfig,
   deleteConfig,
@@ -269,7 +269,6 @@ export default function ConfigMapsPage() {
     const versionFilter = readFilter("version");
 
     return (data?.items ?? []).filter((item) => {
-      if (!hasKnownCluster(clusterMap, item.clusterId)) return false;
       if (!matchLabelExpressions(resolveItemLabels(item), mergedFilters)) return false;
       if (nameFilter && !item.name.toLowerCase().includes(nameFilter)) return false;
       const clusterLabel = getClusterDisplayName(clusterMap, item.clusterId).toLowerCase();
@@ -405,7 +404,7 @@ export default function ConfigMapsPage() {
       dataIndex: "dataCount",
       key: "dataCount",
       width: TABLE_COL_WIDTH.type,
-      render: (v: number) => <Tag color="geekblue">{v}</Tag>,
+      render: (v: number) => <OpsFilterChip tone="info">{v}</OpsFilterChip>,
     },
     {
       title: "版本",

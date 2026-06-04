@@ -1,9 +1,10 @@
 "use client";
 
 import { DownOutlined, FilterOutlined } from "@ant-design/icons";
-import { Badge, Button, Divider, Popover, Select, Space, Typography } from "antd";
+import { Badge, Button, Popover, Select, Typography } from "antd";
 import type { SelectProps } from "antd";
 import { useMemo, useState } from "react";
+import { OpsPopoverPanel } from "@/components/ops";
 
 type ResourceFacetFilterButtonProps = {
   label: string;
@@ -56,11 +57,13 @@ export function ResourceFacetFilterButton({
 
   const selectOptions: SelectProps["options"] = options;
   const content = (
-    <div className="resource-facet-filter-panel">
-      <div className="resource-scope-filter-panel-title">
-        <Typography.Text strong>{panelTitle ?? label}</Typography.Text>
-        <Typography.Text type="secondary">应用后刷新列表</Typography.Text>
-      </div>
+    <OpsPopoverPanel
+      title={panelTitle ?? label}
+      subtitle="应用后刷新列表"
+      onReset={resetAndApply}
+      onApply={applyDraft}
+      className="resource-facet-filter-panel ops-popover-panel--narrow"
+    >
       <Typography.Text className="resource-scope-filter-label">{label}</Typography.Text>
       <Select
         className="resource-filter-select"
@@ -70,14 +73,7 @@ export function ResourceFacetFilterButton({
         onChange={setDraftValue}
         style={{ width: "100%" }}
       />
-      <Divider style={{ margin: "14px 0 12px" }} />
-      <Space className="resource-scope-filter-actions">
-        <Button onClick={resetAndApply}>重置</Button>
-        <Button type="primary" onClick={applyDraft}>
-          应用
-        </Button>
-      </Space>
-    </div>
+    </OpsPopoverPanel>
   );
 
   return (

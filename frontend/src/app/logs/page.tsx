@@ -13,7 +13,6 @@ import {
   Select,
   Space,
   Switch,
-  Tag,
   Tooltip,
   Typography,
   theme,
@@ -32,6 +31,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { useAuth } from "@/components/auth-context";
+import { OpsFilterChip, OpsStatusTag, type OpsStatusTone } from "@/components/ops";
 import {
   createLogsStreamSession,
   getLogs,
@@ -415,12 +415,12 @@ function normalizeLogError(error: unknown): string {
   return sanitizeSensitiveMessage(message || "日志连接失败");
 }
 
-function formatConnectionTag(status: LogsConnectionStatus): { color: string; text: string } {
-  if (status === "已连接") return { color: "green", text: "已连接" };
-  if (status === "连接中") return { color: "blue", text: "连接中" };
-  if (status === "重连中") return { color: "gold", text: "重连中" };
-  if (status === "连接异常") return { color: "red", text: "连接异常" };
-  return { color: "default", text: "未连接" };
+function formatConnectionTag(status: LogsConnectionStatus): { tone: OpsStatusTone; text: string } {
+  if (status === "已连接") return { tone: "success", text: "已连接" };
+  if (status === "连接中") return { tone: "processing", text: "连接中" };
+  if (status === "重连中") return { tone: "warning", text: "重连中" };
+  if (status === "连接异常") return { tone: "danger", text: "连接异常" };
+  return { tone: "neutral", text: "未连接" };
 }
 
 function formatRelativeTimeLabel(seconds: number): string {
@@ -1281,7 +1281,7 @@ export default function LogsPage() {
                   <Typography.Title level={3} style={{ margin: 0 }}>
                     Pod 日志工作区
                   </Typography.Title>
-                  <Tag color={connectionMeta.color}>{connectionMeta.text}</Tag>
+                  <OpsStatusTag tone={connectionMeta.tone}>{connectionMeta.text}</OpsStatusTag>
                 </Space>
                 <Typography.Text type="secondary">
                   {clusterDisplayName} / {namespace || "-"} / {resourceName || pod} / {container || "-"}
@@ -1598,19 +1598,19 @@ export default function LogsPage() {
             </div>
 
             <Space wrap size={8}>
-	              <Tag color={effectivePrevious ? "purple" : "blue"}>
-	                {effectivePrevious ? "上一个实例" : follow ? "实时跟随" : "跟随已暂停"}
-	              </Tag>
-	              <Tag color={isFollowingNow ? "green" : "orange"}>
+              <OpsFilterChip tone={effectivePrevious ? "neutral" : "info"}>
+                {effectivePrevious ? "上一个实例" : follow ? "实时跟随" : "跟随已暂停"}
+              </OpsFilterChip>
+              <OpsFilterChip tone={isFollowingNow ? "success" : "warning"}>
                 {isFollowingNow ? "结束时间=现在，跟随当前时间" : "固定结束时间"}
-	              </Tag>
-	              {previousUnavailable ? (
-                <Tag color="orange">上一个实例不存在，已回退到当前实例</Tag>
+              </OpsFilterChip>
+              {previousUnavailable ? (
+                <OpsFilterChip tone="warning">上一个实例不存在，已回退到当前实例</OpsFilterChip>
               ) : null}
               {reconnectState ? (
-                <Tag color="gold">
+                <OpsFilterChip tone="warning">
                   重连 {reconnectState.attempt}/{reconnectState.maxAttempts}
-                </Tag>
+                </OpsFilterChip>
               ) : null}
             </Space>
 

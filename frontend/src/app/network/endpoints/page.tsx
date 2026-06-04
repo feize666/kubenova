@@ -8,7 +8,6 @@ import {
   Input,
   Select,
   Space,
-  Tag,
   Typography,
   Modal,
   message,
@@ -25,6 +24,7 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { OpsStatusTag } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
@@ -397,8 +397,8 @@ export default function EndpointsPage() {
         const notReady = countAddresses(row, "notReadyAddresses");
         return (
           <Space size={4} wrap>
-            <Tag color="green">就绪 {ready}</Tag>
-            <Tag color={notReady > 0 ? "orange" : "default"}>未就绪 {notReady}</Tag>
+            <OpsStatusTag tone="success">就绪 {ready}</OpsStatusTag>
+            <OpsStatusTag tone={notReady > 0 ? "warning" : "neutral"}>未就绪 {notReady}</OpsStatusTag>
           </Space>
         );
       },

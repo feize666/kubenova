@@ -1,11 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Col, Row, Skeleton, Space, Tag, Typography } from "antd";
+import { Alert, Button, Col, Row, Skeleton, Space, Typography } from "antd";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useMemo } from "react";
 import { useAuth } from "@/components/auth-context";
+import { OpsFilterChip } from "@/components/ops";
 import {
   ActivityTimeline,
   DashboardMetricShell,
@@ -172,12 +173,12 @@ export default function HomePage() {
         }
         right={
           <>
-            <Tag variant="filled" color="blue">
+            <OpsFilterChip tone="info">
               集群 {stats?.clusters.total ?? 0}
-            </Tag>
-            <Tag variant="filled" color="gold">
+            </OpsFilterChip>
+            <OpsFilterChip tone="warning">
               活跃告警 {stats?.alerts.total ?? 0}
-            </Tag>
+            </OpsFilterChip>
           </>
         }
       />
@@ -190,7 +191,7 @@ export default function HomePage() {
           description={
             <Space size={8} wrap>
               <span>{stats.resourceUsage.note ?? "请先执行集群同步以获取真实 CPU/内存数据。"}</span>
-              <Tag color="default">来源: {stats.resourceUsage.dataSource}</Tag>
+              <OpsFilterChip tone="neutral">来源: {stats.resourceUsage.dataSource}</OpsFilterChip>
             </Space>
           }
         />

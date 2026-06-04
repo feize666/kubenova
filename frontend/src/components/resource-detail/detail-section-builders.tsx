@@ -1,10 +1,10 @@
 "use client";
 
-import { Empty, Space, Tag, Typography } from "antd";
+import { Empty, Space, Typography } from "antd";
 import type { ReactNode } from "react";
 import type { ResourceDetailEvent } from "@/lib/api/resources";
 import { StatusTag } from "@/components/status-tag";
-import { DetailDescriptions, DetailSection, TagList } from "./section-primitives";
+import { DetailDescriptions, DetailSection, DetailTag, TagList } from "./section-primitives";
 import type { ResourceDetailRendererProps } from "./types";
 import {
   buildOverviewFieldMap,
@@ -94,12 +94,12 @@ function eventText(item: ResourceDetailEvent, keys: string[]) {
   return undefined;
 }
 
-export function buildOverviewSection({ detail }: DetailSectionBuilderContext): ReactNode {
+export function buildOverviewSection({ detail, clusterMap }: DetailSectionBuilderContext): ReactNode {
   const profile = getRenderProfile(detail);
   const fields = getOrderedFields(detail, "overview", profile.overviewFields);
   return (
     <DetailSection title="Overview" subtitle="资源身份、范围与生命周期">
-      <DetailDescriptions items={toDescriptionItems(fields, buildOverviewFieldMap(detail))} emptyText="暂无概览" />
+      <DetailDescriptions items={toDescriptionItems(fields, buildOverviewFieldMap(detail, clusterMap))} emptyText="暂无概览" />
     </DetailSection>
   );
 }
@@ -187,12 +187,12 @@ export function buildStatusSection({ detail, statusSnapshot }: DetailSectionBuil
         {detail.runtime.conditions && detail.runtime.conditions.length > 0 ? (
           <Space wrap size={[6, 6]}>
             {detail.runtime.conditions.slice(0, 12).map((condition, index) => (
-              <Tag
+              <DetailTag
                 key={`${condition.type ?? "condition"}-${index}`}
                 color={condition.status === "True" ? "green" : "default"}
               >
                 {[condition.type, condition.status, condition.reason].filter(Boolean).join(" / ")}
-              </Tag>
+              </DetailTag>
             ))}
           </Space>
         ) : null}
@@ -219,11 +219,11 @@ export function buildEventsSection({ detail }: DetailSectionBuilderContext): Rea
           {detail.events.items.map((item, index) => (
             <div key={item.id ?? `${item.name ?? "event"}-${index}`}>
               <Space wrap size={[6, 6]}>
-                <Tag color={(eventText(item, ["type"]) ?? "").toLowerCase().includes("warn") ? "error" : "success"}>
+                <DetailTag color={(eventText(item, ["type"]) ?? "").toLowerCase().includes("warn") ? "error" : "success"}>
                   {eventText(item, ["type"]) ?? "Normal"}
-                </Tag>
+                </DetailTag>
                 <Typography.Text strong>{eventText(item, ["reason", "name"]) ?? `事件 ${index + 1}`}</Typography.Text>
-                {eventText(item, ["count"]) ? <Tag>Count {eventText(item, ["count"])}</Tag> : null}
+                {eventText(item, ["count"]) ? <DetailTag>Count {eventText(item, ["count"])}</DetailTag> : null}
                 <Typography.Text type="secondary">
                   {formatDateTime(eventText(item, ["lastTimestamp", "eventTime", "firstTimestamp"]))}
                 </Typography.Text>

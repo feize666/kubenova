@@ -2,7 +2,6 @@
 
 import {
   AuditOutlined,
-  CheckCircleOutlined,
   ExclamationCircleOutlined,
   FileTextOutlined,
   LockOutlined,
@@ -20,7 +19,6 @@ import {
   Space,
   Statistic,
   Tabs,
-  Tag,
   Tooltip,
   Typography,
   message,
@@ -30,6 +28,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
+import { OpsFilterChip, OpsStatusTag, type OpsFilterChipTone, type OpsStatusTone } from "@/components/ops";
 import {
   ResourceActionDropdown,
   type ResourceActionItem,
@@ -119,52 +118,44 @@ function getActionLabel(action: string): string {
 }
 
 function SeverityTag({ severity }: { severity: string }) {
-  const map: Record<string, { color: string; label: string }> = {
-    critical: { color: "red", label: "严重" },
-    high: { color: "orange", label: "高危" },
-    medium: { color: "gold", label: "中危" },
-    low: { color: "blue", label: "低危" },
+  const map: Record<string, { tone: OpsStatusTone; label: string }> = {
+    critical: { tone: "danger", label: "严重" },
+    high: { tone: "danger", label: "高危" },
+    medium: { tone: "warning", label: "中危" },
+    low: { tone: "info", label: "低危" },
   };
-  const cfg = map[severity] ?? { color: "default", label: severity };
-  return <Tag color={cfg.color}>{cfg.label}</Tag>;
+  const cfg = map[severity] ?? { tone: "neutral", label: severity };
+  return <OpsStatusTag tone={cfg.tone}>{cfg.label}</OpsStatusTag>;
 }
 
 function EventStatusTag({ status }: { status: string }) {
   if (status === "resolved") {
-    return (
-      <Tag color="green" icon={<CheckCircleOutlined />}>
-        已解决
-      </Tag>
-    );
+    return <OpsStatusTag tone="success">已解决</OpsStatusTag>;
   }
-  return (
-    <Tag color="red" icon={<ExclamationCircleOutlined />}>
-      待处理
-    </Tag>
-  );
+  return <OpsStatusTag tone="danger">待处理</OpsStatusTag>;
 }
 
 function ActionTag({ action }: { action: string }) {
-  const map: Record<string, string> = {
-    create: "cyan",
-    update: "blue",
-    delete: "red",
-    enable: "green",
-    disable: "orange",
-    batch: "purple",
-    scale: "geekblue",
-    restart: "volcano",
-    rollback: "magenta",
-    query: "default",
+  const map: Record<string, OpsFilterChipTone> = {
+    create: "success",
+    update: "info",
+    delete: "danger",
+    enable: "success",
+    disable: "warning",
+    batch: "neutral",
+    scale: "info",
+    restart: "warning",
+    rollback: "warning",
+    query: "neutral",
   };
-  return <Tag color={map[action] ?? "default"}>{getActionLabel(action)}</Tag>;
+  return <OpsFilterChip tone={map[action] ?? "neutral"}>{getActionLabel(action)}</OpsFilterChip>;
 }
 
 function ResultTag({ result }: { result: string }) {
   if (result === "success") {
-    return <Tag color="success">成功</Tag>;
+    return <OpsStatusTag tone="success">成功</OpsStatusTag>;
   }
-  return <Tag color="error">失败</Tag>;
+  return <OpsStatusTag tone="danger">失败</OpsStatusTag>;
 }
 
 function SecurityEventsTab() {
@@ -410,9 +401,9 @@ function SecurityEventsTab() {
       ellipsis: true,
       ...getSortableColumnProps("cluster", isLoading && !data),
       render: (v: string) => (
-        <Tag style={{ maxWidth: 132, overflow: "hidden", textOverflow: "ellipsis" }}>
+        <OpsFilterChip tone="neutral" style={{ maxWidth: 132, overflow: "hidden", textOverflow: "ellipsis" }}>
           {getClusterDisplayName(clusterMap, v)}
-        </Tag>
+        </OpsFilterChip>
       ),
     },
     {
@@ -727,7 +718,9 @@ function AuditLogsTab() {
       filter: { type: "text", placeholder: "以资源类型过滤" },
       ...getSortableColumnProps("resourceType", isLoading && !data),
       render: (v: string) => (
-        <Tag style={{ margin: 0, maxWidth: 132, overflow: "hidden", textOverflow: "ellipsis" }}>{v}</Tag>
+        <OpsFilterChip tone="neutral" style={{ margin: 0, maxWidth: 132, overflow: "hidden", textOverflow: "ellipsis" }}>
+          {v}
+        </OpsFilterChip>
       ),
     },
     {

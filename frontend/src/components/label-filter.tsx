@@ -1,6 +1,7 @@
 'use client';
-import { Input, Tag, Space } from 'antd';
+import { Input, Space } from 'antd';
 import { useState } from 'react';
+import { OpsFilterChip } from "@/components/ops";
 
 interface LabelFilterProps {
   // labels format: ["app=nginx", "env=prod"]
@@ -24,9 +25,9 @@ export function LabelFilter({ value, onChange }: LabelFilterProps) {
   };
 
   return (
-    <Space wrap style={{ width: '100%' }}>
+    <Space className="label-filter-control" wrap>
       <Input
-        style={{ width: 160 }}
+        className="label-filter-control__input"
         placeholder="app=nginx"
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
@@ -41,9 +42,9 @@ export function LabelFilter({ value, onChange }: LabelFilterProps) {
         }
       />
       {value.map((label) => (
-        <Tag key={label} closable onClose={() => handleRemove(label)} color="blue">
+        <OpsFilterChip key={label} closable onClose={() => handleRemove(label)} tone="info">
           {label}
-        </Tag>
+        </OpsFilterChip>
       ))}
     </Space>
   );

@@ -11,7 +11,6 @@ import {
   Modal,
   Select,
   Space,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -19,6 +18,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
+import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
 import {
   buildResourceActionMenuItems,
   matchLabelExpressions,
@@ -49,7 +49,7 @@ import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
@@ -74,13 +74,13 @@ function readPhase(resource: StorageResource) {
 
 function pvStatusTag(resource: StorageResource) {
   const phase = normalizePhase(readPhase(resource));
-  if (phase === "bound") return <Tag color="green">Bound</Tag>;
-  if (phase === "available") return <Tag color="blue">Available</Tag>;
-  if (phase === "released") return <Tag color="gold">Released</Tag>;
-  if (phase === "failed") return <Tag color="red">Failed</Tag>;
-  if (phase === "pending") return <Tag color="orange">Pending</Tag>;
-  if (phase === "terminating") return <Tag color="default">Terminating</Tag>;
-  return <Tag color="default">{readPhase(resource) || "-"}</Tag>;
+  if (phase === "bound") return <OpsStatusTag tone="success">Bound</OpsStatusTag>;
+  if (phase === "available") return <OpsStatusTag tone="info">Available</OpsStatusTag>;
+  if (phase === "released") return <OpsStatusTag tone="warning">Released</OpsStatusTag>;
+  if (phase === "failed") return <OpsStatusTag tone="danger">Failed</OpsStatusTag>;
+  if (phase === "pending") return <OpsStatusTag tone="warning">Pending</OpsStatusTag>;
+  if (phase === "terminating") return <OpsStatusTag tone="neutral">Terminating</OpsStatusTag>;
+  return <OpsStatusTag tone="neutral">{readPhase(resource) || "-"}</OpsStatusTag>;
 }
 
 function getTextFilter(filters: HeadlampTableFilters, key: string) {
@@ -305,7 +305,6 @@ export default function PvPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels, mergedFilters) &&
           textMatches(item.name, getTextFilter(tableFilters, "name")) &&
           textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
@@ -387,9 +386,9 @@ export default function PvPage() {
       render: (value: string[] | undefined) =>
         value && value.length > 0
           ? value.map((m) => (
-              <Tag key={m} color="blue">
+              <OpsFilterChip key={m} tone="info">
                 {m}
-              </Tag>
+              </OpsFilterChip>
             ))
           : "-",
     },

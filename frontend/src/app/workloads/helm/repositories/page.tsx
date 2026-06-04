@@ -2,7 +2,7 @@
 
 import { DeleteOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Dropdown, Form, Input, Modal, Select, Space, Switch, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Dropdown, Form, Input, Modal, Select, Space, Switch, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { MenuProps } from "antd";
 import { useMemo, useState } from "react";
@@ -42,6 +42,7 @@ import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
+import { OpsStatusTag } from "@/components/ops/ops-status";
 
 interface RepositoryFormValues {
   clusterId: string;
@@ -56,12 +57,12 @@ interface QuickUrlFormValues {
 }
 
 function syncStatusTag(status: HelmRepositoryItem["syncStatus"]) {
-  if (status === "saved") return <Tag color="default">已保存</Tag>;
-  if (status === "validated") return <Tag color="cyan">已验证</Tag>;
-  if (status === "syncing") return <Tag color="gold">待同步</Tag>;
-  if (status === "synced") return <Tag color="green">已同步</Tag>;
-  if (status === "failed") return <Tag color="red">失败</Tag>;
-  return <Tag>{status}</Tag>;
+  if (status === "saved") return <OpsStatusTag tone="neutral">已保存</OpsStatusTag>;
+  if (status === "validated") return <OpsStatusTag tone="info">已验证</OpsStatusTag>;
+  if (status === "syncing") return <OpsStatusTag tone="warning">待同步</OpsStatusTag>;
+  if (status === "synced") return <OpsStatusTag tone="success">已同步</OpsStatusTag>;
+  if (status === "failed") return <OpsStatusTag tone="danger">失败</OpsStatusTag>;
+  return <OpsStatusTag tone="unknown">{status}</OpsStatusTag>;
 }
 
 export default function HelmRepositoriesPage() {

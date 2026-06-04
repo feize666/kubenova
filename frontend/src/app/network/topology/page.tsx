@@ -18,7 +18,7 @@ import {
 } from "@ant-design/icons";
 import dagre from "@dagrejs/dagre";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Empty, Popover, Skeleton, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Empty, Popover, Skeleton, Tooltip, Typography } from "antd";
 import { useRouter } from "next/navigation";
 import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
@@ -42,6 +42,7 @@ import ReactFlow, {
   type NodeTypes,
 } from "reactflow";
 import { useAuth } from "@/components/auth-context";
+import { OpsFilterChip, OpsIconActionButton, OpsPopoverPanel } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { RuntimeStatusPill } from "@/components/visual-system";
@@ -339,17 +340,60 @@ const GROUP_MODE_ITEMS: Array<{ value: GroupMode; label: string }> = [
   { value: "node", label: "节点" },
 ];
 
-const NODE_W = 164;
-const NODE_H = 68;
-type TopologyEdgeRole = "scope" | "relation" | "ownership" | "group";
+const NODE_W = 220;
+const NODE_H = 78;
+const NODE_MAX_W = 320;
+const NODE_LABEL_CHAR_W = 7.2;
+const NODE_LABEL_LINE_H = 17.5;
+const ADAPTIVE_NAME_TOKENS = new Set<TokenKey>(["pod", "endpointslice"]);
+type TopologyEdgeRole =
+  | "scope"
+  | "relation"
+  | "owner"
+  | "selector"
+  | "service-endpoint"
+  | "gateway-route"
+  | "network-policy"
+  | "group";
 type TopologyEdgeData = {
   topologyRole?: TopologyEdgeRole;
+  topologyLabel?: string;
+};
+const EDGE_MARKER_COLOR = "rgba(100, 116, 139, 0.66)";
+const EDGE_LABEL_STYLE: React.CSSProperties = {
+  fill: "#475569",
+  fontSize: 10,
+  fontWeight: 500,
+  opacity: 0.66,
+};
+const EDGE_LABEL_BG_STYLE: React.CSSProperties = {
+  fill: "rgba(255, 255, 255, 0.86)",
+  stroke: "rgba(203, 213, 225, 0.56)",
+  strokeWidth: 0.5,
+};
+const EDGE_ROLE_LABEL: Record<TopologyEdgeRole, string | undefined> = {
+  scope: undefined,
+  relation: undefined,
+  owner: "owns",
+  selector: "selects",
+  "service-endpoint": "endpoints",
+  "gateway-route": "routes",
+  "network-policy": "policy",
+  group: undefined,
 };
 
 type TopologyResourceDetailRequest = {
   kind: string;
   id: string;
   label?: string;
+  clusterId?: string;
+  group?: string;
+  version?: string;
+  resource?: string;
+  namespace?: string;
+  name?: string;
+  apiVersion?: string;
+  kindLabel?: string;
   snapshot?: {
     spec?: Record<string, unknown>;
     status?: Record<string, unknown>;
@@ -500,11 +544,35 @@ function buildEdge(
   target: string,
   overrides: Partial<Edge> & { data?: TopologyEdgeData } = {},
 ): Edge {
+  const {
+    className: overrideClassName,
+    data: overrideData,
+    label: overrideLabel,
+    labelBgBorderRadius: overrideLabelBgBorderRadius,
+    labelBgPadding: overrideLabelBgPadding,
+    labelBgStyle: overrideLabelBgStyle,
+    labelStyle: overrideLabelStyle,
+    markerEnd: overrideMarkerEnd,
+    style: overrideStyle,
+    ...restOverrides
+  } = overrides;
+  const role: TopologyEdgeRole = overrideData?.topologyRole ?? "relation";
+  const topologyLabel = overrideData?.topologyLabel ?? EDGE_ROLE_LABEL[role];
+  const label = overrideLabel ?? topologyLabel;
+  const data: TopologyEdgeData = {
+    topologyRole: role,
+    ...(topologyLabel ? { topologyLabel } : {}),
+    ...(overrideData ?? {}),
+  };
+  const className = ["topology-flow-edge", `topology-flow-edge--${role}`, overrideClassName]
+    .filter(Boolean)
+    .join(" ");
+  const hasMarkerOverride = Object.prototype.hasOwnProperty.call(overrides, "markerEnd");
   const style =
-    overrides.style
+    overrideStyle
       ? {
           ...EDGE_STYLE,
-          ...overrides.style,
+          ...overrideStyle,
         }
       : EDGE_STYLE;
 
@@ -512,22 +580,27 @@ function buildEdge(
     id: `edge-${source}-${target}`,
     source,
     target,
-    type: "step",
+    type: "smoothstep",
     animated: false,
-    className: `topology-flow-edge topology-flow-edge--${(overrides.data?.topologyRole ?? "relation") as TopologyEdgeRole}`,
+    className,
     style,
-      data: {
-        topologyRole: "relation",
-        ...(overrides.data ?? {}),
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: "var(--topology-overview-edge)",
-        width: 13,
-        height: 13,
-      },
-      ...overrides,
-    };
+    data,
+    label,
+    labelShowBg: Boolean(label),
+    labelStyle: label ? { ...EDGE_LABEL_STYLE, ...(overrideLabelStyle ?? {}) } : overrideLabelStyle,
+    labelBgStyle: label ? { ...EDGE_LABEL_BG_STYLE, ...(overrideLabelBgStyle ?? {}) } : overrideLabelBgStyle,
+    labelBgPadding: label ? [5, 2] : overrideLabelBgPadding,
+    labelBgBorderRadius: label ? 4 : overrideLabelBgBorderRadius,
+    markerEnd: hasMarkerOverride
+      ? overrideMarkerEnd
+      : {
+          type: MarkerType.ArrowClosed,
+          color: EDGE_MARKER_COLOR,
+          width: 12,
+          height: 12,
+        },
+    ...restOverrides,
+  };
 }
 
 function sortByStackTokenOrder(left: Node<TopoNodeData>, right: Node<TopoNodeData>): number {
@@ -587,6 +660,111 @@ function toStringRecord(value: unknown): Record<string, string> {
 
 function normalizeResourceKind(kind: string | undefined): string {
   return (kind ?? "").trim().toLowerCase();
+}
+
+const DYNAMIC_RESOURCE_BY_TOKEN: Partial<
+  Record<TokenKey, { group: string; version: string; resource: string; kindLabel: string }>
+> = {
+  namespace: { group: "", version: "v1", resource: "namespaces", kindLabel: "Namespace" },
+  service: { group: "", version: "v1", resource: "services", kindLabel: "Service" },
+  ingress: { group: "networking.k8s.io", version: "v1", resource: "ingresses", kindLabel: "Ingress" },
+  ingressroute: { group: "traefik.io", version: "v1alpha1", resource: "ingressroutes", kindLabel: "IngressRoute" },
+  endpoints: { group: "", version: "v1", resource: "endpoints", kindLabel: "Endpoints" },
+  endpointslice: { group: "discovery.k8s.io", version: "v1", resource: "endpointslices", kindLabel: "EndpointSlice" },
+  networkpolicy: { group: "networking.k8s.io", version: "v1", resource: "networkpolicies", kindLabel: "NetworkPolicy" },
+  gatewayclass: { group: "gateway.networking.k8s.io", version: "v1", resource: "gatewayclasses", kindLabel: "GatewayClass" },
+  gateway: { group: "gateway.networking.k8s.io", version: "v1", resource: "gateways", kindLabel: "Gateway" },
+  httproute: { group: "gateway.networking.k8s.io", version: "v1", resource: "httproutes", kindLabel: "HTTPRoute" },
+  deployment: { group: "apps", version: "v1", resource: "deployments", kindLabel: "Deployment" },
+  statefulset: { group: "apps", version: "v1", resource: "statefulsets", kindLabel: "StatefulSet" },
+  daemonset: { group: "apps", version: "v1", resource: "daemonsets", kindLabel: "DaemonSet" },
+  pod: { group: "", version: "v1", resource: "pods", kindLabel: "Pod" },
+};
+
+function getStringField(raw: Record<string, unknown> | undefined, key: string): string {
+  const value = raw?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function keepNonEmptyRecord(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  return Object.keys(record).length > 0 ? record : undefined;
+}
+
+function parseApiVersion(value: string): { group: string; version: string } | null {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (!normalized.includes("/")) return { group: "", version: normalized };
+  const [group, version] = normalized.split("/");
+  return version ? { group, version } : null;
+}
+
+function buildTopologySnapshot(raw: Record<string, unknown> | undefined): TopologyResourceDetailRequest["snapshot"] {
+  if (!raw) return undefined;
+  const labels = toStringRecord(raw.labels ?? toObject(raw.metadata).labels);
+  const spec = keepNonEmptyRecord(toObject(raw.spec));
+  const status =
+    keepNonEmptyRecord(toObject(raw.statusJson)) ??
+    keepNonEmptyRecord(toObject(raw.status)) ??
+    keepNonEmptyRecord(
+      Object.fromEntries(
+        [
+          "state",
+          "phase",
+          "replicas",
+          "readyReplicas",
+          "createdAt",
+          "updatedAt",
+          "podCount",
+          "readyPods",
+          "pendingPods",
+          "networkCount",
+          "workloadCount",
+          "podReplicaCount",
+          "controller",
+          "nodeName",
+        ]
+          .map((key) => [key, raw[key]])
+          .filter((entry): entry is [string, unknown] => entry[1] !== undefined && entry[1] !== null && entry[1] !== ""),
+      ),
+    );
+  if (!spec && !status && Object.keys(labels).length === 0) return undefined;
+  return {
+    spec,
+    status,
+    labels: Object.keys(labels).length > 0 ? labels : undefined,
+  };
+}
+
+function resolveDynamicDetailParts(
+  nodeData: TopoNodeData,
+  raw: Record<string, unknown> | undefined,
+): Omit<TopologyResourceDetailRequest, "kind" | "id" | "snapshot" | "label"> | null {
+  const mapped = DYNAMIC_RESOURCE_BY_TOKEN[nodeData.tokenKey];
+  if (!mapped) return null;
+  const clusterId = getStringField(raw, "clusterId");
+  const name = getStringField(raw, "name") || nodeData.label.trim();
+  if (!clusterId || !name) return null;
+  const apiVersion = getStringField(raw, "apiVersion");
+  const parsedApiVersion = parseApiVersion(apiVersion);
+  const group = getStringField(raw, "group") || parsedApiVersion?.group || mapped.group;
+  const version = getStringField(raw, "version") || parsedApiVersion?.version || mapped.version;
+  const resource = getStringField(raw, "resource") || mapped.resource;
+  const kindLabel = getStringField(raw, "kind") || mapped.kindLabel;
+  if (!version || !resource) return null;
+  const namespace =
+    nodeData.tokenKey === "namespace" || !getStringField(raw, "namespace")
+      ? ""
+      : getStringField(raw, "namespace");
+  return {
+    clusterId,
+    group,
+    version,
+    resource,
+    namespace,
+    name,
+    apiVersion: apiVersion || (group ? `${group}/${version}` : version),
+    kindLabel,
+  };
 }
 
 function extractServiceSelector(resource: NetworkResource): Record<string, string> {
@@ -824,6 +1002,14 @@ function controllerOwnsPodName(controller: WorkloadListItem, podName: string): b
   return true;
 }
 
+function resolvePodStatus(pod: WorkloadListItem): TopoNodeData["status"] {
+  const phase = String((pod.statusJson ?? {}).phase ?? "").trim();
+  if (phase === "Running") return "Running";
+  if (phase === "Failed") return "Failed";
+  if (phase === "Pending") return "Pending";
+  return "Unknown";
+}
+
 function resolveResourceDetailRequest(node: Node<TopoNodeData> | null): TopologyResourceDetailRequest | null {
   if (!node) return null;
   if (node.data.tokenKey === "instancegroup" || node.data.tokenKey === "node") {
@@ -841,16 +1027,31 @@ function resolveResourceDetailRequest(node: Node<TopoNodeData> | null): Topology
           resource?: unknown;
           namespace?: unknown;
           name?: unknown;
+          apiVersion?: unknown;
+          spec?: unknown;
+          status?: unknown;
+          statusJson?: unknown;
+          labels?: unknown;
         }
       | undefined) ?? undefined;
-  if (node.data.tokenKey === "namespace") {
-    const clusterId = typeof raw?.clusterId === "string" ? raw.clusterId.trim() : "";
-    const name = typeof raw?.name === "string" ? raw.name.trim() : node.data.label.trim();
-    if (!clusterId || !name) return null;
+  const rawRecord = raw as Record<string, unknown> | undefined;
+  const snapshot = buildTopologySnapshot(rawRecord);
+  const dynamicParts = resolveDynamicDetailParts(node.data, rawRecord);
+  if (dynamicParts) {
     return {
-      id: ["dynamic", clusterId, "", "v1", "namespaces", "", name].join(":"),
+      ...dynamicParts,
+      id: [
+        "dynamic",
+        dynamicParts.clusterId,
+        dynamicParts.group ?? "",
+        dynamicParts.version ?? "",
+        dynamicParts.resource ?? "",
+        dynamicParts.namespace ?? "",
+        dynamicParts.name,
+      ].join(":"),
       kind: "dynamic",
       label: node.data.label,
+      snapshot,
     };
   }
   const rawId = typeof raw?.id === "string" ? raw.id.trim() : "";
@@ -869,23 +1070,11 @@ function resolveResourceDetailRequest(node: Node<TopoNodeData> | null): Topology
   const id = dynamicId || rawId;
   const kind = dynamicId ? "dynamic" : typeof raw?.kind === "string" ? raw.kind.trim() : "";
   if (!id || !kind) return null;
-  const snapshot = {
-    spec: (raw as { spec?: unknown } | undefined)?.spec as Record<string, unknown> | undefined,
-    status: (raw as { status?: unknown } | undefined)?.status as Record<string, unknown> | undefined,
-    labels: (raw as { labels?: unknown } | undefined)?.labels as Record<string, string> | undefined,
-  };
   return {
     id,
     kind,
     label: node.data.label,
-    snapshot:
-      snapshot.spec || snapshot.status || snapshot.labels
-        ? {
-            spec: snapshot.spec,
-            status: snapshot.status,
-            labels: snapshot.labels,
-          }
-        : undefined,
+    snapshot,
   };
 }
 
@@ -944,11 +1133,127 @@ function isGroupTokenKey(tokenKey: TokenKey): boolean {
   return tokenKey === "namespace" || tokenKey === "instancegroup" || tokenKey === "node";
 }
 
+type TopologyNodeSize = {
+  width: number;
+  height: number;
+};
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function countDisplayUnits(value: string): number {
+  return Array.from(value).reduce((total, char) => total + (char.charCodeAt(0) > 255 ? 1.5 : 1), 0);
+}
+
+function estimateLabelLines(label: string, width: number, tokenKey: TokenKey): number {
+  const maxLines = ADAPTIVE_NAME_TOKENS.has(tokenKey) ? 4 : tokenKey === "namespace" ? 3 : 2;
+  const contentWidth = Math.max(72, width - 28);
+  const charsPerLine = Math.max(8, Math.floor(contentWidth / NODE_LABEL_CHAR_W));
+  return clampNumber(Math.ceil(countDisplayUnits(label) / charsPerLine), 1, maxLines);
+}
+
+function estimateNodeSizeFromData(data: TopoNodeData): TopologyNodeSize {
+  const raw = data.raw as {
+    layoutLane?: unknown;
+    layoutGroupPanel?: unknown;
+    layoutWidth?: unknown;
+    layoutHeight?: unknown;
+    networkCount?: unknown;
+    workloadCount?: unknown;
+    podReplicaCount?: unknown;
+    caption?: unknown;
+  } | undefined;
+
+  if (raw?.layoutLane === true || raw?.layoutGroupPanel === true) {
+    return {
+      width: typeof raw.layoutWidth === "number" ? raw.layoutWidth : NODE_W,
+      height: typeof raw.layoutHeight === "number" ? raw.layoutHeight : NODE_H,
+    };
+  }
+
+  const labelUnits = countDisplayUnits(data.label);
+  const isNamespace = data.tokenKey === "namespace";
+  const isGroup = isGroupTokenKey(data.tokenKey);
+  const isAdaptiveName = ADAPTIVE_NAME_TOKENS.has(data.tokenKey);
+  const minWidth = isNamespace ? 278 : isGroup ? 184 : isAdaptiveName ? 206 : NODE_W;
+  const maxWidth = isNamespace ? 360 : isGroup ? 292 : isAdaptiveName ? NODE_MAX_W : 280;
+  const width = clampNumber(minWidth + Math.max(0, labelUnits - 18) * (isAdaptiveName ? 5.8 : 4.8), minWidth, maxWidth);
+  const labelLines = estimateLabelLines(data.label, width, data.tokenKey);
+
+  let height = NODE_H + Math.max(0, labelLines - 1) * NODE_LABEL_LINE_H;
+  if (isNamespace) {
+    height = 138 + Math.max(0, labelLines - 2) * NODE_LABEL_LINE_H;
+    if (typeof raw?.networkCount === "number" || typeof raw?.workloadCount === "number" || typeof raw?.podReplicaCount === "number") {
+      height += 8;
+    }
+  } else if (data.tokenKey === "cluster" || data.tokenKey === "instancegroup" || data.tokenKey === "node") {
+    height = 96 + Math.max(0, labelLines - 1) * NODE_LABEL_LINE_H;
+  }
+
+  if (!isNamespace && typeof data.status === "string") height += 22;
+  if (!isNamespace && typeof data.replicas === "string") height += 8;
+  if (typeof data.caption === "string" && data.caption.trim()) height += 18;
+  if (typeof raw?.caption === "string" && raw.caption.trim()) height += 8;
+
+  return {
+    width,
+    height: Math.max(NODE_H, Math.ceil(height)),
+  };
+}
+
+function getEstimatedNodeSize(node: Node<TopoNodeData>): TopologyNodeSize {
+  return estimateNodeSizeFromData(node.data);
+}
+
+function getNodeWidth(node: Node<TopoNodeData>): number {
+  return typeof node.width === "number" ? node.width : getEstimatedNodeSize(node).width;
+}
+
+function getNodeHeight(node: Node<TopoNodeData>): number {
+  return typeof node.height === "number" ? node.height : getEstimatedNodeSize(node).height;
+}
+
+function withEstimatedNodeSize(node: Node<TopoNodeData>): Node<TopoNodeData> {
+  const size = getEstimatedNodeSize(node);
+  return {
+    ...node,
+    width: size.width,
+    height: size.height,
+  };
+}
+
+function middleEllipsize(value: string, maxUnits: number): string {
+  if (countDisplayUnits(value) <= maxUnits) return value;
+  const chars = Array.from(value);
+  const keepUnits = Math.max(8, Math.floor((maxUnits - 1) / 2));
+  let head = "";
+  let tail = "";
+  let headUnits = 0;
+  let tailUnits = 0;
+  for (const char of chars) {
+    const units = char.charCodeAt(0) > 255 ? 1.5 : 1;
+    if (headUnits + units > keepUnits) break;
+    head += char;
+    headUnits += units;
+  }
+  for (let index = chars.length - 1; index >= 0; index -= 1) {
+    const char = chars[index];
+    const units = char.charCodeAt(0) > 255 ? 1.5 : 1;
+    if (tailUnits + units > keepUnits) break;
+    tail = `${char}${tail}`;
+    tailUnits += units;
+  }
+  return `${head}...${tail}`;
+}
+
 function applyDagreLayout(
   nodes: Node<TopoNodeData>[],
   edges: Edge[],
   options?: { nodesep?: number; ranksep?: number; marginx?: number; marginy?: number; rankdir?: "LR" | "TB" },
 ): Node<TopoNodeData>[] {
+  const sizedNodes = nodes.map(withEstimatedNodeSize);
+  const nodeIds = new Set(sizedNodes.map((node) => node.id));
   const graph = new dagre.graphlib.Graph();
   graph.setDefaultEdgeLabel(() => ({}));
   graph.setGraph({
@@ -959,15 +1264,21 @@ function applyDagreLayout(
     marginy: options?.marginy ?? 78,
   });
 
-  nodes.forEach((node) => graph.setNode(node.id, { width: NODE_W, height: NODE_H }));
-  edges.forEach((edge) => graph.setEdge(edge.source, edge.target));
+  sizedNodes.forEach((node) => graph.setNode(node.id, { width: getNodeWidth(node), height: getNodeHeight(node) }));
+  edges.forEach((edge) => {
+    if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+      graph.setEdge(edge.source, edge.target);
+    }
+  });
   dagre.layout(graph);
 
-  return nodes.map((node) => {
+  return sizedNodes.map((node) => {
     const position = graph.node(node.id);
+    const width = getNodeWidth(node);
+    const height = getNodeHeight(node);
     return {
       ...node,
-      position: { x: position.x - NODE_W / 2, y: position.y - NODE_H / 2 },
+      position: { x: position.x - width / 2, y: position.y - height / 2 },
     };
   });
 }
@@ -978,42 +1289,6 @@ type ComponentLayoutResult = {
   height: number;
   hasSemanticEdges: boolean;
 };
-
-function estimateNodeHeight(node: Node<TopoNodeData>): number {
-  const raw = node.data.raw as {
-    layoutLane?: unknown;
-    layoutGroupPanel?: unknown;
-    networkCount?: unknown;
-    workloadCount?: unknown;
-    podReplicaCount?: unknown;
-    status?: unknown;
-    replicas?: unknown;
-    caption?: unknown;
-  } | undefined;
-  if (raw?.layoutLane === true) return 40;
-  if (raw?.layoutGroupPanel === true) return 42;
-
-  let height = NODE_H;
-  if (node.data.tokenKey === "namespace") {
-    height = 118;
-    if (typeof raw?.networkCount === "number" || typeof raw?.workloadCount === "number" || typeof raw?.podReplicaCount === "number") {
-      height += 26;
-    }
-  } else if (node.data.tokenKey === "cluster" || node.data.tokenKey === "instancegroup" || node.data.tokenKey === "node") {
-    height = 96;
-  }
-
-  if (typeof node.data.status === "string") {
-    height += 10;
-  }
-  if (typeof node.data.replicas === "string") {
-    height += 8;
-  }
-  if (typeof raw?.caption === "string" && raw.caption.trim()) {
-    height += 8;
-  }
-  return Math.max(height, NODE_H);
-}
 
 function layoutComponentBlock(members: Node<TopoNodeData>[], edges: Edge[]): ComponentLayoutResult {
   const memberIds = new Set(members.map((member) => member.id));
@@ -1036,7 +1311,7 @@ function layoutComponentBlock(members: Node<TopoNodeData>[], edges: Edge[]): Com
       marginy: 0,
     });
 
-    members.forEach((member) => graph.setNode(member.id, { width: NODE_W, height: estimateNodeHeight(member) }));
+    members.forEach((member) => graph.setNode(member.id, { width: getNodeWidth(member), height: getNodeHeight(member) }));
     semanticEdges.forEach((edge) => graph.setEdge(edge.source, edge.target));
     dagre.layout(graph);
 
@@ -1048,13 +1323,15 @@ function layoutComponentBlock(members: Node<TopoNodeData>[], edges: Edge[]): Com
     members.forEach((member) => {
       const position = graph.node(member.id);
       if (!position) return;
-      const x = position.x - NODE_W / 2;
-      const y = position.y - estimateNodeHeight(member) / 2;
+      const width = getNodeWidth(member);
+      const height = getNodeHeight(member);
+      const x = position.x - width / 2;
+      const y = position.y - height / 2;
       positions.set(member.id, { x, y });
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x + NODE_W);
-      maxY = Math.max(maxY, y + estimateNodeHeight(member));
+      maxX = Math.max(maxX, x + width);
+      maxY = Math.max(maxY, y + height);
     });
 
     const paddingX = 18;
@@ -1079,22 +1356,35 @@ function layoutComponentBlock(members: Node<TopoNodeData>[], edges: Edge[]): Com
   const gapY = 14;
   const paddingX = 18;
   const paddingY = 16;
+  const rows = Math.max(1, Math.ceil(members.length / columns));
+  const columnWidths = Array.from({ length: columns }, (_, col) =>
+    Math.max(...members.filter((_, index) => index % columns === col).map((member) => getNodeWidth(member)), 0),
+  );
+  const rowHeights = Array.from({ length: rows }, (_, row) =>
+    Math.max(...members.filter((_, index) => Math.floor(index / columns) === row).map((member) => getNodeHeight(member)), 0),
+  );
+  const columnOffsets = columnWidths.reduce<number[]>((offsets, width, index) => {
+    offsets.push(index === 0 ? 0 : offsets[index - 1] + columnWidths[index - 1] + gapX);
+    return offsets;
+  }, []);
+  const rowOffsets = rowHeights.reduce<number[]>((offsets, height, index) => {
+    offsets.push(index === 0 ? 0 : offsets[index - 1] + rowHeights[index - 1] + gapY);
+    return offsets;
+  }, []);
 
   members.forEach((member, index) => {
     const row = Math.floor(index / columns);
     const col = index % columns;
-    const height = estimateNodeHeight(member);
     positions.set(member.id, {
-      x: paddingX + col * (NODE_W + gapX),
-      y: paddingY + row * (height + gapY),
+      x: paddingX + columnOffsets[col],
+      y: paddingY + rowOffsets[row],
     });
   });
 
-  const rows = Math.max(1, Math.ceil(members.length / columns));
   return {
     positions,
-    width: paddingX * 2 + columns * NODE_W + Math.max(0, columns - 1) * gapX,
-    height: paddingY * 2 + rows * Math.max(...members.map((member) => estimateNodeHeight(member))) + Math.max(0, rows - 1) * gapY,
+    width: paddingX * 2 + columnWidths.reduce((total, width) => total + width, 0) + Math.max(0, columns - 1) * gapX,
+    height: paddingY * 2 + rowHeights.reduce((total, height) => total + height, 0) + Math.max(0, rows - 1) * gapY,
     hasSemanticEdges,
   };
 }
@@ -1113,6 +1403,7 @@ function buildFlowGraph(
   deployments: WorkloadListItem[],
   statefulsets: WorkloadListItem[],
   daemonsets: WorkloadListItem[],
+  pods: WorkloadListItem[],
   groupMode: GroupMode,
 ): { nodes: Node<TopoNodeData>[]; edges: Edge[] } {
   const activeNetwork = networkResources.filter((item) => item.state !== "deleted");
@@ -1128,12 +1419,14 @@ function buildFlowGraph(
       .filter((item) => item.state !== "deleted")
       .map((item) => ({ ...item, _subKind: "daemonset" as const })),
   ];
+  const activePods = pods.filter((item) => item.state !== "deleted");
 
   const namespaces = Array.from(
     new Set([
       ...activeNetwork.map((item) => item.namespace),
       ...activeGateways.map((item) => item.namespace).filter(Boolean),
       ...controllers.map((item) => item.namespace),
+      ...activePods.map((item) => item.namespace),
     ]),
   ).sort();
 
@@ -1152,6 +1445,7 @@ function buildFlowGraph(
   const gatewayNodeIdByResourceId = new Map<string, string>();
   const controllerNodeIdById = new Map<string, string>();
   const controllersByNamespace = new Map<string, WorkloadListItem[]>();
+  const podNodeIdByNamespaceName = new Map<string, string>();
   const hasSemanticEdge = new Set<string>();
   const nodePool = new Map<
     string,
@@ -1183,18 +1477,21 @@ function buildFlowGraph(
     const namespaceNetwork = activeNetwork.filter((item) => item.namespace === namespace);
     const namespaceGateway = activeGateways.filter((item) => item.namespace === namespace);
     const namespaceControllers = controllers.filter((item) => item.namespace === namespace);
+    const namespacePods = activePods.filter((item) => item.namespace === namespace);
     const podReplicaCount = namespaceControllers.reduce((total, item) => total + Math.max(item.replicas ?? 0, 0), 0);
+    const realPodCount = namespacePods.length;
+    const readyPodCount = namespacePods.filter((item) => String((item.statusJson ?? {}).phase ?? "").toLowerCase() === "running").length;
     const readyReplicaCount = namespaceControllers.reduce(
       (total, item) => total + Math.max(item.readyReplicas ?? 0, 0),
       0,
     );
     namespaceSummaries.set(namespace, {
-      resourceCount: namespaceNetwork.length + namespaceControllers.length + podReplicaCount,
+      resourceCount: namespaceNetwork.length + namespaceControllers.length + Math.max(realPodCount, podReplicaCount),
       networkCount: namespaceNetwork.length + namespaceGateway.length,
       workloadCount: namespaceControllers.length,
-      podReplicaCount,
-      readyReplicaCount,
-      pendingReplicaCount: Math.max(podReplicaCount - readyReplicaCount, 0),
+      podReplicaCount: Math.max(realPodCount, podReplicaCount),
+      readyReplicaCount: realPodCount > 0 ? readyPodCount : readyReplicaCount,
+      pendingReplicaCount: Math.max((realPodCount > 0 ? realPodCount : podReplicaCount) - (realPodCount > 0 ? readyPodCount : readyReplicaCount), 0),
     });
   });
 
@@ -1290,6 +1587,9 @@ function buildFlowGraph(
   });
 
   controllers.forEach((controller) => {
+    const ownedPods = activePods.filter(
+      (pod) => pod.namespace === controller.namespace && controllerOwnsPodName(controller, pod.name),
+    );
     const controllerId = `ctrl-${controller.id}`;
     const ready = controller.readyReplicas ?? 0;
     const total = controller.replicas ?? 0;
@@ -1319,7 +1619,7 @@ function buildFlowGraph(
     namespaceControllers.push(controller);
     controllersByNamespace.set(controller.namespace, namespaceControllers);
 
-    const podCount = Math.min(total || 1, groupMode === "namespace" ? 4 : 6);
+    const podCount = Math.min(ownedPods.length || total || 1, groupMode === "namespace" ? 4 : 6);
     const instanceGroupId = `instance-${controller.id}`;
 
     if (groupMode === "instance") {
@@ -1358,11 +1658,15 @@ function buildFlowGraph(
     }
 
     for (let index = 0; index < podCount; index += 1) {
-      const podReady = index < ready;
-      const podId = `pod-${controller.id}-${index}`;
-      const podStatus: TopoNodeData["status"] = podReady ? "Running" : "Pending";
+      const realPod = ownedPods[index];
+      const podStatus: TopoNodeData["status"] = realPod ? resolvePodStatus(realPod) : index < ready ? "Running" : "Pending";
+      const podReady = podStatus === "Running";
+      const podId = realPod ? `pod-${realPod.id}` : `pod-${controller.id}-${index}`;
       const suffix = (controller.id.slice(-4) + index.toString(16)).slice(-5);
-      const nodeName = deriveNodeName(controller.namespace, controller.id, index, clusterId);
+      const nodeName =
+        realPod && typeof (realPod.spec ?? {}).nodeName === "string"
+          ? String((realPod.spec ?? {}).nodeName)
+          : deriveNodeName(controller.namespace, controller.id, index, clusterId);
 
       if (groupMode === "node") {
         const currentNode = nodePool.get(nodeName) ?? {
@@ -1381,19 +1685,32 @@ function buildFlowGraph(
         type: "topo",
         position: { x: 0, y: 0 },
         data: {
-          label: `${controller.name.slice(0, 10)}-${suffix}`,
+          label: realPod?.name ?? `${controller.name}-${suffix}`,
           typeLabel: "Pod",
           tokenKey: "pod",
           status: podStatus,
           caption: groupMode === "node" ? nodeName : controller.namespace,
-          raw: {
-            namespace: controller.namespace,
-            phase: podStatus,
-            controller: controller.name,
-            nodeName,
-          },
+          raw: realPod
+            ? {
+                ...realPod,
+                phase: podStatus,
+                controller: controller.name,
+                nodeName,
+              }
+            : {
+                clusterId,
+                namespace: controller.namespace,
+                kind: "Pod",
+                name: `${controller.name}-${suffix}`,
+                phase: podStatus,
+                controller: controller.name,
+                nodeName,
+              },
         },
       });
+      if (realPod) {
+        podNodeIdByNamespaceName.set(`${realPod.namespace}/${realPod.name}`, podId);
+      }
 
       pushEdge(
         buildEdge(groupMode === "instance" ? instanceGroupId : controllerId, podId, {
@@ -1402,7 +1719,7 @@ function buildFlowGraph(
             strokeDasharray: podReady ? undefined : "4 3",
           },
           data: {
-            topologyRole: groupMode === "instance" ? "group" : "ownership",
+            topologyRole: groupMode === "instance" ? "group" : "owner",
           },
           markerEnd: undefined,
         }),
@@ -1467,23 +1784,17 @@ function buildFlowGraph(
       });
   }
 
-  const registerSemanticLink = (sourceId: string, targetId: string, role: TopologyEdgeRole = "relation") => {
+  const registerSemanticLink = (sourceId: string, targetId: string, role: TopologyEdgeRole = "relation", label?: string) => {
     hasSemanticEdge.add(sourceId);
     hasSemanticEdge.add(targetId);
     pushEdge(
       buildEdge(sourceId, targetId, {
-        data: { topologyRole: role },
-        style:
-          role === "ownership"
-            ? {
-                strokeWidth: 1.02,
-                opacity: 0.32,
-              }
-            : {
-                strokeWidth: 1.06,
-                opacity: 0.34,
-              },
-        markerEnd: undefined,
+        data: { topologyRole: role, ...(label ? { topologyLabel: label } : {}) },
+        style: {
+          strokeWidth: role === "network-policy" ? 0.95 : 1.04,
+          opacity: role === "network-policy" ? 0.46 : 0.58,
+          strokeDasharray: role === "network-policy" || role === "selector" ? "4 3" : undefined,
+        },
       }),
     );
   };
@@ -1496,7 +1807,7 @@ function buildFlowGraph(
     if (kind === "ingress") {
       extractIngressServiceNames(resource.spec).forEach((serviceName) => {
         const serviceNodeId = serviceNodeIdByNamespaceName.get(`${resource.namespace}/${serviceName}`);
-        if (serviceNodeId) registerSemanticLink(sourceNodeId, serviceNodeId);
+        if (serviceNodeId) registerSemanticLink(sourceNodeId, serviceNodeId, "gateway-route");
       });
       return;
     }
@@ -1504,7 +1815,7 @@ function buildFlowGraph(
     if (kind === "ingressroute") {
       extractIngressRouteServiceNames(resource.spec).forEach((serviceName) => {
         const serviceNodeId = serviceNodeIdByNamespaceName.get(`${resource.namespace}/${serviceName}`);
-        if (serviceNodeId) registerSemanticLink(sourceNodeId, serviceNodeId);
+        if (serviceNodeId) registerSemanticLink(sourceNodeId, serviceNodeId, "gateway-route");
       });
       return;
     }
@@ -1512,13 +1823,17 @@ function buildFlowGraph(
     if (kind === "endpoints") {
       const serviceNodeId = serviceNodeIdByNamespaceName.get(`${resource.namespace}/${resource.name}`);
       if (serviceNodeId) {
-        registerSemanticLink(serviceNodeId, sourceNodeId);
+        registerSemanticLink(serviceNodeId, sourceNodeId, "service-endpoint");
         const podNames = extractEndpointTargetPodNames(resource);
+        podNames.forEach((podName) => {
+          const podNodeId = podNodeIdByNamespaceName.get(`${resource.namespace}/${podName}`);
+          if (podNodeId) registerSemanticLink(sourceNodeId, podNodeId, "service-endpoint", "targets");
+        });
         const namespaceControllers = controllersByNamespace.get(resource.namespace) ?? [];
         namespaceControllers.forEach((controller) => {
           if (!podNames.some((podName) => controllerOwnsPodName(controller, podName))) return;
           const controllerNodeId = controllerNodeIdById.get(controller.id);
-          if (controllerNodeId) registerSemanticLink(serviceNodeId, controllerNodeId);
+          if (controllerNodeId) registerSemanticLink(serviceNodeId, controllerNodeId, "selector");
         });
       }
       return;
@@ -1528,13 +1843,17 @@ function buildFlowGraph(
       extractEndpointSliceServiceNames(resource).forEach((serviceName) => {
         const serviceNodeId = serviceNodeIdByNamespaceName.get(`${resource.namespace}/${serviceName}`);
         if (!serviceNodeId) return;
-        registerSemanticLink(serviceNodeId, sourceNodeId);
+        registerSemanticLink(serviceNodeId, sourceNodeId, "service-endpoint");
         const podNames = extractEndpointTargetPodNames(resource);
+        podNames.forEach((podName) => {
+          const podNodeId = podNodeIdByNamespaceName.get(`${resource.namespace}/${podName}`);
+          if (podNodeId) registerSemanticLink(sourceNodeId, podNodeId, "service-endpoint", "targets");
+        });
         const namespaceControllers = controllersByNamespace.get(resource.namespace) ?? [];
         namespaceControllers.forEach((controller) => {
           if (!podNames.some((podName) => controllerOwnsPodName(controller, podName))) return;
           const controllerNodeId = controllerNodeIdById.get(controller.id);
-          if (controllerNodeId) registerSemanticLink(serviceNodeId, controllerNodeId);
+          if (controllerNodeId) registerSemanticLink(serviceNodeId, controllerNodeId, "selector");
         });
       });
       return;
@@ -1551,7 +1870,7 @@ function buildFlowGraph(
           return;
         }
         const controllerNodeId = controllerNodeIdById.get(controller.id);
-        if (controllerNodeId) registerSemanticLink(sourceNodeId, controllerNodeId);
+        if (controllerNodeId) registerSemanticLink(sourceNodeId, controllerNodeId, "selector");
       });
       return;
     }
@@ -1575,7 +1894,7 @@ function buildFlowGraph(
           return;
         }
         const controllerNodeId = controllerNodeIdById.get(controller.id);
-        if (controllerNodeId) registerSemanticLink(sourceNodeId, controllerNodeId);
+        if (controllerNodeId) registerSemanticLink(sourceNodeId, controllerNodeId, "network-policy");
       });
     }
   });
@@ -1587,18 +1906,18 @@ function buildFlowGraph(
     if (resource.kind === "Gateway") {
       const className = extractGatewayClassName(resource);
       const classNodeId = className ? gatewayClassNodeIdByName.get(className) : undefined;
-      if (classNodeId) registerSemanticLink(classNodeId, sourceNodeId);
+      if (classNodeId) registerSemanticLink(classNodeId, sourceNodeId, "gateway-route", "class");
       return;
     }
 
     if (resource.kind === "HTTPRoute") {
       extractHttpRouteGatewayRefs(resource).forEach((gatewayRef) => {
         const gatewayNodeId = gatewayNodeIdByNamespaceName.get(gatewayRef);
-        if (gatewayNodeId) registerSemanticLink(gatewayNodeId, sourceNodeId);
+        if (gatewayNodeId) registerSemanticLink(gatewayNodeId, sourceNodeId, "gateway-route", "parent");
       });
       extractHttpRouteBackendRefs(resource).forEach((serviceRef) => {
         const serviceNodeId = serviceNodeIdByNamespaceName.get(serviceRef);
-        if (serviceNodeId) registerSemanticLink(sourceNodeId, serviceNodeId);
+        if (serviceNodeId) registerSemanticLink(sourceNodeId, serviceNodeId, "gateway-route");
       });
     }
   });
@@ -1940,10 +2259,8 @@ function applyFocusedRelationLayout(
 
   const minX = Math.min(...layoutNodes.map((node) => node.position.x));
   const minY = Math.min(...layoutNodes.map((node) => node.position.y));
-  const maxX = Math.max(
-    ...layoutNodes.map((node) => node.position.x + (typeof node.width === "number" ? node.width : NODE_W)),
-  );
-  const maxY = Math.max(...layoutNodes.map((node) => node.position.y + estimateNodeHeight(node)));
+  const maxX = Math.max(...layoutNodes.map((node) => node.position.x + getNodeWidth(node)));
+  const maxY = Math.max(...layoutNodes.map((node) => node.position.y + getNodeHeight(node)));
 
   const offsetX = 78 - minX;
   const offsetY = 58 - minY;
@@ -2147,10 +2464,12 @@ const TopoNode = memo(({ data, selected }: NodeProps<TopoNodeData>) => {
   const isLaneNode = raw?.layoutLane === true;
   const isGroupPanelNode = raw?.layoutGroupPanel === true;
   const isNamespaceNode = data.tokenKey === "namespace" && !isLaneNode;
-  const laneWidth = typeof raw?.layoutWidth === "number" ? raw.layoutWidth : NODE_W;
-  const laneHeight = typeof raw?.layoutHeight === "number" ? raw.layoutHeight : NODE_H;
-  const namespaceWidth = 278;
-  const namespaceHeight = 138;
+  const nodeSize = estimateNodeSizeFromData(data);
+  const nodeWidth = nodeSize.width;
+  const nodeHeight = nodeSize.height;
+  const labelLines = estimateLabelLines(data.label, nodeWidth, data.tokenKey);
+  const labelCapacity = Math.max(16, Math.floor(Math.max(72, nodeWidth - 28) / NODE_LABEL_CHAR_W) * labelLines - 2);
+  const displayLabel = countDisplayUnits(data.label) > labelCapacity ? middleEllipsize(data.label, labelCapacity) : data.label;
   const groupCount = typeof raw?.podCount === "number" ? raw.podCount : null;
   const readyCount = typeof raw?.readyPods === "number" ? raw.readyPods : null;
   const pendingCount = typeof raw?.pendingPods === "number" ? raw.pendingPods : 0;
@@ -2175,9 +2494,13 @@ const TopoNode = memo(({ data, selected }: NodeProps<TopoNodeData>) => {
 
   return (
     <div
+      className={`topology-node-card topology-node-card--${data.tokenKey} ${
+        selected ? "is-selected" : ""
+      } ${isGroupNode ? "is-group" : ""} ${isNamespaceNode ? "is-namespace" : ""}`}
+      title={`${data.typeLabel}: ${data.label}${data.caption ? ` (${data.caption})` : ""}`}
       style={{
-        width: isLaneNode ? laneWidth : isNamespaceNode ? namespaceWidth : NODE_W,
-        minHeight: isLaneNode ? laneHeight : isNamespaceNode ? namespaceHeight : NODE_H,
+        width: nodeWidth,
+        minHeight: nodeHeight,
         borderRadius: isGroupPanelNode ? 22 : isLaneNode ? 12 : isNamespaceNode ? 16 : 10,
         border: isGroupPanelNode
           ? "1px dashed rgba(191, 219, 254, 0.46)"
@@ -2280,11 +2603,15 @@ const TopoNode = memo(({ data, selected }: NodeProps<TopoNodeData>) => {
             fontWeight: 700,
             color: "var(--topology-overview-text)",
             lineHeight: 1.34,
-            letterSpacing: "-0.01em",
-            wordBreak: "break-word",
+            letterSpacing: 0,
+            overflowWrap: "anywhere",
+            wordBreak: ADAPTIVE_NAME_TOKENS.has(data.tokenKey) ? "break-word" : "normal",
+            whiteSpace: "normal",
           }}
+          className="topology-node-card__label"
+          title={data.label}
         >
-          {data.label}
+          {displayLabel}
         </div>
 
         {data.caption ? (
@@ -2501,6 +2828,8 @@ const TopoNode = memo(({ data, selected }: NodeProps<TopoNodeData>) => {
 
 TopoNode.displayName = "TopoNode";
 
+const TOPO_NODE_TYPES: NodeTypes = { topo: TopoNode };
+
 function minimapNodeColor(node: Node<TopoNodeData>): string {
   const raw = node.data.raw as { layoutLane?: unknown } | undefined;
   if (raw?.layoutLane) return "transparent";
@@ -2576,7 +2905,6 @@ function TopologyCanvas({
   onNodeDragStop: () => void;
   isNodeDragging: boolean;
 }) {
-  const [stableNodeTypes] = useState<NodeTypes>(() => ({ topo: TopoNode }));
   const { fitView, zoomIn, zoomOut, setViewport } = useReactFlow();
   const reactFlowWidth = useStore((store) => store.width);
   const reactFlowHeight = useStore((store) => store.height);
@@ -2616,8 +2944,8 @@ function TopologyCanvas({
       const bounds = getNodesBounds(
         targetNodes.map((node) => ({
           ...node,
-          width: typeof node.width === "number" ? node.width : NODE_W,
-          height: typeof node.height === "number" ? node.height : NODE_H,
+          width: getNodeWidth(node),
+          height: getNodeHeight(node),
         })),
       );
 
@@ -2673,8 +3001,8 @@ function TopologyCanvas({
     if (isNodeDragging || nodes.some((node) => node.dragging)) return;
     const focusedNode = nodes.find((node) => node.selected);
     if (!focusedNode) return;
-    const width = typeof focusedNode.width === "number" ? focusedNode.width : NODE_W;
-    const height = typeof focusedNode.height === "number" ? focusedNode.height : NODE_H;
+    const width = getNodeWidth(focusedNode);
+    const height = getNodeHeight(focusedNode);
     const left = focusedNode.position.x * viewport.zoom + viewport.x;
     const top = focusedNode.position.y * viewport.zoom + viewport.y;
     const right = left + width * viewport.zoom;
@@ -2715,7 +3043,7 @@ function TopologyCanvas({
       }}
       onMoveStart={() => suspendAutoViewport(960)}
       onMoveEnd={() => suspendAutoViewport(560)}
-      nodeTypes={stableNodeTypes}
+      nodeTypes={TOPO_NODE_TYPES}
       minZoom={0.08}
       maxZoom={4}
       autoPanOnNodeDrag={false}
@@ -2933,14 +3261,9 @@ function NodeDetailPanel({
           </Title>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {canOpenResourceDetail ? (
+          {!isGroupNode && canOpenResourceDetail ? (
             <Button size="small" type="primary" onClick={onOpenResourceDetail}>
-              完整详情
-            </Button>
-          ) : null}
-          {canOpenResourceYaml ? (
-            <Button size="small" icon={<FileTextOutlined />} onClick={onOpenResourceYaml}>
-              YAML
+              打开详情
             </Button>
           ) : null}
           {!isGroupNode && currentResourceActionLabel ? (
@@ -2955,6 +3278,11 @@ function NodeDetailPanel({
               </span>
             </button>
           ) : null}
+          {canOpenResourceYaml ? (
+            <Button size="small" icon={<FileTextOutlined />} onClick={onOpenResourceYaml}>
+              YAML
+            </Button>
+          ) : null}
           {isGroupNode ? (
             <Button size="small" onClick={onToggleGroup}>
               {isGroupExpanded ? "收起" : "展开"}
@@ -2967,22 +3295,21 @@ function NodeDetailPanel({
       </div>
 
       <div className="topology-detail-panel__badges">
-        <Tag
-          variant="filled"
+        <OpsFilterChip
+          tone="info"
           style={{
             margin: 0,
             background: `${token.border}18`,
             color: token.text,
-            borderRadius: 999,
           }}
         >
           {token.icon} {TOKEN[nodeData.tokenKey].label}
-        </Tag>
+        </OpsFilterChip>
         {nodeData.status ? <RuntimeStatusPill status={nodeData.status} /> : null}
         {nodeData.replicas ? (
-          <Tag variant="filled" style={{ margin: 0, borderRadius: 999 }}>
+          <OpsFilterChip tone="neutral" style={{ margin: 0 }}>
             {nodeData.replicas}
-          </Tag>
+          </OpsFilterChip>
         ) : null}
       </div>
 
@@ -3151,9 +3478,9 @@ function NodeDetailPanel({
                               {item.statusText}
                             </span>
                           ) : null}
-                          <Tag variant="filled" style={{ margin: 0 }}>
+                          <OpsFilterChip tone="neutral" style={{ margin: 0 }}>
                             组内
-                          </Tag>
+                          </OpsFilterChip>
                         </div>
                       </button>
                     );
@@ -3181,9 +3508,9 @@ function NodeDetailPanel({
                     </div>
                     <div className="topology-detail-list__meta">{item.typeLabel}</div>
                   </div>
-                  <Tag variant="filled" style={{ margin: 0 }}>
+                  <OpsFilterChip tone="neutral" style={{ margin: 0 }}>
                     {isGroupNode ? "组内" : "相邻"}
-                  </Tag>
+                  </OpsFilterChip>
                 </button>
               );
             })}
@@ -3195,9 +3522,9 @@ function NodeDetailPanel({
         <div className="topology-detail-section__title">异常</div>
         <div className="topology-anomaly-list">
           {anomalyDistribution.length === 0 ? (
-            <Tag variant="filled" style={{ margin: 0 }}>
+            <OpsFilterChip tone="neutral" style={{ margin: 0 }}>
               0
-            </Tag>
+            </OpsFilterChip>
           ) : (
             anomalyDistribution.map((item) => (
               <div key={item.label} className="topology-anomaly-list__item">
@@ -3313,18 +3640,26 @@ export default function NetworkTopologyPage() {
     enabled: queryEnabled,
   });
 
+  const { data: podData, isLoading: podLoading, error: podError } = useQuery({
+    queryKey: ["topology-pods", effectiveClusterId],
+    queryFn: () =>
+      getWorkloadsByKind("Pod", { clusterId: effectiveClusterId!, pageSize: 400 }, token!),
+    enabled: queryEnabled,
+  });
+
   const isLoading =
     clustersLoading ||
     networkLoading ||
     gatewayTopologyLoading ||
     deploymentLoading ||
     statefulSetLoading ||
-    daemonSetLoading;
+    daemonSetLoading ||
+    podLoading;
   const clusterDataUnavailable =
     !isLoading &&
     !!effectiveClusterId &&
-    (!!networkError || !!gatewayTopologyError || !!deploymentError || !!statefulSetError || !!daemonSetError);
-  const topologyErrors = [networkError, gatewayTopologyError, deploymentError, statefulSetError, daemonSetError].filter(Boolean);
+    (!!networkError || !!gatewayTopologyError || !!deploymentError || !!statefulSetError || !!daemonSetError || !!podError);
+  const topologyErrors = [networkError, gatewayTopologyError, deploymentError, statefulSetError, daemonSetError, podError].filter(Boolean);
   const unavailableCategory = resolveFailureCategory(topologyErrors);
   const unavailableSummary = topologyErrors.map(resolveErrorMessage).join(" | ");
   const partialCoverageSummary = useMemo(() => {
@@ -3350,6 +3685,9 @@ export default function NetworkTopologyPage() {
     (daemonSetData?.items ?? []).forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
+    (podData?.items ?? []).forEach((item) => {
+      if (item.namespace) values.add(item.namespace);
+    });
 
     return [
       { value: ALL_NAMESPACE, label: "全部名称空间" },
@@ -3357,7 +3695,7 @@ export default function NetworkTopologyPage() {
         .sort((left, right) => left.localeCompare(right))
         .map((value) => ({ value, label: value })),
     ];
-  }, [daemonSetData?.items, deploymentData?.items, gatewayTopologyData?.items, networkData?.items, statefulSetData?.items]);
+  }, [daemonSetData?.items, deploymentData?.items, gatewayTopologyData?.items, networkData?.items, podData?.items, statefulSetData?.items]);
 
   const namespaceFilteredNetwork = useMemo(
     () =>
@@ -3394,12 +3732,20 @@ export default function NetworkTopologyPage() {
         : (daemonSetData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
     [daemonSetData?.items, selectedNamespace],
   );
+  const namespaceFilteredPods = useMemo(
+    () =>
+      selectedNamespace === ALL_NAMESPACE
+        ? podData?.items ?? []
+        : (podData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
+    [podData?.items, selectedNamespace],
+  );
   const deferredSelectedCluster = useDeferredValue(selectedCluster);
   const deferredNamespaceFilteredNetwork = useDeferredValue(namespaceFilteredNetwork);
   const deferredNamespaceFilteredGatewayTopology = useDeferredValue(namespaceFilteredGatewayTopology);
   const deferredNamespaceFilteredDeployments = useDeferredValue(namespaceFilteredDeployments);
   const deferredNamespaceFilteredStatefulSets = useDeferredValue(namespaceFilteredStatefulSets);
   const deferredNamespaceFilteredDaemonSets = useDeferredValue(namespaceFilteredDaemonSets);
+  const deferredNamespaceFilteredPods = useDeferredValue(namespaceFilteredPods);
 
   useEffect(() => {
     if (!deferredSelectedCluster) return;
@@ -3412,6 +3758,7 @@ export default function NetworkTopologyPage() {
       deferredNamespaceFilteredDeployments,
       deferredNamespaceFilteredStatefulSets,
       deferredNamespaceFilteredDaemonSets,
+      deferredNamespaceFilteredPods,
       groupMode,
     );
     const raf = window.requestAnimationFrame(() => {
@@ -3432,6 +3779,7 @@ export default function NetworkTopologyPage() {
     deferredNamespaceFilteredDeployments,
     deferredNamespaceFilteredStatefulSets,
     deferredNamespaceFilteredDaemonSets,
+    deferredNamespaceFilteredPods,
     groupMode,
     setNodes,
     setEdges,
@@ -4075,19 +4423,19 @@ export default function NetworkTopologyPage() {
 
   const quickLinkDefinitions = useMemo(
     () => [
-      { key: "service", label: "前往 Service 页面", path: "/network/services" },
-      { key: "endpoints", label: "前往 Endpoints 页面", path: "/network/endpoints" },
-      { key: "endpointslice", label: "前往 EndpointSlice 页面", path: "/network/endpointslices" },
-      { key: "ingress", label: "前往 Ingress 页面", path: "/network/ingress" },
-      { key: "ingressroute", label: "前往 IngressRoute 页面", path: "/network/ingressroute" },
-      { key: "networkpolicy", label: "前往 NetworkPolicy 页面", path: "/network/networkpolicy" },
-      { key: "gatewayclass", label: "前往 Gateway API 页面", path: "/network/gateway-api?kind=gatewayclass" },
-      { key: "gateway", label: "前往 Gateway API 页面", path: "/network/gateway-api?kind=gateway" },
-      { key: "httproute", label: "前往 Gateway API 页面", path: "/network/gateway-api?kind=httproute" },
-      { key: "deployment", label: "前往 Deployment 页面", path: "/workloads/deployments" },
-      { key: "statefulset", label: "前往 StatefulSet 页面", path: "/workloads/statefulsets" },
-      { key: "daemonset", label: "前往 DaemonSet 页面", path: "/workloads/daemonsets" },
-      { key: "pod", label: "前往 Pod 页面", path: "/workloads/pods" },
+      { key: "service", label: "前往 Service 列表", path: "/network/services" },
+      { key: "endpoints", label: "前往 Endpoints 列表", path: "/network/endpoints" },
+      { key: "endpointslice", label: "前往 EndpointSlice 列表", path: "/network/endpointslices" },
+      { key: "ingress", label: "前往 Ingress 列表", path: "/network/ingress" },
+      { key: "ingressroute", label: "前往 IngressRoute 列表", path: "/network/ingressroute" },
+      { key: "networkpolicy", label: "前往 NetworkPolicy 列表", path: "/network/networkpolicy" },
+      { key: "gatewayclass", label: "前往 Gateway API 列表", path: "/network/gateway-api?kind=gatewayclass" },
+      { key: "gateway", label: "前往 Gateway API 列表", path: "/network/gateway-api?kind=gateway" },
+      { key: "httproute", label: "前往 Gateway API 列表", path: "/network/gateway-api?kind=httproute" },
+      { key: "deployment", label: "前往 Deployment 列表", path: "/workloads/deployments" },
+      { key: "statefulset", label: "前往 StatefulSet 列表", path: "/workloads/statefulsets" },
+      { key: "daemonset", label: "前往 DaemonSet 列表", path: "/workloads/daemonsets" },
+      { key: "pod", label: "前往 Pod 列表", path: "/workloads/pods" },
     ],
     [],
   );
@@ -4420,7 +4768,11 @@ export default function NetworkTopologyPage() {
   );
 
   const resourceFocusPanel = (
-    <div className="topology-popover-panel topology-popover-panel--resource-focus">
+    <OpsPopoverPanel
+      title="资源类型"
+      subtitle="按资源域筛选图谱"
+      className="topology-popover-panel topology-popover-panel--resource-focus"
+    >
       <div>
         <div className="topology-resource-tree__toolbar">
           <div
@@ -4501,9 +4853,9 @@ export default function NetworkTopologyPage() {
           </div>
           <div className={`topology-resource-tree__items ${expandedResourceDomains.includes(section.domain) ? "is-expanded" : "is-collapsed"}`}>
             {section.items.length === 0 ? (
-              <Tag variant="filled" color="default" style={{ margin: 0 }}>
+              <OpsFilterChip tone="neutral" style={{ margin: 0 }}>
                 当前范围无资源
-              </Tag>
+              </OpsFilterChip>
             ) : (
               section.items.map((item) => (
                 <button
@@ -4528,7 +4880,7 @@ export default function NetworkTopologyPage() {
           </div>
         </div>
       ))}
-    </div>
+    </OpsPopoverPanel>
   );
   const selectedClusterLabel =
     clustersData?.items?.find((item) => item.id === effectiveClusterId)?.name ?? "选择集群";
@@ -4564,7 +4916,7 @@ export default function NetworkTopologyPage() {
   };
 
   const clusterPanel = (
-    <div className="topology-popover-panel topology-popover-panel--compact">
+    <OpsPopoverPanel title="集群" subtitle="切换拓扑范围" className="topology-popover-panel topology-popover-panel--compact">
       {(clustersData?.items ?? []).map((item) => (
         <button
           key={item.id}
@@ -4583,11 +4935,15 @@ export default function NetworkTopologyPage() {
           </span>
         </button>
       ))}
-    </div>
+    </OpsPopoverPanel>
   );
 
   const namespacePanel = (
-    <div className="topology-popover-panel topology-popover-panel--compact topology-popover-panel--scroll">
+    <OpsPopoverPanel
+      title="名称空间"
+      subtitle="按 namespace 过滤"
+      className="topology-popover-panel topology-popover-panel--compact topology-popover-panel--scroll"
+    >
       {namespaceOptions.map((item) => (
         <button
           key={item.value}
@@ -4606,11 +4962,11 @@ export default function NetworkTopologyPage() {
           </span>
         </button>
       ))}
-    </div>
+    </OpsPopoverPanel>
   );
 
   const groupModePanel = (
-    <div className="topology-popover-panel topology-popover-panel--narrow">
+    <OpsPopoverPanel title="分组方式" subtitle="调整聚类维度" className="topology-popover-panel topology-popover-panel--narrow">
       {GROUP_MODE_ITEMS.map((item) => (
         <button
           key={item.value}
@@ -4629,7 +4985,7 @@ export default function NetworkTopologyPage() {
           </span>
         </button>
       ))}
-    </div>
+    </OpsPopoverPanel>
   );
 
   return (
@@ -4770,10 +5126,10 @@ export default function NetworkTopologyPage() {
             </div>
 
             <div className="topology-toolbar-section topology-toolbar-section--compact">
-              <Button size="small" icon={<ReloadOutlined />} onClick={handleRefresh} loading={networkLoading && isLoading}>
+              <OpsIconActionButton size="small" icon={<ReloadOutlined />} onClick={handleRefresh} loading={networkLoading && isLoading}>
                 刷新数据
-              </Button>
-              <Button size="small" onClick={handleResetView}>回到全局</Button>
+              </OpsIconActionButton>
+              <OpsIconActionButton size="small" onClick={handleResetView}>回到全局</OpsIconActionButton>
               <ZoomControls onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onFitView={handleFitView} />
             </div>
           </div>
@@ -4785,9 +5141,9 @@ export default function NetworkTopologyPage() {
             <div className="topology-canvas-stage__body">
               <div className="topology-canvas-stage__breadcrumbs">
                 {breadcrumbItems.length === 0 ? (
-                  <Tag variant="filled" color="default" style={{ margin: 0 }}>
+                  <OpsFilterChip tone="neutral" style={{ margin: 0 }}>
                     Global
-                  </Tag>
+                  </OpsFilterChip>
                 ) : (
                   breadcrumbItems.map((item, index) => (
                     <Button

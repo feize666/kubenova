@@ -38,6 +38,7 @@ describe('StorageService list online gate', () => {
     return {
       service,
       storageRepository,
+      clustersService,
       clusterSyncService,
       clusterHealthService,
     };
@@ -75,6 +76,74 @@ describe('StorageService list online gate', () => {
     expect(storageRepository.list).toHaveBeenCalledWith(
       expect.objectContaining({ clusterId: undefined, clusterIds: ['c-1'] }),
     );
+  });
+
+  it('triggers storage sync for all readable clusters when clusterId is absent', async () => {
+    const {
+      service,
+      storageRepository,
+      clustersService,
+      clusterHealthService,
+      clusterSyncService,
+    } = build();
+    (
+      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
+    ).mockResolvedValue(['c-1', 'c-2']);
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
+    (clusterSyncService.syncCluster as jest.Mock).mockResolvedValue({
+      errors: [],
+    });
+    (storageRepository.list as jest.Mock).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 20,
+    });
+
+    await service.list({ keyword: 'pvc' });
+    await Promise.resolve();
+
+    expect(clusterSyncService.syncCluster).toHaveBeenCalledTimes(2);
+    expect(clusterSyncService.syncCluster).toHaveBeenCalledWith(
+      'c-1',
+      'kubeconfig',
+    );
+    expect(clusterSyncService.syncCluster).toHaveBeenCalledWith(
+      'c-2',
+      'kubeconfig',
+    );
+  });
+
+  it('waits for foreground storage sync before reading repository data', async () => {
+    const {
+      service,
+      storageRepository,
+      clustersService,
+      clusterHealthService,
+      clusterSyncService,
+    } = build();
+    const calls: string[] = [];
+    (
+      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
+    ).mockResolvedValue(['c-1']);
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
+    (clusterSyncService.syncCluster as jest.Mock).mockImplementation(async () => {
+      calls.push('sync');
+      return { errors: [] };
+    });
+    (storageRepository.list as jest.Mock).mockImplementation(async () => {
+      calls.push('list');
+      return {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+      };
+    });
+
+    await service.list({ sync: 'foreground' });
+
+    expect(calls).toEqual(['sync', 'list']);
   });
 
   it('asserts online for explicit clusterId and can skip sync', async () => {

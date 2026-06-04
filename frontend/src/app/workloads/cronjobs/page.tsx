@@ -12,7 +12,6 @@ import {
   Modal,
   Select,
   Space,
-  Tag,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
@@ -55,11 +54,12 @@ import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
+import { OpsStatusTag } from "@/components/ops/ops-status";
 
 function stateTag(state: string) {
-  if (state === "active") return <Tag color="green">调度中</Tag>;
-  if (state === "disabled") return <Tag color="gold">暂停</Tag>;
-  return <Tag color="red">已删除</Tag>;
+  if (state === "active") return <OpsStatusTag tone="success">调度中</OpsStatusTag>;
+  if (state === "disabled") return <OpsStatusTag tone="warning">暂停</OpsStatusTag>;
+  return <OpsStatusTag tone="danger">已删除</OpsStatusTag>;
 }
 
 const STATE_FILTER_OPTIONS = [

@@ -9,7 +9,6 @@ import {
   Modal,
   Select,
   Space,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -21,6 +20,7 @@ import {
   parseResourceSearchInput,
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { OpsFilterChip } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
@@ -336,7 +336,7 @@ export default function ServicesPage() {
       key: "kind",
       filter: { type: "text", placeholder: "类型" },
       width: TABLE_COL_WIDTH.type,
-      render: () => <Tag color="blue">Service</Tag>,
+      render: () => <OpsFilterChip tone="info">Service</OpsFilterChip>,
     },
     {
       title: "创建时间",

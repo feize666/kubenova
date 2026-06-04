@@ -36,6 +36,7 @@ export interface StorageListParams {
   pageSize?: number;
   sortBy?: string;
   sortOrder?: SortOrder;
+  sync?: 'false' | 'true' | 'foreground';
 }
 
 export interface CreateStorageResourcePayload {
@@ -97,6 +98,7 @@ export function getStorageResources(params: StorageListParams = {}, token?: stri
   if (params.pageSize) query.pageSize = params.pageSize;
   if (params.sortBy) query.sortBy = params.sortBy;
   if (params.sortOrder) query.sortOrder = params.sortOrder;
+  if (params.sync) query.sync = params.sync;
   return apiRequest<StorageListResponse>('/api/storage', { query, token });
 }
 

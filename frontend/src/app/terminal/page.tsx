@@ -12,7 +12,7 @@ import {
   LoadingOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { App, Button, Card, Select, Space, Tag, Tooltip, Typography, theme } from "antd";
+import { App, Button, Card, Select, Space, Tooltip, Typography, theme } from "antd";
 import { ApiError } from "@/lib/api/client";
 import { getClusters } from "@/lib/api/clusters";
 import { createRuntimeSession, resolveSafeRuntimeReturnTo, type CreateRuntimeSessionResponse } from "@/lib/api/runtime";
@@ -31,6 +31,7 @@ import {
   type TerminalParsedMessage,
 } from "@/lib/ws/terminal";
 import { useAuth } from "@/components/auth-context";
+import { OpsFilterChip, OpsStatusTag, type OpsStatusTone } from "@/components/ops";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -54,10 +55,10 @@ const STATUS_LABEL: Record<TerminalConnectionStatus, string> = {
   disconnected: "离线",
 };
 
-const STATUS_COLOR: Record<TerminalConnectionStatus, string> = {
+const STATUS_TONE: Record<TerminalConnectionStatus, OpsStatusTone> = {
   connecting: "processing",
   connected: "success",
-  disconnected: "default",
+  disconnected: "neutral",
 };
 
 const MAX_RECONNECTS = 12;
@@ -842,8 +843,8 @@ export default function TerminalPage() {
                 <Typography.Title level={3} style={{ margin: 0 }}>
                   Terminal Workspace
                 </Typography.Title>
-                <Tag color={STATUS_COLOR[status]}>{STATUS_LABEL[status]}</Tag>
-                {podPhase ? <Tag color={podPhase === "Running" ? "success" : "warning"}>Pod {podPhase}</Tag> : null}
+                <OpsStatusTag tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</OpsStatusTag>
+                {podPhase ? <OpsStatusTag tone={podPhase === "Running" ? "success" : "warning"}>Pod {podPhase}</OpsStatusTag> : null}
               </Space>
               <Typography.Text type="secondary">
                 {clusterDisplayName} / {targetBase.namespace || "-"} / {targetBase.pod || "-"} · 来源 {sourceLabel}
@@ -886,14 +887,14 @@ export default function TerminalPage() {
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Tag variant="filled">Cluster {clusterDisplayName}</Tag>
-            <Tag variant="filled">Container {selectedContainer || "-"}</Tag>
+            <OpsFilterChip tone="neutral">Cluster {clusterDisplayName}</OpsFilterChip>
+            <OpsFilterChip tone="neutral">Container {selectedContainer || "-"}</OpsFilterChip>
             <Tooltip title={sessionInfo?.gatewayWsUrl ? sanitizeWsUrlForDisplay(sessionInfo.gatewayWsUrl) : "未创建"}>
-              <Tag variant="filled" color="blue">Gateway {sessionInfo?.sessionId ? "已绑定" : "未创建"}</Tag>
+              <OpsFilterChip tone="info">Gateway {sessionInfo?.sessionId ? "已绑定" : "未创建"}</OpsFilterChip>
             </Tooltip>
-            <Tag variant="filled">TTL {formatExpiry(sessionInfo?.expiresAtMs)}</Tag>
-            {sessionInfo?.sessionId ? <Tag variant="filled">Session {sessionInfo.sessionId.slice(0, 8)}</Tag> : null}
-            {sessionInfo?.reconnectable === false ? <Tag color="warning">不可重连</Tag> : null}
+            <OpsFilterChip tone="neutral">TTL {formatExpiry(sessionInfo?.expiresAtMs)}</OpsFilterChip>
+            {sessionInfo?.sessionId ? <OpsFilterChip tone="neutral">Session {sessionInfo.sessionId.slice(0, 8)}</OpsFilterChip> : null}
+            {sessionInfo?.reconnectable === false ? <OpsFilterChip tone="warning">不可重连</OpsFilterChip> : null}
           </div>
         </div>
 

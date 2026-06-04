@@ -9,7 +9,6 @@ import {
   Modal,
   Select,
   Space,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -21,6 +20,7 @@ import {
   parseResourceSearchInput,
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { OpsFilterChip } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
@@ -39,7 +39,7 @@ import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type Head
 import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -350,7 +350,6 @@ export default function IngressPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters) &&
           textMatches(item.name, getTextFilter(tableFilters, "name")) &&
           textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
@@ -445,7 +444,7 @@ export default function IngressPage() {
         return (
           <Space size={[4, 4]} wrap>
             <Typography.Text ellipsis={{ tooltip: hosts[0] }}>{hosts[0]}</Typography.Text>
-            {hosts.length > 1 ? <Tag color="blue">+{hosts.length - 1}</Tag> : null}
+            {hosts.length > 1 ? <OpsFilterChip tone="info">+{hosts.length - 1}</OpsFilterChip> : null}
           </Space>
         );
       },
@@ -461,7 +460,7 @@ export default function IngressPage() {
         return (
           <Space size={[4, 4]} wrap>
             <Typography.Text ellipsis={{ tooltip: paths[0] }}>{paths[0]}</Typography.Text>
-            {paths.length > 1 ? <Tag color="cyan">+{paths.length - 1}</Tag> : null}
+            {paths.length > 1 ? <OpsFilterChip tone="info">+{paths.length - 1}</OpsFilterChip> : null}
           </Space>
         );
       },
@@ -481,7 +480,7 @@ export default function IngressPage() {
             <Typography.Link onClick={() => setDetailTarget({ kind: "Service", id: serviceId })}>
               {primary.serviceName}
             </Typography.Link>
-            {backends.length > 1 ? <Tag color="purple">+{backends.length - 1}</Tag> : null}
+            {backends.length > 1 ? <OpsFilterChip tone="info">+{backends.length - 1}</OpsFilterChip> : null}
           </Space>
         );
       },

@@ -11,11 +11,11 @@ import {
   Modal,
   Select,
   Space,
-  Tag,
   Typography,
 } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { OpsFilterChip } from "@/components/ops";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
@@ -255,7 +255,7 @@ export default function NamespacesPage() {
         return (
           <Space size={[4, 4]} wrap>
             {labels.map(([k, v]) => (
-              <Tag key={`${row.id}-${k}`}>{`${k}=${v}`}</Tag>
+              <OpsFilterChip key={`${row.id}-${k}`} tone="neutral">{`${k}=${v}`}</OpsFilterChip>
             ))}
           </Space>
         );

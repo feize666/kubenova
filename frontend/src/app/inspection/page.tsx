@@ -15,7 +15,6 @@ import {
   Select,
   Space,
   Statistic,
-  Tag,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -24,6 +23,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
+import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import {
   ResourceFilterToolbar,
@@ -64,9 +64,9 @@ const TIME_PRESETS: Array<{ label: string; value: MonitoringTimePreset | "custom
 ];
 
 function severityTag(level: InspectionIssue["severity"]) {
-  if (level === "critical") return <Tag color="red">严重</Tag>;
-  if (level === "warning") return <Tag color="orange">警告</Tag>;
-  return <Tag color="blue">提示</Tag>;
+  if (level === "critical") return <OpsStatusTag tone="critical">严重</OpsStatusTag>;
+  if (level === "warning") return <OpsStatusTag tone="warning">警告</OpsStatusTag>;
+  return <OpsStatusTag tone="info">提示</OpsStatusTag>;
 }
 
 const CATEGORY_LABEL: Record<InspectionIssue["category"], string> = {
@@ -81,12 +81,12 @@ const CATEGORY_LABEL: Record<InspectionIssue["category"], string> = {
 };
 
 function capabilityStatusTag(status: CapabilityBaselineStatus) {
-  if (status === "implemented") return <Tag color="success">已实现</Tag>;
-  if (status === "planned") return <Tag color="processing">规划中</Tag>;
-  if (status === "in-progress") return <Tag color="blue">进行中</Tag>;
-  if (status === "blocked") return <Tag color="red">阻塞</Tag>;
-  if (status === "gap") return <Tag color="warning">待补齐</Tag>;
-  return <Tag>未知</Tag>;
+  if (status === "implemented") return <OpsStatusTag tone="success">已实现</OpsStatusTag>;
+  if (status === "planned") return <OpsStatusTag tone="processing">规划中</OpsStatusTag>;
+  if (status === "in-progress") return <OpsStatusTag tone="info">进行中</OpsStatusTag>;
+  if (status === "blocked") return <OpsStatusTag tone="danger">阻塞</OpsStatusTag>;
+  if (status === "gap") return <OpsStatusTag tone="warning">待补齐</OpsStatusTag>;
+  return <OpsStatusTag tone="unknown">未知</OpsStatusTag>;
 }
 
 function inspectionActionLabel(action: InspectionActionType) {
@@ -411,7 +411,11 @@ export default function InspectionPage() {
       filter: { type: "text", placeholder: "以任务过滤" },
       render: (value: string | null | undefined, record) => {
         if (record.status === "planned") {
-          return value ? <Tag color="processing">{value}</Tag> : <Tag color="error">未关联任务</Tag>;
+          return value ? (
+            <OpsFilterChip tone="info">{value}</OpsFilterChip>
+          ) : (
+            <OpsStatusTag tone="danger">未关联任务</OpsStatusTag>
+          );
         }
         return value || "-";
       },

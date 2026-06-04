@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Card, Form, Input, Modal, Select, Space, Tag, Typography, message } from "antd";
+import { Alert, Card, Form, Input, Modal, Select, Space, Typography, message } from "antd";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
@@ -16,7 +17,7 @@ import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { matchLabelExpressions, parseResourceSearchInput } from "@/components/resource-action-bar";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
-import { getClusterDisplayName, hasKnownCluster } from "@/lib/cluster-display-name";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
@@ -331,7 +332,6 @@ export default function NetworkPolicyPage() {
     () =>
       (data?.items ?? []).filter(
         (item) =>
-          hasKnownCluster(clusterMap, item.clusterId) &&
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters) &&
           textMatches(item.name, getTextFilter(tableFilters, "name")) &&
           textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
@@ -411,7 +411,7 @@ export default function NetworkPolicyPage() {
       width: TABLE_COL_WIDTH.type,
       render: (_: unknown, row: NetworkPolicyResource) => {
         const policyTypes = Array.isArray(row.spec?.policyTypes) ? row.spec?.policyTypes : [];
-        return policyTypes.length > 0 ? <Tag color="blue">{policyTypes.join(", ")}</Tag> : "-";
+        return policyTypes.length > 0 ? <OpsFilterChip tone="info">{policyTypes.join(", ")}</OpsFilterChip> : "-";
       },
     },
     {
@@ -421,7 +421,7 @@ export default function NetworkPolicyPage() {
       width: TABLE_COL_WIDTH.url,
       render: (_: unknown, row: NetworkPolicyResource) => {
         const selector = row.spec?.podSelector && typeof row.spec.podSelector === "object" ? Object.keys(row.spec.podSelector as Record<string, unknown>).length : 0;
-        return selector > 0 ? <Tag color="cyan">已配置</Tag> : "-";
+        return selector > 0 ? <OpsStatusTag tone="info">已配置</OpsStatusTag> : "-";
       },
     },
     {

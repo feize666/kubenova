@@ -16,7 +16,6 @@ import {
   Dropdown,
   Modal,
   Space,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -49,16 +48,18 @@ import { buildTerminalRoute } from "@/lib/workloads/terminal";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
+import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
+import { OpsStatusTag } from "@/components/ops/ops-status";
 
 // Pod 状态类型
 type PodPhase = "Running" | "Pending" | "Failed" | "Succeeded" | string;
 
-function podPhaseColor(phase: PodPhase): string {
-  if (phase === "Running") return "green";
-  if (phase === "Pending") return "gold";
-  if (phase === "Failed") return "red";
-  if (phase === "Succeeded") return "blue";
-  return "default";
+function podPhaseTone(phase: PodPhase) {
+  if (phase === "Running") return "success";
+  if (phase === "Pending") return "warning";
+  if (phase === "Failed") return "danger";
+  if (phase === "Succeeded") return "info";
+  return "neutral";
 }
 
 // 从 statusJson 中提取 Pod 扩展字段
@@ -315,6 +316,15 @@ const PHASE_OPTIONS = [
   { label: "Succeeded", value: "Succeeded" },
 ];
 
+function getTextFilter(filters: HeadlampTableFilters, key: string) {
+  const value = filters[key];
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function textMatches(value: unknown, filterValue: string) {
+  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
 export default function PodsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -428,9 +438,22 @@ export default function PodsPage() {
     [podsQuery.data],
   );
 
-  // Client-side filtering only applies to labels on the current backend page.
+  // Client-side filtering applies to the current backend page.
   const tableData = useMemo<PodRow[]>(() => {
+    const nameFilter = getTextFilter(tableFilters, "name");
+    const clusterFilter = getTextFilter(tableFilters, "clusterId");
+    const namespaceFilter = getTextFilter(tableFilters, "namespace");
+    const podIpFilter = getTextFilter(tableFilters, "podIP");
+    const nodeNameFilter = getTextFilter(tableFilters, "nodeName");
     let nextRows = [...rows];
+    nextRows = nextRows.filter(
+      (row) =>
+        textMatches(row.name, nameFilter) &&
+        textMatches(`${row.clusterId} ${getClusterDisplayName(clusterMap, row.clusterId)}`, clusterFilter) &&
+        textMatches(row.namespace, namespaceFilter) &&
+        textMatches(row.podIP, podIpFilter) &&
+        textMatches(row.nodeName, nodeNameFilter),
+    );
     if (phaseFilter) nextRows = nextRows.filter((row) => row.phase === phaseFilter);
     if (mergedFilters.length > 0) {
       nextRows = nextRows.filter((row) => {
@@ -442,7 +465,7 @@ export default function PodsPage() {
       });
     }
     return nextRows;
-  }, [mergedFilters, phaseFilter, rows]);
+  }, [clusterMap, mergedFilters, phaseFilter, rows, tableFilters]);
   const displayedRows = useMemo<PodRow[]>(() => {
     const rowsToSort = [...tableData];
     if (!sortBy || !sortOrder) {
@@ -579,9 +602,9 @@ export default function PodsPage() {
     if (!row.usageAvailable || value === null) {
       return (
         <Space orientation="vertical" size={2} style={{ width: "100%", alignItems: "flex-start" }}>
-          <Tag color="default" style={{ marginInlineEnd: 0 }}>
+          <OpsFilterChip tone="neutral" style={{ marginInlineEnd: 0 }}>
             无可用指标
-          </Tag>
+          </OpsFilterChip>
           <Typography.Text type="secondary" style={{ fontSize: 11 }}>
             {row.usageNote ?? "等待同步实时指标"}
           </Typography.Text>
@@ -631,6 +654,7 @@ export default function PodsPage() {
       title: "集群",
       dataIndex: "clusterId",
       key: "clusterId",
+      required: true,
       filter: { type: "text", placeholder: "以集群过滤" },
       width: TABLE_COL_WIDTH.cluster,
       align: "left",
@@ -668,7 +692,7 @@ export default function PodsPage() {
         options: PHASE_OPTIONS.filter((item) => item.value).map((item) => ({ label: item.label, value: item.value })),
       },
       ...getSortableColumnProps("phase"),
-      render: (phase: string) => <Tag color={podPhaseColor(phase)}>{phase}</Tag>,
+      render: (phase: string) => <OpsStatusTag tone={podPhaseTone(phase)}>{phase}</OpsStatusTag>,
     },
     {
       title: "CPU 使用率",

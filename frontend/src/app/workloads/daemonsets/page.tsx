@@ -27,7 +27,6 @@ import {
   Select,
   Space,
   Switch,
-  Tag,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
@@ -74,11 +73,12 @@ import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } fro
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
+import { OpsStatusTag } from "@/components/ops/ops-status";
 
 function stateTag(state: string) {
-  if (state === "active") return <Tag color="green">启用</Tag>;
-  if (state === "disabled") return <Tag color="default">禁用</Tag>;
-  return <Tag color="red">已删除</Tag>;
+  if (state === "active") return <OpsStatusTag tone="success">启用</OpsStatusTag>;
+  if (state === "disabled") return <OpsStatusTag tone="neutral">禁用</OpsStatusTag>;
+  return <OpsStatusTag tone="danger">已删除</OpsStatusTag>;
 }
 
 const STATE_FILTER_OPTIONS = [

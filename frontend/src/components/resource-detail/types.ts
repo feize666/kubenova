@@ -41,6 +41,7 @@ export interface ResourceDetailDrawerProps {
 export interface ResourceDetailRendererProps {
   detail: ResourceDetailResponse;
   snapshot?: ResourceDetailClientSnapshot;
+  clusterMap?: Record<string, string>;
   onNavigateRequest?: (request: { kind: string; id: string; snapshot?: ResourceDetailClientSnapshot }) => void;
 }
 

@@ -2,12 +2,13 @@
 
 import { PlusOutlined, ReloadOutlined, UserOutlined, CrownOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, Modal, Select, Space, Tag, Typography, theme, Badge } from "antd";
+import { Alert, Button, Card, Form, Input, Modal, Select, Space, Typography, theme, Badge } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { useModuleTableState } from "@/components/module-page";
+import { OpsFilterChip } from "@/components/ops";
 import {
   ResourceActionDropdown,
   type ResourceActionItem,
@@ -408,9 +409,9 @@ export default function UsersPage() {
       ...getSortableColumnProps("role", query.isLoading && !query.data),
       render: (role: string) =>
         role === "admin" ? (
-          <Tag icon={<CrownOutlined />} color="gold">管理员</Tag>
+          <OpsFilterChip icon={<CrownOutlined />} tone="warning">管理员</OpsFilterChip>
         ) : (
-          <Tag icon={<UserOutlined />} color="blue">普通用户</Tag>
+          <OpsFilterChip icon={<UserOutlined />} tone="info">普通用户</OpsFilterChip>
         ),
     },
     {

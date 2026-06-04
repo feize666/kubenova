@@ -3,7 +3,7 @@
 import { PlusOutlined } from "@ant-design/icons";
 import { Button, Tooltip } from "antd";
 import type { ButtonProps } from "antd";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 type ResourceAddButtonProps = Omit<ButtonProps, "children" | "type" | "icon"> & {
   label?: ReactNode;
@@ -18,23 +18,6 @@ function normalizeAddTooltip(text: string): string {
   }
   return value;
 }
-
-const buttonStyle: CSSProperties = {
-  height: 28,
-  borderRadius: 999,
-  paddingInline: 10,
-  fontWeight: 700,
-  letterSpacing: 0.2,
-  borderColor: "var(--topology-jump-button-border)",
-  background: "var(--topology-jump-button-bg)",
-  color: "var(--topology-jump-button-text)",
-  boxShadow: "var(--topology-jump-button-shadow)",
-};
-
-const iconStyle: CSSProperties = {
-  fontSize: 11,
-  color: "var(--topology-jump-button-icon)",
-};
 
 export function ResourceAddButton({
   label = "+",
@@ -54,14 +37,11 @@ export function ResourceAddButton({
     <Button
       {...props}
       type="default"
-      icon={<PlusOutlined style={iconStyle} />}
-      style={{
-        ...buttonStyle,
-        minWidth: compact ? 28 : undefined,
-        paddingInline: compact ? 0 : 12,
-        ...(style ?? {}),
-      }}
-      className={["resource-add-button", props.className].filter(Boolean).join(" ") || undefined}
+      icon={<PlusOutlined />}
+      style={style}
+      className={["resource-add-button", compact ? "resource-add-button--compact" : "", props.className]
+        .filter(Boolean)
+        .join(" ") || undefined}
     >
       {compact ? null : label}
     </Button>
