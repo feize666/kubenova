@@ -18,7 +18,7 @@ import {
   SunFilled,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Avatar, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Skeleton, Space } from "antd";
+import { Avatar, Breadcrumb, Dropdown, Input, Layout, Menu, Skeleton, Space } from "antd";
 import type { MenuProps } from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -29,7 +29,8 @@ import { useThemeMode } from "@/components/theme-context";
 import { listCapabilities } from "@/lib/api/capabilities";
 import { buildLoginRoute, buildInternalReturnTo } from "@/lib/login-return";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
-import { queryKeys } from "@/lib/query";
+import { OpsIconActionButton } from "@/components/ops";
+import { QUERY_CACHE_TIMINGS, queryKeys } from "@/lib/query";
 
 const { Header, Sider, Content } = Layout;
 const SIDEBAR_OPEN_SECTION_KEY = "kubenova.nav.sidebar.openSection.v2";
@@ -48,6 +49,8 @@ const SIDEBAR_SECTION_ORDER = [
   "section-system-management",
 ] as const;
 const PREFETCHABLE_NAV_PATHS = new Set(navSections.flatMap((section) => [section.path, ...section.items.map((item) => item.path)].filter(Boolean) as string[]));
+const MAX_REMEMBERED_PREFETCH_PATHS = 32;
+const MAX_IDLE_PREFETCH_PATHS = 3;
 
 type SidebarOpenSectionKey = string | null;
 
@@ -155,6 +158,15 @@ function scheduleIdleTask(task: () => void, timeout = 900) {
   return () => window.clearTimeout(id);
 }
 
+function rememberPrefetchedPath(paths: Set<string>, path: string) {
+  paths.add(path);
+  while (paths.size > MAX_REMEMBERED_PREFETCH_PATHS) {
+    const oldest = paths.values().next().value;
+    if (!oldest) break;
+    paths.delete(oldest);
+  }
+}
+
 function shouldHideIssueLauncher(node: HTMLElement) {
   const text = (node.innerText || node.textContent || "").trim().toLowerCase();
   if (!text || !/issues?/.test(text)) {
@@ -231,22 +243,40 @@ const AppSider = memo(function AppSider({
   const [sidebarStateRestored, setSidebarStateRestored] = useState(false);
   const previousPathnameRef = useRef(pathname);
   const prefetchedPathsRef = useRef(new Set<string>());
+  const pendingPrefetchPathsRef = useRef(new Set<string>());
   const router = useRouter();
   const effectiveOpenSectionKey = openSectionKey && sectionKeySet.has(openSectionKey) ? openSectionKey : null;
   const expandedSectionKeys = effectiveOpenSectionKey ? [effectiveOpenSectionKey] : [];
-  const prefetchPath = useCallback((path: string) => {
-    if (!PREFETCHABLE_NAV_PATHS.has(path) || prefetchedPathsRef.current.has(path)) {
+  const prefetchPath = useCallback((path: string, timeout = 700) => {
+    if (
+      !PREFETCHABLE_NAV_PATHS.has(path) ||
+      prefetchedPathsRef.current.has(path) ||
+      pendingPrefetchPathsRef.current.has(path)
+    ) {
       return;
     }
-    prefetchedPathsRef.current.add(path);
+    pendingPrefetchPathsRef.current.add(path);
     scheduleIdleTask(() => {
+      pendingPrefetchPathsRef.current.delete(path);
       try {
         router.prefetch(path);
+        rememberPrefetchedPath(prefetchedPathsRef.current, path);
       } catch {
         prefetchedPathsRef.current.delete(path);
       }
-    });
+    }, timeout);
   }, [router]);
+  const activeSectionPrefetchPaths = useMemo(() => {
+    if (!activeSectionKey) {
+      return [];
+    }
+    const section = visibleSections.find((item) => item.key === activeSectionKey);
+    if (!section) {
+      return [];
+    }
+    const paths = section.items.length > 0 ? section.items.map((item) => item.path) : section.path ? [section.path] : [];
+    return paths.filter((path) => path !== pathname).slice(0, MAX_IDLE_PREFETCH_PATHS);
+  }, [activeSectionKey, pathname, visibleSections]);
 
   // items 根据 role 过滤后生成
   const items: MenuProps["items"] = useMemo(
@@ -262,10 +292,10 @@ const AppSider = memo(function AppSider({
             label: (
               <Link
                 href={section.path}
-                prefetch
+                prefetch={false}
                 style={{ display: "block" }}
-                onMouseEnter={() => prefetchPath(section.path as string)}
-                onFocus={() => prefetchPath(section.path as string)}
+                onMouseEnter={() => prefetchPath(section.path as string, 250)}
+                onFocus={() => prefetchPath(section.path as string, 250)}
               >
                 <span className="app-sidebar-menu__label">{section.label}</span>
               </Link>
@@ -290,10 +320,10 @@ const AppSider = memo(function AppSider({
             label: (
               <Link
                 href={item.path}
-                prefetch
+                prefetch={false}
                 style={{ display: "block" }}
-                onMouseEnter={() => prefetchPath(item.path)}
-                onFocus={() => prefetchPath(item.path)}
+                onMouseEnter={() => prefetchPath(item.path, 250)}
+                onFocus={() => prefetchPath(item.path, 250)}
               >
                 <span className="app-sidebar-menu__label app-sidebar-menu__label--nested">
                   {getNavDisplayLabel(item)}
@@ -345,6 +375,15 @@ const AppSider = memo(function AppSider({
     const timer = window.setTimeout(() => setOpenSectionKey(activeExpandableSectionKey ?? null), 0);
     return () => window.clearTimeout(timer);
   }, [activeExpandableSectionKey, pathname, sidebarStateRestored]);
+
+  useEffect(() => {
+    if (!sidebarStateRestored || activeSectionPrefetchPaths.length === 0) {
+      return undefined;
+    }
+    return scheduleIdleTask(() => {
+      activeSectionPrefetchPaths.forEach((path) => prefetchPath(path, 450));
+    }, 1400);
+  }, [activeSectionPrefetchPaths, prefetchPath, sidebarStateRestored]);
 
   useEffect(() => {
     if (!sidebarStateRestored) {
@@ -451,8 +490,9 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     queryKey: queryKeys.capabilities.list(accessToken),
     queryFn: () => listCapabilities(accessToken),
     enabled: !isLoginPage && !isInitializing && isAuthenticated && Boolean(accessToken),
-    staleTime: 5 * 60 * 1000,
-    refetchInterval: 60_000,
+    staleTime: QUERY_CACHE_TIMINGS.shellCapabilityStaleTimeMs,
+    gcTime: QUERY_CACHE_TIMINGS.shellCapabilityGcTimeMs,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
     refetchOnMount: false,
     refetchOnReconnect: true,
@@ -613,8 +653,9 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               placeholder="搜索资源、日志或告警"
               style={{ width: 280 }}
             />
-            <Button icon={<BellOutlined />}>通知中心</Button>
-            <Button
+            <OpsIconActionButton className="shell-topbar-action" icon={<BellOutlined />}>通知中心</OpsIconActionButton>
+            <OpsIconActionButton
+              className="shell-theme-toggle"
               onClick={toggleTheme}
               style={{
                 background:
@@ -636,7 +677,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               ) : (
                 <><SunFilled style={{ color: "#f59e0b", fontSize: 14 }} /> 浅色</>
               )}
-            </Button>
+            </OpsIconActionButton>
             <Dropdown
               menu={{
                 items: userItems,

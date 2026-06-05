@@ -49,11 +49,22 @@ type AdaptiveWidthOptions = {
 
 type WidthLike = number | string | undefined;
 
+export type AutoFitTableColumnsOptions<T> = {
+  enabled?: boolean;
+  rows?: readonly T[];
+  sampleSize?: number;
+  min?: number;
+  max?: number;
+  fallback?: number;
+  padding?: number;
+};
+
 export type StandardTableLayoutOptions<T> = {
   nameValues?: Array<string | null | undefined>;
   nameWidthOptions?: AdaptiveWidthOptions;
   actionWidth?: number;
   columns?: ColumnsType<T>;
+  autoFit?: boolean | AutoFitTableColumnsOptions<T>;
 };
 
 const DEFAULT_NAME_WIDTH_OPTIONS = {
@@ -62,6 +73,15 @@ const DEFAULT_NAME_WIDTH_OPTIONS = {
   fallback: TABLE_COL_WIDTH.name,
   padding: 64,
 } satisfies Required<AdaptiveWidthOptions>;
+
+const DEFAULT_AUTOFIT_OPTIONS = {
+  enabled: true,
+  sampleSize: 24,
+  min: 96,
+  max: 420,
+  fallback: TABLE_COL_WIDTH.namespace,
+  padding: 48,
+} satisfies Required<Omit<AutoFitTableColumnsOptions<unknown>, "rows">>;
 
 function clampWidth(value: number, min: number, max: number): number {
   return Math.min(Math.max(Math.round(value), min), max);
@@ -102,6 +122,90 @@ function estimateTextWidth(value: string): number {
     width += 9;
   }
   return width;
+}
+
+function resolveTitleText(title: unknown): string {
+  if (typeof title === "string" || typeof title === "number") {
+    return String(title);
+  }
+  return "";
+}
+
+function resolveDataIndexValue<T>(record: T, dataIndex: unknown): unknown {
+  if (!record || typeof record !== "object") {
+    return undefined;
+  }
+
+  const path = Array.isArray(dataIndex) ? dataIndex : typeof dataIndex === "string" ? dataIndex.split(".") : [];
+  return path.reduce<unknown>((current, key) => {
+    if (!current || typeof current !== "object") {
+      return undefined;
+    }
+    return (current as Record<string, unknown>)[String(key)];
+  }, record);
+}
+
+function stringifyCellSample(value: unknown): string {
+  if (value == null) {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 3)
+      .map((item) => stringifyCellSample(item))
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (typeof value === "object") {
+    const named = (value as { name?: unknown; id?: unknown; value?: unknown }).name
+      ?? (value as { id?: unknown }).id
+      ?? (value as { value?: unknown }).value;
+    return stringifyCellSample(named);
+  }
+  return "";
+}
+
+function getAutoFitOptions<T>(
+  options: StandardTableLayoutOptions<T>,
+): Required<Omit<AutoFitTableColumnsOptions<T>, "rows">> & { rows: readonly T[] } {
+  if (typeof options.autoFit === "object") {
+    const autoFit = options.autoFit;
+    return {
+      ...DEFAULT_AUTOFIT_OPTIONS,
+      ...autoFit,
+      enabled: autoFit.enabled ?? DEFAULT_AUTOFIT_OPTIONS.enabled,
+      rows: autoFit.rows ?? [],
+    };
+  }
+  return {
+    ...DEFAULT_AUTOFIT_OPTIONS,
+    enabled: options.autoFit ?? DEFAULT_AUTOFIT_OPTIONS.enabled,
+    rows: [],
+  };
+}
+
+function estimateAutoFitWidth<T>(
+  column: NonNullable<ColumnsType<T>[number]>,
+  options: Required<Omit<AutoFitTableColumnsOptions<T>, "rows">> & { rows: readonly T[] },
+): number | undefined {
+  if (!options.enabled) {
+    return undefined;
+  }
+
+  const dataIndex = (column as { dataIndex?: unknown }).dataIndex;
+  const samples = options.rows.slice(0, options.sampleSize).map((record) => stringifyCellSample(resolveDataIndexValue(record, dataIndex)));
+  const titleWidth = estimateTextWidth(resolveTitleText((column as { title?: unknown }).title));
+  const sampleWidth = samples.reduce((maxWidth, value) => Math.max(maxWidth, estimateTextWidth(value)), 0);
+  const estimated = Math.max(titleWidth, sampleWidth);
+
+  if (estimated <= 0) {
+    return options.fallback;
+  }
+
+  return clampWidth(estimated + options.padding, options.min, options.max);
 }
 
 export function getAdaptiveNameWidth(
@@ -163,11 +267,17 @@ function inferStandardWidth<T>(
   column: NonNullable<ColumnsType<T>[number]>,
   nameWidth: number,
   actionWidth: number,
+  autoFitOptions: Required<Omit<AutoFitTableColumnsOptions<T>, "rows">> & { rows: readonly T[] },
 ): number | undefined {
+  const explicitWidth = normalizeWidth((column as { width?: WidthLike }).width);
+  if (typeof explicitWidth === "number") {
+    return explicitWidth;
+  }
+
   const identity = resolveColumnIdentity(column);
 
   if (!identity) {
-    return undefined;
+    return estimateAutoFitWidth(column, autoFitOptions);
   }
 
   if (matchesAny(identity, ["name", "名称", "卷名称", "服务名称", "仓库名称", "release", "chart"])) {
@@ -240,7 +350,7 @@ function inferStandardWidth<T>(
     return actionWidth;
   }
 
-  return normalizeWidth((column as { width?: WidthLike }).width);
+  return estimateAutoFitWidth(column, autoFitOptions);
 }
 
 export function normalizeResourceTableColumns<T>(
@@ -249,17 +359,36 @@ export function normalizeResourceTableColumns<T>(
 ): ColumnsType<T> {
   const nameWidth = getAdaptiveNameWidth(options.nameValues ?? [], options.nameWidthOptions ?? {});
   const actionWidth = options.actionWidth ?? TABLE_COL_WIDTH.actionCompact;
+  const autoFitOptions = getAutoFitOptions(options);
 
   return columns.map((column) => {
     if (!column || typeof column !== "object") {
       return column;
     }
-    const normalizedWidth = inferStandardWidth(column as NonNullable<ColumnsType<T>[number]>, nameWidth, actionWidth);
+    const identity = resolveColumnIdentity(column as NonNullable<ColumnsType<T>[number]>);
+    const isActionColumn = matchesAny(identity, ["actions", "quick-actions", "操作"]);
+    const normalizedWidth = inferStandardWidth(
+      column as NonNullable<ColumnsType<T>[number]>,
+      nameWidth,
+      actionWidth,
+      autoFitOptions,
+    );
     if (typeof normalizedWidth === "number") {
       return {
         ...column,
         width: normalizedWidth,
         ellipsis: (column as { ellipsis?: boolean }).ellipsis ?? true,
+        className: [isActionColumn ? "resource-table-actions-cell" : undefined, (column as { className?: string }).className]
+          .filter(Boolean)
+          .join(" "),
+      };
+    }
+    if (isActionColumn) {
+      return {
+        ...column,
+        className: ["resource-table-actions-cell", (column as { className?: string }).className]
+          .filter(Boolean)
+          .join(" "),
       };
     }
     return column;

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
+import { useThemeMode } from "@/components/theme-context";
 import { sanitizeInternalReturnTo } from "@/lib/login-return";
 
 type LoginForm = {
@@ -69,8 +70,9 @@ function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated, isInitializing, login, lastRequestId } = useAuth();
+  const { mode } = useThemeMode();
   const { message } = App.useApp();
-  const isDark = false;
+  const isDark = mode === "dark";
   const [submitting, setSubmitting] = useState(false);
   const [apiReachable, setApiReachable] = useState<boolean | null>(null);
   const [apiProbeFailures, setApiProbeFailures] = useState(0);

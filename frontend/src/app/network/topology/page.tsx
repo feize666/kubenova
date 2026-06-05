@@ -19,9 +19,10 @@ import {
 import dagre from "@dagrejs/dagre";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Empty, Popover, Skeleton, Tooltip, Typography } from "antd";
+import type { ButtonProps } from "antd";
 import { useRouter } from "next/navigation";
-import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import { forwardRef, memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -109,37 +110,40 @@ function TopologyReactFlowErrorHandler({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function TopologyFilterPill({
+const TopologyFilterPill = forwardRef<
+  HTMLAnchorElement | HTMLButtonElement,
+  Omit<ButtonProps, "icon" | "value"> & {
+    label: ReactNode;
+    value: ReactNode;
+    icon: ReactNode;
+    meta?: ReactNode;
+    active?: boolean;
+    wide?: boolean;
+    warning?: boolean;
+    toggle?: boolean;
+  }
+>(function TopologyFilterPill({
   label,
   value,
   icon,
   meta,
   active,
-  disabled,
   wide,
   warning,
   toggle,
   style,
-  onClick,
-}: {
-  label: ReactNode;
-  value: ReactNode;
-  icon: ReactNode;
-  meta?: ReactNode;
-  active?: boolean;
-  disabled?: boolean;
-  wide?: boolean;
-  warning?: boolean;
-  toggle?: boolean;
-  style?: CSSProperties;
-  onClick?: () => void;
-}) {
+  className,
+  ...props
+}, ref) {
   return (
     <OpsFilterTriggerButton
+      {...props}
+      ref={ref}
       baseClassName="topology-filter-pill"
       className={[
         toggle ? "topology-filter-pill--toggle" : "topology-filter-pill--interactive",
         wide ? "topology-filter-pill--wide" : undefined,
+        className,
       ].filter(Boolean).join(" ")}
       active={active}
       icon={icon}
@@ -160,12 +164,10 @@ function TopologyFilterPill({
         meta: "topology-filter-pill__meta-content",
       }}
       style={style}
-      disabled={disabled}
-      onClick={onClick}
       value={value}
     />
   );
-}
+});
 
 function DetailFactsGrid({
   items,
@@ -3549,13 +3551,13 @@ function NodeDetailPanel({
       }}
     >
       <div className="topology-detail-panel__header">
-        <div>
+        <div className="topology-detail-panel__heading">
           <div className="topology-detail-panel__eyebrow">{nodeData.typeLabel}</div>
-          <Title level={4} style={{ margin: "4px 0 0" }}>
+          <Title className="topology-detail-panel__title" level={4} style={{ margin: "4px 0 0" }} title={nodeData.label}>
             {nodeData.label}
           </Title>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="topology-detail-panel__actions">
           {!isGroupNode && canOpenResourceDetail ? (
             <OpsIconActionButton size="small" opsTone="primary" onClick={onOpenResourceDetail}>
               打开详情
@@ -5011,11 +5013,38 @@ export default function NetworkTopologyPage() {
     setViewportVersion((current) => current + 1);
   }, []);
 
+  const handleClusterPanelOpenChange = useCallback((open: boolean) => {
+    setClusterPanelOpen(open);
+    if (!open) return;
+    setNamespacePanelOpen(false);
+    setResourceFocusPanelOpen(false);
+    setGroupModePanelOpen(false);
+  }, []);
+
+  const handleNamespacePanelOpenChange = useCallback((open: boolean) => {
+    setNamespacePanelOpen(open);
+    if (!open) return;
+    setClusterPanelOpen(false);
+    setResourceFocusPanelOpen(false);
+    setGroupModePanelOpen(false);
+  }, []);
+
   const handleResourceFocusPanelOpenChange = useCallback((open: boolean) => {
     setResourceFocusPanelOpen(open);
     if (open) {
       setHeavyTopologyRequested(true);
+      setClusterPanelOpen(false);
+      setNamespacePanelOpen(false);
+      setGroupModePanelOpen(false);
     }
+  }, []);
+
+  const handleGroupModePanelOpenChange = useCallback((open: boolean) => {
+    setGroupModePanelOpen(open);
+    if (!open) return;
+    setClusterPanelOpen(false);
+    setNamespacePanelOpen(false);
+    setResourceFocusPanelOpen(false);
   }, []);
 
   const handleSelectAllResourceTypes = useCallback(() => {
@@ -5466,7 +5495,7 @@ export default function NetworkTopologyPage() {
                 trigger="click"
                 placement="bottomLeft"
                 open={clusterPanelOpen}
-                onOpenChange={setClusterPanelOpen}
+                onOpenChange={handleClusterPanelOpenChange}
                 content={clusterPanel}
                 overlayStyle={{ width: "var(--topology-popover-width-compact)", maxWidth: "calc(100vw - 24px)" }}
               >
@@ -5483,7 +5512,7 @@ export default function NetworkTopologyPage() {
                 trigger="click"
                 placement="bottomLeft"
                 open={namespacePanelOpen}
-                onOpenChange={setNamespacePanelOpen}
+                onOpenChange={handleNamespacePanelOpenChange}
                 content={namespacePanel}
                 overlayStyle={{ width: "var(--topology-popover-width-compact)", maxWidth: "calc(100vw - 24px)" }}
               >
@@ -5522,7 +5551,7 @@ export default function NetworkTopologyPage() {
                 trigger="click"
                 placement="bottomLeft"
                 open={groupModePanelOpen}
-                onOpenChange={setGroupModePanelOpen}
+                onOpenChange={handleGroupModePanelOpenChange}
                 content={groupModePanel}
                 overlayStyle={{ width: "var(--topology-popover-width-narrow)", maxWidth: "calc(100vw - 24px)" }}
               >

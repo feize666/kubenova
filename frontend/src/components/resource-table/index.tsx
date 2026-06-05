@@ -101,7 +101,14 @@ export function ResourceTable<T extends object>({
     );
   }
 
-  const normalizedColumns = normalizeResourceTableColumns(columns, layoutOptions);
+  const normalizedLayoutOptions = {
+    ...layoutOptions,
+    autoFit:
+      typeof layoutOptions?.autoFit === "object"
+        ? { rows: restProps.dataSource, ...layoutOptions.autoFit }
+        : { rows: restProps.dataSource, enabled: layoutOptions?.autoFit },
+  };
+  const normalizedColumns = normalizeResourceTableColumns(columns, normalizedLayoutOptions);
   const nextScroll = scroll ?? { x: getStandardResourceTableScrollX(normalizedColumns) };
   const nextLoading = loading ?? buildResourceTableLoading(loadingOptions);
   const isLoading = typeof nextLoading === "boolean" ? nextLoading : Boolean(nextLoading?.spinning);
@@ -171,7 +178,14 @@ function HeadlampResourceTable<T extends object>({
     preferencesClient,
     sort,
   });
-  const normalizedColumns = normalizeResourceTableColumns(table.columns, layoutOptions);
+  const normalizedLayoutOptions = {
+    ...layoutOptions,
+    autoFit:
+      typeof layoutOptions?.autoFit === "object"
+        ? { rows: restProps.dataSource, ...layoutOptions.autoFit }
+        : { rows: restProps.dataSource, enabled: layoutOptions?.autoFit },
+  };
+  const normalizedColumns = normalizeResourceTableColumns(table.columns, normalizedLayoutOptions);
   const nextScroll = scroll ?? { x: getStandardResourceTableScrollX(normalizedColumns) };
   const nextLoading = loading ?? buildResourceTableLoading(loadingOptions);
   const isLoading = typeof nextLoading === "boolean" ? nextLoading : Boolean(nextLoading?.spinning);

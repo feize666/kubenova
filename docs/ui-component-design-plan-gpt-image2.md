@@ -64,7 +64,7 @@ Official prompt summary:
 
 | Layer | Current usage | Design direction |
 | --- | --- | --- |
-| Shell and navigation | AntD `Layout`, `Sider`, `Menu`, top search, theme toggle, notification button, avatar dropdown. | Keep left domain navigation as primary IA. Normalize collapsed/mobile behavior later; keep top bar quiet and utilitarian. |
+| Shell and navigation | AntD `Layout`, `Sider`, `Menu`, top search, avatar dropdown. Theme toggle and notification button now use `OpsIconActionButton`. | Keep left domain navigation as primary IA. Normalize collapsed/mobile behavior later; keep top bar quiet and utilitarian. |
 | Resource pages | Most domain pages use shared `ResourceTable`, shared filters, row action dropdowns, and global detail drawer. | Treat resource list as Level 1 work surface. Standard header, toolbar, table density, row action trigger, empty/degraded state. |
 | Filters | Scope popover, network filters, table global search, table filter row, topology filter pills. `OpsFilterTriggerButton` now covers scope/facet triggers and topology pills with slot classes. | Define one filter grammar: global keyword, cluster/namespace scope, domain facets, table columns. Same active-count badge semantics. |
 | Menus and row actions | `ResourceActionDropdown`, `ResourceRowActions`, `ResourceActionBar`, page-local actions, confirm modal integration. Topology and AI assistant action buttons now route most non-modal actions through `OpsIconActionButton`. | Use one compact trigger style. Keep destructive actions in danger section with confirm copy. |

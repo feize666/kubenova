@@ -318,6 +318,7 @@ export default function InspectionPage() {
       title: "修复建议",
       dataIndex: "suggestion",
       key: "suggestion",
+      width: 420,
       ellipsis: true,
       filter: { type: "text", placeholder: "以建议过滤" },
     },
@@ -325,20 +326,22 @@ export default function InspectionPage() {
       title: "修复动作",
       key: "actions",
       required: true,
-      width: 280,
+      width: 156,
       render: (_, record) => {
         const actions = record.actions ?? [];
         if (actions.length === 0) {
           return "-";
         }
         return (
-          <Space wrap>
+          <Space wrap size={[6, 6]} className="inspection-action-buttons">
             {actions.map((action) => (
               <Button
                 key={`${record.id}-${action.type}`}
+                className="inspection-action-button"
                 size="small"
                 type={action.type === "create-hpa-draft" ? "primary" : "default"}
                 loading={actionMutation.isPending}
+                title={action.label}
                 onClick={() => actionMutation.mutate({ issue: record, action: action.type })}
               >
                 {action.label}
@@ -773,6 +776,16 @@ export default function InspectionPage() {
               setIssuePage(nextPage);
             },
           })}
+          className="inspection-issues-table"
+          layoutOptions={{
+            actionWidth: 156,
+            autoFit: {
+              rows: issuePagedItems,
+              min: 96,
+              max: 420,
+              sampleSize: 12,
+            },
+          }}
         />
       </Card>
 
