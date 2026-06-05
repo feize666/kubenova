@@ -6,14 +6,11 @@ import {
   DeleteOutlined,
   EyeOutlined,
   FileTextOutlined,
-  MoreOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
-  Button,
   Card,
-  Dropdown,
   Modal,
   Space,
   Typography,
@@ -48,6 +45,7 @@ import { buildTerminalRoute } from "@/lib/workloads/terminal";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
+import { OpsActionDropdown } from "@/components/ops/ops-action-dropdown";
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
 import { OpsStatusTag } from "@/components/ops/ops-status";
 
@@ -564,7 +562,7 @@ export default function PodsPage() {
     };
   }
 
-  function buildActionItems(): MenuProps["items"] {
+  function buildActionItems(): NonNullable<MenuProps["items"]> {
     return [
       {
         key: "description",
@@ -756,44 +754,39 @@ export default function PodsPage() {
       fixed: "right",
       align: "left",
       render: (_: unknown, row: PodRow) => (
-        <Dropdown
-          menu={{
-            items: buildActionItems(),
-            onClick: ({ key }) => {
-              if (key === "description") {
-                if (row.id) setDetailTarget({ kind: "Pod", id: row.id });
-                return;
-              }
-              if (key === "logs") {
-                if (row.id) router.push(`/logs?${buildLogsParams(row)}`);
-                return;
-              }
-              if (key === "terminal") {
-                if (row.id) router.push(`/terminal?${buildTerminalParams(row)}`);
-                return;
-              }
-              if (key === "yaml") {
-                if (row.id) setYamlTarget(resolveIdentity(row));
-                return;
-              }
-              if (key === "delete") {
-                Modal.confirm({
-                  title: "确认删除 Pod",
-                  content: `删除 Pod ${row.name} 后将不可恢复`,
-                  okText: "确认",
-                  cancelText: "取消",
-                  okButtonProps: { danger: true },
-                  onOk: () => void handleDelete(row),
-                });
-              }
-            },
+        <OpsActionDropdown
+          items={buildActionItems()}
+          onClick={({ key }) => {
+            if (key === "description") {
+              if (row.id) setDetailTarget({ kind: "Pod", id: row.id });
+              return;
+            }
+            if (key === "logs") {
+              if (row.id) router.push(`/logs?${buildLogsParams(row)}`);
+              return;
+            }
+            if (key === "terminal") {
+              if (row.id) router.push(`/terminal?${buildTerminalParams(row)}`);
+              return;
+            }
+            if (key === "yaml") {
+              if (row.id) setYamlTarget(resolveIdentity(row));
+              return;
+            }
+            if (key === "delete") {
+              Modal.confirm({
+                title: "确认删除 Pod",
+                content: `删除 Pod ${row.name} 后将不可恢复`,
+                okText: "确认",
+                cancelText: "取消",
+                okButtonProps: { danger: true },
+                onOk: () => void handleDelete(row),
+              });
+            }
           }}
-          trigger={["click"]}
+          ariaLabel="操作"
           placement="bottomRight"
-          classNames={{ root: "pod-actions-dropdown" }}
-        >
-          <Button size="small" className="pod-action-trigger" icon={<MoreOutlined />} aria-label="操作" />
-        </Dropdown>
+        />
       ),
     },
   ];
@@ -887,97 +880,6 @@ export default function PodsPage() {
           void podsQuery.refetch();
         }}
       />
-
-      <style>{`
-        .pod-action-trigger.ant-btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          height: 30px;
-          padding: 0 10px;
-          border-radius: 999px;
-          border: 1px solid var(--pod-action-trigger-border);
-          background: var(--pod-action-trigger-bg);
-          color: var(--pod-action-trigger-text);
-          box-shadow: var(--pod-action-trigger-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-          backdrop-filter: blur(14px);
-          transition:
-            transform 0.18s ease,
-            box-shadow 0.18s ease,
-            border-color 0.18s ease,
-            background 0.18s ease;
-        }
-
-        .pod-action-trigger.ant-btn:hover,
-        .pod-action-trigger.ant-btn:focus-visible {
-          border-color: var(--pod-action-trigger-border-hover);
-          background: var(--pod-action-trigger-bg-hover);
-          color: var(--pod-action-trigger-text-hover);
-          box-shadow: var(--pod-action-trigger-shadow-hover), 0 0 0 4px var(--pod-action-trigger-ring), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-        }
-
-        .pod-action-trigger.ant-btn:hover {
-          transform: translateY(-1px);
-        }
-
-        .pod-action-trigger .ant-btn-icon .anticon {
-          color: var(--pod-action-trigger-icon);
-          font-size: 13px;
-        }
-
-        .pod-action-trigger .ant-btn-icon + span {
-          font-weight: 600;
-          letter-spacing: 0.01em;
-        }
-
-        .pod-actions-dropdown .ant-dropdown-menu {
-          min-width: 188px;
-          padding: 8px;
-          border-radius: 16px;
-          border: 1px solid var(--pod-actions-menu-border);
-          background: var(--pod-actions-menu-bg);
-          box-shadow: var(--pod-actions-menu-shadow);
-          backdrop-filter: blur(18px);
-        }
-
-        .pod-actions-dropdown .ant-dropdown-menu-item {
-          min-height: 38px;
-          margin: 2px 0;
-          padding: 8px 12px;
-          border-radius: 12px;
-          color: var(--pod-actions-menu-item-text);
-          transition: background-color 0.18s ease, transform 0.18s ease;
-        }
-
-        .pod-actions-dropdown .ant-dropdown-menu-item:hover {
-          background: var(--pod-actions-menu-item-hover);
-          transform: translateX(1px);
-        }
-
-        .pod-actions-dropdown .ant-dropdown-menu-item-danger:hover {
-          background: var(--pod-actions-menu-item-danger-hover);
-        }
-
-        .pod-actions-dropdown .ant-dropdown-menu-item .ant-dropdown-menu-title-content {
-          font-size: 13px;
-          font-weight: 500;
-        }
-
-        .pod-actions-dropdown .ant-dropdown-menu-item .anticon {
-          font-size: 14px;
-          color: var(--pod-actions-menu-item-icon);
-        }
-
-        .pod-actions-dropdown .ant-dropdown-menu-item-danger .anticon {
-          color: var(--pod-actions-menu-item-danger-icon);
-        }
-
-        .pod-actions-dropdown .ant-dropdown-menu-item-divider {
-          margin: 6px 4px;
-          border-color: rgba(148, 163, 184, 0.16);
-        }
-
-      `}</style>
     </Space>
   );
 }

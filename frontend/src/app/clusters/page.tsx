@@ -20,7 +20,6 @@ import {
   Card,
   Col,
   Descriptions,
-  Dropdown,
   Drawer,
   Form,
   Input,
@@ -39,7 +38,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterDetailDrawer } from "@/components/cluster-detail-drawer";
-import { OpsFilterChip, type OpsFilterChipTone } from "@/components/ops";
+import { OpsActionDropdown, OpsFilterChip, type OpsFilterChipTone } from "@/components/ops";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
@@ -48,11 +47,6 @@ import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { ResourceAddButton } from "@/components/resource-add-button";
-import {
-  POD_ACTION_MENU_CLASS,
-  POD_ACTION_TRIGGER_CLASS,
-  renderPodLikeResourceActionStyles,
-} from "@/components/resource-action-bar";
 import {
   createCluster,
   deleteCluster,
@@ -718,60 +712,58 @@ export default function ClustersPage() {
         ].filter(Boolean) as MenuProps["items"];
 
         return (
-          <Dropdown
-            trigger={["click"]}
+          <OpsActionDropdown
             placement="bottomRight"
-            menu={{
-              items,
-              onClick: ({ key }) => {
-                if (key === "healthDetail") {
-                  setHealthDetailCluster(row);
-                  return;
-                }
-                if (key === "probe") {
-                  manualProbeMutation.mutate(row.id);
-                  return;
-                }
-                if (key === "edit") {
-                  openEditModal(row);
-                  return;
-                }
-                if (key === "delete") {
-                  Modal.confirm({
-                    title: "删除集群",
-                    content: `确认删除集群「${row.name}」吗？此操作不可恢复。`,
-                    okText: "确认删除",
-                    cancelText: "取消",
-                    okButtonProps: { danger: true },
-                    onOk: () => void handleDelete(row),
-                  });
-                  return;
-                }
-                if (key === "enable" || key === "disable") {
-                  Modal.confirm({
-                    title: key === "enable" ? "启用集群" : "停用集群",
-                    content:
-                      key === "enable"
-                        ? `确认启用集群「${row.name}」？`
-                        : `确认停用集群「${row.name}」？停用后集群不可操作但可恢复。`,
-                    okText: key === "enable" ? "确认启用" : "确认停用",
-                    cancelText: "取消",
-                    okButtonProps: { danger: key === "disable" },
-                    onOk: () => void handleToggleState(row),
-                  });
-                }
-              },
+            items={items}
+            ariaLabel="操作"
+            onClick={({ key }) => {
+              if (key === "healthDetail") {
+                setHealthDetailCluster(row);
+                return;
+              }
+              if (key === "probe") {
+                manualProbeMutation.mutate(row.id);
+                return;
+              }
+              if (key === "edit") {
+                openEditModal(row);
+                return;
+              }
+              if (key === "delete") {
+                Modal.confirm({
+                  title: "删除集群",
+                  content: `确认删除集群「${row.name}」吗？此操作不可恢复。`,
+                  okText: "确认删除",
+                  cancelText: "取消",
+                  okButtonProps: { danger: true },
+                  onOk: () => void handleDelete(row),
+                });
+                return;
+              }
+              if (key === "enable" || key === "disable") {
+                Modal.confirm({
+                  title: key === "enable" ? "启用集群" : "停用集群",
+                  content:
+                    key === "enable"
+                      ? `确认启用集群「${row.name}」？`
+                      : `确认停用集群「${row.name}」？停用后集群不可操作但可恢复。`,
+                  okText: key === "enable" ? "确认启用" : "确认停用",
+                  cancelText: "取消",
+                  okButtonProps: { danger: key === "disable" },
+                  onOk: () => void handleToggleState(row),
+                });
+              }
             }}
-            classNames={{ root: POD_ACTION_MENU_CLASS }}
-          >
-            <Button
-              size="small"
-              className={POD_ACTION_TRIGGER_CLASS}
-              icon={<MoreOutlined />}
-              aria-label="操作"
-              loading={togglingId === row.id || (manualProbeMutation.isPending && manualProbeMutation.variables === row.id)}
-            />
-          </Dropdown>
+            trigger={
+              <Button
+                size="small"
+                className="ops-action-trigger"
+                icon={<MoreOutlined />}
+                aria-label="操作"
+                loading={togglingId === row.id || (manualProbeMutation.isPending && manualProbeMutation.variables === row.id)}
+              />
+            }
+          />
         );
       },
     },
@@ -1060,10 +1052,6 @@ export default function ClustersPage() {
           </Form.Item>
         </Form>
       </Modal>
-      {renderPodLikeResourceActionStyles({
-        triggerClassName: POD_ACTION_TRIGGER_CLASS,
-        menuClassName: POD_ACTION_MENU_CLASS,
-      })}
     </Space>
   );
 }

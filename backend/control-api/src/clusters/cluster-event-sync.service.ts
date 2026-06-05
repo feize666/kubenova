@@ -85,7 +85,7 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
     this.eventBus.setMaxListeners(0);
   }
 
-  async onModuleInit(): Promise<void> {
+  onModuleInit(): void {
     if (process.env.NODE_ENV === 'test') {
       return;
     }
@@ -147,20 +147,32 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
     const targets = this.buildTargets();
     const handles: WatchHandle[] = [];
     for (const target of targets) {
+      if (!this.isCurrentWatchGeneration(clusterId, watchGeneration)) {
+        break;
+      }
       let stopped = false;
       try {
         const abortController = await watch.watch(
           target.path,
           {},
           (phase: string, apiObj: any) => {
+            if (
+              stopped ||
+              !this.isCurrentWatchGeneration(clusterId, watchGeneration)
+            ) {
+              return;
+            }
             this.markClusterDirty(clusterId);
             this.emitRealtimeEvent(
               this.buildRealtimeEvent(clusterId, target, phase, apiObj),
             );
-            void this.scheduleSync(clusterId);
+            this.scheduleSync(clusterId);
           },
           (err) => {
-            if (stopped || this.watchGenerations.get(clusterId) !== watchGeneration) {
+            if (
+              stopped ||
+              !this.isCurrentWatchGeneration(clusterId, watchGeneration)
+            ) {
               return;
             }
             if (err && err !== k8s.Watch.SERVER_SIDE_CLOSE) {
@@ -181,9 +193,13 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
               }
             }
             this.markClusterDirty(clusterId);
-            void this.scheduleRestart(clusterId);
+            this.scheduleRestart(clusterId, watchGeneration);
           },
         );
+        if (!this.isCurrentWatchGeneration(clusterId, watchGeneration)) {
+          abortController.abort();
+          continue;
+        }
         handles.push({
           abort: () => {
             stopped = true;
@@ -191,14 +207,23 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
           },
         });
       } catch (error) {
+        if (!this.isCurrentWatchGeneration(clusterId, watchGeneration)) {
+          continue;
+        }
         this.logger.warn(
           `watch start failed cluster=${clusterId} target=${target.path}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
         this.markClusterDirty(clusterId);
-        void this.scheduleRestart(clusterId);
+        this.scheduleRestart(clusterId, watchGeneration);
       }
+    }
+    if (!this.isCurrentWatchGeneration(clusterId, watchGeneration)) {
+      for (const handle of handles) {
+        handle.abort();
+      }
+      return;
     }
     this.watches.set(clusterId, handles);
     this.logger.log(
@@ -256,7 +281,10 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private stopForCluster(clusterId: string): void {
-    this.watchGenerations.set(clusterId, (this.watchGenerations.get(clusterId) ?? 0) + 1);
+    this.watchGenerations.set(
+      clusterId,
+      (this.watchGenerations.get(clusterId) ?? 0) + 1,
+    );
     const restartTimer = this.restartTimers.get(clusterId);
     if (restartTimer) {
       clearTimeout(restartTimer);
@@ -272,7 +300,7 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
     this.watches.delete(clusterId);
   }
 
-  private async scheduleSync(clusterId: string): Promise<void> {
+  private scheduleSync(clusterId: string): void {
     const existing = this.debounceTimers.get(clusterId);
     if (existing) {
       clearTimeout(existing);
@@ -311,7 +339,17 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
     return Math.min(delay, this.restartMaxDelayMs);
   }
 
-  private async scheduleRestart(clusterId: string): Promise<void> {
+  private isCurrentWatchGeneration(
+    clusterId: string,
+    watchGeneration: number,
+  ): boolean {
+    return this.watchGenerations.get(clusterId) === watchGeneration;
+  }
+
+  private scheduleRestart(clusterId: string, watchGeneration: number): void {
+    if (!this.isCurrentWatchGeneration(clusterId, watchGeneration)) {
+      return;
+    }
     const existing = this.restartTimers.get(clusterId);
     if (existing) {
       return;
@@ -321,6 +359,9 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
       clusterId,
       setTimeout(() => {
         this.restartTimers.delete(clusterId);
+        if (!this.isCurrentWatchGeneration(clusterId, watchGeneration)) {
+          return;
+        }
         void this.ensureClusterWatching(clusterId);
       }, delayMs),
     );

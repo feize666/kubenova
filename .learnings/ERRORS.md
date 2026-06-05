@@ -45,3 +45,29 @@ Before cleaning build artifacts, verify no active service depends on the directo
 - Source: error
 - Related Files: frontend/.next
 - Tags: cleanup, nextjs, browser-regression
+
+## ERR-20260606-performance-login-selector
+
+**Logged**: 2026-06-06T02:01:00+08:00
+**Area**: frontend-tests
+
+### Summary
+Playwright `getByRole("button", { name: "登录控制台" })` matched the wrong visible element when login page had duplicate text, causing `GET /login?` and no auth request.
+
+### Action
+For performance probes, prefer API login plus writing the app auth storage keys. Keep UI login only as a fallback, and if using UI wait for hydration/network idle before clicking the form-scoped `button[type="submit"]`.
+
+---
+
+## ERR-20260606-eslint-flat-file-flag
+
+**Logged**: 2026-06-06T02:10:00+08:00
+**Area**: frontend-lint
+
+### Summary
+`npm run lint -- --file <path>` fails with ESLint 9 flat config: `Invalid option '--file'`.
+
+### Action
+Use positional paths instead, for example `npm run lint -- src/app/clusters/page.tsx`.
+
+---
