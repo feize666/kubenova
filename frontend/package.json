@@ -3,7 +3,8 @@
   "version": "1.1.1",
   "private": true,
   "scripts": {
-    "dev": "node --max-old-space-size=3072 ./node_modules/next/dist/bin/next dev --webpack",
+    "dev": "node --max-old-space-size=2048 ./node_modules/next/dist/bin/next dev --webpack",
+    "dev:turbo": "node --max-old-space-size=2048 ./node_modules/next/dist/bin/next dev --turbo",
     "build": "next build",
     "build:stable": "node --max-old-space-size=2048 ./node_modules/next/dist/bin/next build",
     "start": "next start",

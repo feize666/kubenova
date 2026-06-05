@@ -72,6 +72,7 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly restartTimers = new Map<string, NodeJS.Timeout>();
   private readonly restartFailures = new Map<string, number>();
   private readonly dirtyClusters = new Set<string>();
+  private readonly watchGenerations = new Map<string, number>();
   private readonly debounceMs = 1500;
   private readonly restartBaseDelayMs = 30_000;
   private readonly restartMaxDelayMs = 10 * 60_000;
@@ -114,6 +115,7 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
     this.restartTimers.clear();
     this.restartFailures.clear();
     this.dirtyClusters.clear();
+    this.watchGenerations.clear();
   }
 
   private async start(): Promise<void> {
@@ -133,6 +135,8 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
   private async startForCluster(clusterId: string): Promise<void> {
     this.stopForCluster(clusterId);
     this.restartFailures.delete(clusterId);
+    const watchGeneration = (this.watchGenerations.get(clusterId) ?? 0) + 1;
+    this.watchGenerations.set(clusterId, watchGeneration);
     const kubeconfig = await this.clustersService.getKubeconfig(clusterId);
     if (!kubeconfig) {
       return;
@@ -143,6 +147,7 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
     const targets = this.buildTargets();
     const handles: WatchHandle[] = [];
     for (const target of targets) {
+      let stopped = false;
       try {
         const abortController = await watch.watch(
           target.path,
@@ -155,6 +160,9 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
             void this.scheduleSync(clusterId);
           },
           (err) => {
+            if (stopped || this.watchGenerations.get(clusterId) !== watchGeneration) {
+              return;
+            }
             if (err && err !== k8s.Watch.SERVER_SIDE_CLOSE) {
               const message = err instanceof Error ? err.message : String(err);
               const normalized = message.toLowerCase();
@@ -176,7 +184,12 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
             void this.scheduleRestart(clusterId);
           },
         );
-        handles.push({ abort: () => abortController.abort() });
+        handles.push({
+          abort: () => {
+            stopped = true;
+            abortController.abort();
+          },
+        });
       } catch (error) {
         this.logger.warn(
           `watch start failed cluster=${clusterId} target=${target.path}: ${
@@ -243,6 +256,12 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private stopForCluster(clusterId: string): void {
+    this.watchGenerations.set(clusterId, (this.watchGenerations.get(clusterId) ?? 0) + 1);
+    const restartTimer = this.restartTimers.get(clusterId);
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      this.restartTimers.delete(clusterId);
+    }
     const existing = this.watches.get(clusterId);
     if (!existing) {
       return;
@@ -295,7 +314,7 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
   private async scheduleRestart(clusterId: string): Promise<void> {
     const existing = this.restartTimers.get(clusterId);
     if (existing) {
-      clearTimeout(existing);
+      return;
     }
     const delayMs = this.getRestartDelayMs(clusterId);
     this.restartTimers.set(

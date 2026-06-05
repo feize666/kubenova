@@ -31,6 +31,7 @@ import {
   WorkloadsRepository,
   type WorkloadRecord,
   type WorkloadListParams,
+  type WorkloadListProjection,
 } from './workloads.repository';
 import {
   mapWorkspaceErrorCode,
@@ -50,6 +51,8 @@ export interface WorkloadsListQuery {
   pageSize?: string;
   sortBy?: string;
   sortOrder?: string;
+  projection?: string;
+  fields?: string;
 }
 
 export interface WorkloadActionPayload {
@@ -84,11 +87,35 @@ export interface WorkloadUpdateDto {
 }
 
 export interface WorkloadListResponse {
-  items: WorkloadRecord[];
+  items: Array<WorkloadRecord | WorkloadTopologyItem>;
   total: number;
   page: number;
   pageSize: number;
   timestamp: string;
+}
+
+export interface WorkloadTopologyItem {
+  id: string;
+  clusterId: string;
+  namespace: string;
+  kind: string;
+  name: string;
+  state: WorkloadRecord['state'];
+  status: string | null;
+  labels: Prisma.JsonValue | null;
+  selector: Prisma.JsonValue | null;
+  ownerRefs: Prisma.JsonValue[];
+  replicas: number | null;
+  readyReplicas: number | null;
+  updatedReplicas: number | null;
+  availableReplicas: number | null;
+  podPhase: string | null;
+  nodeName: string | null;
+  restarts: number | null;
+  age: string;
+  creationTimestamp: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface LegacyWorkloadItem {
@@ -404,6 +431,19 @@ export class WorkloadsService {
     return undefined;
   }
 
+  private normalizeListProjection(
+    query: WorkloadsListQuery,
+  ): WorkloadListProjection | undefined {
+    const projection = query.projection?.trim().toLowerCase();
+    if (projection === 'topology') {
+      return 'topology';
+    }
+    const fields = query.fields
+      ?.split(',')
+      .map((item) => item.trim().toLowerCase());
+    return fields?.includes('topology') ? 'topology' : undefined;
+  }
+
   isLegacyKind(kind: string): boolean {
     return this.normalizeKind(kind) !== kind;
   }
@@ -440,10 +480,18 @@ export class WorkloadsService {
       pageSize: this.parsePositiveInt(query.pageSize, 10),
       sortBy: this.normalizeSortBy(query.sortBy),
       sortOrder: this.normalizeSortOrder(query.sortOrder),
+      projection: this.normalizeListProjection(query),
     };
 
     const result = await this.repository.list(params);
     void this.refreshWorkloadSyncState(normalizedClusterId, readableClusterIds);
+    if (params.projection === 'topology') {
+      return {
+        ...result,
+        items: result.items.map((item) => this.toTopologyItem(item)),
+        timestamp: new Date().toISOString(),
+      };
+    }
     const items =
       params.kind === 'Pod'
         ? await this.safeEnrichPodListWithLiveMetrics(result.items)
@@ -704,12 +752,15 @@ export class WorkloadsService {
     query: Omit<WorkloadsListQuery, 'kind'>,
   ): Promise<LegacyWorkloadsListResponse> {
     const normalizedKind = this.normalizeKind(kind);
-    const result = await this.list({ ...query, kind: normalizedKind });
+    const { projection: _projection, fields: _fields, ...listQuery } = query;
+    const result = await this.list({ ...listQuery, kind: normalizedKind });
     return {
       kind: kind.toLowerCase(),
       total: result.total,
       timestamp: result.timestamp,
-      items: result.items.map((item) => this.toLegacyItem(item)),
+      items: result.items.map((item) =>
+        this.toLegacyItem(item as WorkloadRecord),
+      ),
     };
   }
 
@@ -2907,6 +2958,107 @@ export class WorkloadsService {
     }
     const days = Math.floor(hours / 24);
     return `${days}d`;
+  }
+
+  private toTopologyItem(item: WorkloadRecord): WorkloadTopologyItem {
+    const status = this.toTopologyStatusObject(item.statusJson);
+    const creationTimestamp = this.readTopologyString(
+      status,
+      'creationTimestamp',
+    );
+    const createdAt =
+      this.readK8sCreationTimestamp(item.statusJson) ?? item.createdAt;
+    const replicas =
+      item.replicas ??
+      this.readTopologyNumber(status, 'replicas') ??
+      this.readTopologyNumber(status, 'desiredNumberScheduled');
+    const readyReplicas =
+      item.readyReplicas ??
+      this.readTopologyNumber(status, 'readyReplicas') ??
+      this.readTopologyNumber(status, 'numberReady') ??
+      this.readTopologyNumber(status, 'succeeded');
+    const podPhase = this.readTopologyString(status, 'phase');
+    const statusText =
+      podPhase ??
+      this.computeLegacyStatus(item.state, replicas ?? 0, readyReplicas ?? 0);
+
+    return {
+      id: item.id,
+      clusterId: item.clusterId,
+      namespace: item.namespace,
+      kind: item.kind,
+      name: item.name,
+      state: item.state,
+      status: statusText,
+      labels: item.labels,
+      selector: this.readTopologyJson(status, 'selector'),
+      ownerRefs:
+        this.readTopologyArray(status, 'ownerRefs') ??
+        this.readTopologyArray(status, 'ownerReferences') ??
+        [],
+      replicas,
+      readyReplicas,
+      updatedReplicas:
+        this.readTopologyNumber(status, 'updatedReplicas') ??
+        this.readTopologyNumber(status, 'updatedNumberScheduled') ??
+        this.readTopologyNumber(status, 'numberUpdated'),
+      availableReplicas:
+        this.readTopologyNumber(status, 'availableReplicas') ??
+        this.readTopologyNumber(status, 'numberAvailable'),
+      podPhase,
+      nodeName: this.readTopologyString(status, 'nodeName'),
+      restarts:
+        this.readTopologyNumber(status, 'restarts') ??
+        this.readTopologyNumber(status, 'restartCount'),
+      age: this.formatAge(createdAt),
+      creationTimestamp,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    };
+  }
+
+  private toTopologyStatusObject(
+    value: Prisma.JsonValue | null,
+  ): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+    return value as Record<string, unknown>;
+  }
+
+  private readTopologyString(
+    source: Record<string, unknown>,
+    key: string,
+  ): string | null {
+    const value = source[key];
+    return typeof value === 'string' && value.trim() ? value : null;
+  }
+
+  private readTopologyNumber(
+    source: Record<string, unknown>,
+    key: string,
+  ): number | null {
+    const value = source[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
+
+  private readTopologyJson(
+    source: Record<string, unknown>,
+    key: string,
+  ): Prisma.JsonValue | null {
+    const value = source[key];
+    if (value === undefined) {
+      return null;
+    }
+    return value as Prisma.JsonValue;
+  }
+
+  private readTopologyArray(
+    source: Record<string, unknown>,
+    key: string,
+  ): Prisma.JsonValue[] | null {
+    const value = source[key];
+    return Array.isArray(value) ? (value as Prisma.JsonValue[]) : null;
   }
 
   private readK8sCreationTimestamp(

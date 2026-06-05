@@ -3,9 +3,9 @@
 import { LockOutlined, LoginOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Checkbox, Divider, Form, Input, Space, Typography } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip } from "@/components/ops";
+import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
 import { sanitizeInternalReturnTo } from "@/lib/login-return";
 
 type LoginForm = {
@@ -65,10 +65,10 @@ function KubeNovaLogo({ size = 48, isDark }: { size?: number; isDark: boolean })
   );
 }
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isAuthenticated, login, lastRequestId } = useAuth();
+  const { isAuthenticated, isInitializing, login, lastRequestId } = useAuth();
   const { message } = App.useApp();
   const isDark = false;
   const [submitting, setSubmitting] = useState(false);
@@ -81,13 +81,16 @@ export default function LoginPage() {
   );
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (!isInitializing && isAuthenticated) {
       router.replace(returnTo || "/dashboard");
     }
-  }, [isAuthenticated, returnTo, router]);
+  }, [isAuthenticated, isInitializing, returnTo, router]);
 
   useEffect(() => {
     let cancelled = false;
+    let intervalTimer: number | null = null;
+    let idleCallbackId: number | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const checkApi = async () => {
       try {
@@ -104,11 +107,29 @@ export default function LoginPage() {
       }
     };
 
-    void checkApi();
-    const timer = window.setInterval(() => void checkApi(), 15000);
+    const startProbe = () => {
+      if (cancelled) return;
+      void checkApi();
+      intervalTimer = window.setInterval(() => void checkApi(), 15000);
+    };
+
+    if ("requestIdleCallback" in window) {
+      idleCallbackId = window.requestIdleCallback(startProbe, { timeout: 1500 });
+    } else {
+      timeoutId = setTimeout(startProbe, 800);
+    }
+
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (intervalTimer !== null) {
+        window.clearInterval(intervalTimer);
+      }
+      if (idleCallbackId !== null && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleCallbackId);
+      }
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
     };
   }, []);
 
@@ -117,16 +138,17 @@ export default function LoginPage() {
       return;
     }
 
-    const updateViewport = () => {
-      setIsCompact(window.innerWidth < 992);
+    const mediaQuery = window.matchMedia("(max-width: 991px)");
+    const updateViewport = (event: MediaQueryList | MediaQueryListEvent) => {
+      setIsCompact(event.matches);
     };
 
-    updateViewport();
-    window.addEventListener("resize", updateViewport);
-    return () => window.removeEventListener("resize", updateViewport);
+    updateViewport(mediaQuery);
+    mediaQuery.addEventListener("change", updateViewport);
+    return () => mediaQuery.removeEventListener("change", updateViewport);
   }, []);
 
-  if (isAuthenticated) return null;
+  if (!isInitializing && isAuthenticated) return null;
 
   const onFinish = async (values: LoginForm) => {
     setSubmitting(true);
@@ -503,5 +525,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

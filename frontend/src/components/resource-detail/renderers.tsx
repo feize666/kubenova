@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, Empty, Space, Typography } from "antd";
+import { Card, Empty, Space, Tooltip, Typography } from "antd";
 import { Fragment, useMemo } from "react";
 import type { ReactNode } from "react";
 import type {
@@ -15,7 +15,7 @@ import {
   DetailTag,
   DetailDescriptions,
   DetailSection,
-  TagList,
+  DetailChipList,
 } from "./section-primitives";
 import {
   buildHeadlampDetailSections,
@@ -263,7 +263,7 @@ function renderFieldValue(field: string, value: unknown) {
   }
   if (field === "images" && Array.isArray(value)) {
     return (
-      <TagList
+      <DetailChipList
         items={value.filter((item): item is string => typeof item === "string")}
         color="blue"
       />
@@ -371,6 +371,7 @@ function renderContainerSummaries(
 function toNavigateRequest(
   kind?: string | null,
   id?: string | null,
+  options: Omit<NavigateRequest, "kind" | "id"> = {},
 ): NavigateRequest | null {
   if (!kind || !id) {
     return null;
@@ -380,22 +381,74 @@ function toNavigateRequest(
   if (!safeKind || !safeId) {
     return null;
   }
-  return { kind: safeKind, id: safeId };
+  return { ...options, kind: safeKind, id: safeId };
+}
+
+type RelationshipNavigationResolution =
+  | { target: NavigateRequest; reason?: never }
+  | { target: null; reason: string };
+
+const FALLBACK_LIVE_NETWORK_KINDS = new Set([
+  "service",
+  "endpoints",
+  "endpointslice",
+  "ingress",
+  "ingressroute",
+  "gateway",
+  "httproute",
+  "middleware",
+  "network-policy",
+]);
+
+const FALLBACK_AUTOSCALING_KINDS = new Set([
+  "horizontalpodautoscaler",
+  "verticalpodautoscaler",
+]);
+
+function buildRelationshipFallbackId(
+  detail: ResourceDetailRendererProps["detail"],
+  kind: string,
+  name: string,
+  namespace: string | undefined,
+  clusterId: string | undefined,
+): string | null {
+  const normalizedKind = normalizeKind(kind);
+  const targetClusterId = clusterId || detail.overview.clusterId;
+  if (!targetClusterId) {
+    return null;
+  }
+  if (normalizedKind === "node") {
+    return `live-node:${targetClusterId}:${name}`;
+  }
+  if (FALLBACK_AUTOSCALING_KINDS.has(normalizedKind) && namespace) {
+    return `${targetClusterId}/${namespace}/${name}`;
+  }
+  if (FALLBACK_LIVE_NETWORK_KINDS.has(normalizedKind) && namespace) {
+    return `live:${targetClusterId}:${kind}:${namespace}:${name}`;
+  }
+  return null;
 }
 
 function resolveAssociationNavigationByIdentity(
   detail: ResourceDetailRendererProps["detail"],
-  kind?: string,
-  name?: string,
-  namespace?: string,
-  id?: string,
-): NavigateRequest | null {
-  const direct = toNavigateRequest(kind, id);
+  node: RelationshipNode,
+): RelationshipNavigationResolution {
+  const { kind, name, namespace, id, clusterId, apiVersion } = node;
+  const requestMeta =
+    kind && name
+      ? {
+          apiVersion,
+          namespace,
+          name,
+          label: namespace ? `${namespace}/${name}` : name,
+        }
+      : {};
+  const direct = toNavigateRequest(kind, id, requestMeta);
   if (direct) {
-    return direct;
+    return { target: direct };
   }
   if (!kind || !name) {
-    return null;
+    return { target: null, reason: "缺少 kind 或 name，无法定位资源" };
   }
   if (
     normalizeKind(kind) === normalizeKind(detail.overview.kind) &&
@@ -404,7 +457,17 @@ function resolveAssociationNavigationByIdentity(
       !detail.overview.namespace ||
       namespace === detail.overview.namespace)
   ) {
-    return toNavigateRequest(detail.overview.kind, detail.overview.id);
+    const current = toNavigateRequest(detail.overview.kind, detail.overview.id, {
+      apiVersion,
+      namespace: detail.overview.namespace,
+      name: detail.overview.name,
+      label: detail.overview.namespace
+        ? `${detail.overview.namespace}/${detail.overview.name}`
+        : detail.overview.name,
+    });
+    return current
+      ? { target: current }
+      : { target: null, reason: "当前资源缺少详情 id，无法跳转" };
   }
   const targetKind = normalizeKind(kind);
   const candidate = detail.associations.find((association) => {
@@ -419,42 +482,62 @@ function resolveAssociationNavigationByIdentity(
       return false;
     return true;
   });
-  return toNavigateRequest(candidate?.kind, candidate?.id);
+  const associationTarget = toNavigateRequest(candidate?.kind, candidate?.id, {
+    apiVersion,
+    namespace: candidate?.namespace ?? namespace,
+    name,
+    label: namespace ? `${namespace}/${name}` : name,
+  });
+  if (associationTarget) {
+    return { target: associationTarget };
+  }
+  const fallbackId = buildRelationshipFallbackId(
+    detail,
+    kind,
+    name,
+    namespace,
+    clusterId,
+  );
+  const fallbackTarget = toNavigateRequest(kind, fallbackId, requestMeta);
+  if (fallbackTarget) {
+    return { target: fallbackTarget };
+  }
+  return {
+    target: null,
+    reason: namespace
+      ? "未下发详情 id，且当前资源类型不支持按 kind/name/namespace 兜底跳转"
+      : "未下发详情 id，且缺少 namespace 或该资源为不可兜底类型",
+  };
 }
 
 function renderPipelineObject(
   detail: ResourceDetailRendererProps["detail"],
-  kind: string | undefined,
-  name: string | undefined,
-  namespace: string | undefined,
-  id: string | undefined,
-  color: string,
+  node: RelationshipNode,
   onNavigateRequest?: ResourceDetailRendererProps["onNavigateRequest"],
 ) {
+  const { kind, name, namespace, color } = node;
   if (!kind && !name) {
     return null;
   }
   const safeKind = kind || "Object";
   const safeName = name || "-";
-  const target =
+  const navigation =
     onNavigateRequest && kind && name
-      ? resolveAssociationNavigationByIdentity(
-          detail,
-          kind,
-          name,
-          namespace,
-          id,
-        )
-      : null;
+      ? resolveAssociationNavigationByIdentity(detail, node)
+      : { target: null, reason: "当前视图未启用详情跳转" };
   return (
     <>
       <DetailTag color={color}>{safeKind}</DetailTag>
-      {target && onNavigateRequest ? (
-        <Typography.Link strong onClick={() => onNavigateRequest(target)}>
+      {navigation.target && onNavigateRequest ? (
+        <Typography.Link strong onClick={() => onNavigateRequest(navigation.target)}>
           {safeName}
         </Typography.Link>
       ) : (
-        <Typography.Text strong>{safeName}</Typography.Text>
+        <Tooltip title={navigation.reason}>
+          <Typography.Text strong type="secondary" style={{ cursor: "not-allowed" }}>
+            {safeName}
+          </Typography.Text>
+        </Tooltip>
       )}
       {namespace ? (
         <Typography.Text type="secondary">{namespace}</Typography.Text>
@@ -656,7 +739,7 @@ function EndpointHighlightsSection({ detail }: ResourceDetailRendererProps) {
             <div>
               <Typography.Text strong>端口视图</Typography.Text>
               <div style={{ marginTop: 8 }}>
-                <TagList
+                <DetailChipList
                   items={portLabels}
                   color={kind === "endpointslice" ? "volcano" : "gold"}
                 />
@@ -728,7 +811,7 @@ function EndpointHighlightsSection({ detail }: ResourceDetailRendererProps) {
             <div>
               <Typography.Text strong>Topology 视图</Typography.Text>
               <div style={{ marginTop: 8 }}>
-                <TagList items={topologyLabels} color="cyan" />
+                <DetailChipList items={topologyLabels} color="cyan" />
               </div>
             </div>
           ) : (
@@ -862,7 +945,7 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
           <div>
             <Typography.Text strong>Entrypoints</Typography.Text>
             <div style={{ marginTop: 8 }}>
-              <TagList items={entryPoints} color="cyan" />
+              <DetailChipList items={entryPoints} color="cyan" />
             </div>
           </div>
         ) : null}
@@ -1122,7 +1205,7 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               镜像
             </Typography.Text>
-            <TagList
+            <DetailChipList
               items={
                 detail.runtime.images.length > 0
                   ? detail.runtime.images
@@ -1261,7 +1344,7 @@ function PodHighlightsSection({
           <div>
             <Typography.Text strong>镜像列表</Typography.Text>
             <div style={{ marginTop: 8 }}>
-              <TagList items={detail.runtime.images} color="blue" />
+              <DetailChipList items={detail.runtime.images} color="blue" />
             </div>
           </div>
         ) : null}
@@ -1293,7 +1376,7 @@ function NodeHighlightsSection({ detail }: ResourceDetailRendererProps) {
             : "False",
     },
     roles.length > 0
-      ? { key: "roles", label: "角色", value: <TagList items={roles} color="blue" /> }
+      ? { key: "roles", label: "角色", value: <DetailChipList items={roles} color="blue" /> }
       : null,
     detail.runtime.internalIP
       ? { key: "internalIP", label: "Internal IP", value: detail.runtime.internalIP }
@@ -1341,7 +1424,7 @@ function NodeHighlightsSection({ detail }: ResourceDetailRendererProps) {
           <div>
             <Typography.Text strong>Taints</Typography.Text>
             <div style={{ marginTop: 8 }}>
-              <TagList items={taints} color="gold" />
+              <DetailChipList items={taints} color="gold" />
             </div>
           </div>
         ) : null}
@@ -1412,7 +1495,7 @@ function WorkloadHighlightsSection({
           <div>
             <Typography.Text strong>镜像列表</Typography.Text>
             <div style={{ marginTop: 8 }}>
-              <TagList items={detail.runtime.images} color="blue" />
+              <DetailChipList items={detail.runtime.images} color="blue" />
             </div>
           </div>
         ) : null}
@@ -1998,7 +2081,7 @@ function NetworkPolicyHighlightsSection({
       ? {
           key: "types",
           label: "策略类型",
-          value: <TagList items={policyTypes} color="blue" />,
+          value: <DetailChipList items={policyTypes} color="blue" />,
         }
       : null,
     podSelector
@@ -2470,14 +2553,14 @@ function GatewayHighlightsSection({ detail }: ResourceDetailRendererProps) {
                 ? {
                     key: "listeners",
                     label: "监听器",
-                    value: <TagList items={listenerNames} color="blue" />,
+                    value: <DetailChipList items={listenerNames} color="blue" />,
                   }
                 : null,
               listenerHostnames.length > 0
                 ? {
                     key: "hostnames",
                     label: "Hostname",
-                    value: <TagList items={listenerHostnames} color="green" />,
+                    value: <DetailChipList items={listenerHostnames} color="green" />,
                   }
                 : hostnameCount > 0
                   ? { key: "hostnames", label: "Hostname", value: hostnameCount }
@@ -2486,14 +2569,14 @@ function GatewayHighlightsSection({ detail }: ResourceDetailRendererProps) {
                 ? {
                     key: "allowedRoutes",
                     label: "允许路由方式",
-                    value: <TagList items={allowedRoutesFrom} color="gold" />,
+                    value: <DetailChipList items={allowedRoutesFrom} color="gold" />,
                   }
                 : null,
               routeNames.length > 0
                 ? {
                     key: "routes",
                     label: "路由",
-                    value: <TagList items={routeNames} color="cyan" />,
+                    value: <DetailChipList items={routeNames} color="cyan" />,
                   }
                 : null,
               detail.runtime.phase
@@ -2670,6 +2753,9 @@ type RelationshipNode = {
   name?: string;
   namespace?: string;
   id?: string;
+  clusterId?: string;
+  apiVersion?: string;
+  role?: string;
   color: string;
 };
 
@@ -2748,6 +2834,9 @@ function buildRelationshipGroups(
             name: node.name,
             namespace: node.namespace,
             id: node.id,
+            clusterId: node.clusterId,
+            apiVersion: node.apiVersion,
+            role: node.role,
             color: node.color ?? "default",
           })),
         })),
@@ -2979,11 +3068,7 @@ function RelationshipNavigatorSection({
                               ) : null}
                               {renderPipelineObject(
                                 detail,
-                                node.kind,
-                                node.name,
-                                node.namespace,
-                                node.id,
-                                node.color,
+                                node,
                                 onNavigateRequest,
                               )}
                             </Fragment>
@@ -3054,7 +3139,7 @@ function HttpRouteHighlightsSection({ detail }: ResourceDetailRendererProps) {
                   ? {
                       key: "parents",
                       label: "父引用",
-                      value: <TagList items={runtimeParentRefs} color="gold" />,
+                      value: <DetailChipList items={runtimeParentRefs} color="gold" />,
                     }
                 : null,
               backendRefs.length > 0
@@ -3067,14 +3152,14 @@ function HttpRouteHighlightsSection({ detail }: ResourceDetailRendererProps) {
                   ? {
                       key: "backend",
                       label: "后端引用",
-                      value: <TagList items={runtimeBackendRefs} color="cyan" />,
+                      value: <DetailChipList items={runtimeBackendRefs} color="cyan" />,
                     }
                 : null,
               runtimeHostnames.length > 0
                 ? {
                     key: "hostnames",
                     label: "Hostname",
-                    value: <TagList items={runtimeHostnames} color="green" />,
+                    value: <DetailChipList items={runtimeHostnames} color="green" />,
                   }
                 : null,
               detail.runtime.phase

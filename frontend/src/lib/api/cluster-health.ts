@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import type { ApiRequestSignalOptions } from "./types";
 
 export type RuntimeStatus = "running" | "offline" | "checking" | "disabled" | "offline-mode";
 export type HealthProbeSource = "auto" | "manual" | "event";
@@ -63,11 +64,12 @@ export interface ClusterHealthListParams {
 export async function getClusterHealthList(
   params: ClusterHealthListParams = {},
   token?: string,
-  options?: { suppressAuthExpiryBroadcast?: boolean },
+  options?: { suppressAuthExpiryBroadcast?: boolean } & ApiRequestSignalOptions,
 ): Promise<ClusterHealthListResponse> {
   return apiRequest<ClusterHealthListResponse>("/api/cluster-health", {
     method: "GET",
     token,
+    signal: options?.signal,
     suppressAuthExpiryBroadcast: options?.suppressAuthExpiryBroadcast,
     query: {
       keyword: params.keyword?.trim() || undefined,
@@ -86,11 +88,12 @@ export async function getClusterHealthList(
 export async function getClusterHealthDetail(
   clusterId: string,
   token?: string,
-  options?: { suppressAuthExpiryBroadcast?: boolean },
+  options?: { suppressAuthExpiryBroadcast?: boolean } & ApiRequestSignalOptions,
 ): Promise<ClusterHealthDetailResponse> {
   return apiRequest<ClusterHealthDetailResponse>(`/api/cluster-health/${clusterId}`, {
     method: "GET",
     token,
+    signal: options?.signal,
     suppressAuthExpiryBroadcast: options?.suppressAuthExpiryBroadcast,
   });
 }
@@ -98,11 +101,12 @@ export async function getClusterHealthDetail(
 export async function probeClusterHealth(
   clusterId: string,
   token?: string,
-  options?: { suppressAuthExpiryBroadcast?: boolean },
+  options?: { suppressAuthExpiryBroadcast?: boolean } & ApiRequestSignalOptions,
 ): Promise<ClusterHealthSnapshotView> {
   return apiRequest<ClusterHealthSnapshotView>(`/api/cluster-health/${clusterId}/probe`, {
     method: "POST",
     token,
+    signal: options?.signal,
     suppressAuthExpiryBroadcast: options?.suppressAuthExpiryBroadcast,
   });
 }

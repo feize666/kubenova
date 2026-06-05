@@ -1,6 +1,5 @@
 "use client";
 
-import { Tag } from "antd";
 import type { ReactNode } from "react";
 
 export type OpsSeverityLevel = "critical" | "warning" | "info" | "success" | "neutral" | "unknown";
@@ -63,9 +62,9 @@ export function OpsStatusTag({
   const resolvedTone = tone ?? resolved?.tone ?? "neutral";
   const label = children ?? resolved?.label ?? state ?? "-";
   return (
-    <Tag className={["ops-status-tag", toneClass(resolvedTone), className].filter(Boolean).join(" ")}>
+    <span className={["ops-status-tag", toneClass(resolvedTone), className].filter(Boolean).join(" ")}>
       {label}
-    </Tag>
+    </span>
   );
 }
 

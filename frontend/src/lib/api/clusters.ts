@@ -1,9 +1,13 @@
 import { ApiError, CONTROL_API_BASE, apiRequest, extractApiError } from "./client";
-import type { Cluster, ClusterListResponse, GetClustersParams, QueryParams } from "./types";
+import type { ApiRequestSignalOptions, Cluster, ClusterListResponse, GetClustersParams, QueryParams } from "./types";
 import type { ClusterDetailModel, ClusterNodeListModel } from "@/lib/contracts/domain";
 import { getClusterHealthList, type RuntimeStatus } from "./cluster-health";
 
-export async function getClusters(params: GetClustersParams = {}, token: string): Promise<ClusterListResponse> {
+export async function getClusters(
+  params: GetClustersParams = {},
+  token: string,
+  requestOptions: ApiRequestSignalOptions = {},
+): Promise<ClusterListResponse> {
   const query: QueryParams = {
     keyword: params.keyword,
     environment: params.environment,
@@ -20,6 +24,7 @@ export async function getClusters(params: GetClustersParams = {}, token: string)
     method: "GET",
     query,
     token,
+    signal: requestOptions.signal,
   });
   const visibleItems = (result.items ?? []).filter((item) => {
     if (item.state === "deleted") return false;
@@ -38,7 +43,7 @@ export async function getClusters(params: GetClustersParams = {}, token: string)
         pageSize: 500,
       },
       token,
-      { suppressAuthExpiryBroadcast: true },
+      { suppressAuthExpiryBroadcast: true, signal: requestOptions.signal },
     );
     const onlineIds = new Set(health.items.map((item) => item.clusterId));
     const onlineSelectable = visibleItems.filter(

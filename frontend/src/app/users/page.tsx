@@ -1,18 +1,19 @@
 "use client";
 
-import { PlusOutlined, ReloadOutlined, UserOutlined, CrownOutlined } from "@ant-design/icons";
+import { ReloadOutlined, UserOutlined, CrownOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, Modal, Select, Space, Typography, theme, Badge } from "antd";
+import { Alert, Card, Form, Input, Modal, Select, Space, Typography, theme, Badge } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { useModuleTableState } from "@/components/module-page";
-import { OpsFilterChip } from "@/components/ops";
+import { OpsFilterChip, OpsIconActionButton } from "@/components/ops";
 import {
   ResourceActionDropdown,
   type ResourceActionItem,
 } from "@/components/resource-action-bar";
+import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -535,12 +536,10 @@ export default function UsersPage() {
           }}
           toolbarExtra={
             <Space size={8} wrap>
-              <Button icon={<ReloadOutlined />} onClick={() => void query.refetch()}>
+              <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void query.refetch()}>
                 刷新
-              </Button>
-              <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
-                新建用户
-              </Button>
+              </OpsIconActionButton>
+              <ResourceAddButton compact={false} label="新建用户" onClick={() => setCreateOpen(true)} aria-label="新建用户" />
             </Space>
           }
           loading={{ spinning: query.isLoading, description: "用户数据加载中..." }}

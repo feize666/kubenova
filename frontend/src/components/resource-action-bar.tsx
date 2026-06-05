@@ -15,10 +15,10 @@ import {
   StopOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
-import { Button, Popconfirm, Space } from "antd";
+import { Popconfirm, Space } from "antd";
 import type { MenuProps } from "antd";
 import type { ReactNode } from "react";
-import { OpsActionDropdown, openOpsConfirm, renderOpsActionTriggerButton } from "@/components/ops";
+import { OpsActionDropdown, OpsIconActionButton, openOpsConfirm, renderOpsActionTriggerButton } from "@/components/ops";
 
 export interface ResourceActionItem {
   key: string;
@@ -387,21 +387,17 @@ function renderActionButton(
   fallbackType: ResourceActionItem["type"] = "default",
 ) {
   const unavailable = action.availability === "unavailable";
+  const opsTone = action.danger ? "danger" : action.type === "primary" || fallbackType === "primary" ? "primary" : "default";
   const button = (
-    <Button
+    <OpsIconActionButton
+      className="resource-action-bar-button"
       size={action.size ?? "middle"}
-      type={action.type ?? fallbackType}
-      danger={action.danger}
+      opsTone={opsTone}
       ghost={action.ghost}
       disabled={action.disabled || unavailable}
       loading={action.loading}
       onClick={action.confirm || unavailable ? undefined : action.onClick}
       style={{
-        borderRadius: 999,
-        minWidth: 74,
-        height: 30,
-        fontWeight: 600,
-        paddingInline: 14,
         opacity: unavailable ? 0.72 : 1,
       }}
     >
@@ -411,7 +407,7 @@ function renderActionButton(
         </span>
       ) : null}
       {action.label}
-    </Button>
+    </OpsIconActionButton>
   );
 
   if (!action.confirm || unavailable) {

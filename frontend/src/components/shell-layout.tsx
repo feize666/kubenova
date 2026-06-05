@@ -20,11 +20,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Avatar, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Skeleton, Space } from "antd";
 import type { MenuProps } from "antd";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useRef, useState, memo } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useAuth } from "@/components/auth-context";
-import { getNavDisplayLabel, getTitleFromPath, filterNavSectionsByRole } from "@/config/navigation";
+import { getNavDisplayLabel, getTitleFromPath, filterNavSectionsByRole, navSections } from "@/config/navigation";
 import { useThemeMode } from "@/components/theme-context";
 import { listCapabilities } from "@/lib/api/capabilities";
 import { buildLoginRoute, buildInternalReturnTo } from "@/lib/login-return";
@@ -47,6 +47,7 @@ const SIDEBAR_SECTION_ORDER = [
   "section-iam-security",
   "section-system-management",
 ] as const;
+const PREFETCHABLE_NAV_PATHS = new Set(navSections.flatMap((section) => [section.path, ...section.items.map((item) => item.path)].filter(Boolean) as string[]));
 
 type SidebarOpenSectionKey = string | null;
 
@@ -138,6 +139,22 @@ function writeStoredSidebarOpenState(openSectionKey: SidebarOpenSectionKey) {
   );
 }
 
+function scheduleIdleTask(task: () => void, timeout = 900) {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  if (idleWindow.requestIdleCallback) {
+    const id = idleWindow.requestIdleCallback(task, { timeout });
+    return () => idleWindow.cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(task, Math.min(timeout, 250));
+  return () => window.clearTimeout(id);
+}
+
 function shouldHideIssueLauncher(node: HTMLElement) {
   const text = (node.innerText || node.textContent || "").trim().toLowerCase();
   if (!text || !/issues?/.test(text)) {
@@ -154,7 +171,10 @@ function hideIssueLaunchers(root: ParentNode = document) {
   if (typeof window === "undefined") {
     return;
   }
-  const elements = root.querySelectorAll<HTMLElement>("body *");
+  const elements =
+    root instanceof HTMLElement
+      ? [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))]
+      : Array.from(root.querySelectorAll<HTMLElement>("body *"));
   elements.forEach((element) => {
     if (!shouldHideIssueLauncher(element)) {
       return;
@@ -210,8 +230,23 @@ const AppSider = memo(function AppSider({
   const [openSectionKey, setOpenSectionKey] = useState<SidebarOpenSectionKey>(null);
   const [sidebarStateRestored, setSidebarStateRestored] = useState(false);
   const previousPathnameRef = useRef(pathname);
+  const prefetchedPathsRef = useRef(new Set<string>());
+  const router = useRouter();
   const effectiveOpenSectionKey = openSectionKey && sectionKeySet.has(openSectionKey) ? openSectionKey : null;
   const expandedSectionKeys = effectiveOpenSectionKey ? [effectiveOpenSectionKey] : [];
+  const prefetchPath = useCallback((path: string) => {
+    if (!PREFETCHABLE_NAV_PATHS.has(path) || prefetchedPathsRef.current.has(path)) {
+      return;
+    }
+    prefetchedPathsRef.current.add(path);
+    scheduleIdleTask(() => {
+      try {
+        router.prefetch(path);
+      } catch {
+        prefetchedPathsRef.current.delete(path);
+      }
+    });
+  }, [router]);
 
   // items 根据 role 过滤后生成
   const items: MenuProps["items"] = useMemo(
@@ -225,7 +260,13 @@ const AppSider = memo(function AppSider({
             key: section.path,
             icon,
             label: (
-              <Link href={section.path} prefetch={false} style={{ display: "block" }}>
+              <Link
+                href={section.path}
+                prefetch
+                style={{ display: "block" }}
+                onMouseEnter={() => prefetchPath(section.path as string)}
+                onFocus={() => prefetchPath(section.path as string)}
+              >
                 <span className="app-sidebar-menu__label">{section.label}</span>
               </Link>
             ),
@@ -247,7 +288,13 @@ const AppSider = memo(function AppSider({
                 : undefined,
             // Link 包裹 label：鼠标悬停自动触发 Next.js prefetch，点击由 Link 接管导航
             label: (
-              <Link href={item.path} prefetch={false} style={{ display: "block" }}>
+              <Link
+                href={item.path}
+                prefetch
+                style={{ display: "block" }}
+                onMouseEnter={() => prefetchPath(item.path)}
+                onFocus={() => prefetchPath(item.path)}
+              >
                 <span className="app-sidebar-menu__label app-sidebar-menu__label--nested">
                   {getNavDisplayLabel(item)}
                 </span>
@@ -256,7 +303,7 @@ const AppSider = memo(function AppSider({
           })),
         };
       }),
-    [visibleSections],
+    [prefetchPath, visibleSections],
   );
 
   useEffect(() => {
@@ -397,7 +444,6 @@ function LoadingSkeleton() {
 
 export function ShellLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { mode, toggleTheme } = useThemeMode();
   const { accessToken, isAuthenticated, isInitializing, username, role, logout } = useAuth();
   const isLoginPage = pathname === "/login";
@@ -412,11 +458,6 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     refetchOnReconnect: true,
     refetchOnWindowFocus: false,
   });
-  const currentReturnTo = useMemo(
-    () => buildInternalReturnTo(pathname, searchParams.toString()),
-    [pathname, searchParams],
-  );
-
   const userItems: MenuProps["items"] = [
     { key: "profile", label: "个人中心" },
     { key: "logout", label: "退出登录" },
@@ -452,15 +493,33 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    hideIssueLaunchers();
+    if (process.env.NODE_ENV !== "development") {
+      return;
+    }
+    let frame = 0;
+    const scheduleHide = (root?: ParentNode) => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+      }
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        hideIssueLaunchers(root);
+      });
+    };
+    scheduleHide();
     const observer = new MutationObserver(() => {
-      hideIssueLaunchers();
+      scheduleHide();
     });
     observer.observe(document.body, {
       childList: true,
-      subtree: true,
+      subtree: false,
     });
-    return () => observer.disconnect();
+    return () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+      }
+      observer.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -478,8 +537,10 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     if (isLoginPage || isInitializing || isAuthenticated) {
       return;
     }
+    const currentSearch = typeof window === "undefined" ? "" : window.location.search;
+    const currentReturnTo = buildInternalReturnTo(pathname, currentSearch);
     window.location.replace(buildLoginRoute(currentReturnTo));
-  }, [currentReturnTo, isAuthenticated, isInitializing, isLoginPage]);
+  }, [isAuthenticated, isInitializing, isLoginPage, pathname]);
 
   if (isLoginPage) {
     return <>{children}</>;

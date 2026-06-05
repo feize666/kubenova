@@ -1,14 +1,14 @@
 "use client";
 
 import { ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
-import { Alert, Button, Empty, Skeleton, Space, Typography } from "antd";
+import { Alert, Empty, Skeleton, Space, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
 import type { DynamicResourceIdentity, ResourceIdentity, ResourceDetailResponse } from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { OpsDrawerShell } from "@/components/ops";
+import { OpsDrawerShell, OpsIconActionButton } from "@/components/ops";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceDetailContent } from "./renderers";
 import type { ResourceDetailDrawerProps } from "./types";
@@ -210,12 +210,12 @@ export function ResourceDetailDrawer({
 
   const query = useQuery({
     queryKey: ["resource-detail", normalizedKind, requestId, token],
-    queryFn: () => getResourceDetail({ kind: normalizedKind, id: requestId }, token),
+    queryFn: ({ signal }) => getResourceDetail({ kind: normalizedKind, id: requestId }, token, { signal }),
     enabled: open && Boolean(normalizedKind && requestId),
   });
   const clusterQuery = useQuery({
     queryKey: ["resource-detail", "clusters", token],
-    queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, token!),
+    queryFn: ({ signal }) => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, token!, { signal }),
     enabled: open && Boolean(token),
   });
   const clusterMap = Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name]));
@@ -264,17 +264,17 @@ export function ResourceDetailDrawer({
       extra={
         <Space>
           {navigationStack.length > 0 ? (
-            <Button icon={<ArrowLeftOutlined />} onClick={handleBack}>
+            <OpsIconActionButton icon={<ArrowLeftOutlined />} onClick={handleBack}>
               返回
-            </Button>
+            </OpsIconActionButton>
           ) : null}
-          <Button onClick={() => void query.refetch()} loading={query.isFetching} disabled={!activeRequest}>
+          <OpsIconActionButton onClick={() => void query.refetch()} loading={query.isFetching} disabled={!activeRequest}>
             刷新
-          </Button>
+          </OpsIconActionButton>
           {yamlTarget ? (
-            <Button icon={<FileTextOutlined />} onClick={() => setYamlOpen(true)}>
+            <OpsIconActionButton icon={<FileTextOutlined />} onClick={() => setYamlOpen(true)}>
               YAML
-            </Button>
+            </OpsIconActionButton>
           ) : null}
           {extra}
         </Space>
@@ -303,9 +303,9 @@ export function ResourceDetailDrawer({
               title={canShowSnapshotFallback ? "资源详情加载失败，显示拓扑快照" : "资源详情加载失败"}
               description={query.error.message}
               action={
-                <Button size="small" onClick={() => void query.refetch()}>
+                <OpsIconActionButton size="small" onClick={() => void query.refetch()}>
                   重试
-                </Button>
+                </OpsIconActionButton>
               }
             />
             {canShowSnapshotFallback ? (

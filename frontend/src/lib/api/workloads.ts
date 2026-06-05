@@ -1,5 +1,6 @@
 import { apiRequest } from "./client";
 import { buildResourceListQuery, type ExtendedListQueryParams } from "./helpers";
+import type { ApiRequestSignalOptions } from "./types";
 
 export type WorkloadStatus = "Running" | "Pending" | "Degraded" | "Failed";
 export type WorkloadState = "active" | "disabled" | "deleted";
@@ -52,6 +53,7 @@ export interface WorkloadsListResponse {
 export interface WorkloadsListParams extends ExtendedListQueryParams {
   clusterId?: string;
   namespace?: string;
+  projection?: "topology";
 }
 
 export interface WorkloadUpdatePayload {
@@ -119,7 +121,12 @@ export interface WorkloadUpdateResponse {
   timestamp: string;
 }
 
-export function getWorkloads(kind: WorkloadKind | string, params: WorkloadsListParams = {}, token: string) {
+export function getWorkloads(
+  kind: WorkloadKind | string,
+  params: WorkloadsListParams = {},
+  token: string,
+  requestOptions: ApiRequestSignalOptions = {},
+) {
   const query = buildResourceListQuery(params);
   const normalizedKind = normalizeLegacyKind(kind);
   return apiRequest<unknown>("/api/workloads", {
@@ -129,6 +136,7 @@ export function getWorkloads(kind: WorkloadKind | string, params: WorkloadsListP
       kind: normalizedKind,
     },
     token,
+    signal: requestOptions.signal,
   }).then((payload) => toLegacyWorkloadsResponse(kind, payload));
 }
 
@@ -400,13 +408,22 @@ export interface WorkloadListItem {
   replicas: number;
   readyReplicas: number;
   state: WorkloadState;
+  status?: string | null;
   spec?: Record<string, unknown>;
   statusJson?: Record<string, unknown>;
   observedState?: WorkloadObservedScaleState | null;
   labels?: Record<string, string>;
+  selector?: Record<string, unknown> | null;
+  ownerRefs?: unknown[];
+  podPhase?: string | null;
+  nodeName?: string | null;
+  restarts?: number | null;
+  updatedReplicas?: number | null;
+  availableReplicas?: number | null;
   annotations?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
+  creationTimestamp?: string | null;
 }
 
 export interface WorkloadListResponse {
@@ -420,6 +437,7 @@ export interface WorkloadListParams {
   clusterId?: string;
   namespace?: string;
   keyword?: string;
+  projection?: "topology";
   page?: number;
   pageSize?: number;
   sortBy?: string;
@@ -430,16 +448,18 @@ export function getWorkloadsByKind(
   kind: WorkloadKindParam,
   params: WorkloadListParams = {},
   token?: string,
+  requestOptions: ApiRequestSignalOptions = {},
 ) {
   const query: Record<string, string | number> = { kind };
   if (params.clusterId) query.clusterId = params.clusterId;
   if (params.namespace) query.namespace = params.namespace;
   if (params.keyword) query.keyword = params.keyword;
+  if (params.projection) query.projection = params.projection;
   if (params.page) query.page = params.page;
   if (params.pageSize) query.pageSize = params.pageSize;
   if (params.sortBy) query.sortBy = params.sortBy;
   if (params.sortOrder) query.sortOrder = params.sortOrder;
-  return apiRequest<WorkloadListResponse>('/api/workloads', { query, token });
+  return apiRequest<WorkloadListResponse>('/api/workloads', { query, token, signal: requestOptions.signal });
 }
 
 

@@ -18,9 +18,10 @@ import {
 } from "@ant-design/icons";
 import dagre from "@dagrejs/dagre";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Empty, Popover, Skeleton, Tooltip, Typography } from "antd";
+import { Alert, Empty, Popover, Skeleton, Tooltip, Typography } from "antd";
 import { useRouter } from "next/navigation";
 import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -33,6 +34,7 @@ import ReactFlow, {
   useNodesState,
   useReactFlow,
   useStore,
+  useStoreApi,
   getNodesBounds,
   getViewportForBounds,
   useViewport,
@@ -42,7 +44,7 @@ import ReactFlow, {
   type NodeTypes,
 } from "reactflow";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsIconActionButton, OpsPopoverPanel } from "@/components/ops";
+import { OpsFilterChip, OpsFilterTriggerButton, OpsIconActionButton, OpsPopoverPanel } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { RuntimeStatusPill } from "@/components/visual-system";
@@ -55,6 +57,10 @@ import {
   type DynamicResourceItem,
   type ResourceIdentity,
 } from "@/lib/api/resources";
+import {
+  getTopologyNamespaceSummaries,
+  type TopologyNamespaceSummaryItem,
+} from "@/lib/api/topology-summary";
 import { getWorkloadsByKind, type WorkloadListItem } from "@/lib/api/workloads";
 
 const { Text, Title } = Typography;
@@ -62,6 +68,104 @@ const { Text, Title } = Typography;
 const CANVAS_BG = "var(--topology-overview-bg)";
 const DEFAULT_VIEWPORT_MODE = "100%";
 const MAX_ZOOM = 4;
+const TOPOLOGY_QUERY_STALE_TIME_MS = 30_000;
+const TOPOLOGY_QUERY_GC_TIME_MS = 60_000;
+const TOPOLOGY_RESOURCE_QUERY_OPTIONS = {
+  staleTime: TOPOLOGY_QUERY_STALE_TIME_MS,
+  gcTime: TOPOLOGY_QUERY_GC_TIME_MS,
+} as const;
+const GATEWAY_DETAIL_CONCURRENCY = 4;
+const LARGE_GRAPH_MINIMAP_NODE_LIMIT = 180;
+const LARGE_GRAPH_MINIMAP_EDGE_LIMIT = 280;
+const REACT_FLOW_PRO_OPTIONS = { hideAttribution: true } as const;
+const TOPO_EDGE_TYPES: Record<string, never> = {};
+const handleTopologyReactFlowError = (id: string, message: string) => {
+  // React Flow 11 emits dev-only 002 during Next/React dev remounts even with stable type maps.
+  if (id === "002") return;
+  console.error(message);
+};
+
+function scheduleTopologyWork(task: () => void, timeout = 700) {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  if (idleWindow.requestIdleCallback) {
+    const id = idleWindow.requestIdleCallback(task, { timeout });
+    return () => idleWindow.cancelIdleCallback?.(id);
+  }
+  const id = window.setTimeout(task, 32);
+  return () => window.clearTimeout(id);
+}
+
+function TopologyReactFlowErrorHandler({ children }: { children: ReactNode }) {
+  const store = useStoreApi();
+  if (store.getState().onError !== handleTopologyReactFlowError) {
+    store.setState({ onError: handleTopologyReactFlowError });
+  }
+  return <>{children}</>;
+}
+
+function TopologyFilterPill({
+  label,
+  value,
+  icon,
+  meta,
+  active,
+  disabled,
+  wide,
+  warning,
+  toggle,
+  style,
+  onClick,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  icon: ReactNode;
+  meta?: ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+  wide?: boolean;
+  warning?: boolean;
+  toggle?: boolean;
+  style?: CSSProperties;
+  onClick?: () => void;
+}) {
+  return (
+    <OpsFilterTriggerButton
+      baseClassName="topology-filter-pill"
+      className={[
+        toggle ? "topology-filter-pill--toggle" : "topology-filter-pill--interactive",
+        wide ? "topology-filter-pill--wide" : undefined,
+      ].filter(Boolean).join(" ")}
+      active={active}
+      icon={icon}
+      label={label}
+      labelSuffix=""
+      meta={meta}
+      slotClassNames={{
+        lead: "topology-filter-pill__lead",
+        icon: ["topology-filter-pill__icon", warning ? "topology-filter-pill__icon--warning" : undefined]
+          .filter(Boolean)
+          .join(" "),
+        copy: "topology-filter-pill__content",
+        label: "topology-filter-pill__label",
+        valueWrap: "topology-filter-pill__content-value",
+        value: "topology-filter-pill__value",
+        affordance: "topology-filter-pill__meta",
+        caret: "topology-filter-pill__arrow",
+        meta: "topology-filter-pill__meta-content",
+      }}
+      style={style}
+      disabled={disabled}
+      onClick={onClick}
+      value={value}
+    />
+  );
+}
 
 function DetailFactsGrid({
   items,
@@ -407,6 +511,7 @@ type TopologyYamlTarget = {
 type TopologyFailureCategory = "service-unavailable" | "network-timeout" | "auth" | "unknown";
 type GatewayKindKey = "gatewayclass" | "gateway" | "httproute";
 type GatewayTopologyResource = DynamicResourceItem & {
+  kind: "GatewayClass" | "Gateway" | "HTTPRoute";
   group: "gateway.networking.k8s.io";
   version: "v1";
   resource: "gatewayclasses" | "gateways" | "httproutes";
@@ -440,6 +545,7 @@ const GATEWAY_TOPOLOGY_META: Record<
 };
 
 const GATEWAY_TOPOLOGY_KINDS = Object.keys(GATEWAY_TOPOLOGY_META) as GatewayKindKey[];
+const GATEWAY_DETAIL_TOPOLOGY_KINDS = new Set<GatewayTopologyResource["kind"]>(["Gateway", "HTTPRoute"]);
 
 function resolveErrorStatus(error: unknown): number | null {
   if (!error || typeof error !== "object") return null;
@@ -509,6 +615,10 @@ function getNodeNamespace(node: Node<TopoNodeData>): string | null {
 
 function isSourceKey(value: string): value is SourceKey {
   return SOURCE_TOKEN_KEYS.includes(value as SourceKey);
+}
+
+function incrementSourceCount(counts: Map<SourceKey, number>, key: SourceKey, count = 1) {
+  counts.set(key, (counts.get(key) ?? 0) + count);
 }
 
 const RESOURCE_DOMAIN_META: Record<
@@ -709,10 +819,15 @@ function buildTopologySnapshot(raw: Record<string, unknown> | undefined): Topolo
       Object.fromEntries(
         [
           "state",
+          "status",
           "phase",
+          "podPhase",
           "replicas",
           "readyReplicas",
+          "availableReplicas",
+          "updatedReplicas",
           "createdAt",
+          "creationTimestamp",
           "updatedAt",
           "podCount",
           "readyPods",
@@ -722,6 +837,9 @@ function buildTopologySnapshot(raw: Record<string, unknown> | undefined): Topolo
           "podReplicaCount",
           "controller",
           "nodeName",
+          "selector",
+          "ownerRefs",
+          "restarts",
         ]
           .map((key) => [key, raw[key]])
           .filter((entry): entry is [string, unknown] => entry[1] !== undefined && entry[1] !== null && entry[1] !== ""),
@@ -781,6 +899,11 @@ function extractWorkloadTemplateLabels(workload: WorkloadListItem): Record<strin
 }
 
 function extractWorkloadSelectorLabels(workload: WorkloadListItem): Record<string, string> {
+  const projectedSelector = toObject(workload.selector);
+  const projectedMatchLabels = toStringRecord(projectedSelector.matchLabels);
+  if (Object.keys(projectedMatchLabels).length > 0) return projectedMatchLabels;
+  const projectedLabels = toStringRecord(projectedSelector);
+  if (Object.keys(projectedLabels).length > 0) return projectedLabels;
   const spec = toObject(workload.spec);
   const selector = toObject(spec.selector);
   const matchLabels = toStringRecord(selector.matchLabels);
@@ -922,10 +1045,42 @@ function extractHttpRouteBackendRefs(resource: GatewayTopologyResource): string[
   return Array.from(refs);
 }
 
-async function getGatewayTopologyResources(clusterId: string, token: string): Promise<GatewayTopologyResult> {
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await mapper(items[index], index);
+      }
+    }),
+  );
+
+  return results;
+}
+
+async function getGatewayTopologyResources(
+  clusterId: string,
+  token: string,
+  options: { signal?: AbortSignal; includeDetails?: boolean; namespace?: string } = {},
+): Promise<GatewayTopologyResult> {
+  const { signal, includeDetails = true, namespace } = options;
   const lists = await Promise.all(
     GATEWAY_TOPOLOGY_KINDS.map(async (kindKey) => {
       const meta = GATEWAY_TOPOLOGY_META[kindKey];
+      const scopedNamespace = meta.kind === "GatewayClass" ? undefined : namespace;
       try {
         const list = await getDynamicResources(
           {
@@ -933,10 +1088,12 @@ async function getGatewayTopologyResources(clusterId: string, token: string): Pr
             group: "gateway.networking.k8s.io",
             version: "v1",
             resource: meta.resource,
+            namespace: scopedNamespace,
             pageSize: 200,
             missingAsEmpty: true,
           },
           token,
+          { signal },
         );
         return {
           items: list.items.map((item) => ({
@@ -948,7 +1105,10 @@ async function getGatewayTopologyResources(clusterId: string, token: string): Pr
           })),
           unavailableKind: null,
         };
-      } catch {
+      } catch (err) {
+        if (signal?.aborted || isAbortError(err)) {
+          throw err;
+        }
         return {
           items: [],
           unavailableKind: meta.kind,
@@ -961,8 +1121,19 @@ async function getGatewayTopologyResources(clusterId: string, token: string): Pr
   const unavailableKinds = lists
     .map((list) => list.unavailableKind)
     .filter((kind): kind is "GatewayClass" | "Gateway" | "HTTPRoute" => Boolean(kind));
-  const withDetails = await Promise.all(
-    items.map(async (item): Promise<GatewayTopologyResource> => {
+  if (!includeDetails) {
+    return {
+      items,
+      unavailableKinds,
+    };
+  }
+  const withDetails = await mapWithConcurrency(
+    items,
+    GATEWAY_DETAIL_CONCURRENCY,
+    async (item): Promise<GatewayTopologyResource> => {
+      if (!GATEWAY_DETAIL_TOPOLOGY_KINDS.has(item.kind)) {
+        return item;
+      }
       try {
         const detail = await getDynamicResourceDetail(
           {
@@ -974,6 +1145,7 @@ async function getGatewayTopologyResources(clusterId: string, token: string): Pr
             name: item.name,
           },
           token,
+          { signal },
         );
         const raw = toObject(detail.raw);
         return {
@@ -982,10 +1154,13 @@ async function getGatewayTopologyResources(clusterId: string, token: string): Pr
           statusJson: toObject(raw.status),
           labels: Object.keys(item.labels ?? {}).length > 0 ? item.labels : toStringRecord(toObject(raw.metadata).labels),
         };
-      } catch {
+      } catch (err) {
+        if (signal?.aborted || isAbortError(err)) {
+          throw err;
+        }
         return item;
       }
-    }),
+    },
   );
 
   return {
@@ -1003,7 +1178,7 @@ function controllerOwnsPodName(controller: WorkloadListItem, podName: string): b
 }
 
 function resolvePodStatus(pod: WorkloadListItem): TopoNodeData["status"] {
-  const phase = String((pod.statusJson ?? {}).phase ?? "").trim();
+  const phase = String(pod.podPhase ?? pod.statusJson?.phase ?? pod.status ?? "").trim();
   if (phase === "Running") return "Running";
   if (phase === "Failed") return "Failed";
   if (phase === "Pending") return "Pending";
@@ -1395,6 +1570,109 @@ const EDGE_STYLE: React.CSSProperties = {
   opacity: 0.66,
 };
 
+function sumResourceCounts(counts: Record<string, number>): number {
+  return Object.values(counts).reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0);
+}
+
+function addSummaryResourceCounts(counts: Map<SourceKey, number>, summary: TopologyNamespaceSummaryItem): void {
+  Object.entries(summary.resourceCounts).forEach(([kind, value]) => {
+    if (!Number.isFinite(value) || value <= 0) return;
+    const gatewayMeta = GATEWAY_TOPOLOGY_KINDS.map((key) => GATEWAY_TOPOLOGY_META[key]).find((meta) => meta.kind === kind);
+    if (gatewayMeta) {
+      incrementSourceCount(counts, gatewayMeta.tokenKey, value);
+      return;
+    }
+    if (kind === "Deployment") {
+      incrementSourceCount(counts, "deployment", value);
+      return;
+    }
+    if (kind === "StatefulSet") {
+      incrementSourceCount(counts, "statefulset", value);
+      return;
+    }
+    if (kind === "DaemonSet") {
+      incrementSourceCount(counts, "daemonset", value);
+      return;
+    }
+    if (kind === "Pod") {
+      incrementSourceCount(counts, "pod", value);
+      return;
+    }
+    const networkToken = resolveNetworkTokenKey(kind);
+    if (networkToken !== "networkpolicy" || kind === "NetworkPolicy") {
+      incrementSourceCount(counts, networkToken, value);
+    }
+  });
+}
+
+function buildNamespaceSummaryGraph(
+  clusterName: string,
+  clusterId: string,
+  summaries: TopologyNamespaceSummaryItem[],
+): { nodes: Node<TopoNodeData>[]; edges: Edge[] } {
+  const nodes: Node<TopoNodeData>[] = [
+    {
+      id: `cluster-${clusterId}`,
+      type: "topo",
+      position: { x: 0, y: 0 },
+      data: {
+        label: clusterName,
+        typeLabel: "cluster",
+        tokenKey: "cluster",
+      },
+    },
+  ];
+  const edges: Edge[] = [];
+  const activeSummaries = summaries.length > 0 ? summaries : [];
+
+  activeSummaries.forEach((summary) => {
+    const namespace = summary.namespace?.trim() || "cluster-scope";
+    const namespaceId = `ns-${namespace}`;
+    const resourceCount = sumResourceCounts(summary.resourceCounts);
+    const readyReplicaCount = Math.max((summary.podCount || 0) - (summary.abnormalCount || 0), 0);
+    const pendingReplicaCount = Math.max(summary.abnormalCount || 0, 0);
+    nodes.push({
+      id: namespaceId,
+      type: "topo",
+      position: { x: 0, y: 0 },
+      data: {
+        label: namespace,
+        typeLabel: "namespace",
+        tokenKey: "namespace",
+        caption: "scope boundary",
+        raw: {
+          namespace,
+          clusterId,
+          kind: "Namespace",
+          name: namespace,
+          podCount: resourceCount,
+          readyPods: readyReplicaCount,
+          pendingPods: pendingReplicaCount,
+          networkCount: summary.networkCount + summary.gatewayCount,
+          workloadCount: summary.workloadCount,
+          podReplicaCount: summary.podCount,
+          resourceCounts: summary.resourceCounts,
+          statusCounts: summary.statusCounts,
+          abnormalCount: summary.abnormalCount,
+          mode: "namespace",
+        },
+      },
+    });
+    edges.push(
+      buildEdge(`cluster-${clusterId}`, namespaceId, {
+        style: {
+          strokeWidth: 1.06,
+          opacity: 0.34,
+        },
+        data: { topologyRole: "scope" },
+        markerEnd: undefined,
+      }),
+    );
+  });
+
+  return { nodes, edges };
+}
+
 function buildFlowGraph(
   clusterName: string,
   clusterId: string,
@@ -1405,6 +1683,7 @@ function buildFlowGraph(
   daemonsets: WorkloadListItem[],
   pods: WorkloadListItem[],
   groupMode: GroupMode,
+  options: { namespaceOverviewOnly?: boolean } = {},
 ): { nodes: Node<TopoNodeData>[]; edges: Edge[] } {
   const activeNetwork = networkResources.filter((item) => item.state !== "deleted");
   const activeGateways = gatewayResources.filter((item) => item.state !== "deleted");
@@ -1480,7 +1759,9 @@ function buildFlowGraph(
     const namespacePods = activePods.filter((item) => item.namespace === namespace);
     const podReplicaCount = namespaceControllers.reduce((total, item) => total + Math.max(item.replicas ?? 0, 0), 0);
     const realPodCount = namespacePods.length;
-    const readyPodCount = namespacePods.filter((item) => String((item.statusJson ?? {}).phase ?? "").toLowerCase() === "running").length;
+    const readyPodCount = namespacePods.filter(
+      (item) => String(item.podPhase ?? item.statusJson?.phase ?? item.status ?? "").toLowerCase() === "running",
+    ).length;
     const readyReplicaCount = namespaceControllers.reduce(
       (total, item) => total + Math.max(item.readyReplicas ?? 0, 0),
       0,
@@ -1536,6 +1817,12 @@ function buildFlowGraph(
         }),
       );
     });
+    if (options.namespaceOverviewOnly) {
+      return {
+        nodes,
+        edges,
+      };
+    }
   }
 
   activeNetwork.forEach((resource) => {
@@ -1664,8 +1951,8 @@ function buildFlowGraph(
       const podId = realPod ? `pod-${realPod.id}` : `pod-${controller.id}-${index}`;
       const suffix = (controller.id.slice(-4) + index.toString(16)).slice(-5);
       const nodeName =
-        realPod && typeof (realPod.spec ?? {}).nodeName === "string"
-          ? String((realPod.spec ?? {}).nodeName)
+        realPod && typeof (realPod.nodeName ?? (realPod.spec ?? {}).nodeName) === "string"
+          ? String(realPod.nodeName ?? (realPod.spec ?? {}).nodeName)
           : deriveNodeName(controller.namespace, controller.id, index, clusterId);
 
       if (groupMode === "node") {
@@ -1986,7 +2273,7 @@ function buildFlowGraph(
   });
 
   return {
-    nodes: applyDagreLayout(nodes, edges),
+    nodes: groupMode === "namespace" ? nodes : applyDagreLayout(nodes, edges),
     edges,
   };
 }
@@ -2848,13 +3135,13 @@ function ZoomControls({
   return (
     <div className="topology-control-group">
       <Tooltip title="缩小">
-        <Button size="small" icon={<MinusOutlined />} onClick={onZoomOut} />
+        <OpsIconActionButton className="topology-control-button" size="small" icon={<MinusOutlined />} onClick={onZoomOut} />
       </Tooltip>
       <Tooltip title="放大">
-        <Button size="small" icon={<PlusOutlined />} onClick={onZoomIn} />
+        <OpsIconActionButton className="topology-control-button" size="small" icon={<PlusOutlined />} onClick={onZoomIn} />
       </Tooltip>
       <Tooltip title="适应视图">
-        <Button size="small" icon={<ShrinkOutlined />} onClick={onFitView} />
+        <OpsIconActionButton className="topology-control-button" size="small" icon={<ShrinkOutlined />} onClick={onFitView} />
       </Tooltip>
     </div>
   );
@@ -2910,6 +3197,8 @@ function TopologyCanvas({
   const reactFlowHeight = useStore((store) => store.height);
   const viewport = useViewport();
   const suspendAutoViewportUntilRef = useRef(0);
+  const nodeTypes = useMemo(() => TOPO_NODE_TYPES, []);
+  const edgeTypes = useMemo(() => TOPO_EDGE_TYPES, []);
 
   const suspendAutoViewport = useCallback((duration = 680) => {
     suspendAutoViewportUntilRef.current = Date.now() + duration;
@@ -3026,6 +3315,8 @@ function TopologyCanvas({
     }
   }, [autoViewportSuspended, hasNodes, isNodeDragging, nodes, reactFlowHeight, reactFlowWidth, setViewport, viewport, viewportMode]);
 
+  const showMiniMap = nodes.length <= LARGE_GRAPH_MINIMAP_NODE_LIMIT && edges.length <= LARGE_GRAPH_MINIMAP_EDGE_LIMIT;
+
   return (
     <ReactFlow
       nodes={nodes}
@@ -3043,28 +3334,32 @@ function TopologyCanvas({
       }}
       onMoveStart={() => suspendAutoViewport(960)}
       onMoveEnd={() => suspendAutoViewport(560)}
-      nodeTypes={TOPO_NODE_TYPES}
+      nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       minZoom={0.08}
       maxZoom={4}
       autoPanOnNodeDrag={false}
-      proOptions={{ hideAttribution: true }}
+      proOptions={REACT_FLOW_PRO_OPTIONS}
+      onError={handleTopologyReactFlowError}
       style={{ background: CANVAS_BG }}
     >
       <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--topology-overview-grid)" />
 
-      <MiniMap
-        nodeColor={minimapNodeColor}
-        position="bottom-right"
-        style={{
-          background: "var(--topology-overview-panel)",
-          border: "1px solid var(--topology-overview-border)",
-          borderRadius: 16,
-          width: 164,
-          height: 100,
-          pointerEvents: "none",
-        }}
-        maskColor="var(--topology-overview-mask)"
-      />
+      {showMiniMap ? (
+        <MiniMap
+          nodeColor={minimapNodeColor}
+          position="bottom-right"
+          style={{
+            background: "var(--topology-overview-panel)",
+            border: "1px solid var(--topology-overview-border)",
+            borderRadius: 16,
+            width: 164,
+            height: 100,
+            pointerEvents: "none",
+          }}
+          maskColor="var(--topology-overview-mask)"
+        />
+      ) : null}
 
       {isLoading && !hasNodes ? (
         <div className="topology-canvas-overlay">
@@ -3096,9 +3391,9 @@ function TopologyCanvas({
                 <span>{getFailureCopy(unavailableCategory).description}</span>
                 <span style={{ color: "var(--topology-overview-subtle)" }}>{unavailableSummary}</span>
                 <div>
-                  <Button size="small" type="primary" icon={<ReloadOutlined />} onClick={onRetry}>
+                  <OpsIconActionButton size="small" opsTone="primary" icon={<ReloadOutlined />} onClick={onRetry}>
                     重试拉取
-                  </Button>
+                  </OpsIconActionButton>
                 </div>
               </div>
             }
@@ -3262,9 +3557,9 @@ function NodeDetailPanel({
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {!isGroupNode && canOpenResourceDetail ? (
-            <Button size="small" type="primary" onClick={onOpenResourceDetail}>
+            <OpsIconActionButton size="small" opsTone="primary" onClick={onOpenResourceDetail}>
               打开详情
-            </Button>
+            </OpsIconActionButton>
           ) : null}
           {!isGroupNode && currentResourceActionLabel ? (
             <button type="button" className="topology-current-resource-button" onClick={onOpenCurrentResource}>
@@ -3279,18 +3574,18 @@ function NodeDetailPanel({
             </button>
           ) : null}
           {canOpenResourceYaml ? (
-            <Button size="small" icon={<FileTextOutlined />} onClick={onOpenResourceYaml}>
+            <OpsIconActionButton size="small" icon={<FileTextOutlined />} onClick={onOpenResourceYaml}>
               YAML
-            </Button>
+            </OpsIconActionButton>
           ) : null}
           {isGroupNode ? (
-            <Button size="small" onClick={onToggleGroup}>
+            <OpsIconActionButton size="small" onClick={onToggleGroup}>
               {isGroupExpanded ? "收起" : "展开"}
-            </Button>
+            </OpsIconActionButton>
           ) : null}
-          <Button size="small" onClick={onClear}>
+          <OpsIconActionButton size="small" onClick={onClear}>
             清空
-          </Button>
+          </OpsIconActionButton>
         </div>
       </div>
 
@@ -3535,27 +3830,24 @@ function NodeDetailPanel({
           )}
         </div>
         <div className="topology-quick-actions">
-          <button
-            type="button"
+          <OpsIconActionButton
             className={`topology-quick-actions__item ${activeQuickAction === "abnormal" ? "is-active" : ""}`}
             onClick={() => onApplyQuickFilter("abnormal")}
           >
             异常聚焦
-          </button>
-          <button
-            type="button"
+          </OpsIconActionButton>
+          <OpsIconActionButton
             className={`topology-quick-actions__item ${activeQuickAction === "highRisk" ? "is-active" : ""}`}
             onClick={() => onApplyQuickFilter("highRisk")}
           >
             高风险链路
-          </button>
-          <button
-            type="button"
+          </OpsIconActionButton>
+          <OpsIconActionButton
             className={`topology-quick-actions__item ${activeQuickAction === "group" ? "is-active" : ""}`}
             onClick={() => onApplyQuickFilter("group")}
           >
             异常组
-          </button>
+          </OpsIconActionButton>
         </div>
       </div>
     </aside>
@@ -3583,6 +3875,7 @@ export default function NetworkTopologyPage() {
   const [yamlTarget, setYamlTarget] = useState<TopologyYamlTarget | null>(null);
   const [viewportVersion, setViewportVersion] = useState(0);
   const [isNodeDragging, setIsNodeDragging] = useState(false);
+  const [heavyTopologyRequested, setHeavyTopologyRequested] = useState(false);
   const fitViewRef = useRef<(() => void) | null>(null);
   const zoomInRef = useRef<(() => void) | null>(null);
   const zoomOutRef = useRef<(() => void) | null>(null);
@@ -3592,20 +3885,55 @@ export default function NetworkTopologyPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<TopoNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
+  useEffect(() => {
+    document.body.classList.add("topology-overview-active");
+    return () => {
+      document.body.classList.remove("topology-overview-active");
+    };
+  }, []);
+
   const { data: clustersData, isLoading: clustersLoading } = useQuery({
     queryKey: ["clusters"],
-    queryFn: () => getClusters({ state: "active", selectableOnly: true }, token!),
+    queryFn: ({ signal }) => getClusters({ state: "active", selectableOnly: true }, token!, { signal }),
     enabled: !!token,
   });
 
   const effectiveClusterId = selectedClusterId ?? clustersData?.items?.[0]?.id ?? null;
   const selectedCluster = clustersData?.items?.find((item) => item.id === effectiveClusterId);
   const queryEnabled = !!token && !!effectiveClusterId;
+  const topologyRequestNamespace = selectedNamespace === ALL_NAMESPACE ? undefined : selectedNamespace;
+  const shouldLoadHeavyTopology =
+    heavyTopologyRequested ||
+    selectedNamespace !== ALL_NAMESPACE ||
+    groupMode !== "namespace" ||
+    Boolean(focusedNodeId) ||
+    resourceFilter !== "all" ||
+    Boolean(activeQuickAction) ||
+    userExpandedGroups;
+  const {
+    data: topologyNamespaceSummaryData,
+    isLoading: topologyNamespaceSummaryLoading,
+    error: topologyNamespaceSummaryError,
+    refetch: refetchTopologyNamespaceSummary,
+  } = useQuery({
+    queryKey: ["topology-namespace-summary", effectiveClusterId],
+    queryFn: ({ signal }) => getTopologyNamespaceSummaries({ clusterId: effectiveClusterId! }, token!, { signal }),
+    enabled: queryEnabled,
+    ...TOPOLOGY_RESOURCE_QUERY_OPTIONS,
+  });
+  const shouldFallbackToResourceTopology =
+    !topologyNamespaceSummaryLoading &&
+    !topologyNamespaceSummaryError &&
+    Boolean(topologyNamespaceSummaryData) &&
+    (topologyNamespaceSummaryData?.items.length ?? 0) === 0;
+  const shouldLoadResourceTopology = shouldLoadHeavyTopology || shouldFallbackToResourceTopology;
 
   const { data: networkData, isLoading: networkLoading, error: networkError, refetch } = useQuery({
-    queryKey: ["topology-network", effectiveClusterId],
-    queryFn: () => getNetworkResources({ clusterId: effectiveClusterId!, pageSize: 200 }, token!),
-    enabled: queryEnabled,
+    queryKey: ["topology-network", effectiveClusterId, topologyRequestNamespace ?? "all"],
+    queryFn: ({ signal }) =>
+      getNetworkResources({ clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 200 }, token!, { signal }),
+    enabled: queryEnabled && shouldLoadResourceTopology,
+    ...TOPOLOGY_RESOURCE_QUERY_OPTIONS,
   });
 
   const {
@@ -3614,52 +3942,93 @@ export default function NetworkTopologyPage() {
     error: gatewayTopologyError,
     refetch: refetchGatewayTopology,
   } = useQuery({
-    queryKey: ["topology-gateway-api", effectiveClusterId],
-    queryFn: () => getGatewayTopologyResources(effectiveClusterId!, token!),
-    enabled: queryEnabled,
+    queryKey: [
+      "topology-gateway-api",
+      effectiveClusterId,
+      topologyRequestNamespace ?? "all",
+      shouldLoadHeavyTopology ? "detail" : "summary",
+    ],
+    queryFn: ({ signal }) =>
+      getGatewayTopologyResources(effectiveClusterId!, token!, {
+        signal,
+        namespace: topologyRequestNamespace,
+        includeDetails: shouldLoadHeavyTopology,
+      }),
+    enabled: queryEnabled && shouldLoadResourceTopology,
+    ...TOPOLOGY_RESOURCE_QUERY_OPTIONS,
   });
 
   const { data: deploymentData, isLoading: deploymentLoading, error: deploymentError } = useQuery({
-    queryKey: ["topology-deployments", effectiveClusterId],
-    queryFn: () =>
-      getWorkloadsByKind("Deployment", { clusterId: effectiveClusterId!, pageSize: 200 }, token!),
-    enabled: queryEnabled,
+    queryKey: ["topology-deployments", effectiveClusterId, topologyRequestNamespace ?? "all"],
+    queryFn: ({ signal }) =>
+      getWorkloadsByKind(
+        "Deployment",
+        { clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 200, projection: "topology" },
+        token!,
+        { signal },
+      ),
+    enabled: queryEnabled && shouldLoadResourceTopology,
+    ...TOPOLOGY_RESOURCE_QUERY_OPTIONS,
   });
 
   const { data: statefulSetData, isLoading: statefulSetLoading, error: statefulSetError } = useQuery({
-    queryKey: ["topology-statefulsets", effectiveClusterId],
-    queryFn: () =>
-      getWorkloadsByKind("StatefulSet", { clusterId: effectiveClusterId!, pageSize: 200 }, token!),
-    enabled: queryEnabled,
+    queryKey: ["topology-statefulsets", effectiveClusterId, topologyRequestNamespace ?? "all"],
+    queryFn: ({ signal }) =>
+      getWorkloadsByKind(
+        "StatefulSet",
+        { clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 200, projection: "topology" },
+        token!,
+        { signal },
+      ),
+    enabled: queryEnabled && shouldLoadResourceTopology,
+    ...TOPOLOGY_RESOURCE_QUERY_OPTIONS,
   });
 
   const { data: daemonSetData, isLoading: daemonSetLoading, error: daemonSetError } = useQuery({
-    queryKey: ["topology-daemonsets", effectiveClusterId],
-    queryFn: () =>
-      getWorkloadsByKind("DaemonSet", { clusterId: effectiveClusterId!, pageSize: 200 }, token!),
-    enabled: queryEnabled,
+    queryKey: ["topology-daemonsets", effectiveClusterId, topologyRequestNamespace ?? "all"],
+    queryFn: ({ signal }) =>
+      getWorkloadsByKind(
+        "DaemonSet",
+        { clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 200, projection: "topology" },
+        token!,
+        { signal },
+      ),
+    enabled: queryEnabled && shouldLoadResourceTopology,
+    ...TOPOLOGY_RESOURCE_QUERY_OPTIONS,
   });
 
   const { data: podData, isLoading: podLoading, error: podError } = useQuery({
-    queryKey: ["topology-pods", effectiveClusterId],
-    queryFn: () =>
-      getWorkloadsByKind("Pod", { clusterId: effectiveClusterId!, pageSize: 400 }, token!),
-    enabled: queryEnabled,
+    queryKey: ["topology-pods", effectiveClusterId, topologyRequestNamespace ?? "all", shouldLoadHeavyTopology ? "detail" : "idle"],
+    queryFn: ({ signal }) =>
+      getWorkloadsByKind(
+        "Pod",
+        { clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 400, projection: "topology" },
+        token!,
+        { signal },
+      ),
+    enabled: queryEnabled && shouldLoadResourceTopology,
+    ...TOPOLOGY_RESOURCE_QUERY_OPTIONS,
   });
 
   const isLoading =
     clustersLoading ||
-    networkLoading ||
-    gatewayTopologyLoading ||
-    deploymentLoading ||
-    statefulSetLoading ||
-    daemonSetLoading ||
-    podLoading;
+    (!shouldLoadResourceTopology && topologyNamespaceSummaryLoading) ||
+    (shouldLoadResourceTopology &&
+      (networkLoading ||
+        gatewayTopologyLoading ||
+        deploymentLoading ||
+        statefulSetLoading ||
+        daemonSetLoading ||
+        podLoading));
   const clusterDataUnavailable =
     !isLoading &&
     !!effectiveClusterId &&
-    (!!networkError || !!gatewayTopologyError || !!deploymentError || !!statefulSetError || !!daemonSetError || !!podError);
-  const topologyErrors = [networkError, gatewayTopologyError, deploymentError, statefulSetError, daemonSetError, podError].filter(Boolean);
+    (shouldLoadResourceTopology
+      ? !!networkError || !!gatewayTopologyError || !!deploymentError || !!statefulSetError || !!daemonSetError || !!podError
+      : !!topologyNamespaceSummaryError);
+  const topologyErrors = shouldLoadResourceTopology
+    ? [networkError, gatewayTopologyError, deploymentError, statefulSetError, daemonSetError, podError].filter(Boolean)
+    : [topologyNamespaceSummaryError].filter(Boolean);
   const unavailableCategory = resolveFailureCategory(topologyErrors);
   const unavailableSummary = topologyErrors.map(resolveErrorMessage).join(" | ");
   const partialCoverageSummary = useMemo(() => {
@@ -3670,6 +4039,9 @@ export default function NetworkTopologyPage() {
 
   const namespaceOptions = useMemo(() => {
     const values = new Set<string>();
+    (topologyNamespaceSummaryData?.items ?? []).forEach((item) => {
+      if (item.namespace) values.add(item.namespace);
+    });
     (networkData?.items ?? []).forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
@@ -3695,7 +4067,15 @@ export default function NetworkTopologyPage() {
         .sort((left, right) => left.localeCompare(right))
         .map((value) => ({ value, label: value })),
     ];
-  }, [daemonSetData?.items, deploymentData?.items, gatewayTopologyData?.items, networkData?.items, podData?.items, statefulSetData?.items]);
+  }, [
+    daemonSetData?.items,
+    deploymentData?.items,
+    gatewayTopologyData?.items,
+    networkData?.items,
+    podData?.items,
+    statefulSetData?.items,
+    topologyNamespaceSummaryData?.items,
+  ]);
 
   const namespaceFilteredNetwork = useMemo(
     () =>
@@ -3739,6 +4119,49 @@ export default function NetworkTopologyPage() {
         : (podData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
     [podData?.items, selectedNamespace],
   );
+  const namespaceFilteredSummaries = useMemo(
+    () =>
+      selectedNamespace === ALL_NAMESPACE
+        ? topologyNamespaceSummaryData?.items ?? []
+        : (topologyNamespaceSummaryData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
+    [selectedNamespace, topologyNamespaceSummaryData?.items],
+  );
+  const sourceResourceCounts = useMemo(() => {
+    const counts = new Map<SourceKey, number>();
+    if (!shouldLoadResourceTopology && namespaceFilteredSummaries.length > 0) {
+      namespaceFilteredSummaries.forEach((summary) => addSummaryResourceCounts(counts, summary));
+      return counts;
+    }
+    namespaceFilteredNetwork.forEach((item) => incrementSourceCount(counts, resolveNetworkTokenKey(String(item.kind))));
+    namespaceFilteredGatewayTopology.forEach((item) => {
+      const tokenKey = GATEWAY_TOPOLOGY_KINDS.map((key) => GATEWAY_TOPOLOGY_META[key]).find(
+        (meta) => meta.kind === item.kind,
+      )?.tokenKey;
+      if (tokenKey) incrementSourceCount(counts, tokenKey);
+    });
+    incrementSourceCount(counts, "deployment", namespaceFilteredDeployments.length);
+    incrementSourceCount(counts, "statefulset", namespaceFilteredStatefulSets.length);
+    incrementSourceCount(counts, "daemonset", namespaceFilteredDaemonSets.length);
+    const estimatedPodCount =
+      podData?.items
+        ? namespaceFilteredPods.length
+        : [...namespaceFilteredDeployments, ...namespaceFilteredStatefulSets, ...namespaceFilteredDaemonSets].reduce(
+            (total, item) => total + Math.max(item.replicas ?? item.readyReplicas ?? 0, 0),
+            0,
+          );
+    incrementSourceCount(counts, "pod", estimatedPodCount);
+    return counts;
+  }, [
+    namespaceFilteredDaemonSets,
+    namespaceFilteredDeployments,
+    namespaceFilteredGatewayTopology,
+    namespaceFilteredNetwork,
+    namespaceFilteredPods,
+    namespaceFilteredStatefulSets,
+    namespaceFilteredSummaries,
+    podData?.items,
+    shouldLoadResourceTopology,
+  ]);
   const deferredSelectedCluster = useDeferredValue(selectedCluster);
   const deferredNamespaceFilteredNetwork = useDeferredValue(namespaceFilteredNetwork);
   const deferredNamespaceFilteredGatewayTopology = useDeferredValue(namespaceFilteredGatewayTopology);
@@ -3746,31 +4169,51 @@ export default function NetworkTopologyPage() {
   const deferredNamespaceFilteredStatefulSets = useDeferredValue(namespaceFilteredStatefulSets);
   const deferredNamespaceFilteredDaemonSets = useDeferredValue(namespaceFilteredDaemonSets);
   const deferredNamespaceFilteredPods = useDeferredValue(namespaceFilteredPods);
+  const deferredNamespaceFilteredSummaries = useDeferredValue(namespaceFilteredSummaries);
+  const namespaceOverviewOnly =
+    selectedNamespace === ALL_NAMESPACE &&
+    groupMode === "namespace" &&
+    !focusedNodeId &&
+    resourceFilter === "all" &&
+    !activeQuickAction &&
+    !userExpandedGroups;
+  const useNamespaceSummaryGraph = namespaceOverviewOnly && !shouldLoadResourceTopology;
 
   useEffect(() => {
     if (!deferredSelectedCluster) return;
     let cancelled = false;
-    const graph = buildFlowGraph(
-      deferredSelectedCluster.name,
-      deferredSelectedCluster.id,
-      deferredNamespaceFilteredNetwork,
-      deferredNamespaceFilteredGatewayTopology,
-      deferredNamespaceFilteredDeployments,
-      deferredNamespaceFilteredStatefulSets,
-      deferredNamespaceFilteredDaemonSets,
-      deferredNamespaceFilteredPods,
-      groupMode,
-    );
-    const raf = window.requestAnimationFrame(() => {
+
+    const cancelWork = scheduleTopologyWork(() => {
+      if (cancelled) return;
+      const graph = useNamespaceSummaryGraph
+        ? buildNamespaceSummaryGraph(
+            deferredSelectedCluster.name,
+            deferredSelectedCluster.id,
+            deferredNamespaceFilteredSummaries,
+          )
+        : buildFlowGraph(
+            deferredSelectedCluster.name,
+            deferredSelectedCluster.id,
+            deferredNamespaceFilteredNetwork,
+            deferredNamespaceFilteredGatewayTopology,
+            deferredNamespaceFilteredDeployments,
+            deferredNamespaceFilteredStatefulSets,
+            deferredNamespaceFilteredDaemonSets,
+            deferredNamespaceFilteredPods,
+            groupMode,
+            { namespaceOverviewOnly },
+          );
       if (cancelled) return;
       startTransition(() => {
+        if (cancelled) return;
         setNodes(graph.nodes);
         setEdges(graph.edges);
       });
     });
+
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(raf);
+      cancelWork();
     };
   }, [
     deferredSelectedCluster,
@@ -3780,7 +4223,10 @@ export default function NetworkTopologyPage() {
     deferredNamespaceFilteredStatefulSets,
     deferredNamespaceFilteredDaemonSets,
     deferredNamespaceFilteredPods,
+    deferredNamespaceFilteredSummaries,
     groupMode,
+    namespaceOverviewOnly,
+    useNamespaceSummaryGraph,
     setNodes,
     setEdges,
   ]);
@@ -3793,16 +4239,11 @@ export default function NetworkTopologyPage() {
     return map;
   }, [nodes]);
 
-  const availableResourceTypeKeys = useMemo(
-    () =>
-      RESOURCE_DOMAIN_KEYS.flatMap((domain) =>
-        RESOURCE_DOMAIN_META[domain].keys.filter((key) => {
-          const count = nodes.filter((node) => node.data.tokenKey === key).length;
-          return count > 0;
-        }),
-      ),
-    [nodes],
-  );
+  const availableResourceTypeKeys = useMemo(() => {
+    return RESOURCE_DOMAIN_KEYS.flatMap((domain) =>
+      RESOURCE_DOMAIN_META[domain].keys.filter((key) => (sourceResourceCounts.get(key) ?? 0) > 0),
+    );
+  }, [sourceResourceCounts]);
 
   const effectiveSelectedResourceTypes = useMemo(() => {
     if (availableResourceTypeKeys.length === 0) return selectedResourceTypes;
@@ -4190,6 +4631,9 @@ export default function NetworkTopologyPage() {
 
 
   const resourceFocusCounts = useMemo(() => {
+    if (namespaceOverviewOnly) {
+      return sourceResourceCounts;
+    }
     const counts = new Map<SourceKey, number>();
     nodes.forEach((node) => {
       if (!baseFilteredNodeIds.has(node.id)) return;
@@ -4198,7 +4642,7 @@ export default function NetworkTopologyPage() {
     });
 
     return counts;
-  }, [nodes, baseFilteredNodeIds]);
+  }, [baseFilteredNodeIds, namespaceOverviewOnly, nodes, sourceResourceCounts]);
 
   const resourceFocusSections = useMemo(() => {
     return RESOURCE_DOMAIN_KEYS.map((domain) => {
@@ -4452,6 +4896,9 @@ export default function NetworkTopologyPage() {
   const focusNodeById = useCallback(
     (targetNodeId: string | null) => {
       const nextNode = targetNodeId ? graphNodeMap.get(targetNodeId) ?? null : null;
+      if (nextNode && isGroupTokenKey(nextNode.data.tokenKey)) {
+        setHeavyTopologyRequested(true);
+      }
       setFocusedNodeId(targetNodeId);
       setSelectedGroupSection(null);
 
@@ -4515,19 +4962,24 @@ export default function NetworkTopologyPage() {
   }, [focusNodeById]);
 
   const handleRefresh = useCallback(() => {
-    refetch();
-    refetchGatewayTopology();
+    refetchTopologyNamespaceSummary();
+    if (shouldLoadResourceTopology) {
+      refetch();
+      refetchGatewayTopology();
+    }
+    setHeavyTopologyRequested(false);
     setSelectedGroupSection(null);
     setFocusedNodeId(null);
     setDetailRequest(null);
     setYamlTarget(null);
     setViewportVersion((current) => current + 1);
-  }, [refetch, refetchGatewayTopology]);
+  }, [refetch, refetchGatewayTopology, refetchTopologyNamespaceSummary, shouldLoadResourceTopology]);
 
   const handleClusterChange = useCallback(
     (value: string) => {
       userExpandedGroupsRef.current = false;
       setUserExpandedGroups(false);
+      setHeavyTopologyRequested(false);
       setSelectedClusterId(value);
       setSelectedNamespace(ALL_NAMESPACE);
       setSelectedResourceTypes([...SOURCE_TOKEN_KEYS]);
@@ -4546,6 +4998,7 @@ export default function NetworkTopologyPage() {
   const handleNamespaceChange = useCallback((value: string) => {
     userExpandedGroupsRef.current = value !== ALL_NAMESPACE;
     setUserExpandedGroups(value !== ALL_NAMESPACE);
+    setHeavyTopologyRequested(value !== ALL_NAMESPACE);
     setSelectedNamespace(value);
     setSelectedResourceTypes([...SOURCE_TOKEN_KEYS]);
     setSelectedGroupSection(null);
@@ -4558,7 +5011,15 @@ export default function NetworkTopologyPage() {
     setViewportVersion((current) => current + 1);
   }, []);
 
+  const handleResourceFocusPanelOpenChange = useCallback((open: boolean) => {
+    setResourceFocusPanelOpen(open);
+    if (open) {
+      setHeavyTopologyRequested(true);
+    }
+  }, []);
+
   const handleSelectAllResourceTypes = useCallback(() => {
+    setHeavyTopologyRequested(true);
     setSelectedResourceTypes(
       availableResourceTypeKeys.length > 0 ? [...availableResourceTypeKeys] : [...SOURCE_TOKEN_KEYS],
     );
@@ -4568,6 +5029,7 @@ export default function NetworkTopologyPage() {
   }, [availableResourceTypeKeys]);
 
   const handleResetResourceTypesToDefault = useCallback(() => {
+    setHeavyTopologyRequested(true);
     setSelectedResourceTypes([...availableResourceTypeKeys]);
     setSelectedGroupSection(null);
     setDetailRequest(null);
@@ -4583,6 +5045,7 @@ export default function NetworkTopologyPage() {
   }, []);
 
   const handleToggleResourceDomainSelection = useCallback((domain: ResourceDomainKey) => {
+    setHeavyTopologyRequested(true);
     const keys = RESOURCE_DOMAIN_META[domain].keys;
     setSelectedResourceTypes((current) => {
       const allSelected = keys.every((key) => effectiveSelectedResourceTypes.includes(key));
@@ -4599,6 +5062,7 @@ export default function NetworkTopologyPage() {
   }, [effectiveSelectedResourceTypes]);
 
   const handleToggleResourceType = useCallback((value: SourceKey) => {
+    setHeavyTopologyRequested(true);
     setSelectedResourceTypes((current) => {
       if (current.includes(value)) {
         const next = current.filter((item) => item !== value);
@@ -4615,6 +5079,7 @@ export default function NetworkTopologyPage() {
   const handleGroupModeChange = useCallback((value: GroupMode) => {
     userExpandedGroupsRef.current = false;
     setUserExpandedGroups(false);
+    setHeavyTopologyRequested(value !== "namespace");
     setGroupMode(value);
     setSelectedGroupSection(null);
     setFocusedNodeId(null);
@@ -4626,6 +5091,7 @@ export default function NetworkTopologyPage() {
   }, []);
 
   const handleAbnormalFocusToggle = useCallback(() => {
+    setHeavyTopologyRequested(true);
     setResourceFilter((current) => (current === "abnormal" ? "all" : "abnormal"));
     setSelectedGroupSection(null);
     setFocusedNodeId(null);
@@ -4648,6 +5114,7 @@ export default function NetworkTopologyPage() {
   const handleResetView = useCallback(() => {
     userExpandedGroupsRef.current = false;
     setUserExpandedGroups(false);
+    setHeavyTopologyRequested(false);
     setFocusedNodeId(null);
     setSelectedGroupSection(null);
     setSelectedResourceTypes([...SOURCE_TOKEN_KEYS]);
@@ -4737,6 +5204,7 @@ export default function NetworkTopologyPage() {
 
   const handleQuickFilter = useCallback(
     (action: "abnormal" | "group" | "highRisk") => {
+      setHeavyTopologyRequested(true);
       setActiveQuickAction(action);
       if (action === "abnormal") {
         setResourceFilter("abnormal");
@@ -4787,12 +5255,12 @@ export default function NetworkTopologyPage() {
             资源域
           </div>
           <div className="topology-resource-tree__toolbar-actions">
-            <button type="button" className="topology-resource-tree__toolbar-action" onClick={handleSelectAllResourceTypes}>
+            <OpsIconActionButton className="topology-resource-tree__toolbar-action" onClick={handleSelectAllResourceTypes}>
               全选
-            </button>
-            <button type="button" className="topology-resource-tree__toolbar-action" onClick={handleResetResourceTypesToDefault}>
+            </OpsIconActionButton>
+            <OpsIconActionButton className="topology-resource-tree__toolbar-action" onClick={handleResetResourceTypesToDefault}>
               默认
-            </button>
+            </OpsIconActionButton>
           </div>
         </div>
         <button
@@ -5002,25 +5470,14 @@ export default function NetworkTopologyPage() {
                 content={clusterPanel}
                 overlayStyle={{ width: "var(--topology-popover-width-compact)", maxWidth: "calc(100vw - 24px)" }}
               >
-                <button
-                  type="button"
-                  className={`topology-filter-pill topology-filter-pill--interactive ${clusterPanelOpen ? "is-active" : ""}`}
-                  style={{ ...toolbarPillBaseStyle, opacity: clustersLoading ? 0.6 : 1 }}
+                <TopologyFilterPill
+                  active={clusterPanelOpen}
                   disabled={clustersLoading}
-                >
-                  <span className="topology-filter-pill__lead">
-                    <span className="topology-filter-pill__icon">
-                      <RadarChartOutlined />
-                    </span>
-                  </span>
-                  <span className="topology-filter-pill__content">
-                    <span className="topology-filter-pill__label">集群</span>
-                    <span className="topology-filter-pill__value">{selectedClusterLabel}</span>
-                  </span>
-                  <span className="topology-filter-pill__meta">
-                    <DownOutlined className="topology-filter-pill__arrow" />
-                  </span>
-                </button>
+                  icon={<RadarChartOutlined />}
+                  label="集群"
+                  value={selectedClusterLabel}
+                  style={{ ...toolbarPillBaseStyle, opacity: clustersLoading ? 0.6 : 1 }}
+                />
               </Popover>
               <Popover
                 trigger="click"
@@ -5030,52 +5487,36 @@ export default function NetworkTopologyPage() {
                 content={namespacePanel}
                 overlayStyle={{ width: "var(--topology-popover-width-compact)", maxWidth: "calc(100vw - 24px)" }}
               >
-                <button
-                  type="button"
-                  className={`topology-filter-pill topology-filter-pill--interactive ${namespacePanelOpen ? "is-active" : ""}`}
+                <TopologyFilterPill
+                  active={namespacePanelOpen}
+                  icon={<BranchesOutlined />}
+                  label="名称空间"
+                  value={selectedNamespaceLabel}
                   style={toolbarPillBaseStyle}
-                >
-                  <span className="topology-filter-pill__lead">
-                    <span className="topology-filter-pill__icon">
-                      <BranchesOutlined />
-                    </span>
-                  </span>
-                  <span className="topology-filter-pill__content">
-                    <span className="topology-filter-pill__label">名称空间</span>
-                    <span className="topology-filter-pill__value">{selectedNamespaceLabel}</span>
-                  </span>
-                  <span className="topology-filter-pill__meta">
-                    <DownOutlined className="topology-filter-pill__arrow" />
-                  </span>
-                </button>
+                />
               </Popover>
               <Popover
                 trigger="click"
                 placement="bottomLeft"
                 open={resourceFocusPanelOpen}
-                onOpenChange={setResourceFocusPanelOpen}
+                onOpenChange={handleResourceFocusPanelOpenChange}
                 content={resourceFocusPanel}
                 overlayStyle={{ width: "var(--topology-popover-width-resource)", maxWidth: "calc(100vw - 24px)" }}
               >
-                <button
-                  type="button"
-                  className={`topology-filter-pill topology-filter-pill--interactive topology-filter-pill--wide ${resourceFocusPanelOpen ? "is-active" : ""}`}
+                <TopologyFilterPill
+                  active={resourceFocusPanelOpen}
+                  icon={<FilterOutlined />}
+                  label="资源类型"
+                  meta={
+                    <>
+                      <span className="topology-filter-pill__count">{effectiveSelectedResourceTypes.length}</span>
+                      <DownOutlined className="topology-filter-pill__arrow" />
+                    </>
+                  }
                   style={toolbarWidePillStyle}
-                >
-                  <span className="topology-filter-pill__lead">
-                    <span className="topology-filter-pill__icon">
-                      <FilterOutlined />
-                    </span>
-                  </span>
-                  <span className="topology-filter-pill__content">
-                    <span className="topology-filter-pill__label">资源类型</span>
-                    <span className="topology-filter-pill__value">{selectedResourceFocusSummary}</span>
-                  </span>
-                  <span className="topology-filter-pill__meta">
-                    <span className="topology-filter-pill__count">{effectiveSelectedResourceTypes.length}</span>
-                    <DownOutlined className="topology-filter-pill__arrow" />
-                  </span>
-                </button>
+                  value={selectedResourceFocusSummary}
+                  wide
+                />
               </Popover>
               <Popover
                 trigger="click"
@@ -5085,48 +5526,29 @@ export default function NetworkTopologyPage() {
                 content={groupModePanel}
                 overlayStyle={{ width: "var(--topology-popover-width-narrow)", maxWidth: "calc(100vw - 24px)" }}
               >
-                <button
-                  type="button"
-                  className={`topology-filter-pill topology-filter-pill--interactive ${groupModePanelOpen ? "is-active" : ""}`}
+                <TopologyFilterPill
+                  active={groupModePanelOpen}
+                  icon={<BranchesOutlined />}
+                  label="分组"
+                  value={selectedGroupModeLabel}
                   style={toolbarPillBaseStyle}
-                >
-                  <span className="topology-filter-pill__lead">
-                    <span className="topology-filter-pill__icon">
-                      <BranchesOutlined />
-                    </span>
-                  </span>
-                  <span className="topology-filter-pill__content">
-                    <span className="topology-filter-pill__label">分组</span>
-                    <span className="topology-filter-pill__value">{selectedGroupModeLabel}</span>
-                  </span>
-                  <span className="topology-filter-pill__meta">
-                    <DownOutlined className="topology-filter-pill__arrow" />
-                  </span>
-                </button>
+                />
               </Popover>
-              <button
-                type="button"
-                className={`topology-filter-pill topology-filter-pill--toggle ${isAbnormalFocusActive ? "is-active" : ""}`}
+              <TopologyFilterPill
+                active={isAbnormalFocusActive}
+                icon={<WarningOutlined />}
+                label="异常链路"
+                meta={<WarningOutlined className="topology-filter-pill__toggle-icon" />}
                 onClick={handleAbnormalFocusToggle}
                 style={toolbarToggleStyle}
-              >
-                <span className="topology-filter-pill__lead">
-                  <span className="topology-filter-pill__icon topology-filter-pill__icon--warning">
-                    <WarningOutlined />
-                  </span>
-                </span>
-                <span className="topology-filter-pill__content">
-                  <span className="topology-filter-pill__label">异常链路</span>
-                  <span className="topology-filter-pill__value">聚焦告警</span>
-                </span>
-                <span className="topology-filter-pill__meta">
-                  <WarningOutlined className="topology-filter-pill__toggle-icon" />
-                </span>
-              </button>
+                toggle
+                value="聚焦告警"
+                warning
+              />
             </div>
 
             <div className="topology-toolbar-section topology-toolbar-section--compact">
-              <OpsIconActionButton size="small" icon={<ReloadOutlined />} onClick={handleRefresh} loading={networkLoading && isLoading}>
+              <OpsIconActionButton size="small" icon={<ReloadOutlined />} onClick={handleRefresh} loading={isLoading}>
                 刷新数据
               </OpsIconActionButton>
               <OpsIconActionButton size="small" onClick={handleResetView}>回到全局</OpsIconActionButton>
@@ -5146,10 +5568,10 @@ export default function NetworkTopologyPage() {
                   </OpsFilterChip>
                 ) : (
                   breadcrumbItems.map((item, index) => (
-                    <Button
+                    <OpsIconActionButton
                       key={item.id}
                       size="small"
-                      type={index === breadcrumbItems.length - 1 ? "primary" : "default"}
+                      opsTone={index === breadcrumbItems.length - 1 ? "primary" : "default"}
                       disabled={!item.nodeId}
                       onClick={() => {
                         const targetNodeId = item.nodeId;
@@ -5158,7 +5580,7 @@ export default function NetworkTopologyPage() {
                       }}
                     >
                       {item.typeLabel} / {item.label}
-                    </Button>
+                    </OpsIconActionButton>
                   ))
                 )}
               </div>
@@ -5173,29 +5595,31 @@ export default function NetworkTopologyPage() {
               ) : null}
               <div className="topology-canvas-surface">
                 <ReactFlowProvider>
-                  <TopologyCanvas
-                    nodes={visibleLayoutNodes}
-                    edges={canvasEdges}
-                    onNodesChange={onNodesChange}
-                    onEdgesChange={onEdgesChange}
-                    onNodeClick={handleNodeClick}
-                    onNodeDragStart={() => setIsNodeDragging(true)}
-                    onNodeDragStop={() => setIsNodeDragging(false)}
-                    isLoading={isLoading}
-                    hasNodes={hasNodes && baseHasNodes}
-                    selectedClusterId={effectiveClusterId}
-                    clusterDataUnavailable={clusterDataUnavailable}
-                    unavailableSummary={unavailableSummary}
-                    unavailableCategory={unavailableCategory}
-                    onRetry={handleRefresh}
-                    viewportVersion={viewportVersion}
-                    viewportKey={layoutViewportKey}
-                    viewportMode={topologyViewMode}
-                    onFitViewRef={fitViewRef}
-                    onZoomInRef={zoomInRef}
-                    onZoomOutRef={zoomOutRef}
-                    isNodeDragging={isNodeDragging}
-                  />
+                  <TopologyReactFlowErrorHandler>
+                    <TopologyCanvas
+                      nodes={visibleLayoutNodes}
+                      edges={canvasEdges}
+                      onNodesChange={onNodesChange}
+                      onEdgesChange={onEdgesChange}
+                      onNodeClick={handleNodeClick}
+                      onNodeDragStart={() => setIsNodeDragging(true)}
+                      onNodeDragStop={() => setIsNodeDragging(false)}
+                      isLoading={isLoading}
+                      hasNodes={hasNodes && baseHasNodes}
+                      selectedClusterId={effectiveClusterId}
+                      clusterDataUnavailable={clusterDataUnavailable}
+                      unavailableSummary={unavailableSummary}
+                      unavailableCategory={unavailableCategory}
+                      onRetry={handleRefresh}
+                      viewportVersion={viewportVersion}
+                      viewportKey={layoutViewportKey}
+                      viewportMode={topologyViewMode}
+                      onFitViewRef={fitViewRef}
+                      onZoomInRef={zoomInRef}
+                      onZoomOutRef={zoomOutRef}
+                      isNodeDragging={isNodeDragging}
+                    />
+                  </TopologyReactFlowErrorHandler>
                 </ReactFlowProvider>
               </div>
             </div>

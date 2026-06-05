@@ -2,13 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Alert, Button, Empty, Skeleton, Space, message } from "antd";
+import { Alert, Empty, Skeleton, Space, message } from "antd";
 import { useAuth } from "@/components/auth-context";
 import { downloadClusterKubeconfig, getClusterDetail } from "@/lib/api/clusters";
 import type { ClusterTableRecord } from "@/app/clusters/page";
 import { DetailDescriptions, DetailSection } from "./resource-detail/section-primitives";
 import { StatusTag } from "./status-tag";
-import { OpsDrawerShell, openOpsConfirm } from "@/components/ops";
+import { OpsDrawerShell, OpsIconActionButton, openOpsConfirm } from "@/components/ops";
 
 type ClusterDetailDrawerProps = {
   open: boolean;
@@ -168,14 +168,14 @@ export function ClusterDetailDrawer({
         isOfflineView ? null : (
           <Space>
             {canExportKubeconfig ? (
-              <Button onClick={handleExportKubeconfig} loading={exporting} disabled={!clusterId || !token}>
+              <OpsIconActionButton onClick={handleExportKubeconfig} loading={exporting} disabled={!clusterId || !token}>
                 导出 kubeconfig
-              </Button>
+              </OpsIconActionButton>
             ) : null}
-            <Button onClick={handleRefreshDetail} loading={query.isFetching} disabled={!clusterId}>
+            <OpsIconActionButton onClick={handleRefreshDetail} loading={query.isFetching} disabled={!clusterId}>
               刷新
-            </Button>
-            {onRefreshRequest ? <Button onClick={onRefreshRequest}>同步列表</Button> : null}
+            </OpsIconActionButton>
+            {onRefreshRequest ? <OpsIconActionButton onClick={onRefreshRequest}>同步列表</OpsIconActionButton> : null}
           </Space>
         )
       }
@@ -197,9 +197,9 @@ export function ClusterDetailDrawer({
             title="集群详情加载失败"
             description={query.error.message}
             action={
-              <Button size="small" onClick={handleRefreshDetail}>
+              <OpsIconActionButton size="small" onClick={handleRefreshDetail}>
                 重试
-              </Button>
+              </OpsIconActionButton>
             }
           />
         ) : query.data ? (
@@ -230,9 +230,9 @@ export function ClusterDetailDrawer({
                     title="节点清单暂不可用"
                     description={nodeSummaryDegradationReason ?? "当前集群节点清单读取失败"}
                     action={
-                      <Button size="small" onClick={() => void query.refetch()}>
+                      <OpsIconActionButton size="small" onClick={() => void query.refetch()}>
                         重试
-                      </Button>
+                      </OpsIconActionButton>
                     }
                   />
                 ) : null}
@@ -282,9 +282,9 @@ export function ClusterDetailDrawer({
                 title="集群详情加载超时"
                 description="实时详情读取时间过长，当前展示列表快照。可重试刷新，或先用列表信息继续排查。"
                 action={
-                  <Button size="small" onClick={handleRefreshDetail} loading={query.isFetching}>
+                  <OpsIconActionButton size="small" onClick={handleRefreshDetail} loading={query.isFetching}>
                     重试
-                  </Button>
+                  </OpsIconActionButton>
                 }
               />
             ) : null}

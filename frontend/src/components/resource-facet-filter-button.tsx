@@ -1,10 +1,10 @@
 "use client";
 
-import { DownOutlined, FilterOutlined } from "@ant-design/icons";
-import { Badge, Button, Popover, Select, Typography } from "antd";
+import { FilterOutlined } from "@ant-design/icons";
+import { Badge, Popover, Select, Typography } from "antd";
 import type { SelectProps } from "antd";
 import { useMemo, useState } from "react";
-import { OpsPopoverPanel } from "@/components/ops";
+import { OpsFilterTriggerButton, OpsPopoverPanel } from "@/components/ops";
 
 type ResourceFacetFilterButtonProps = {
   label: string;
@@ -86,20 +86,13 @@ export function ResourceFacetFilterButton({
       overlayClassName="resource-scope-filter-popover"
     >
       <Badge count={activeCount} size="small" offset={[-4, 4]}>
-        <Button className="resource-scope-filter-button resource-facet-filter-button">
-          <span className="resource-scope-filter-icon" aria-hidden>
-            <FilterOutlined />
-          </span>
-          <span className="resource-scope-filter-copy">
-            <span className="resource-scope-filter-field-label">{label} /</span>
-            <span className="resource-scope-filter-value">
-              <span className="resource-scope-filter-summary">{summary}</span>
-            </span>
-          </span>
-          <span className="resource-scope-filter-affordance" aria-hidden>
-            <DownOutlined className="resource-scope-filter-caret" aria-hidden />
-          </span>
-        </Button>
+        <OpsFilterTriggerButton
+          active={open || activeCount > 0}
+          className="resource-facet-filter-button"
+          icon={<FilterOutlined />}
+          label={label}
+          value={summary}
+        />
       </Badge>
     </Popover>
   );

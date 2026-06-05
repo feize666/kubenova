@@ -363,6 +363,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUsername(snapshot.username);
       setRole(snapshot.role);
       setExpiresAt(snapshot.expiresAt ?? "");
+      setIsInitializing(false);
 
       try {
         const me = await requestAuthJson<{ user: AuthUser; expiresAt?: string }>("me", {
@@ -385,7 +386,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           applyClearAuthState(requestGeneration);
         }
       } finally {
-        setIsInitializing(false);
+        if (requestGeneration === authGenerationRef.current) {
+          setIsInitializing(false);
+        }
       }
     };
 

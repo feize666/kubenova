@@ -4,7 +4,6 @@ import {
   CheckCircleOutlined,
   CrownOutlined,
   EyeOutlined,
-  PlusOutlined,
   ReloadOutlined,
   ToolOutlined,
   UserOutlined,
@@ -13,7 +12,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Badge,
-  Button,
   Card,
   Col,
   Descriptions,
@@ -30,7 +28,8 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsStatusTag, type OpsFilterChipTone } from "@/components/ops";
+import { OpsFilterChip, OpsIconActionButton, OpsStatusTag, type OpsFilterChipTone } from "@/components/ops";
+import { ResourceAddButton } from "@/components/resource-add-button";
 import {
   POD_ACTION_MENU_CLASS,
   POD_ACTION_TRIGGER_CLASS,
@@ -965,12 +964,10 @@ export default function RbacPage() {
           }}
           toolbarExtra={
             <Space size={8} wrap>
-              <Button icon={<ReloadOutlined />} onClick={() => void query.refetch()} loading={query.isFetching}>
+              <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void query.refetch()} loading={query.isFetching}>
                 刷新
-              </Button>
-              <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
-                新建绑定
-              </Button>
+              </OpsIconActionButton>
+              <ResourceAddButton compact={false} label="新建绑定" onClick={() => setCreateOpen(true)} aria-label="新建绑定" />
             </Space>
           }
           loading={{ spinning: query.isLoading, description: "RBAC 数据加载中..." }}

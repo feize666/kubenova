@@ -2,7 +2,7 @@
 
 import { DownloadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Input, Space, Typography } from "antd";
+import { Alert, Input, Space, Typography } from "antd";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   getDynamicResourceDetail,
@@ -16,7 +16,7 @@ import {
 import { getClusters } from "@/lib/api/clusters";
 
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { OpsDrawerShell } from "@/components/ops";
+import { OpsDrawerShell, OpsIconActionButton } from "@/components/ops";
 
 interface ResourceYamlDrawerProps {
   open: boolean;
@@ -75,9 +75,9 @@ export function ResourceYamlDrawer({
       dynamicIdentity?.name ?? identity?.name,
       token,
     ],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (dynamicIdentity) {
-        const detail = await getDynamicResourceDetail(dynamicIdentity, token);
+        const detail = await getDynamicResourceDetail(dynamicIdentity, token, { signal });
         return {
           clusterId: detail.clusterId,
           namespace: detail.namespace,
@@ -87,7 +87,7 @@ export function ResourceYamlDrawer({
           updatedAt: detail.timestamp,
         };
       }
-      return getResourceYaml(identity!, token);
+      return getResourceYaml(identity!, token, { signal });
     },
     enabled:
       open &&
@@ -97,7 +97,7 @@ export function ResourceYamlDrawer({
   });
   const clusterQuery = useQuery({
     queryKey: ["resource-yaml", "clusters", token],
-    queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, token!),
+    queryFn: ({ signal }) => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, token!, { signal }),
     enabled: open && Boolean(token),
   });
   const clusterMap = useMemo(
@@ -183,7 +183,7 @@ export function ResourceYamlDrawer({
       }}
       extra={
         <Space>
-          <Button
+          <OpsIconActionButton
             icon={<DownloadOutlined />}
             disabled={downloadDisabled}
             onClick={() => {
@@ -194,13 +194,13 @@ export function ResourceYamlDrawer({
             }}
           >
             下载 YAML
-          </Button>
-          <Button onClick={() => void query.refetch()} loading={query.isFetching}>
+          </OpsIconActionButton>
+          <OpsIconActionButton onClick={() => void query.refetch()} loading={query.isFetching}>
             重新加载
-          </Button>
-          <Button type="primary" loading={mutation.isPending} onClick={() => void mutation.mutateAsync()}>
+          </OpsIconActionButton>
+          <OpsIconActionButton opsTone="primary" loading={mutation.isPending} onClick={() => void mutation.mutateAsync()}>
             保存 YAML
-          </Button>
+          </OpsIconActionButton>
         </Space>
       }
     >

@@ -172,6 +172,116 @@ describe('WorkloadsService list online gate', () => {
       }),
     );
   });
+
+  it('keeps default list payload unchanged', async () => {
+    const { service, repository, clusterHealthService } = build();
+    const record = {
+      id: 'w-1',
+      clusterId: 'c-1',
+      namespace: 'default',
+      kind: 'Deployment',
+      name: 'web',
+      state: 'active',
+      replicas: 2,
+      readyReplicas: 1,
+      spec: { template: { spec: { containers: [{ image: 'nginx' }] } } },
+      statusJson: { availableReplicas: 1 },
+      labels: { app: 'web' },
+      annotations: { checksum: 'abc' },
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:01:00.000Z'),
+    };
+    (repository.list as jest.Mock).mockResolvedValue({
+      items: [record],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+    });
+    (
+      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
+    ).mockResolvedValue(['c-1']);
+
+    const result = await service.list({});
+
+    expect(result.items).toEqual([record]);
+    expect(repository.list).toHaveBeenCalledWith(
+      expect.objectContaining({ projection: undefined }),
+    );
+  });
+
+  it('returns slim topology projection without raw json payloads', async () => {
+    const { service, repository, clusterHealthService, clusterSyncService } =
+      build();
+    const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    (clusterSyncService.syncCluster as jest.Mock).mockResolvedValue({
+      errors: [],
+    });
+    (
+      service as unknown as { clustersService: { getKubeconfig: jest.Mock } }
+    ).clustersService.getKubeconfig.mockResolvedValue('kubeconfig');
+    (
+      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
+    ).mockResolvedValue(['c-1']);
+    (repository.list as jest.Mock).mockResolvedValue({
+      items: [
+        {
+          id: 'pod-1',
+          clusterId: 'c-1',
+          namespace: 'default',
+          kind: 'Pod',
+          name: 'web-abc',
+          state: 'active',
+          replicas: 1,
+          readyReplicas: 1,
+          spec: null,
+          statusJson: {
+            phase: 'Running',
+            nodeName: 'node-1',
+            restartCount: 3,
+            ownerReferences: [{ kind: 'ReplicaSet', name: 'web-abc' }],
+            creationTimestamp: createdAt.toISOString(),
+          },
+          labels: { app: 'web' },
+          annotations: null,
+          createdAt,
+          updatedAt: new Date('2026-01-01T00:01:00.000Z'),
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+    });
+
+    const result = await service.list({
+      kind: 'pods',
+      projection: 'topology',
+    });
+    const item = result.items[0] as Record<string, unknown>;
+
+    expect(repository.list).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'Pod',
+        projection: 'topology',
+      }),
+    );
+    expect(item).toEqual(
+      expect.objectContaining({
+        id: 'pod-1',
+        clusterId: 'c-1',
+        namespace: 'default',
+        kind: 'Pod',
+        name: 'web-abc',
+        status: 'Running',
+        podPhase: 'Running',
+        nodeName: 'node-1',
+        restarts: 3,
+        ownerRefs: [{ kind: 'ReplicaSet', name: 'web-abc' }],
+      }),
+    );
+    expect(item).not.toHaveProperty('spec');
+    expect(item).not.toHaveProperty('statusJson');
+    expect(item).not.toHaveProperty('annotations');
+  });
 });
 
 describe('WorkloadsService workspace advanced validation', () => {

@@ -301,16 +301,16 @@ export default function HomePage() {
           </Typography.Text>
           <div style={{ marginTop: 12 }}>
             <Space wrap>
-              <Link href="/network/topology">
+              <Link href="/network/topology" prefetch={false}>
                 <Button type="primary">查看资源拓扑</Button>
               </Link>
-              <Link href="/inspection">
+              <Link href="/inspection" prefetch={false}>
                 <Button>查看资源巡检</Button>
               </Link>
-              <Link href="/workloads/deployments">
+              <Link href="/workloads/deployments" prefetch={false}>
                 <Button>查看工作负载</Button>
               </Link>
-              <Link href="/workloads/helm">
+              <Link href="/workloads/helm" prefetch={false}>
                 <Button>查看 Helm 应用</Button>
               </Link>
             </Space>

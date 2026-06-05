@@ -1,11 +1,11 @@
 "use client";
 
-import { AppstoreOutlined, DownOutlined } from "@ant-design/icons";
-import { Badge, Button, Popover, Space, Typography } from "antd";
+import { AppstoreOutlined } from "@ant-design/icons";
+import { Badge, Popover, Space, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { ClusterSelect, type ClusterOption } from "@/components/cluster-select";
 import { NamespaceSelect } from "@/components/namespace-select";
-import { OpsPopoverPanel } from "@/components/ops";
+import { OpsFilterTriggerButton, OpsPopoverPanel } from "@/components/ops";
 
 type ResourceScopeFilterButtonProps = {
   clusterId: string;
@@ -128,20 +128,12 @@ export function ResourceScopeFilterButton({
       overlayClassName="resource-scope-filter-popover"
     >
       <Badge count={activeCount} size="small" offset={[-4, 4]}>
-        <Button className="resource-scope-filter-button">
-          <span className="resource-scope-filter-icon" aria-hidden>
-            <AppstoreOutlined />
-          </span>
-          <span className="resource-scope-filter-copy">
-            <span className="resource-scope-filter-field-label">{label} /</span>
-            <span className="resource-scope-filter-value">
-              <span className="resource-scope-filter-summary">{summary}</span>
-            </span>
-          </span>
-          <span className="resource-scope-filter-affordance" aria-hidden>
-            <DownOutlined className="resource-scope-filter-caret" aria-hidden />
-          </span>
-        </Button>
+        <OpsFilterTriggerButton
+          active={open || activeCount > 0}
+          icon={<AppstoreOutlined />}
+          label={label}
+          value={summary}
+        />
       </Badge>
     </Popover>
   );

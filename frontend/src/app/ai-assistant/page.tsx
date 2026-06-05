@@ -272,16 +272,15 @@ function MessageBubble({
           {!isUser && (message.actionDescriptors?.length ?? 0) > 0 ? (
             <Space wrap size={[6, 6]} style={{ marginTop: 8 }}>
               {message.actionDescriptors!.map((descriptor) => (
-                <Button
+                <OpsIconActionButton
                   key={descriptor.id}
                   size="small"
-                  type={descriptor.riskLevel === "high" || descriptor.riskLevel === "critical" ? "primary" : "default"}
-                  danger={descriptor.riskLevel === "critical"}
+                  opsTone={descriptor.riskLevel === "critical" ? "danger" : descriptor.riskLevel === "high" ? "primary" : "default"}
                   loading={loadingActionId === descriptor.id}
                   onClick={() => onAction(descriptor)}
                 >
                   {descriptor.label}
-                </Button>
+                </OpsIconActionButton>
               ))}
             </Space>
           ) : null}
@@ -1279,9 +1278,9 @@ export default function AiAssistantPage() {
           title="无权限访问 AIOps 中台"
           subTitle="当前账号不是管理员，无法查看会话、建议与执行任何 AI 运维动作。"
           extra={
-            <Button type="primary" onClick={() => router.push("/")}>
+            <OpsIconActionButton opsTone="primary" onClick={() => router.push("/")}>
               返回首页
-            </Button>
+            </OpsIconActionButton>
           }
         />
       </Card>
@@ -1342,9 +1341,9 @@ export default function AiAssistantPage() {
         autoSize={{ minRows: 3, maxRows: 5 }}
         placeholder="告警详情"
       />
-      <Button type="primary" onClick={() => void handleTriggerDiagnosis()} loading={loading}>
+      <OpsIconActionButton opsTone="primary" onClick={() => void handleTriggerDiagnosis()} loading={loading}>
         触发诊断
-      </Button>
+      </OpsIconActionButton>
 
       <Divider style={{ margin: "8px 0" }} />
 
@@ -1353,7 +1352,7 @@ export default function AiAssistantPage() {
       </Typography.Text>
       <Space orientation="vertical" style={{ width: "100%" }}>
         {(presets ?? []).map((preset) => (
-          <Button
+          <OpsIconActionButton
             key={preset.id}
             block
             icon={<ClusterOutlined />}
@@ -1362,7 +1361,7 @@ export default function AiAssistantPage() {
             disabled={loading || !accessToken}
           >
             {preset.title}
-          </Button>
+          </OpsIconActionButton>
         ))}
       </Space>
     </>
@@ -1522,8 +1521,8 @@ export default function AiAssistantPage() {
                 }}
               >
                 <div style={{ padding: 12 }}>
-                  <Button
-                    type="primary"
+                  <OpsIconActionButton
+                    opsTone="primary"
                     block
                     icon={<PlusOutlined />}
                     loading={creating}
@@ -1531,7 +1530,7 @@ export default function AiAssistantPage() {
                     disabled={isInitializing || !accessToken}
                   >
                     新建会话
-                  </Button>
+                  </OpsIconActionButton>
                 </div>
 
                 <Divider style={{ margin: "0 0 6px" }} />
@@ -1575,10 +1574,10 @@ export default function AiAssistantPage() {
                               </Typography.Text>
                             </div>
                             <Tooltip title="删除会话">
-                              <Button
+                              <OpsIconActionButton
                                 size="small"
-                                type="text"
-                                danger
+                                opsTone="danger"
+                                className="resource-table-icon-action-compact"
                                 icon={<DeleteOutlined />}
                                 onClick={(event) => {
                                   event.stopPropagation();
@@ -1655,9 +1654,9 @@ export default function AiAssistantPage() {
                 <div style={{ padding: "8px 12px", borderTop: "1px solid var(--ai-chat-composer-border)", background: "var(--ai-chat-composer-bg)", overflowX: "hidden" }}>
                   <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
                     {QUICK_PROMPTS.map((prompt) => (
-                      <Button key={prompt} size="small" onClick={() => void handleSend(prompt)} disabled={loading || !accessToken}>
+                      <OpsIconActionButton key={prompt} size="small" onClick={() => void handleSend(prompt)} disabled={loading || !accessToken}>
                         {prompt.slice(0, 14)}...
-                      </Button>
+                      </OpsIconActionButton>
                     ))}
                   </Space>
 
@@ -1702,19 +1701,20 @@ export default function AiAssistantPage() {
                   <div style={{ display: "flex", gap: 8, alignItems: "flex-end", minWidth: 0 }}>
                     <Space orientation="vertical" size={6}>
                       <Tooltip title="上传文件/图片">
-                        <Button
+                        <OpsIconActionButton
+                          className="resource-table-icon-action-compact"
                           icon={<PaperClipOutlined />}
                           onClick={handleFileChoose}
                           disabled={loading || isInitializing || !accessToken}
                         />
                       </Tooltip>
                       <Tooltip title={recording ? "停止录音" : "语音输入"}>
-                        <Button
+                        <OpsIconActionButton
+                          className="resource-table-icon-action-compact"
                           icon={recording ? <StopOutlined /> : <AudioOutlined />}
                           onClick={toggleRecording}
                           disabled={!voiceSupported || loading || isInitializing || !accessToken}
-                          type={recording ? "primary" : "default"}
-                          danger={recording}
+                          opsTone={recording ? "danger" : "default"}
                         />
                       </Tooltip>
                     </Space>
@@ -1731,8 +1731,9 @@ export default function AiAssistantPage() {
                       style={{ minWidth: 0 }}
                     />
                     <Tooltip title="发送">
-                      <Button
-                        type="primary"
+                      <OpsIconActionButton
+                        opsTone="primary"
+                        className="resource-table-icon-action-compact"
                         icon={<SendOutlined />}
                         onClick={() => void handleSend(inputText)}
                         loading={loading}

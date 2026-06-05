@@ -23,7 +23,7 @@ START_GATEWAY="${START_GATEWAY:-true}"
 USE_TMUX="${USE_TMUX:-false}"
 FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-dev}"
 FRONTEND_DEV_BUNDLER="${FRONTEND_DEV_BUNDLER:-webpack}"
-FRONTEND_NODE_OPTIONS="${FRONTEND_NODE_OPTIONS:---max-old-space-size=3072}"
+FRONTEND_NODE_OPTIONS="${FRONTEND_NODE_OPTIONS:---max-old-space-size=2048}"
 RUNTIME_GATEWAY_DEPS_STAMP="$CACHE_DIR/runtime-gateway-go-mod.download.stamp"
 SERVICE_LOG_SUFFIX="dev"
 source "$ROOT_DIR/scripts/_service-lib.sh"
@@ -272,8 +272,13 @@ cleanup_orphan_processes() {
   local pid_file
   pid_file="$(service_pid_file "$name")"
 
-  if [[ -f "$pid_file" ]] && [[ -n "$(cat "$pid_file" 2>/dev/null || true)" ]]; then
-    return
+  local managed_pid=""
+  if [[ -f "$pid_file" ]]; then
+    managed_pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$managed_pid" ]] && kill -0 "$managed_pid" 2>/dev/null; then
+      return
+    fi
+    rm -f "$pid_file"
   fi
 
   local bound_pid
@@ -297,6 +302,7 @@ cleanup_orphan_processes() {
 
   for pid in "${pids[@]}"; do
     [[ "$pid" != "$$" ]] || continue
+    [[ "$pid" != "$managed_pid" ]] || continue
     if [[ "$name" == "frontend" ]] && ! is_frontend_process "$pid"; then
       continue
     fi
@@ -540,6 +546,7 @@ echo "✔ 所有服务已启动"
 echo "  前端:            http://localhost:$FRONTEND_PORT"
 if [[ "$FRONTEND_BOOT_MODE" == "dev" ]]; then
   echo "  前端模式:        dev"
+  echo "  前端内存:        NODE_OPTIONS=$FRONTEND_NODE_OPTIONS（内存紧张可用 --stable-frontend）"
 else
   echo "  前端模式:        stable"
 fi
