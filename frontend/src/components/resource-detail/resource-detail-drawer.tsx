@@ -3,7 +3,7 @@
 import { ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
 import { Alert, Empty, Skeleton, Space, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
 import type { DynamicResourceIdentity, ResourceIdentity, ResourceDetailResponse } from "@/lib/api/resources";
@@ -161,16 +161,20 @@ export function ResourceDetailDrawer({
     navigationState &&
       (navigationState.baseKey === requestKey || navigationStateActiveKey === requestKey),
   );
-  const activeRequest = hasActiveNavigationState
-    ? navigationState?.activeRequest ?? null
-    : request;
-  const navigationStack = hasActiveNavigationState ? navigationState?.stack ?? [] : [];
+  const activeRequest = useMemo(
+    () => (hasActiveNavigationState ? navigationState?.activeRequest ?? null : request),
+    [hasActiveNavigationState, navigationState?.activeRequest, request],
+  );
+  const navigationStack = useMemo(
+    () => (hasActiveNavigationState ? navigationState?.stack ?? [] : []),
+    [hasActiveNavigationState, navigationState?.stack],
+  );
   const activeRequestKey = getRequestKey(activeRequest);
 
   const normalizedKind = activeRequest?.kind ? normalizeKind(activeRequest.kind) : "";
   const requestId = activeRequest?.id ?? "";
 
-  const emitNavigateRequest = (nextRequest: DetailRequest) => {
+  const emitNavigateRequest = useCallback((nextRequest: DetailRequest) => {
     const kind = String(nextRequest.kind ?? "").trim();
     const id = String(nextRequest.id ?? "").trim();
     if (!kind || !id) return;
@@ -189,9 +193,9 @@ export function ResourceDetailDrawer({
       ],
     }));
     onNavigateRequest?.(next);
-  };
+  }, [activeRequest, activeRequestKey, hasActiveNavigationState, onNavigateRequest, requestKey]);
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     const previous = navigationStack.at(-1);
     if (!previous) return;
     setNavigationState((current) => ({
@@ -200,13 +204,13 @@ export function ResourceDetailDrawer({
       stack: current?.stack.slice(0, -1) ?? [],
     }));
     onNavigateRequest?.(previous);
-  };
+  }, [navigationStack, onNavigateRequest, requestKey]);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setNavigationState(null);
     setYamlOpen(false);
     onClose();
-  };
+  }, [onClose]);
 
   const query = useQuery({
     queryKey: ["resource-detail", normalizedKind, requestId, token],
@@ -218,9 +222,12 @@ export function ResourceDetailDrawer({
     queryFn: ({ signal }) => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, token!, { signal }),
     enabled: open && Boolean(token),
   });
-  const clusterMap = Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name]));
+  const clusterMap = useMemo(
+    () => Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name])),
+    [clusterQuery.data?.items],
+  );
   const hasDetailData = Boolean(query.data);
-  const yamlTarget = buildDetailYamlTarget(query.data, activeRequest);
+  const yamlTarget = useMemo(() => buildDetailYamlTarget(query.data, activeRequest), [query.data, activeRequest]);
   const activeSnapshot = activeRequest?.snapshot;
   const canShowSnapshotFallback = hasSnapshot(activeSnapshot);
 

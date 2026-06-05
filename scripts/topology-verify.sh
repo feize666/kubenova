@@ -58,6 +58,11 @@ if [[ "$failures" -eq 0 ]]; then
   check_pattern "topology key functions" "resolveResourceDetailRequest|layoutComponentBlock|buildConnectedComponents|buildNamespaceCanvasEdges|applyNamespaceStackLayout" "$TOPOLOGY_FILE"
   check_pattern "connected component internals" "componentIdByNodeId|componentNodeIdsById|componentCanonicalNodeById" "$TOPOLOGY_FILE"
   check_pattern "focus / layout / detail paths" "focusedNodeId|focusedNamespaceId|focusVisibleNodeIds|layoutViewportKey|detailRequest|ResourceDetailDrawer" "$TOPOLOGY_FILE"
+  check_pattern "resource detail drawer symbol" "ResourceDetailDrawer" "$TOPOLOGY_FILE"
+  check_pattern "resource yaml drawer symbol" "ResourceYamlDrawer" "$TOPOLOGY_FILE"
+  check_pattern "gateway token stable map" "GATEWAY_TOKEN_BY_KIND" "$TOPOLOGY_FILE"
+  check_pattern "topology namespace stable query key" "topologyNamespaceQueryKey" "$TOPOLOGY_FILE"
+  check_pattern "gateway partial coverage summary" "partialCoverageSummary" "$TOPOLOGY_FILE"
   check_pattern "fallback / timeout / auth-expired symbols" "service-unavailable|network-timeout|集群服务暂不可达|网络或超时异常|拓扑数据不可用|导航超时，点击重试|navigationTimeoutRef|navigationRetryRef|AUTH_EXPIRED_EVENT|aiops:auth-expired|authExpiredHandled|resetAuthExpiryState" \
     "$TOPOLOGY_FILE" "$AUTH_CLIENT_FILE" "$AUTH_CONTEXT_FILE" "$SHELL_LAYOUT_FILE"
   check_pattern "cleanup command hooks" "topology-artifacts|topology verify|topology clean|topology-verify\\.sh" "$SERVICE_FILE"

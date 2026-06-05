@@ -50,6 +50,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { RuntimeStatusPill } from "@/components/visual-system";
 import { getClusters } from "@/lib/api/clusters";
+import type { Cluster } from "@/lib/api/types";
 import { getNetworkResources, type NetworkResource } from "@/lib/api/network";
 import {
   getDynamicResourceDetail,
@@ -548,6 +549,17 @@ const GATEWAY_TOPOLOGY_META: Record<
 
 const GATEWAY_TOPOLOGY_KINDS = Object.keys(GATEWAY_TOPOLOGY_META) as GatewayKindKey[];
 const GATEWAY_DETAIL_TOPOLOGY_KINDS = new Set<GatewayTopologyResource["kind"]>(["Gateway", "HTTPRoute"]);
+const GATEWAY_TOKEN_BY_KIND: Partial<Record<string, SourceKey>> = {
+  GatewayClass: "gatewayclass",
+  Gateway: "gateway",
+  HTTPRoute: "httproute",
+};
+const EMPTY_TOPOLOGY_NAMESPACE_SUMMARIES: TopologyNamespaceSummaryItem[] = [];
+const EMPTY_CLUSTERS: Cluster[] = [];
+const EMPTY_NETWORK_RESOURCES: NetworkResource[] = [];
+const EMPTY_GATEWAY_TOPOLOGY_RESOURCES: GatewayTopologyResource[] = [];
+const EMPTY_GATEWAY_UNAVAILABLE_KINDS: GatewayTopologyResult["unavailableKinds"] = [];
+const EMPTY_WORKLOAD_ITEMS: WorkloadListItem[] = [];
 
 function resolveErrorStatus(error: unknown): number | null {
   if (!error || typeof error !== "object") return null;
@@ -1579,9 +1591,9 @@ function sumResourceCounts(counts: Record<string, number>): number {
 function addSummaryResourceCounts(counts: Map<SourceKey, number>, summary: TopologyNamespaceSummaryItem): void {
   Object.entries(summary.resourceCounts).forEach(([kind, value]) => {
     if (!Number.isFinite(value) || value <= 0) return;
-    const gatewayMeta = GATEWAY_TOPOLOGY_KINDS.map((key) => GATEWAY_TOPOLOGY_META[key]).find((meta) => meta.kind === kind);
-    if (gatewayMeta) {
-      incrementSourceCount(counts, gatewayMeta.tokenKey, value);
+    const gatewayToken = GATEWAY_TOKEN_BY_KIND[kind];
+    if (gatewayToken) {
+      incrementSourceCount(counts, gatewayToken, value);
       return;
     }
     if (kind === "Deployment") {
@@ -1849,9 +1861,7 @@ function buildFlowGraph(
   });
 
   activeGateways.forEach((resource) => {
-    const tokenKey = GATEWAY_TOPOLOGY_KINDS.map((key) => GATEWAY_TOPOLOGY_META[key]).find(
-      (item) => item.kind === resource.kind,
-    )?.tokenKey;
+    const tokenKey = GATEWAY_TOKEN_BY_KIND[resource.kind];
     if (!tokenKey) return;
     const gatewayNodeId = `gateway-${resource.resource}-${resource.id}`;
     nodes.push({
@@ -3900,10 +3910,40 @@ export default function NetworkTopologyPage() {
     enabled: !!token,
   });
 
-  const effectiveClusterId = selectedClusterId ?? clustersData?.items?.[0]?.id ?? null;
-  const selectedCluster = clustersData?.items?.find((item) => item.id === effectiveClusterId);
+  const clusterItems = clustersData?.items ?? EMPTY_CLUSTERS;
+  const effectiveClusterId = selectedClusterId ?? clusterItems[0]?.id ?? null;
+  const selectedCluster = useMemo(
+    () => clusterItems.find((item) => item.id === effectiveClusterId),
+    [clusterItems, effectiveClusterId],
+  );
   const queryEnabled = !!token && !!effectiveClusterId;
   const topologyRequestNamespace = selectedNamespace === ALL_NAMESPACE ? undefined : selectedNamespace;
+  const topologyNamespaceQueryKey = topologyRequestNamespace ?? ALL_NAMESPACE;
+  const topologyNamespaceSummaryRequest = useMemo(
+    () => (effectiveClusterId ? { clusterId: effectiveClusterId } : null),
+    [effectiveClusterId],
+  );
+  const topologyNetworkRequest = useMemo(
+    () =>
+      effectiveClusterId
+        ? { clusterId: effectiveClusterId, namespace: topologyRequestNamespace, pageSize: 200 }
+        : null,
+    [effectiveClusterId, topologyRequestNamespace],
+  );
+  const topologyWorkloadRequest = useMemo(
+    () =>
+      effectiveClusterId
+        ? { clusterId: effectiveClusterId, namespace: topologyRequestNamespace, pageSize: 200, projection: "topology" as const }
+        : null,
+    [effectiveClusterId, topologyRequestNamespace],
+  );
+  const topologyPodRequest = useMemo(
+    () =>
+      effectiveClusterId
+        ? { clusterId: effectiveClusterId, namespace: topologyRequestNamespace, pageSize: 400, projection: "topology" as const }
+        : null,
+    [effectiveClusterId, topologyRequestNamespace],
+  );
   const shouldLoadHeavyTopology =
     heavyTopologyRequested ||
     selectedNamespace !== ALL_NAMESPACE ||
@@ -3919,7 +3959,7 @@ export default function NetworkTopologyPage() {
     refetch: refetchTopologyNamespaceSummary,
   } = useQuery({
     queryKey: ["topology-namespace-summary", effectiveClusterId],
-    queryFn: ({ signal }) => getTopologyNamespaceSummaries({ clusterId: effectiveClusterId! }, token!, { signal }),
+    queryFn: ({ signal }) => getTopologyNamespaceSummaries(topologyNamespaceSummaryRequest!, token!, { signal }),
     enabled: queryEnabled,
     ...TOPOLOGY_RESOURCE_QUERY_OPTIONS,
   });
@@ -3931,9 +3971,8 @@ export default function NetworkTopologyPage() {
   const shouldLoadResourceTopology = shouldLoadHeavyTopology || shouldFallbackToResourceTopology;
 
   const { data: networkData, isLoading: networkLoading, error: networkError, refetch } = useQuery({
-    queryKey: ["topology-network", effectiveClusterId, topologyRequestNamespace ?? "all"],
-    queryFn: ({ signal }) =>
-      getNetworkResources({ clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 200 }, token!, { signal }),
+    queryKey: ["topology-network", effectiveClusterId, topologyNamespaceQueryKey],
+    queryFn: ({ signal }) => getNetworkResources(topologyNetworkRequest!, token!, { signal }),
     enabled: queryEnabled && shouldLoadResourceTopology,
     ...TOPOLOGY_RESOURCE_QUERY_OPTIONS,
   });
@@ -3947,7 +3986,7 @@ export default function NetworkTopologyPage() {
     queryKey: [
       "topology-gateway-api",
       effectiveClusterId,
-      topologyRequestNamespace ?? "all",
+      topologyNamespaceQueryKey,
       shouldLoadHeavyTopology ? "detail" : "summary",
     ],
     queryFn: ({ signal }) =>
@@ -3961,11 +4000,11 @@ export default function NetworkTopologyPage() {
   });
 
   const { data: deploymentData, isLoading: deploymentLoading, error: deploymentError } = useQuery({
-    queryKey: ["topology-deployments", effectiveClusterId, topologyRequestNamespace ?? "all"],
+    queryKey: ["topology-deployments", effectiveClusterId, topologyNamespaceQueryKey],
     queryFn: ({ signal }) =>
       getWorkloadsByKind(
         "Deployment",
-        { clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 200, projection: "topology" },
+        topologyWorkloadRequest!,
         token!,
         { signal },
       ),
@@ -3974,11 +4013,11 @@ export default function NetworkTopologyPage() {
   });
 
   const { data: statefulSetData, isLoading: statefulSetLoading, error: statefulSetError } = useQuery({
-    queryKey: ["topology-statefulsets", effectiveClusterId, topologyRequestNamespace ?? "all"],
+    queryKey: ["topology-statefulsets", effectiveClusterId, topologyNamespaceQueryKey],
     queryFn: ({ signal }) =>
       getWorkloadsByKind(
         "StatefulSet",
-        { clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 200, projection: "topology" },
+        topologyWorkloadRequest!,
         token!,
         { signal },
       ),
@@ -3987,11 +4026,11 @@ export default function NetworkTopologyPage() {
   });
 
   const { data: daemonSetData, isLoading: daemonSetLoading, error: daemonSetError } = useQuery({
-    queryKey: ["topology-daemonsets", effectiveClusterId, topologyRequestNamespace ?? "all"],
+    queryKey: ["topology-daemonsets", effectiveClusterId, topologyNamespaceQueryKey],
     queryFn: ({ signal }) =>
       getWorkloadsByKind(
         "DaemonSet",
-        { clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 200, projection: "topology" },
+        topologyWorkloadRequest!,
         token!,
         { signal },
       ),
@@ -4000,11 +4039,11 @@ export default function NetworkTopologyPage() {
   });
 
   const { data: podData, isLoading: podLoading, error: podError } = useQuery({
-    queryKey: ["topology-pods", effectiveClusterId, topologyRequestNamespace ?? "all", shouldLoadHeavyTopology ? "detail" : "idle"],
+    queryKey: ["topology-pods", effectiveClusterId, topologyNamespaceQueryKey, shouldLoadHeavyTopology ? "detail" : "idle"],
     queryFn: ({ signal }) =>
       getWorkloadsByKind(
         "Pod",
-        { clusterId: effectiveClusterId!, namespace: topologyRequestNamespace, pageSize: 400, projection: "topology" },
+        topologyPodRequest!,
         token!,
         { signal },
       ),
@@ -4028,38 +4067,58 @@ export default function NetworkTopologyPage() {
     (shouldLoadResourceTopology
       ? !!networkError || !!gatewayTopologyError || !!deploymentError || !!statefulSetError || !!daemonSetError || !!podError
       : !!topologyNamespaceSummaryError);
-  const topologyErrors = shouldLoadResourceTopology
-    ? [networkError, gatewayTopologyError, deploymentError, statefulSetError, daemonSetError, podError].filter(Boolean)
-    : [topologyNamespaceSummaryError].filter(Boolean);
-  const unavailableCategory = resolveFailureCategory(topologyErrors);
-  const unavailableSummary = topologyErrors.map(resolveErrorMessage).join(" | ");
+  const topologyErrors = useMemo(() => {
+    const errors = shouldLoadResourceTopology
+      ? [networkError, gatewayTopologyError, deploymentError, statefulSetError, daemonSetError, podError]
+      : [topologyNamespaceSummaryError];
+    return errors.filter(Boolean);
+  }, [
+    daemonSetError,
+    deploymentError,
+    gatewayTopologyError,
+    networkError,
+    podError,
+    shouldLoadResourceTopology,
+    statefulSetError,
+    topologyNamespaceSummaryError,
+  ]);
+  const unavailableCategory = useMemo(() => resolveFailureCategory(topologyErrors), [topologyErrors]);
+  const unavailableSummary = useMemo(() => topologyErrors.map(resolveErrorMessage).join(" | "), [topologyErrors]);
   const partialCoverageSummary = useMemo(() => {
-    const unavailableKinds = gatewayTopologyData?.unavailableKinds ?? [];
+    const unavailableKinds = gatewayTopologyData?.unavailableKinds ?? EMPTY_GATEWAY_UNAVAILABLE_KINDS;
     if (unavailableKinds.length === 0) return null;
     return `Gateway API 部分资源不可用：${unavailableKinds.join(", ")}。拓扑已保留其他资源与关系。`;
   }, [gatewayTopologyData?.unavailableKinds]);
+  const topologyNamespaceSummaryItems = topologyNamespaceSummaryData?.items ?? EMPTY_TOPOLOGY_NAMESPACE_SUMMARIES;
+  const networkItems = networkData?.items ?? EMPTY_NETWORK_RESOURCES;
+  const gatewayTopologyItems = gatewayTopologyData?.items ?? EMPTY_GATEWAY_TOPOLOGY_RESOURCES;
+  const deploymentItems = deploymentData?.items ?? EMPTY_WORKLOAD_ITEMS;
+  const statefulSetItems = statefulSetData?.items ?? EMPTY_WORKLOAD_ITEMS;
+  const daemonSetItems = daemonSetData?.items ?? EMPTY_WORKLOAD_ITEMS;
+  const podItems = podData?.items ?? EMPTY_WORKLOAD_ITEMS;
+  const hasPodItems = Boolean(podData?.items);
 
   const namespaceOptions = useMemo(() => {
     const values = new Set<string>();
-    (topologyNamespaceSummaryData?.items ?? []).forEach((item) => {
+    topologyNamespaceSummaryItems.forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
-    (networkData?.items ?? []).forEach((item) => {
+    networkItems.forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
-    (gatewayTopologyData?.items ?? []).forEach((item) => {
+    gatewayTopologyItems.forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
-    (deploymentData?.items ?? []).forEach((item) => {
+    deploymentItems.forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
-    (statefulSetData?.items ?? []).forEach((item) => {
+    statefulSetItems.forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
-    (daemonSetData?.items ?? []).forEach((item) => {
+    daemonSetItems.forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
-    (podData?.items ?? []).forEach((item) => {
+    podItems.forEach((item) => {
       if (item.namespace) values.add(item.namespace);
     });
 
@@ -4070,63 +4129,63 @@ export default function NetworkTopologyPage() {
         .map((value) => ({ value, label: value })),
     ];
   }, [
-    daemonSetData?.items,
-    deploymentData?.items,
-    gatewayTopologyData?.items,
-    networkData?.items,
-    podData?.items,
-    statefulSetData?.items,
-    topologyNamespaceSummaryData?.items,
+    daemonSetItems,
+    deploymentItems,
+    gatewayTopologyItems,
+    networkItems,
+    podItems,
+    statefulSetItems,
+    topologyNamespaceSummaryItems,
   ]);
 
   const namespaceFilteredNetwork = useMemo(
     () =>
       selectedNamespace === ALL_NAMESPACE
-        ? networkData?.items ?? []
-        : (networkData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
-    [networkData?.items, selectedNamespace],
+        ? networkItems
+        : networkItems.filter((item) => item.namespace === selectedNamespace),
+    [networkItems, selectedNamespace],
   );
   const namespaceFilteredGatewayTopology = useMemo(
     () =>
       selectedNamespace === ALL_NAMESPACE
-        ? gatewayTopologyData?.items ?? []
-        : (gatewayTopologyData?.items ?? []).filter((item) => !item.namespace || item.namespace === selectedNamespace),
-    [gatewayTopologyData?.items, selectedNamespace],
+        ? gatewayTopologyItems
+        : gatewayTopologyItems.filter((item) => !item.namespace || item.namespace === selectedNamespace),
+    [gatewayTopologyItems, selectedNamespace],
   );
   const namespaceFilteredDeployments = useMemo(
     () =>
       selectedNamespace === ALL_NAMESPACE
-        ? deploymentData?.items ?? []
-        : (deploymentData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
-    [deploymentData?.items, selectedNamespace],
+        ? deploymentItems
+        : deploymentItems.filter((item) => item.namespace === selectedNamespace),
+    [deploymentItems, selectedNamespace],
   );
   const namespaceFilteredStatefulSets = useMemo(
     () =>
       selectedNamespace === ALL_NAMESPACE
-        ? statefulSetData?.items ?? []
-        : (statefulSetData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
-    [selectedNamespace, statefulSetData?.items],
+        ? statefulSetItems
+        : statefulSetItems.filter((item) => item.namespace === selectedNamespace),
+    [selectedNamespace, statefulSetItems],
   );
   const namespaceFilteredDaemonSets = useMemo(
     () =>
       selectedNamespace === ALL_NAMESPACE
-        ? daemonSetData?.items ?? []
-        : (daemonSetData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
-    [daemonSetData?.items, selectedNamespace],
+        ? daemonSetItems
+        : daemonSetItems.filter((item) => item.namespace === selectedNamespace),
+    [daemonSetItems, selectedNamespace],
   );
   const namespaceFilteredPods = useMemo(
     () =>
       selectedNamespace === ALL_NAMESPACE
-        ? podData?.items ?? []
-        : (podData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
-    [podData?.items, selectedNamespace],
+        ? podItems
+        : podItems.filter((item) => item.namespace === selectedNamespace),
+    [podItems, selectedNamespace],
   );
   const namespaceFilteredSummaries = useMemo(
     () =>
       selectedNamespace === ALL_NAMESPACE
-        ? topologyNamespaceSummaryData?.items ?? []
-        : (topologyNamespaceSummaryData?.items ?? []).filter((item) => item.namespace === selectedNamespace),
-    [selectedNamespace, topologyNamespaceSummaryData?.items],
+        ? topologyNamespaceSummaryItems
+        : topologyNamespaceSummaryItems.filter((item) => item.namespace === selectedNamespace),
+    [selectedNamespace, topologyNamespaceSummaryItems],
   );
   const sourceResourceCounts = useMemo(() => {
     const counts = new Map<SourceKey, number>();
@@ -4136,21 +4195,25 @@ export default function NetworkTopologyPage() {
     }
     namespaceFilteredNetwork.forEach((item) => incrementSourceCount(counts, resolveNetworkTokenKey(String(item.kind))));
     namespaceFilteredGatewayTopology.forEach((item) => {
-      const tokenKey = GATEWAY_TOPOLOGY_KINDS.map((key) => GATEWAY_TOPOLOGY_META[key]).find(
-        (meta) => meta.kind === item.kind,
-      )?.tokenKey;
+      const tokenKey = GATEWAY_TOKEN_BY_KIND[item.kind];
       if (tokenKey) incrementSourceCount(counts, tokenKey);
     });
     incrementSourceCount(counts, "deployment", namespaceFilteredDeployments.length);
     incrementSourceCount(counts, "statefulset", namespaceFilteredStatefulSets.length);
     incrementSourceCount(counts, "daemonset", namespaceFilteredDaemonSets.length);
-    const estimatedPodCount =
-      podData?.items
-        ? namespaceFilteredPods.length
-        : [...namespaceFilteredDeployments, ...namespaceFilteredStatefulSets, ...namespaceFilteredDaemonSets].reduce(
-            (total, item) => total + Math.max(item.replicas ?? item.readyReplicas ?? 0, 0),
-            0,
-          );
+    let estimatedPodCount = namespaceFilteredPods.length;
+    if (!hasPodItems) {
+      estimatedPodCount = 0;
+      namespaceFilteredDeployments.forEach((item) => {
+        estimatedPodCount += Math.max(item.replicas ?? item.readyReplicas ?? 0, 0);
+      });
+      namespaceFilteredStatefulSets.forEach((item) => {
+        estimatedPodCount += Math.max(item.replicas ?? item.readyReplicas ?? 0, 0);
+      });
+      namespaceFilteredDaemonSets.forEach((item) => {
+        estimatedPodCount += Math.max(item.replicas ?? item.readyReplicas ?? 0, 0);
+      });
+    }
     incrementSourceCount(counts, "pod", estimatedPodCount);
     return counts;
   }, [
@@ -4161,7 +4224,7 @@ export default function NetworkTopologyPage() {
     namespaceFilteredPods,
     namespaceFilteredStatefulSets,
     namespaceFilteredSummaries,
-    podData?.items,
+    hasPodItems,
     shouldLoadResourceTopology,
   ]);
   const deferredSelectedCluster = useDeferredValue(selectedCluster);
@@ -5379,8 +5442,7 @@ export default function NetworkTopologyPage() {
       ))}
     </OpsPopoverPanel>
   );
-  const selectedClusterLabel =
-    clustersData?.items?.find((item) => item.id === effectiveClusterId)?.name ?? "选择集群";
+  const selectedClusterLabel = selectedCluster?.name ?? "选择集群";
   const selectedNamespaceLabel =
     namespaceOptions.find((item) => item.value === selectedNamespace)?.label ?? "全部名称空间";
   const selectedGroupModeLabel =
@@ -5414,7 +5476,7 @@ export default function NetworkTopologyPage() {
 
   const clusterPanel = (
     <OpsPopoverPanel title="集群" subtitle="切换拓扑范围" className="topology-popover-panel topology-popover-panel--compact">
-      {(clustersData?.items ?? []).map((item) => (
+      {clusterItems.map((item) => (
         <button
           key={item.id}
           type="button"

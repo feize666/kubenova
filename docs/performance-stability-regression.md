@@ -117,3 +117,53 @@ This follow-up closes the fresh route/API smoke gap and provides representative 
 The empty topology state was fixed by making selectable-cluster health filtering prefer live running clusters but fall back to backend-selectable clusters when fresh health snapshots are missing. Gateway API optional dynamic resources now use a `missingAsEmpty` read path so missing CRDs render as partial coverage without browser 404 console errors.
 
 Task 12.9 can be marked complete for the current representative regression scope: route switch, tab switch, drawer open, filter change, graph focus, observability time-range change, backend error path, and bounded pressure smoke all have fresh evidence. Long soak, heap/memory leak, shutdown/recovery, and real production-mode stress remain deeper follow-up items rather than blockers for 12.9.
+
+## 2026-06-06 Current Branch Follow-Up
+
+This pass continued the topology/detail stability work with scoped source changes, parallel worktrees, main-thread integration, and a fresh npm browser performance profile against the local dev services.
+
+### Completed Changes
+
+| Area | Change | Verification |
+| --- | --- | --- |
+| Detail drawer render stability | `ResourceDetailDrawer` now memoizes active navigation state, navigation stack, cluster map, YAML target, and navigation/close callbacks so detail content receives fewer unstable references. | `cd frontend && npx eslint src/components/resource-detail/resource-detail-drawer.tsx src/app/network/topology/page.tsx`; `cd frontend && npx tsc --noEmit --pretty false` |
+| Topology query/compute stability | `/network/topology` now uses stable namespace query keys, memoized request payloads, module-level empty arrays, O(1) Gateway kind-token lookup, and loop-based pod estimation to reduce short-lived allocations and query function churn. | `cd frontend && npx eslint src/components/resource-detail/resource-detail-drawer.tsx src/app/network/topology/page.tsx`; `cd frontend && npx tsc --noEmit --pretty false` |
+| Watch restart stability | `ClusterEventSyncService` now ignores stale watch event/done callbacks by generation, gates restart timers before scheduling/firing, and aborts late watch handles from obsolete startup generations. | `cd backend/control-api && npm test -- cluster-event-sync.service.spec.ts --runInBand` |
+| Watch regression coverage | `cluster-event-sync.service.spec.ts` now covers old callbacks after watch replacement, stop-after-restart-timer behavior, and late watch handles from obsolete generations. | `5` tests passed in `cluster-event-sync.service.spec.ts` |
+| Performance probe diagnostics | `performance-switching.mjs` now reports clearer Playwright-missing, base-url, login, route, body-snippet, console, and page-error diagnostics; failed console/page-error runs do not write a success summary first. | `node --check frontend/scripts/performance-switching.mjs`; `git diff --check` |
+| Topology static guard | `scripts/topology-verify.sh` now checks detail/YAML drawer wiring, Gateway token map, stable namespace query key, and partial coverage summary symbols. | `bash -n scripts/topology-verify.sh`; `bash scripts/topology-verify.sh` |
+
+### Verification Commands Run
+
+- `cd frontend && npx eslint src/components/resource-detail/resource-detail-drawer.tsx src/app/network/topology/page.tsx`
+- `cd frontend && npx tsc --noEmit --pretty false`
+- `node --check frontend/scripts/performance-switching.mjs`
+- `cd backend/control-api && npm test -- cluster-event-sync.service.spec.ts --runInBand`
+- `bash -n scripts/topology-verify.sh`
+- `bash scripts/topology-verify.sh`
+- `git diff --check`
+
+### Fresh Browser Profile
+
+The local dev stack was already healthy on ports `3000`/`4000`/`4100` when this profile ran. The npm probe used system Chrome fallback because the Playwright-managed browser was not installed.
+
+Command:
+
+`PERF_BASE_URL=http://127.0.0.1:3000 PERF_USER=admin@local.dev PERF_PASS=admin123456 PERF_SAMPLE_COUNT=1 PERF_WARMUP_COUNT=0 PERF_SETTLE_MS=150 PERF_OUTPUT=/tmp/k8s-aiops-performance-20260606.json npm run e2e:performance:switching`
+
+Summary:
+
+- `routeCount=9`
+- `p50Ms=2372`
+- `p95Ms=2540`
+- `maxMs=2540`
+- `consoleErrorCount=0`
+- `pageErrorCount=0`
+- `requestCount=222`
+- slowest route: `/network/services` at `2540ms`
+- `/network/topology`: `325ms`, `16` requests, `8` XHR/fetch requests
+
+### Current Risk
+
+- No new heap/memory leak, long soak, shutdown/recovery, or production-mode stress evidence was generated.
+- The fresh profile used one sample in local dev mode, not production mode or a long-duration soak.

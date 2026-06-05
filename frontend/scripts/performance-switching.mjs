@@ -64,12 +64,37 @@ const outputPath =
     `${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "")}.json`,
   );
 
-function fail(message) {
-  throw new Error(message);
+function fail(message, cause) {
+  const suffix = cause === undefined ? "" : ` 原因: ${describeError(cause)}`;
+  throw new Error(`${message}${suffix}`);
 }
 
 function info(message) {
   console.log(`[perf-switching] ${message}`);
+}
+
+function describeError(error) {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+  return String(error);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isConnectionRefused(error) {
+  return describeError(error).includes("ERR_CONNECTION_REFUSED");
+}
+
+async function pageTextSnippet(page) {
+  try {
+    const text = await page.locator("body").innerText({ timeout: 1000 });
+    return text.replace(/\s+/g, " ").trim().slice(0, 300);
+  } catch {
+    return "";
+  }
 }
 
 function normalizeBaseUrl(value) {
@@ -121,6 +146,72 @@ function routeUrl(route) {
   return `${baseUrl}${route}`;
 }
 
+function readAuthSnapshot(payload) {
+  const data = payload && typeof payload === "object" && "data" in payload ? payload.data : payload;
+  if (!data || typeof data !== "object") {
+    fail("登录接口响应缺少 data 对象");
+  }
+  if (typeof data.accessToken !== "string" || typeof data.refreshToken !== "string") {
+    fail("登录接口响应缺少 accessToken/refreshToken");
+  }
+  const user = data.user && typeof data.user === "object" ? data.user : {};
+  return {
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
+    expiresAt: typeof data.expiresAt === "string" ? data.expiresAt : "",
+    username: typeof user.username === "string" ? user.username : username,
+    role: typeof user.role === "string" ? user.role : "",
+  };
+}
+
+async function authenticateViaApi(page) {
+  const loginApiUrl = `${baseUrl}/api/v1/auth/login`;
+  let response;
+  try {
+    response = await fetch(loginApiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+  } catch (error) {
+    fail(`API 登录请求失败: url=${loginApiUrl}`, error);
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    fail(`API 登录响应不是 JSON: url=${loginApiUrl} status=${response.status}`, error);
+  }
+  if (!response.ok) {
+    fail(`API 登录失败: url=${loginApiUrl} status=${response.status} body=${JSON.stringify(payload).slice(0, 300)}`);
+  }
+
+  const snapshot = readAuthSnapshot(payload);
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout });
+  await page.evaluate((auth) => {
+    const entries = [
+      ["aiops_auth_access", auth.accessToken],
+      ["aiops_auth_refresh", auth.refreshToken],
+      ["aiops_auth_user", auth.username],
+      ["aiops_auth_role", auth.role],
+      ["access_token", auth.accessToken],
+      ["refresh_token", auth.refreshToken],
+      ["username", auth.username],
+      ["role", auth.role],
+    ];
+    for (const [key, value] of entries) {
+      window.localStorage.setItem(key, value);
+    }
+    if (auth.expiresAt) {
+      window.localStorage.setItem("aiops_auth_expires_at", auth.expiresAt);
+      window.localStorage.setItem("expires_at", auth.expiresAt);
+    }
+  }, snapshot);
+  await page.goto(`${baseUrl}/dashboard`, { waitUntil: "domcontentloaded", timeout });
+  await ensureStillLoggedIn(page);
+  info("API 登录已写入浏览器会话");
+}
+
 function getRouteSectionLabel(route) {
   return ROUTE_SECTION_LABELS.find((item) => route === item.prefix || route.startsWith(`${item.prefix}/`))?.label ?? null;
 }
@@ -134,21 +225,48 @@ function samePath(page, route) {
 }
 
 async function ensureLoggedIn(page) {
-  await page.goto(`${baseUrl}/login`, { waitUntil: "domcontentloaded", timeout });
+  if (!username || !password) {
+    fail("需要登录但缺少 PERF_USER/PERF_PASS");
+  }
+  try {
+    await authenticateViaApi(page);
+    return;
+  } catch (error) {
+    info(`API 登录不可用，回退 UI 登录: ${describeError(error)}`);
+  }
+
+  const loginUrl = `${baseUrl}/login`;
+  try {
+    await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout });
+  } catch (error) {
+    fail(`登录页不可达: url=${loginUrl} timeout=${timeout}ms`, error);
+  }
   if (!page.url().includes("/login")) {
     info("检测到已有登录会话");
     return;
   }
-  if (!username || !password) {
-    fail("需要登录但缺少 PERF_USER/PERF_PASS");
+
+  try {
+    await page.waitForLoadState("networkidle", { timeout });
+    await page.waitForFunction(() => document.querySelector("form button[type='submit']") !== null, null, { timeout });
+    await page.getByPlaceholder("输入邮箱账号").fill(username);
+    await page.getByPlaceholder("输入登录密码").fill(password);
+  } catch (error) {
+    const snippet = await pageTextSnippet(page);
+    fail(`登录表单未就绪: url=${page.url()} 需要 placeholder=输入邮箱账号/输入登录密码 body="${snippet}"`, error);
   }
 
-  await page.getByPlaceholder("输入邮箱账号").fill(username);
-  await page.getByPlaceholder("输入登录密码").fill(password);
-  await Promise.all([
-    page.waitForURL(/\/dashboard|\/$/, { timeout }),
-    page.getByRole("button", { name: "登录控制台" }).click(),
-  ]);
+  try {
+    const loginForm = page.locator("form").filter({ has: page.getByPlaceholder("输入登录密码") }).first();
+    const submitButton = loginForm.locator('button[type="submit"]').first();
+    await Promise.all([
+      page.waitForURL(/\/dashboard|\/$/, { timeout }),
+      submitButton.click(),
+    ]);
+  } catch (error) {
+    const snippet = await pageTextSnippet(page);
+    fail(`登录失败: user=${username} expect=/dashboard|/ current=${page.url()} timeout=${timeout}ms body="${snippet}"`, error);
+  }
 }
 
 async function ensureStillLoggedIn(page) {
@@ -159,9 +277,18 @@ async function ensureStillLoggedIn(page) {
 }
 
 async function waitForStablePage(page) {
-  await page.waitForLoadState("domcontentloaded", { timeout });
+  try {
+    await page.waitForLoadState("domcontentloaded", { timeout });
+  } catch (error) {
+    fail(`页面加载未完成: url=${page.url()} timeout=${timeout}ms`, error);
+  }
   await ensureStillLoggedIn(page);
-  await page.locator("main, .ant-layout-content").first().waitFor({ state: "visible", timeout });
+  try {
+    await page.locator("main, .ant-layout-content").first().waitFor({ state: "visible", timeout });
+  } catch (error) {
+    const snippet = await pageTextSnippet(page);
+    fail(`页面主体未出现: url=${page.url()} selector="main, .ant-layout-content" body="${snippet}"`, error);
+  }
   if (settleMs > 0) {
     await page.waitForTimeout(settleMs);
   }
@@ -203,15 +330,33 @@ async function measureRoute(page, route) {
   const requestStartIndex = page.__perfRequests.length;
   const start = Date.now();
   let navMode = "current";
-  if (!samePath(page, route)) {
-    if (await clickRouteLink(page, route)) {
-      navMode = "click";
-    } else {
-      navMode = "goto";
+  try {
+    if (!samePath(page, route)) {
+      if (await clickRouteLink(page, route)) {
+        navMode = "click";
+      } else {
+        navMode = "goto";
+        await page.goto(routeUrl(route), { waitUntil: "domcontentloaded", timeout });
+      }
+    }
+  } catch (error) {
+    if (!isConnectionRefused(error)) {
+      fail(`路由切换失败: route=${route} mode=${navMode} from=${page.url()} target=${routeUrl(route)} timeout=${timeout}ms`, error);
+    }
+    info(`检测到前端连接拒绝，等待恢复后重试 route=${route}`);
+    await waitForBaseReachable(`route=${route}`);
+    navMode = "goto-retry";
+    try {
       await page.goto(routeUrl(route), { waitUntil: "domcontentloaded", timeout });
+    } catch (retryError) {
+      fail(`路由切换重试失败: route=${route} mode=${navMode} from=${page.url()} target=${routeUrl(route)} timeout=${timeout}ms`, retryError);
     }
   }
-  await waitForStablePage(page);
+  try {
+    await waitForStablePage(page);
+  } catch (error) {
+    fail(`路由稳定等待失败: route=${route} mode=${navMode} current=${page.url()}`, error);
+  }
   const routeRequests = page.__perfRequests.slice(requestStartIndex);
   return {
     durationMs: Date.now() - start,
@@ -224,24 +369,48 @@ async function measureRoute(page, route) {
 async function assertBaseReachable() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.min(timeout, 5000));
+  let response;
   try {
-    const response = await fetch(baseUrl, { signal: controller.signal });
-    if (response.status >= 500) {
-      fail(`PERF_BASE_URL 返回服务端错误: ${baseUrl} status=${response.status}`);
-    }
+    response = await fetch(baseUrl, { signal: controller.signal });
   } catch (error) {
-    fail(`无法访问 PERF_BASE_URL=${baseUrl}。请确认前端服务已启动。原因: ${error instanceof Error ? error.message : String(error)}`);
+    const timeoutMs = Math.min(timeout, 5000);
+    fail(`无法访问 PERF_BASE_URL=${baseUrl}。请确认前端服务已启动且地址可达，探测超时=${timeoutMs}ms`, error);
   } finally {
     clearTimeout(timer);
   }
+  if (response.status >= 500) {
+    fail(`PERF_BASE_URL 返回服务端错误: ${baseUrl} status=${response.status} statusText=${response.statusText}`);
+  }
+}
+
+async function waitForBaseReachable(reason) {
+  const deadline = Date.now() + Math.min(timeout, 15000);
+  let lastError;
+  while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    try {
+      const response = await fetch(baseUrl, { signal: controller.signal });
+      if (response.status < 500) {
+        return;
+      }
+      lastError = new Error(`status=${response.status}`);
+    } catch (error) {
+      lastError = error;
+    } finally {
+      clearTimeout(timer);
+    }
+    await sleep(500);
+  }
+  fail(`前端服务未恢复: baseUrl=${baseUrl} reason=${reason}`, lastError);
 }
 
 async function main() {
   let chromium;
   try {
     ({ chromium } = await import("playwright"));
-  } catch {
-    fail("未安装 playwright。请先在 frontend 执行: npm install");
+  } catch (error) {
+    fail("未安装 playwright。请先在 frontend 执行: npm install；若已安装依赖，请确认从仓库根或 frontend workspace 运行", error);
   }
 
   await assertBaseReachable();
@@ -309,13 +478,15 @@ async function main() {
       generatedAt: new Date().toISOString(),
     };
 
+    if (consoleErrors.length > 0 || pageErrors.length > 0) {
+      fail(
+        `detected console/page errors: console=${consoleErrors.length} page=${pageErrors.length} firstConsole="${consoleErrors[0] ?? ""}" firstPage="${pageErrors[0] ?? ""}"`,
+      );
+    }
+
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(outputPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
     info(`summary=${outputPath}`);
-
-    if (consoleErrors.length > 0 || pageErrors.length > 0) {
-      fail(`detected console/page errors: console=${consoleErrors.length} page=${pageErrors.length}`);
-    }
   } finally {
     await browser.close();
   }
