@@ -166,8 +166,10 @@ export function buildSpecSection({ detail, specSnapshot }: DetailSectionBuilderC
 }
 
 export function buildStatusSection({ detail, statusSnapshot }: DetailSectionBuilderContext): ReactNode {
+  const profile = getRenderProfile(detail);
+  const runtimeFields = getOrderedFields(detail, "runtime", profile.runtimeFields);
   const runtimeValues = buildRuntimeFieldMap(detail.runtime);
-  const statusFields = [
+  const statusFieldCandidates = [
     "phase",
     "replicas",
     "readyReplicas",
@@ -176,8 +178,11 @@ export function buildStatusSection({ detail, statusSnapshot }: DetailSectionBuil
     "podIP",
     "nodeName",
   ];
+  const statusFields = statusFieldCandidates.filter((field) =>
+    runtimeFields.includes(field),
+  );
   return (
-    <DetailSection title="Status" subtitle="健康、阶段、规模与条件">
+    <DetailSection title="Status" subtitle="健康、阶段与条件">
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         {statusSnapshot ? (
           renderReadonlyObjectSummary(statusSnapshot, "暂无 Status 摘要")

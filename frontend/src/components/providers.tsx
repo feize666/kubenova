@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { AuthProvider } from "@/components/auth-context";
 import { ThemeProvider } from "@/components/theme-context";
+import { defaultQueryOptions, listQueryOptions } from "@/lib/query";
 
 const RealtimeSyncBridge = dynamic(
   () => import("@/components/realtime-sync-bridge").then((mod) => mod.RealtimeSyncBridge),
@@ -23,18 +24,25 @@ function RealtimeSyncBridgeSlot() {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 60_000,
-            gcTime: 2 * 60_000,
-            refetchOnWindowFocus: false,
-            refetchOnReconnect: true,
-            retry: 1,
-          },
-        },
-      }),
+    () => {
+      const client = new QueryClient({
+        defaultOptions: defaultQueryOptions,
+      });
+      [
+        ["clusters"],
+        ["workloads"],
+        ["network"],
+        ["storage"],
+        ["configs"],
+        ["namespaces"],
+        ["helm", "releases"],
+        ["helm", "repositories"],
+        ["helm", "charts"],
+        ["security"],
+        ["rbac"],
+      ].forEach((queryKey) => client.setQueryDefaults(queryKey, listQueryOptions));
+      return client;
+    },
   );
 
   return (

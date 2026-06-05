@@ -119,6 +119,22 @@ Run this matrix before marking Requirement 8 complete:
 - Some Helm drawers are intentionally non-Kubernetes and need separate action semantics in the final regression matrix.
 - Permission-denied and source-unavailable states have representative drawer evidence through Pod detail `403/503` interception; route-by-route negative cases remain follow-up coverage.
 
+## 2026-06-05 Field Ownership Pass
+
+Frontend drawer now applies a kind-owned runtime field whitelist before rendering generic Hero, Status, Spec fallback, and runtime detail sections. This guards against backend descriptor defaults exposing pod/workload fields on unrelated resources.
+
+| Resource family | Drawer field strategy |
+| --- | --- |
+| Pod | Show pod phase, restart count, images, Pod IP, node, service account, restart/DNS/scheduler policy; keep container summaries and raw spec/status when available. |
+| Node | Show Ready, roles, addresses, OS/kernel/runtime, CPU/memory capacity, taints, schedulable state, and conditions. |
+| Deployment/StatefulSet/DaemonSet/ReplicaSet | Show replica counts, selector, images, owned pods, controller chain, container summaries, and raw spec/status. |
+| Job/CronJob | Show job execution scale/status and owner/job relations; avoid Pod-only image/IP/node fields unless backend raw spec/status carries them inside the actual resource payload. |
+| Service/Ingress/IngressRoute/Gateway API/Endpoints/EndpointSlice/NetworkPolicy | Show network-owned service type/IP/ports/routes/listeners/parents/backends/policy selectors/rules; avoid workload replica/image/Pod IP fields in generic summaries. |
+| PV/PVC/StorageClass | Show storage phase, capacity, access modes, reclaim policy, claim refs, provisioner, binding mode, expansion, and storage pipelines. |
+| ConfigMap/Secret/ServiceAccount | Show metadata counts, key/reference usage, consumer relationships, and Secret redaction context; no runtime phase/replica/image/IP fields. |
+| HPA/VPA | Show autoscaling type, target relations, current scale signal when provided, metrics/recommendation hints, and conditions; avoid workload readiness/image/IP fields. |
+| Dynamic/CRD | Show identity, metadata, phase/conditions when status provides them, raw spec/status, events, and YAML; relation inference remains intentionally limited. |
+
 ## Focused Regression Evidence
 
 Task 12.3 cluster/node regression:

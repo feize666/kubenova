@@ -302,6 +302,13 @@ function renderKeyValueSection(
   );
 }
 
+function getAllowedRuntimeFields(
+  detail: ResourceDetailRendererProps["detail"],
+) {
+  const profile = getRenderProfile(detail);
+  return getOrderedFields(detail, "runtime", profile.runtimeFields);
+}
+
 function formatStringMap(value?: Record<string, string>) {
   const entries = Object.entries(value ?? {});
   return entries.length > 0
@@ -1063,29 +1070,30 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
 }
 
 function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps) {
+  const allowedRuntimeFields = new Set(getAllowedRuntimeFields(detail));
   const runtimeHighlights = [
-    detail.runtime.phase
+    allowedRuntimeFields.has("phase") && detail.runtime.phase
       ? {
           label: "阶段",
           value: renderFieldValue("phase", detail.runtime.phase),
         }
       : null,
-    detail.runtime.replicas !== undefined
+    allowedRuntimeFields.has("replicas") && detail.runtime.replicas !== undefined
       ? { label: "副本", value: detail.runtime.replicas }
       : null,
-    detail.runtime.readyReplicas !== undefined
+    allowedRuntimeFields.has("readyReplicas") && detail.runtime.readyReplicas !== undefined
       ? { label: "就绪", value: detail.runtime.readyReplicas }
       : null,
-    detail.runtime.availableReplicas !== undefined
+    allowedRuntimeFields.has("availableReplicas") && detail.runtime.availableReplicas !== undefined
       ? { label: "可用", value: detail.runtime.availableReplicas }
       : null,
-    detail.runtime.restartCount !== undefined
+    allowedRuntimeFields.has("restartCount") && detail.runtime.restartCount !== undefined
       ? { label: "重启", value: detail.runtime.restartCount }
       : null,
-    detail.runtime.podIP
+    allowedRuntimeFields.has("podIP") && detail.runtime.podIP
       ? { label: "Pod IP", value: detail.runtime.podIP }
       : null,
-    detail.runtime.nodeName
+    allowedRuntimeFields.has("nodeName") && detail.runtime.nodeName
       ? { label: "节点", value: detail.runtime.nodeName }
       : null,
   ].filter(Boolean) as Array<{ label: string; value: ReactNode }>;
@@ -1112,7 +1120,7 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
             <DetailTag>集群级</DetailTag>
           )}
           <StatusTag state={detail.overview.state} />
-          {detail.runtime.phase ? (
+          {allowedRuntimeFields.has("phase") && detail.runtime.phase ? (
             <StatusTag state={detail.runtime.phase} />
           ) : null}
         </Space>
@@ -1200,16 +1208,18 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
           ))}
         </div>
 
-        {detail.runtime.image || detail.runtime.images.length > 0 ? (
+        {(allowedRuntimeFields.has("image") && detail.runtime.image) ||
+        (allowedRuntimeFields.has("images") && detail.runtime.images.length > 0) ? (
           <Space orientation="vertical" size={6} style={{ width: "100%" }}>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               镜像
             </Typography.Text>
             <DetailChipList
               items={
+                allowedRuntimeFields.has("images") &&
                 detail.runtime.images.length > 0
                   ? detail.runtime.images
-                  : detail.runtime.image
+                  : allowedRuntimeFields.has("image") && detail.runtime.image
                     ? [detail.runtime.image]
                     : []
               }
@@ -1223,29 +1233,31 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
 }
 
 function StatusSnapshotSection({ detail }: ResourceDetailRendererProps) {
+  const allowedRuntimeFields = new Set(getAllowedRuntimeFields(detail));
   const items = [
     {
       key: "state",
       label: "资源状态",
       value: renderFieldValue("state", detail.overview.state),
     },
-    detail.runtime.phase !== undefined
+    allowedRuntimeFields.has("phase") && detail.runtime.phase !== undefined
       ? {
           key: "phase",
           label: "运行阶段",
           value: renderFieldValue("phase", detail.runtime.phase),
         }
       : null,
-    detail.runtime.replicas !== undefined
+    allowedRuntimeFields.has("replicas") && detail.runtime.replicas !== undefined
       ? { key: "replicas", label: "期望副本", value: detail.runtime.replicas }
       : null,
-    detail.runtime.readyReplicas !== undefined
+    allowedRuntimeFields.has("readyReplicas") && detail.runtime.readyReplicas !== undefined
       ? {
           key: "readyReplicas",
           label: "就绪副本",
           value: detail.runtime.readyReplicas,
         }
       : null,
+    allowedRuntimeFields.has("availableReplicas") &&
     detail.runtime.availableReplicas !== undefined
       ? {
           key: "availableReplicas",
@@ -1253,6 +1265,7 @@ function StatusSnapshotSection({ detail }: ResourceDetailRendererProps) {
           value: detail.runtime.availableReplicas,
         }
       : null,
+    allowedRuntimeFields.has("restartCount") &&
     detail.runtime.restartCount !== undefined
       ? {
           key: "restartCount",
@@ -1260,10 +1273,10 @@ function StatusSnapshotSection({ detail }: ResourceDetailRendererProps) {
           value: detail.runtime.restartCount,
         }
       : null,
-    detail.runtime.podIP
+    allowedRuntimeFields.has("podIP") && detail.runtime.podIP
       ? { key: "podIP", label: "Pod IP", value: detail.runtime.podIP }
       : null,
-    detail.runtime.nodeName
+    allowedRuntimeFields.has("nodeName") && detail.runtime.nodeName
       ? { key: "nodeName", label: "节点", value: detail.runtime.nodeName }
       : null,
   ].filter(Boolean) as Array<{
@@ -1273,7 +1286,7 @@ function StatusSnapshotSection({ detail }: ResourceDetailRendererProps) {
   }>;
 
   return (
-    <DetailSection title="状态摘要" subtitle="先看健康、阶段与运行规模">
+    <DetailSection title="状态摘要" subtitle="先看健康、阶段与条件">
       <DetailDescriptions items={items} emptyText="暂无状态信息" />
     </DetailSection>
   );

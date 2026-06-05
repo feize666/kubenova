@@ -3,6 +3,7 @@
 import { DownOutlined } from "@ant-design/icons";
 import { Button } from "antd";
 import type { ButtonProps } from "antd";
+import { forwardRef } from "react";
 import type { ReactNode } from "react";
 
 export type OpsIconActionButtonTone = "default" | "primary" | "danger";
@@ -20,18 +21,7 @@ export function OpsIconActionButton({
   );
 }
 
-export function OpsFilterTriggerButton({
-  baseClassName = "resource-scope-filter-button",
-  className,
-  icon,
-  label,
-  labelSuffix = " /",
-  value,
-  meta,
-  active,
-  slotClassNames,
-  ...props
-}: Omit<ButtonProps, "icon" | "value"> & {
+export const OpsFilterTriggerButton = forwardRef<HTMLAnchorElement | HTMLButtonElement, Omit<ButtonProps, "icon" | "value"> & {
   baseClassName?: string;
   icon: ReactNode;
   label: ReactNode;
@@ -50,7 +40,18 @@ export function OpsFilterTriggerButton({
     caret?: string;
     meta?: string;
   };
-}) {
+}>(function OpsFilterTriggerButton({
+  baseClassName = "resource-scope-filter-button",
+  className,
+  icon,
+  label,
+  labelSuffix = " /",
+  value,
+  meta,
+  active,
+  slotClassNames,
+  ...props
+}, ref) {
   const iconNode = (
     <span className={slotClassNames?.icon ?? "resource-scope-filter-icon"} aria-hidden>
       {icon}
@@ -60,6 +61,7 @@ export function OpsFilterTriggerButton({
   return (
     <Button
       {...props}
+      ref={ref}
       className={[baseClassName, active ? "is-active" : undefined, className].filter(Boolean).join(" ")}
     >
       {slotClassNames?.lead ? <span className={slotClassNames.lead}>{iconNode}</span> : iconNode}
@@ -75,4 +77,4 @@ export function OpsFilterTriggerButton({
       </span>
     </Button>
   );
-}
+});

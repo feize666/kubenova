@@ -13,7 +13,7 @@ import type { ResourceDetailRenderProfile, SectionFieldMap } from "./types";
 
 const DEFAULT_SECTION_FIELDS: SectionFieldMap = {
   overview: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-  runtime: ["phase", "replicas", "readyReplicas", "availableReplicas", "restartCount", "image", "podIP", "nodeName"],
+  runtime: ["phase"],
   associations: [],
   network: [],
   storage: [],
@@ -25,47 +25,59 @@ const RENDER_PROFILES: Record<string, ResourceDetailRenderProfile> = {
   pod: {
     title: "Pod 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "restartCount", "image", "podIP", "nodeName"],
+    runtimeFields: [
+      "phase",
+      "restartCount",
+      "image",
+      "images",
+      "podIP",
+      "nodeName",
+      "serviceAccountName",
+      "restartPolicy",
+      "dnsPolicy",
+      "schedulerName",
+      "priorityClassName",
+    ],
   },
   node: {
     title: "Node 详情",
     overviewFields: ["clusterId", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "ready", "roles", "internalIP", "externalIP", "osImage", "kernelVersion", "containerRuntimeVersion", "cpuCapacity", "memoryCapacity", "unschedulable"],
+    runtimeFields: ["phase", "ready", "roles", "internalIP", "externalIP", "osImage", "kernelVersion", "containerRuntimeVersion", "cpuCapacity", "memoryCapacity", "taints", "unschedulable"],
   },
   deployment: {
     title: "Deployment 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "replicas", "readyReplicas", "availableReplicas", "image"],
+    runtimeFields: ["phase", "replicas", "readyReplicas", "availableReplicas", "image", "images", "selector"],
   },
   statefulset: {
     title: "StatefulSet 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "replicas", "readyReplicas", "availableReplicas", "image"],
+    runtimeFields: ["phase", "replicas", "readyReplicas", "availableReplicas", "image", "images", "selector"],
   },
   daemonset: {
     title: "DaemonSet 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "readyReplicas", "availableReplicas", "image"],
+    runtimeFields: ["phase", "replicas", "readyReplicas", "availableReplicas", "image", "images", "selector"],
   },
   replicaset: {
     title: "ReplicaSet 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "replicas", "readyReplicas", "availableReplicas", "image"],
+    runtimeFields: ["phase", "replicas", "readyReplicas", "availableReplicas", "image", "images", "selector"],
   },
   job: {
     title: "Job 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "restartCount", "image", "podIP", "nodeName"],
+    runtimeFields: ["phase", "replicas", "readyReplicas"],
   },
   cronjob: {
     title: "CronJob 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "image"],
+    runtimeFields: ["phase"],
   },
   service: {
     title: "Service 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: [],
   },
   ingress: {
     title: "Ingress 详情",
@@ -80,32 +92,32 @@ const RENDER_PROFILES: Record<string, ResourceDetailRenderProfile> = {
   gatewayclass: {
     title: "GatewayClass 详情",
     overviewFields: ["clusterId", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: ["phase", "controllerName"],
   },
   gateway: {
     title: "Gateway 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: ["phase", "gatewayClassName", "hostnames"],
   },
   httproute: {
     title: "HTTPRoute 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: ["phase", "hostnames", "parentRefs", "backendRefs"],
   },
   "network-policy": {
     title: "NetworkPolicy 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: ["policyTypes", "podSelector"],
   },
   endpoints: {
     title: "Endpoints 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: [],
   },
   endpointslice: {
     title: "EndpointSlice 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: [],
   },
   persistentvolume: {
     title: "PersistentVolume 详情",
@@ -120,32 +132,32 @@ const RENDER_PROFILES: Record<string, ResourceDetailRenderProfile> = {
   storageclass: {
     title: "StorageClass 详情",
     overviewFields: ["clusterId", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: [],
   },
   configmap: {
     title: "ConfigMap 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: [],
   },
   secret: {
     title: "Secret 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: [],
   },
   serviceaccount: {
     title: "ServiceAccount 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase"],
+    runtimeFields: [],
   },
   horizontalpodautoscaler: {
     title: "HorizontalPodAutoscaler 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "replicas", "readyReplicas", "availableReplicas"],
+    runtimeFields: ["phase", "replicas"],
   },
   verticalpodautoscaler: {
     title: "VerticalPodAutoscaler 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
-    runtimeFields: ["phase", "replicas", "readyReplicas", "availableReplicas"],
+    runtimeFields: ["phase"],
   },
   helmrelease: {
     title: "Helm 应用详情",
@@ -260,7 +272,7 @@ export function getRenderProfile(detail: ResourceDetailResponse): ResourceDetail
     RENDER_PROFILES[normalizeKind(detail.descriptor.resourceKind || detail.overview.kind)] ?? {
       title: `${detail.overview.kind || detail.descriptor.resourceKind || "资源"}详情`,
       overviewFields: DEFAULT_SECTION_FIELDS.overview,
-      runtimeFields: DEFAULT_SECTION_FIELDS.runtime,
+      runtimeFields: ["phase"],
     }
   );
 }
@@ -271,6 +283,12 @@ export function getOrderedFields(
   fallback: string[],
 ): string[] {
   const configured = detail.descriptor.fieldsBySection[section] ?? [];
+  if (section === "runtime") {
+    const allowed = new Set(fallback);
+    return (configured.length > 0 ? configured : fallback).filter((field) =>
+      allowed.has(field),
+    );
+  }
   if (configured.length > 0) {
     return configured;
   }
@@ -328,6 +346,30 @@ export function humanizeFieldLabel(field: string): string {
     images: "镜像列表",
     podIP: "Pod IP",
     nodeName: "节点",
+    selector: "Selector",
+    serviceAccountName: "ServiceAccount",
+    restartPolicy: "重启策略",
+    dnsPolicy: "DNS 策略",
+    schedulerName: "调度器",
+    priorityClassName: "优先级类",
+    ready: "Ready",
+    roles: "角色",
+    internalIP: "Internal IP",
+    externalIP: "External IP",
+    osImage: "OS Image",
+    kernelVersion: "Kernel",
+    containerRuntimeVersion: "容器运行时",
+    cpuCapacity: "CPU 容量",
+    memoryCapacity: "内存容量",
+    taints: "Taints",
+    unschedulable: "不可调度",
+    controllerName: "Controller",
+    gatewayClassName: "GatewayClass",
+    hostnames: "Hostnames",
+    parentRefs: "ParentRefs",
+    backendRefs: "BackendRefs",
+    policyTypes: "策略类型",
+    podSelector: "Pod Selector",
     id: "资源 ID",
   };
 
@@ -368,6 +410,17 @@ export function buildRuntimeFieldMap(runtime: ResourceDetailRuntime): Record<str
     images: runtime.images,
     podIP: runtime.podIP,
     nodeName: runtime.nodeName,
+    selector: runtime.selector,
+    serviceAccountName: runtime.serviceAccountName,
+    restartPolicy: runtime.restartPolicy,
+    dnsPolicy: runtime.dnsPolicy,
+    schedulerName: runtime.schedulerName,
+    priorityClassName: runtime.priorityClassName,
+    controllerName: runtime.controllerName,
+    gatewayClassName: runtime.gatewayClassName,
+    hostnames: runtime.hostnames?.join(", "),
+    parentRefs: runtime.parentRefs?.join(", "),
+    backendRefs: runtime.backendRefs?.join(", "),
     ready: runtime.ready,
     roles: runtime.roles?.join(", "),
     internalIP: runtime.internalIP,
@@ -379,6 +432,8 @@ export function buildRuntimeFieldMap(runtime: ResourceDetailRuntime): Record<str
     memoryCapacity: runtime.memoryCapacity,
     taints: runtime.taints?.join(", "),
     unschedulable: runtime.unschedulable,
+    policyTypes: runtime.policyTypes?.join(", "),
+    podSelector: runtime.podSelector,
   };
 }
 

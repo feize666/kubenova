@@ -30,6 +30,7 @@ import {
 } from './helm-repository.store';
 
 const execFileAsync = promisify(execFile);
+const HELM_ALL_RELEASES_CLUSTER_TIMEOUT_MS = 7000;
 
 interface HelmReleaseItem {
   name: string;
@@ -1404,8 +1405,12 @@ export class HelmService {
     await Promise.all(
       clusters.map(async (cluster) => {
         try {
-          const releases = await this.withKubeconfig(cluster.id, (ctx) =>
-            this.fetchReleases(ctx, namespace),
+          const releases = await this.withTimeout(
+            this.withKubeconfig(cluster.id, (ctx) =>
+              this.fetchReleases(ctx, namespace),
+            ),
+            HELM_ALL_RELEASES_CLUSTER_TIMEOUT_MS,
+            `Helm Release 查询超时: clusterId=${cluster.id}`,
           );
           for (const release of releases) {
             if (!release.name || !release.namespace) {
@@ -1431,6 +1436,26 @@ export class HelmService {
       throw errors[0];
     }
     return [];
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    message: string,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
   }
 
   private async readHostRepositoryInventory(): Promise<
