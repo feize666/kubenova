@@ -1,4 +1,5 @@
 import { ApiError, apiRequest } from "./client";
+import type { ApiRequestSignalOptions } from "./types";
 
 export interface ResourceIdentity {
   clusterId: string;
@@ -420,11 +421,12 @@ async function tryGetWithFallback<T>(
   paths: readonly string[],
   query: Record<string, string>,
   token?: string,
+  requestOptions: ApiRequestSignalOptions = {},
 ): Promise<T> {
   let lastError: unknown;
   for (const path of paths) {
     try {
-      return await apiRequest<T>(path, { method: "GET", query, token });
+      return await apiRequest<T>(path, { method: "GET", query, token, signal: requestOptions.signal });
     } catch (err) {
       if (!isNotFound(err)) {
         throw err;
@@ -590,7 +592,11 @@ function normalizeResourceKind(kind: string): string {
   }
 }
 
-export async function getResourceYaml(identity: ResourceIdentity, token?: string): Promise<ResourceYamlResponse> {
+export async function getResourceYaml(
+  identity: ResourceIdentity,
+  token?: string,
+  requestOptions: ApiRequestSignalOptions = {},
+): Promise<ResourceYamlResponse> {
   const payload = await tryGetWithFallback<unknown>(
     YAML_GET_PATHS,
     {
@@ -600,6 +606,7 @@ export async function getResourceYaml(identity: ResourceIdentity, token?: string
       name: identity.name,
     },
     token,
+    requestOptions,
   );
 
   if (!payload || typeof payload !== "object") {
@@ -646,11 +653,12 @@ export async function scaleResource(payload: ResourceScalePayload, token?: strin
 export async function getResourceDetail(
   request: ResourceDetailRequest,
   token?: string,
+  requestOptions: ApiRequestSignalOptions = {},
 ): Promise<ResourceDetailResponse> {
   const kind = encodeURIComponent(normalizeResourceKind(request.kind));
   const id = encodeURIComponent(request.id.trim());
   const path = `/api/resources/${kind}/${id}/detail`;
-  const payload = await apiRequest<unknown>(path, { method: "GET", token });
+  const payload = await apiRequest<unknown>(path, { method: "GET", token, signal: requestOptions.signal });
 
   if (!isObject(payload)) {
     throw new Error("资源详情返回格式无效");
@@ -1322,6 +1330,7 @@ export async function getResourceDiscoveryCatalog(
 export async function getDynamicResources(
   query: DynamicResourceQuery,
   token?: string,
+  requestOptions: ApiRequestSignalOptions = {},
 ): Promise<DynamicResourceListResponse> {
   return apiRequest<DynamicResourceListResponse>("/api/resources/dynamic", {
     method: "GET",
@@ -1339,12 +1348,14 @@ export async function getDynamicResources(
       missingAsEmpty: query.missingAsEmpty ? "true" : undefined,
     },
     token,
+    signal: requestOptions.signal,
   });
 }
 
 export async function getDynamicResourceDetail(
   identity: DynamicResourceIdentity,
   token?: string,
+  requestOptions: ApiRequestSignalOptions = {},
 ): Promise<DynamicResourceDetailResponse> {
   return apiRequest<DynamicResourceDetailResponse>("/api/resources/dynamic/detail", {
     method: "GET",
@@ -1357,6 +1368,7 @@ export async function getDynamicResourceDetail(
       name: identity.name,
     },
     token,
+    signal: requestOptions.signal,
   });
 }
 

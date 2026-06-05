@@ -42,7 +42,16 @@ export interface ResourceDetailRendererProps {
   detail: ResourceDetailResponse;
   snapshot?: ResourceDetailClientSnapshot;
   clusterMap?: Record<string, string>;
-  onNavigateRequest?: (request: { kind: string; id: string; snapshot?: ResourceDetailClientSnapshot }) => void;
+  onNavigateRequest?: (request: {
+    kind: string;
+    id: string;
+    kindLabel?: string;
+    apiVersion?: string;
+    namespace?: string;
+    name?: string;
+    label?: string;
+    snapshot?: ResourceDetailClientSnapshot;
+  }) => void;
 }
 
 export interface ResourceDetailRenderProfile {

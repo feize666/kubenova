@@ -3916,8 +3916,9 @@ export class ResourcesService {
     if (!kind || !name || kind === 'Container' || kind === 'Volume' || kind === 'Pod/IP') {
       return undefined;
     }
+    const targetKind = this.normalizeKindForRelationship(kind);
     if (
-      base.kind === kind &&
+      this.normalizeKindForRelationship(base.kind) === targetKind &&
       base.name === name &&
       (!namespace || !base.namespace || base.namespace === namespace)
     ) {
@@ -3933,7 +3934,7 @@ export class ResourcesService {
     for (const pool of pools) {
       const matched = pool.find(
         (item) =>
-          item.kind === kind &&
+          this.normalizeKindForRelationship(item.kind) === targetKind &&
           item.name === name &&
           (!namespace || !item.namespace || item.namespace === namespace),
       );
@@ -3955,9 +3956,10 @@ export class ResourcesService {
     if (!kind || !name || kind === 'Container' || kind === 'Volume' || kind === 'Pod/IP') {
       return undefined;
     }
+    const targetKind = this.normalizeKindForRelationship(kind);
     const association = associations.find(
       (item) =>
-        item.kind === kind &&
+        this.normalizeKindForRelationship(item.kind) === targetKind &&
         item.name === name &&
         (!namespace || !item.namespace || item.namespace === namespace) &&
         item.id,
@@ -3966,7 +3968,7 @@ export class ResourcesService {
       return association.id;
     }
     if (
-      base.kind === kind &&
+      this.normalizeKindForRelationship(base.kind) === targetKind &&
       base.name === name &&
       (!namespace || !base.namespace || base.namespace === namespace)
     ) {
@@ -3982,7 +3984,7 @@ export class ResourcesService {
     for (const pool of pools) {
       const matched = pool.find(
         (item) =>
-          item.kind === kind &&
+          this.normalizeKindForRelationship(item.kind) === targetKind &&
           item.name === name &&
           (!namespace || !item.namespace || item.namespace === namespace),
       );
@@ -3994,6 +3996,14 @@ export class ResourcesService {
       return this.buildLiveNetworkId(base.clusterId, kind, namespace, name);
     }
     return undefined;
+  }
+
+  private normalizeKindForRelationship(kind: string): string {
+    try {
+      return this.resolveKind(kind).kind;
+    } catch {
+      return kind.trim();
+    }
   }
 
   private buildStorageSummary(

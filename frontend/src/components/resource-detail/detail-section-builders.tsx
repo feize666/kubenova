@@ -4,7 +4,7 @@ import { Empty, Space, Typography } from "antd";
 import type { ReactNode } from "react";
 import type { ResourceDetailEvent } from "@/lib/api/resources";
 import { StatusTag } from "@/components/status-tag";
-import { DetailDescriptions, DetailSection, DetailTag, TagList } from "./section-primitives";
+import { DetailDescriptions, DetailSection, DetailTag, DetailChipList } from "./section-primitives";
 import type { ResourceDetailRendererProps } from "./types";
 import {
   buildOverviewFieldMap,
@@ -30,7 +30,7 @@ function renderFieldValue(field: string, value: unknown) {
     return formatDateTime(value);
   }
   if (field === "images" && Array.isArray(value)) {
-    return <TagList items={value.filter((item): item is string => typeof item === "string")} color="blue" />;
+    return <DetailChipList items={value.filter((item): item is string => typeof item === "string")} color="blue" />;
   }
   return formatValue(value);
 }

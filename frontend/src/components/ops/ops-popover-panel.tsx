@@ -1,7 +1,8 @@
 "use client";
 
-import { Button, Divider, Space, Typography } from "antd";
+import { Divider, Space, Typography } from "antd";
 import type { ReactNode } from "react";
+import { OpsIconActionButton } from "./ops-button";
 
 export function OpsPopoverPanel({
   title,
@@ -33,11 +34,11 @@ export function OpsPopoverPanel({
         <>
           <Divider className="ops-popover-panel__divider" />
           <Space className="ops-popover-panel__footer">
-            {onReset ? <Button onClick={onReset}>{resetText}</Button> : null}
+            {onReset ? <OpsIconActionButton onClick={onReset}>{resetText}</OpsIconActionButton> : null}
             {onApply ? (
-              <Button type="primary" onClick={onApply}>
+              <OpsIconActionButton opsTone="primary" onClick={onApply}>
                 {applyText}
-              </Button>
+              </OpsIconActionButton>
             ) : null}
           </Space>
         </>

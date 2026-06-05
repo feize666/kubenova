@@ -1,9 +1,8 @@
 "use client";
 
 import { Card, Descriptions, Empty, Space, Typography } from "antd";
-import type { TagProps } from "antd";
 import type { ReactNode } from "react";
-import { OpsFilterChip, type OpsFilterChipTone } from "@/components/ops";
+import { OpsFilterChip, type OpsFilterChipProps, type OpsFilterChipTone } from "@/components/ops";
 
 export function DetailSection({
   title,
@@ -90,7 +89,7 @@ export function DetailTag({
   color = "default",
   children,
   ...props
-}: Omit<TagProps, "color"> & {
+}: Omit<OpsFilterChipProps, "tone"> & {
   color?: string;
 }) {
   return (
@@ -100,7 +99,7 @@ export function DetailTag({
   );
 }
 
-export function TagList({ items, color = "default" }: { items: string[]; color?: string }) {
+export function DetailChipList({ items, color = "default" }: { items: string[]; color?: string }) {
   if (items.length === 0) {
     return <Typography.Text type="secondary">-</Typography.Text>;
   }

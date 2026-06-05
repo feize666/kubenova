@@ -27,6 +27,8 @@ export interface ApiRequestOptions<TBody = unknown> {
   suppressAuthExpiryBroadcast?: boolean;
 }
 
+export type ApiRequestSignalOptions = Pick<ApiRequestOptions, "signal">;
+
 // Backward-compatible export aliases used by existing pages/api modules.
 export type Cluster = ClusterModel;
 export type ClusterListResponse = ClusterListModel;

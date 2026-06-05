@@ -12,6 +12,7 @@ import {
 
 const STREAM_PATH = "/api/v1/clusters/events/stream";
 const RECONNECT_DELAY_MS = 1500;
+const INVALIDATE_BATCH_DELAY_MS = 250;
 
 function buildStreamUrl() {
   return STREAM_PATH;
@@ -28,16 +29,29 @@ export function RealtimeSyncBridge() {
   }, [pathname]);
 
   useEffect(() => {
-    if (!accessToken || !isAuthenticated) {
+    if (pathname === "/login" || !accessToken || !isAuthenticated) {
       return;
     }
 
     const controller = new AbortController();
     let buffer = "";
+    let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
+    const pendingInvalidations = new Map<string, readonly unknown[]>();
     const refreshQueryPrefixes = (queryPrefixes: readonly (readonly unknown[])[]) => {
       for (const queryKey of queryPrefixes) {
-        void queryClient.invalidateQueries({ queryKey });
+        pendingInvalidations.set(JSON.stringify(queryKey), queryKey);
       }
+      if (invalidateTimer) {
+        return;
+      }
+      invalidateTimer = setTimeout(() => {
+        invalidateTimer = null;
+        const keys = Array.from(pendingInvalidations.values());
+        pendingInvalidations.clear();
+        keys.forEach((queryKey) => {
+          void queryClient.invalidateQueries({ queryKey });
+        });
+      }, INVALIDATE_BATCH_DELAY_MS);
     };
 
     const processBuffer = () => {
@@ -122,9 +136,12 @@ export function RealtimeSyncBridge() {
     void connect();
 
     return () => {
+      if (invalidateTimer) {
+        clearTimeout(invalidateTimer);
+      }
       controller.abort();
     };
-  }, [accessToken, isAuthenticated, queryClient]);
+  }, [accessToken, isAuthenticated, pathname, queryClient]);
 
   return null;
 }

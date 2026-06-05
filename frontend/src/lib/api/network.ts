@@ -1,5 +1,6 @@
 import { apiRequest } from './client';
 import type { SortOrder } from '@/lib/contracts/common';
+import type { ApiRequestSignalOptions } from "./types";
 
 export interface NetworkResource {
   id: string;
@@ -56,7 +57,11 @@ export interface ApplyNetworkResourceYamlPayload {
   yaml: string;
 }
 
-export function getNetworkResources(params: NetworkListParams = {}, token?: string) {
+export function getNetworkResources(
+  params: NetworkListParams = {},
+  token?: string,
+  requestOptions: ApiRequestSignalOptions = {},
+) {
   const query: Record<string, string | number> = {};
   if (params.kind) query.kind = params.kind;
   if (params.clusterId) query.clusterId = params.clusterId;
@@ -66,7 +71,7 @@ export function getNetworkResources(params: NetworkListParams = {}, token?: stri
   if (params.pageSize) query.pageSize = params.pageSize;
   if (params.sortBy) query.sortBy = params.sortBy;
   if (params.sortOrder) query.sortOrder = params.sortOrder;
-  return apiRequest<NetworkListResponse>('/api/network', { query, token });
+  return apiRequest<NetworkListResponse>('/api/network', { query, token, signal: requestOptions.signal });
 }
 
 export function createNetworkResource(body: CreateNetworkResourcePayload, token?: string) {

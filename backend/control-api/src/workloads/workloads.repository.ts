@@ -19,6 +19,8 @@ export interface WorkloadRecord {
   updatedAt: Date;
 }
 
+export type WorkloadListProjection = 'topology';
+
 export interface WorkloadListParams {
   clusterId?: string;
   clusterIds?: string[];
@@ -40,6 +42,7 @@ export interface WorkloadListParams {
     | 'updatedAt'
     | 'id';
   sortOrder?: 'asc' | 'desc';
+  projection?: WorkloadListProjection;
 }
 
 export interface WorkloadListResult {
@@ -99,13 +102,31 @@ export class WorkloadsRepository {
       where.name = { contains: params.keyword, mode: 'insensitive' };
     }
 
+    const findManyArgs: Prisma.WorkloadRecordFindManyArgs = {
+      where,
+      orderBy: this.buildOrderBy(params),
+      skip,
+      take: pageSize,
+    };
+    if (params.projection === 'topology') {
+      findManyArgs.select = {
+        id: true,
+        clusterId: true,
+        namespace: true,
+        kind: true,
+        name: true,
+        state: true,
+        replicas: true,
+        readyReplicas: true,
+        statusJson: true,
+        labels: true,
+        createdAt: true,
+        updatedAt: true,
+      };
+    }
+
     const [rows, total] = await Promise.all([
-      this.prisma.workloadRecord.findMany({
-        where,
-        orderBy: this.buildOrderBy(params),
-        skip,
-        take: pageSize,
-      }),
+      this.prisma.workloadRecord.findMany(findManyArgs),
       this.prisma.workloadRecord.count({ where }),
     ]);
 
@@ -254,10 +275,10 @@ export class WorkloadsRepository {
     state: string;
     replicas: number | null;
     readyReplicas: number | null;
-    spec: Prisma.JsonValue | null;
-    statusJson: Prisma.JsonValue | null;
-    labels: Prisma.JsonValue | null;
-    annotations: Prisma.JsonValue | null;
+    spec?: Prisma.JsonValue | null;
+    statusJson?: Prisma.JsonValue | null;
+    labels?: Prisma.JsonValue | null;
+    annotations?: Prisma.JsonValue | null;
     createdAt: Date;
     updatedAt: Date;
   }): WorkloadRecord {
@@ -270,10 +291,10 @@ export class WorkloadsRepository {
       state: this.parseState(row.state),
       replicas: row.replicas,
       readyReplicas: row.readyReplicas,
-      spec: row.spec,
-      statusJson: row.statusJson,
-      labels: row.labels,
-      annotations: row.annotations,
+      spec: row.spec ?? null,
+      statusJson: row.statusJson ?? null,
+      labels: row.labels ?? null,
+      annotations: row.annotations ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

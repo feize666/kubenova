@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
   output: "standalone",
   devIndicators: false,
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  onDemandEntries: {
+    maxInactiveAge: 60_000,
+    pagesBufferLength: 2,
+  },
+  experimental: {
+    optimizePackageImports: ["antd", "@ant-design/icons", "reactflow"],
+    webpackMemoryOptimizations: true,
+  },
   async rewrites() {
     const configuredBase = (process.env.NEXT_PUBLIC_CONTROL_API_BASE ?? "").trim().replace(/\/+$/, "");
     const backendBase = /^https?:\/\//i.test(configuredBase) ? configuredBase : "http://127.0.0.1:4000";

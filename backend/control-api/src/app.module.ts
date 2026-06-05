@@ -21,6 +21,7 @@ import { ResourcesModule } from './resources/resources.module';
 import { SecurityModule } from './security/security.module';
 import { StorageModule } from './storage/storage.module';
 import { SystemUpdateModule } from './system-update/system-update.module';
+import { TopologySummaryModule } from './topology-summary/topology-summary.module';
 import { UsersModule } from './users/users.module';
 import { WorkloadsModule } from './workloads/workloads.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -50,6 +51,7 @@ import { DatabaseModule } from './platform/database/database.module';
     NetworkModule,
     WorkloadsModule,
     StorageModule,
+    TopologySummaryModule,
     SystemUpdateModule,
     ConfigsModule,
     UsersModule,

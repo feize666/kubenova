@@ -96,6 +96,7 @@
   --ops-surface-overlay: rgba(17, 24, 39, 0.98);
   --ops-border-subtle: rgba(148, 163, 184, 0.18);
   --ops-border-strong: rgba(96, 165, 250, 0.34);
+  --ops-subtle-bg: rgba(148, 163, 184, 0.12);
   --ops-hover-bg: rgba(59, 130, 246, 0.12);
   --ops-active-bg: rgba(59, 130, 246, 0.18);
   --ops-shadow-subtle: 0 10px 24px rgba(2, 8, 23, 0.18);
@@ -212,6 +213,7 @@
   --ops-surface-overlay: #ffffff;
   --ops-border-subtle: rgba(148, 163, 184, 0.28);
   --ops-border-strong: rgba(37, 99, 235, 0.34);
+  --ops-subtle-bg: rgba(100, 116, 139, 0.08);
   --ops-hover-bg: rgba(37, 99, 235, 0.08);
   --ops-active-bg: rgba(37, 99, 235, 0.12);
   --ops-shadow-subtle: 0 8px 20px rgba(15, 23, 42, 0.06);
@@ -333,15 +335,7 @@ body {
   box-shadow: 0 8px 18px color-mix(in srgb, var(--ant-color-primary) 22%, transparent);
 }
 
-.ant-tag {
-  min-height: 22px;
-  border-radius: 6px;
-  margin-inline-end: 6px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.ops-status-tag.ant-tag,
+.ops-status-tag,
 .ops-severity-pill {
   display: inline-flex;
   align-items: center;
@@ -521,6 +515,14 @@ body {
   color: var(--ant-color-text-disabled);
 }
 
+.resource-action-bar-button.ops-icon-action-button.ant-btn {
+  min-width: 74px;
+  height: 30px;
+  padding-inline: 14px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
 .resource-add-button.ant-btn {
   display: inline-flex;
   align-items: center;
@@ -556,9 +558,10 @@ body {
   padding-inline: 0;
 }
 
-.ops-filter-chip.ant-tag {
+.ops-filter-chip {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   max-width: 100%;
   min-height: 26px;
   margin: 0;
@@ -572,40 +575,63 @@ body {
   line-height: 18px;
 }
 
-.ops-filter-chip.ant-tag .ant-tag-close-icon {
-  margin-inline-start: 6px;
-  color: var(--ant-color-text-tertiary);
+.ops-filter-chip--borderless {
+  border-color: transparent;
 }
 
-.ops-filter-chip.ant-tag .ant-tag-close-icon:hover {
+.ops-filter-chip__icon {
+  display: inline-flex;
+  align-items: center;
+  color: currentColor;
+}
+
+.ops-filter-chip__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-inline-start: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ant-color-text-tertiary);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.ops-filter-chip__close:hover {
   color: var(--ant-color-error);
 }
 
-.ops-filter-chip--info.ant-tag {
+.ops-filter-chip--info {
   border-color: color-mix(in srgb, var(--ant-color-primary) 28%, transparent);
   background: color-mix(in srgb, var(--ant-color-primary) 9%, var(--ant-color-bg-container));
   color: var(--ant-color-primary);
 }
 
-.ops-filter-chip--success.ant-tag {
+.ops-filter-chip--success {
   border-color: color-mix(in srgb, var(--ant-color-success) 28%, transparent);
   background: color-mix(in srgb, var(--ant-color-success) 9%, var(--ant-color-bg-container));
   color: var(--ant-color-success);
 }
 
-.ops-filter-chip--warning.ant-tag {
+.ops-filter-chip--warning {
   border-color: color-mix(in srgb, var(--ant-color-warning) 32%, transparent);
   background: color-mix(in srgb, var(--ant-color-warning) 10%, var(--ant-color-bg-container));
   color: var(--ant-color-warning);
 }
 
-.ops-filter-chip--danger.ant-tag {
+.ops-filter-chip--danger {
   border-color: color-mix(in srgb, var(--ant-color-error) 30%, transparent);
   background: color-mix(in srgb, var(--ant-color-error) 9%, var(--ant-color-bg-container));
   color: var(--ant-color-error);
 }
 
-.ops-filter-chip--neutral.ant-tag {
+.ops-filter-chip--neutral {
+  border-color: var(--ops-status-neutral-border);
+  background: var(--ops-status-neutral-bg);
   color: var(--ant-color-text-secondary);
 }
 
@@ -780,9 +806,11 @@ body {
 }
 
 .resource-table .ant-table-tbody > tr > td .ant-typography,
-.resource-table .ant-table-tbody > tr > td .ant-tag,
+.resource-table .ant-table-tbody > tr > td .ops-status-tag,
+.resource-table .ant-table-tbody > tr > td .ops-filter-chip,
 .pod-table .ant-table-tbody > tr > td .ant-typography,
-.pod-table .ant-table-tbody > tr > td .ant-tag {
+.pod-table .ant-table-tbody > tr > td .ops-status-tag,
+.pod-table .ant-table-tbody > tr > td .ops-filter-chip {
   margin-inline: 0;
 }
 
@@ -984,7 +1012,8 @@ body {
 }
 
 .resource-scope-filter-button:hover,
-.resource-scope-filter-button:focus-visible {
+.resource-scope-filter-button:focus-visible,
+.resource-scope-filter-button.is-active {
   border-color: var(--ops-border-strong);
   background: var(--ant-color-bg-container);
   color: var(--ant-color-text);
@@ -1008,6 +1037,7 @@ body {
 
 .resource-scope-filter-button:hover::after,
 .resource-scope-filter-button:focus-visible::after,
+.resource-scope-filter-button.is-active::after,
 .resource-table-icon-action.ant-btn:hover::after,
 .resource-table-icon-action.ant-btn:focus-visible::after,
 .resource-table-icon-action.ant-btn.is-active::after {
@@ -1080,6 +1110,13 @@ body {
 .resource-scope-filter-caret {
   color: currentColor;
   font-size: 11px;
+}
+
+.resource-scope-filter-meta {
+  color: currentColor;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
 }
 
 [data-theme="dark"] .resource-scope-filter-button {
@@ -1257,7 +1294,7 @@ body {
   min-height: 24px;
 }
 
-.resource-table-status-title .ant-tag {
+.resource-table-status-title .ops-filter-chip {
   margin: 0;
 }
 
@@ -1907,7 +1944,7 @@ body {
     0 14px 30px rgba(37, 99, 235, 0.16) !important;
 }
 
-body:has(.topology-overview-page) .ant-select-dropdown {
+body.topology-overview-active .ant-select-dropdown {
   padding: 8px;
   border-radius: 20px;
   border: 1px solid rgba(148, 163, 184, 0.2);
@@ -1917,35 +1954,35 @@ body:has(.topology-overview-page) .ant-select-dropdown {
   max-width: min(calc(100vw - 20px), 420px);
 }
 
-body:has(.topology-overview-page) .ant-select-dropdown .ant-select-item {
+body.topology-overview-active .ant-select-dropdown .ant-select-item {
   min-height: 38px;
   border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
 }
 
-body:has(.topology-overview-page) .ant-select-dropdown .ant-select-item-option-active {
+body.topology-overview-active .ant-select-dropdown .ant-select-item-option-active {
   background: rgba(59, 130, 246, 0.08);
 }
 
-body:has(.topology-overview-page) .ant-select-dropdown .ant-select-item-option-selected {
+body.topology-overview-active .ant-select-dropdown .ant-select-item-option-selected {
   background: linear-gradient(135deg, rgba(219, 234, 254, 0.92) 0%, rgba(239, 246, 255, 0.94) 100%);
   color: #1d4ed8;
 }
 
-body:has(.topology-overview-page) .ant-popover {
+body.topology-overview-active .ant-popover {
   width: min(var(--topology-popover-width-resource), calc(100vw - 24px));
   max-width: calc(100vw - 24px);
   box-sizing: border-box;
 }
 
-body:has(.topology-overview-page) .ant-popover .ant-popover-content {
+body.topology-overview-active .ant-popover .ant-popover-content {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
 }
 
-body:has(.topology-overview-page) .ant-popover .ant-popover-inner {
+body.topology-overview-active .ant-popover .ant-popover-inner {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -1956,7 +1993,7 @@ body:has(.topology-overview-page) .ant-popover .ant-popover-inner {
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
 }
 
-body:has(.topology-overview-page) .ant-popover .ant-popover-inner-content > div {
+body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
   width: 100% !important;
   max-width: 100%;
   max-height: min(72vh, 560px);
@@ -2197,12 +2234,25 @@ body:has(.topology-overview-page) .ant-popover .ant-popover-inner-content > div 
   gap: 1px;
 }
 
+.topology-filter-pill__content-value {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
 .topology-filter-pill__meta {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.topology-filter-pill__meta-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .topology-filter-pill__count {
@@ -2304,6 +2354,13 @@ body:has(.topology-overview-page) .ant-popover .ant-popover-inner-content > div 
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.topology-resource-tree__toolbar-action.ant-btn {
+  min-width: auto;
+  height: auto;
+  padding: 0;
+  box-shadow: none;
 }
 
 .topology-resource-tree__toolbar-action:hover {
@@ -2649,21 +2706,21 @@ body:has(.topology-overview-page) .ant-popover .ant-popover-inner-content > div 
     0 8px 18px rgba(37, 99, 235, 0.16) !important;
 }
 
-[data-theme="dark"] body:has(.topology-overview-page) .ant-select-dropdown {
+[data-theme="dark"] body.topology-overview-active .ant-select-dropdown {
   border-color: var(--topology-overview-border);
   background: rgba(15, 23, 42, 0.94);
 }
 
-[data-theme="dark"] body:has(.topology-overview-page) .ant-select-dropdown .ant-select-item-option-active {
+[data-theme="dark"] body.topology-overview-active .ant-select-dropdown .ant-select-item-option-active {
   background: rgba(59, 130, 246, 0.14);
 }
 
-[data-theme="dark"] body:has(.topology-overview-page) .ant-select-dropdown .ant-select-item-option-selected {
+[data-theme="dark"] body.topology-overview-active .ant-select-dropdown .ant-select-item-option-selected {
   background: rgba(37, 99, 235, 0.18);
   color: #bfdbfe;
 }
 
-[data-theme="dark"] body:has(.topology-overview-page) .ant-popover .ant-popover-inner {
+[data-theme="dark"] body.topology-overview-active .ant-popover .ant-popover-inner {
   border-color: var(--topology-overview-border);
   background: rgba(15, 23, 42, 0.96);
   box-shadow: 0 12px 24px rgba(2, 6, 23, 0.32);
@@ -2951,6 +3008,12 @@ button.topology-detail-list__item {
     color 0.18s ease;
 }
 
+.topology-control-group .topology-control-button.ant-btn {
+  min-width: 40px;
+  width: 40px;
+  padding-inline: 0;
+}
+
 .topology-toolbar-section--compact .ant-btn {
   height: 42px;
   padding-inline: 16px;
@@ -3002,20 +3065,6 @@ button.topology-detail-list__item {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.98),
     0 14px 32px rgba(37, 99, 235, 0.14);
-}
-
-.topology-toolbar-row:last-child .ant-tag {
-  border-radius: 999px;
-  padding-inline: 10px;
-  line-height: 24px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: rgba(248, 250, 252, 0.84);
-  color: #475569;
-}
-
-.topology-toolbar-row:last-child .ant-tag-blue {
-  background: rgba(219, 234, 254, 0.92);
-  color: #1d4ed8;
 }
 
 .topology-canvas-overlay {
@@ -3419,6 +3468,13 @@ button.topology-source-matrix__name:focus-visible,
   transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
 }
 
+.topology-quick-actions__item.ant-btn {
+  min-width: auto;
+  height: auto;
+  padding: 6px 10px;
+  box-shadow: none;
+}
+
 .topology-quick-actions__item:hover {
   border-color: rgba(37, 99, 235, 0.34);
   transform: translateY(-1px);
@@ -3612,11 +3668,11 @@ button.topology-source-matrix__name:focus-visible,
     justify-content: flex-start;
   }
 
-  body:has(.topology-overview-page) .ant-popover {
+  body.topology-overview-active .ant-popover {
     max-width: calc(100vw - 24px);
   }
 
-  body:has(.topology-overview-page) .ant-popover .ant-popover-inner-content > div {
+  body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
     width: 100% !important;
     max-width: calc(100vw - 32px);
     max-height: min(72vh, calc(100vh - 120px));
@@ -3660,7 +3716,7 @@ button.topology-source-matrix__name:focus-visible,
     min-width: 0;
   }
 
-  body:has(.topology-overview-page) .ant-select-dropdown {
+  body.topology-overview-active .ant-select-dropdown {
     max-width: calc(100vw - 16px);
   }
 }
@@ -3773,13 +3829,6 @@ button.topology-source-matrix__name:focus-visible,
   -webkit-text-fill-color: transparent;
   background-clip: text;
   font-weight: 700;
-}
-
-/* ============================================================
-   深色主题：Tag 无边框
-   ============================================================ */
-[data-theme="dark"] .ant-tag {
-  border-color: transparent !important;
 }
 
 /* ============================================================
