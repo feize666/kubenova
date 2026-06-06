@@ -51,20 +51,38 @@ export function saveTablePreference<TValue = TablePreferenceValue>(
   );
 }
 
+const tablePreferencesClientCache = new Map<string, TablePreferencesClient>();
+
 export function createTablePreferencesClient(token: string | undefined): TablePreferencesClient | undefined {
   if (!token) {
     return undefined;
   }
-  return {
+  const cachedClient = tablePreferencesClientCache.get(token);
+  if (cachedClient) {
+    return cachedClient;
+  }
+  const preferenceCache = new Map<string, Promise<TablePreferences | null> | TablePreferences | null>();
+  const client: TablePreferencesClient = {
     loadTablePreferences: async (tableKey) => {
-      try {
-        const response = await getTablePreference<TablePreferences>(tableKey, token);
-        return response.value;
-      } catch {
-        return null;
+      if (preferenceCache.has(tableKey)) {
+        const cached = preferenceCache.get(tableKey);
+        return cached instanceof Promise ? cached : cached;
       }
+      const request = getTablePreference<TablePreferences>(tableKey, token)
+        .then((response) => {
+          const value = response.value ?? null;
+          preferenceCache.set(tableKey, value);
+          return value;
+        })
+        .catch(() => {
+          preferenceCache.set(tableKey, null);
+          return null;
+        });
+      preferenceCache.set(tableKey, request);
+      return request;
     },
     saveTablePreferences: async (tableKey, preferences) => {
+      preferenceCache.set(tableKey, preferences);
       try {
         await saveTablePreference(tableKey, preferences, token);
       } catch {
@@ -72,4 +90,6 @@ export function createTablePreferencesClient(token: string | undefined): TablePr
       }
     },
   };
+  tablePreferencesClientCache.set(token, client);
+  return client;
 }

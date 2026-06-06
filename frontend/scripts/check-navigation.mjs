@@ -191,6 +191,15 @@ function readStringLiteral(valueText) {
   return undefined;
 }
 
+function readRequiredRole(valueText) {
+  const value = readStringLiteral(valueText);
+  if (value === undefined) return undefined;
+  if (value !== "admin") {
+    throw new Error(`Unsupported requiredRole "${value}".`);
+  }
+  return value;
+}
+
 function readArrayLiteral(valueText) {
   if (!valueText) return undefined;
   const openIndex = valueText.indexOf("[");
@@ -206,16 +215,31 @@ function extractNavigation(navigationText) {
     if (!key) throw new Error(`navSections[${sectionIndex}] is missing string key.`);
 
     const sectionPath = readStringLiteral(findTopLevelPropertyValue(sectionText, "path"));
+    const sectionLabel = readStringLiteral(findTopLevelPropertyValue(sectionText, "label"));
+    const sectionRequiredRole = readRequiredRole(findTopLevelPropertyValue(sectionText, "requiredRole"));
     const itemsArray = readArrayLiteral(findTopLevelPropertyValue(sectionText, "items"));
     if (!itemsArray) throw new Error(`navSections[${sectionIndex}] (${key}) is missing items array.`);
 
-    const itemPaths = splitTopLevelElements(itemsArray).map((itemText, itemIndex) => {
+    const items = splitTopLevelElements(itemsArray).map((itemText, itemIndex) => {
+      const itemKey = readStringLiteral(findTopLevelPropertyValue(itemText, "key"));
       const itemPath = readStringLiteral(findTopLevelPropertyValue(itemText, "path"));
+      const itemLabel = readStringLiteral(findTopLevelPropertyValue(itemText, "label"));
+      const itemRequiredRole = readRequiredRole(findTopLevelPropertyValue(itemText, "requiredRole"));
+      if (!itemKey) throw new Error(`navSections[${sectionIndex}].items[${itemIndex}] (${key}) missing key.`);
       if (!itemPath) throw new Error(`navSections[${sectionIndex}].items[${itemIndex}] (${key}) missing path.`);
-      return itemPath;
+      if (!itemLabel) throw new Error(`navSections[${sectionIndex}].items[${itemIndex}] (${key}) missing label.`);
+      return { key: itemKey, path: itemPath, label: itemLabel, requiredRole: itemRequiredRole };
     });
 
-    return { key, path: sectionPath, itemPaths };
+    return {
+      key,
+      path: sectionPath,
+      label: sectionLabel,
+      requiredRole: sectionRequiredRole,
+      items,
+      itemPaths: items.map((item) => item.path),
+      itemKeys: items.map((item) => item.key),
+    };
   });
 }
 
@@ -253,6 +277,10 @@ function formatList(values) {
   return values.length === 0 ? "(none)" : values.map((value) => `  - ${value}`).join("\n");
 }
 
+function findDuplicates(values) {
+  return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))];
+}
+
 function main() {
   const navigationText = fs.readFileSync(navigationPath, "utf8");
   const shellLayoutText = fs.readFileSync(shellLayoutPath, "utf8");
@@ -260,6 +288,7 @@ function main() {
   const sections = extractNavigation(navigationText);
   const sectionKeys = sections.map((section) => section.key);
   const sectionKeySet = new Set(sectionKeys);
+  const itemKeys = sections.flatMap((section) => section.itemKeys);
   const navigationPaths = sections.flatMap((section) => [
     ...(section.path ? [section.path] : []),
     ...section.itemPaths,
@@ -274,18 +303,40 @@ function main() {
   const missingFromOrder = sectionKeys.filter((key) => !sidebarOrderSet.has(key));
   const missingFromIcons = sectionKeys.filter((key) => !iconKeySet.has(key));
   const unknownOrderKeys = sidebarOrder.filter((key) => !sectionKeySet.has(key));
-  const duplicateSections = sectionKeys.filter((key, index) => sectionKeys.indexOf(key) !== index);
-  const duplicatePaths = navigationPaths.filter((routePath, index) => navigationPaths.indexOf(routePath) !== index);
+  const duplicateSections = findDuplicates(sectionKeys);
+  const duplicateItems = findDuplicates(itemKeys);
+  const duplicateSectionItemKeys = findDuplicates([...sectionKeys, ...itemKeys]);
+  const duplicatePaths = findDuplicates(navigationPaths);
   const forbiddenPaths = navigationPaths.filter((routePath) => forbiddenSidebarPaths.has(routePath));
+  const invalidSections = sections
+    .filter((section) => !section.label?.trim() || (section.path && section.items.length > 0) || (!section.path && section.items.length === 0))
+    .map((section) => {
+      if (!section.label?.trim()) return `${section.key}: missing label`;
+      if (section.path && section.items.length > 0) return `${section.key}: section path cannot also declare child items`;
+      return `${section.key}: section without path must declare child items`;
+    });
+  const requiredShellContracts = [
+    "PREFETCHABLE_NAV_PATHS",
+    "navSections.flatMap",
+    "filterNavSectionsByRole",
+    "findActiveSectionKey",
+    "getSectionOrder",
+    "sectionIconMap[section.key]",
+  ];
+  const missingShellContracts = requiredShellContracts.filter((contract) => !shellLayoutText.includes(contract));
 
   const failures = [];
   if (missingPages.length > 0) failures.push(`Missing app pages:\n${formatList(missingPages)}`);
   if (missingFromOrder.length > 0) failures.push(`Missing from SIDEBAR_SECTION_ORDER:\n${formatList(missingFromOrder)}`);
   if (missingFromIcons.length > 0) failures.push(`Missing from sectionIconMap:\n${formatList(missingFromIcons)}`);
   if (unknownOrderKeys.length > 0) failures.push(`Unknown keys in SIDEBAR_SECTION_ORDER:\n${formatList(unknownOrderKeys)}`);
-  if (duplicateSections.length > 0) failures.push(`Duplicate section keys:\n${formatList([...new Set(duplicateSections)])}`);
-  if (duplicatePaths.length > 0) failures.push(`Duplicate navigation paths:\n${formatList([...new Set(duplicatePaths)])}`);
+  if (duplicateSections.length > 0) failures.push(`Duplicate section keys:\n${formatList(duplicateSections)}`);
+  if (duplicateItems.length > 0) failures.push(`Duplicate item keys:\n${formatList(duplicateItems)}`);
+  if (duplicateSectionItemKeys.length > 0) failures.push(`Section/item key collisions:\n${formatList(duplicateSectionItemKeys)}`);
+  if (duplicatePaths.length > 0) failures.push(`Duplicate navigation paths:\n${formatList(duplicatePaths)}`);
   if (forbiddenPaths.length > 0) failures.push(`Forbidden sidebar paths:\n${formatList([...new Set(forbiddenPaths)])}`);
+  if (invalidSections.length > 0) failures.push(`Invalid section shapes:\n${formatList(invalidSections)}`);
+  if (missingShellContracts.length > 0) failures.push(`Missing shell navigation contracts:\n${formatList(missingShellContracts)}`);
 
   if (failures.length > 0) {
     console.error(`[check-navigation] FAIL\n${failures.join("\n\n")}`);

@@ -54,6 +54,7 @@ const headless = process.env.PERF_HEADLESS !== "false";
 const sampleCount = readPositiveInt("PERF_SAMPLE_COUNT", 5);
 const warmupCount = readNonNegativeInt("PERF_WARMUP_COUNT", 1);
 const settleMs = readNonNegativeInt("PERF_SETTLE_MS", 150);
+const closedMenuLinkProbeMs = readPositiveInt("PERF_CLOSED_MENU_LINK_PROBE_MS", 80);
 const routes = readRoutes();
 const outputPath =
   process.env.PERF_OUTPUT ||
@@ -63,6 +64,11 @@ const outputPath =
     "performance-switching",
     `${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "")}.json`,
   );
+const budgets = {
+  maxP95Ms: readOptionalPositiveInt("PERF_MAX_P95_MS"),
+  maxRouteMs: readOptionalPositiveInt("PERF_MAX_ROUTE_MS"),
+  maxConsoleErrors: readOptionalNonNegativeInt("PERF_MAX_CONSOLE_ERRORS") ?? 0,
+};
 
 function fail(message, cause) {
   const suffix = cause === undefined ? "" : ` 原因: ${describeError(cause)}`;
@@ -121,6 +127,26 @@ function readNonNegativeInt(name, fallback) {
   return value;
 }
 
+function readOptionalPositiveInt(name) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    fail(`${name} 必须是正整数毫秒阈值，当前值: ${raw}`);
+  }
+  return value;
+}
+
+function readOptionalNonNegativeInt(name) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    fail(`${name} 必须是非负整数阈值，当前值: ${raw}`);
+  }
+  return value;
+}
+
 function readRoutes() {
   const raw = process.env.PERF_ROUTES;
   if (!raw) return DEFAULT_ROUTES;
@@ -144,6 +170,42 @@ function percentile(values, p) {
 
 function routeUrl(route) {
   return `${baseUrl}${route}`;
+}
+
+function formatBudgetValue(value) {
+  return value === null ? "unset" : String(value);
+}
+
+function describeBudgets() {
+  return `maxP95Ms=${formatBudgetValue(budgets.maxP95Ms)} maxRouteMs=${formatBudgetValue(budgets.maxRouteMs)} maxConsoleErrors=${budgets.maxConsoleErrors}`;
+}
+
+function assessPerformanceBudgets(summary) {
+  const failures = [];
+  if (budgets.maxP95Ms !== null && summary.p95Ms > budgets.maxP95Ms) {
+    failures.push(`p95Ms=${summary.p95Ms}ms > PERF_MAX_P95_MS=${budgets.maxP95Ms}ms`);
+  }
+  if (budgets.maxRouteMs !== null) {
+    const slowRoutes = summary.samples
+      .filter((sample) => sample.durationMs > budgets.maxRouteMs)
+      .sort((left, right) => right.durationMs - left.durationMs);
+    if (slowRoutes.length > 0) {
+      const examples = slowRoutes
+        .slice(0, 5)
+        .map((sample) => `${sample.route}:${sample.durationMs}ms`)
+        .join(", ");
+      failures.push(`route samples over PERF_MAX_ROUTE_MS=${budgets.maxRouteMs}ms count=${slowRoutes.length} slowest=${examples}`);
+    }
+  }
+  if (summary.consoleErrorCount > budgets.maxConsoleErrors) {
+    failures.push(
+      `consoleErrorCount=${summary.consoleErrorCount} > PERF_MAX_CONSOLE_ERRORS=${budgets.maxConsoleErrors} firstConsole="${summary.consoleErrors[0] ?? ""}"`,
+    );
+  }
+  if (summary.pageErrorCount > 0) {
+    failures.push(`pageErrorCount=${summary.pageErrorCount} > 0 firstPage="${summary.pageErrors[0] ?? ""}"`);
+  }
+  return failures;
 }
 
 function readAuthSnapshot(payload) {
@@ -224,6 +286,39 @@ function samePath(page, route) {
   }
 }
 
+function summarizeRequests(routeRequests) {
+  return routeRequests
+    .filter((item) => item.resourceType === "xhr" || item.resourceType === "fetch" || item.url.includes("/_next/"))
+    .map((item) => {
+      let path = item.url;
+      try {
+        const parsed = new URL(item.url);
+        path = `${parsed.pathname}${parsed.search}`;
+      } catch {
+        path = item.url;
+      }
+      return {
+        method: item.method,
+        path: path.length > 140 ? `${path.slice(0, 137)}...` : path,
+        type: item.resourceType,
+        status: item.status,
+        durationMs: item.durationMs,
+      };
+    })
+    .sort((left, right) => (right.durationMs ?? 0) - (left.durationMs ?? 0))
+    .slice(0, 8);
+}
+
+function countApiRequests(routeRequests) {
+  return routeRequests.filter((item) => {
+    try {
+      return new URL(item.url).pathname.startsWith("/api/");
+    } catch {
+      return item.url.includes("/api/");
+    }
+  }).length;
+}
+
 async function ensureLoggedIn(page) {
   if (!username || !password) {
     fail("需要登录但缺少 PERF_USER/PERF_PASS");
@@ -298,8 +393,8 @@ async function clickRouteLink(page, route) {
   const selector = `a[href="${route}"], a[href="${routeUrl(route)}"]`;
   let link = page.locator(selector).first();
   try {
-    await link.waitFor({ state: "attached", timeout: Math.min(timeout, 2000) });
-    await link.scrollIntoViewIfNeeded({ timeout: Math.min(timeout, 2000) });
+    await link.waitFor({ state: "attached", timeout: Math.min(timeout, closedMenuLinkProbeMs) });
+    await link.scrollIntoViewIfNeeded({ timeout: Math.min(timeout, closedMenuLinkProbeMs) });
     await Promise.all([
       page.waitForURL((currentUrl) => currentUrl.pathname === route, { timeout }),
       link.click({ timeout: Math.min(timeout, 5000) }),
@@ -363,6 +458,8 @@ async function measureRoute(page, route) {
     navMode,
     requestCount: routeRequests.length,
     xhrFetchCount: routeRequests.filter((item) => item.resourceType === "xhr" || item.resourceType === "fetch").length,
+    apiRequestCount: countApiRequests(routeRequests),
+    topRequests: summarizeRequests(routeRequests),
   };
 }
 
@@ -384,7 +481,7 @@ async function assertBaseReachable() {
 }
 
 async function waitForBaseReachable(reason) {
-  const deadline = Date.now() + Math.min(timeout, 15000);
+  const deadline = Date.now() + timeout;
   let lastError;
   while (Date.now() < deadline) {
     const controller = new AbortController();
@@ -403,6 +500,12 @@ async function waitForBaseReachable(reason) {
     await sleep(500);
   }
   fail(`前端服务未恢复: baseUrl=${baseUrl} reason=${reason}`, lastError);
+}
+
+async function writeSummary(summary) {
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  info(`summary=${outputPath}`);
 }
 
 async function main() {
@@ -437,11 +540,32 @@ async function main() {
       url: request.url(),
       resourceType: request.resourceType(),
       method: request.method(),
+      startedAt: Date.now(),
     });
+  });
+  page.on("requestfinished", async (request) => {
+    const item = [...requests].reverse().find((entry) => entry.url === request.url() && entry.method === request.method() && !entry.finishedAt);
+    if (item) {
+      item.finishedAt = Date.now();
+      item.durationMs = item.finishedAt - item.startedAt;
+      try {
+        item.status = (await request.response())?.status();
+      } catch {
+        item.status = undefined;
+      }
+    }
+  });
+  page.on("requestfailed", (request) => {
+    const item = [...requests].reverse().find((entry) => entry.url === request.url() && entry.method === request.method() && !entry.finishedAt);
+    if (item) {
+      item.finishedAt = Date.now();
+      item.durationMs = item.finishedAt - item.startedAt;
+      item.failureText = request.failure()?.errorText;
+    }
   });
 
   try {
-    info(`baseUrl=${baseUrl} routes=${routes.length} warmup=${warmupCount} samples=${sampleCount}`);
+    info(`baseUrl=${baseUrl} routes=${routes.length} warmup=${warmupCount} samples=${sampleCount} budgets=(${describeBudgets()})`);
     await ensureLoggedIn(page);
 
     for (let warmup = 0; warmup < warmupCount; warmup += 1) {
@@ -472,21 +596,21 @@ async function main() {
       consoleErrorCount: consoleErrors.length,
       pageErrorCount: pageErrors.length,
       requestCount: requests.length,
+      budgets,
       samples,
       consoleErrors,
       pageErrors,
       generatedAt: new Date().toISOString(),
     };
 
-    if (consoleErrors.length > 0 || pageErrors.length > 0) {
-      fail(
-        `detected console/page errors: console=${consoleErrors.length} page=${pageErrors.length} firstConsole="${consoleErrors[0] ?? ""}" firstPage="${pageErrors[0] ?? ""}"`,
-      );
+    const budgetFailures = assessPerformanceBudgets(summary);
+    summary.budgetFailures = budgetFailures;
+    if (budgetFailures.length > 0) {
+      await writeSummary(summary);
+      fail(`performance budget failed: ${budgetFailures.join("; ")}`);
     }
 
-    await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
-    info(`summary=${outputPath}`);
+    await writeSummary(summary);
   } finally {
     await browser.close();
   }

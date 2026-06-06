@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dev-up.sh — 一键启动所有开发服务
-# 用法: bash scripts/dev-up.sh [--no-gateway] [--stable-frontend|--dev-frontend]
+# 用法: bash scripts/dev-up.sh [--no-gateway] [--stable-frontend|--dev-frontend] [--stable-api|--dev-api]
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,8 +22,10 @@ RUNTIME_GATEWAY_GOPROXY="${RUNTIME_GATEWAY_GOPROXY:-https://goproxy.cn,direct}"
 START_GATEWAY="${START_GATEWAY:-true}"
 USE_TMUX="${USE_TMUX:-false}"
 FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-dev}"
-FRONTEND_DEV_BUNDLER="${FRONTEND_DEV_BUNDLER:-webpack}"
-FRONTEND_NODE_OPTIONS="${FRONTEND_NODE_OPTIONS:---max-old-space-size=2048}"
+CONTROL_API_BOOT_MODE="${CONTROL_API_BOOT_MODE:-dev}"
+FRONTEND_DEV_BUNDLER="${FRONTEND_DEV_BUNDLER:-turbopack}"
+FRONTEND_NODE_OPTIONS="${FRONTEND_NODE_OPTIONS:---max-old-space-size=1536}"
+CONTROL_API_NODE_OPTIONS="${CONTROL_API_NODE_OPTIONS:---max-old-space-size=768}"
 RUNTIME_GATEWAY_DEPS_STAMP="$CACHE_DIR/runtime-gateway-go-mod.download.stamp"
 SERVICE_LOG_SUFFIX="dev"
 source "$ROOT_DIR/scripts/_service-lib.sh"
@@ -35,6 +37,8 @@ for arg in "$@"; do
     --no-gateway) START_GATEWAY="false" ;;
     --stable-frontend) FRONTEND_BOOT_MODE="stable" ;;
     --dev-frontend) FRONTEND_BOOT_MODE="dev" ;;
+    --stable-api) CONTROL_API_BOOT_MODE="stable" ;;
+    --dev-api) CONTROL_API_BOOT_MODE="dev" ;;
   esac
 done
 
@@ -231,6 +235,27 @@ prepare_frontend_standalone() {
   fi
 }
 
+prepare_control_api_standalone() {
+  if [[ "$CONTROL_API_BOOT_MODE" != "stable" ]]; then
+    return
+  fi
+
+  local server_js="$CONTROL_API_DIR/dist/src/main.js"
+  if [[ -f "$server_js" ]]; then
+    local changed=""
+    changed="$(find "$CONTROL_API_DIR/src" "$CONTROL_API_DIR/package.json" "$CONTROL_API_DIR/tsconfig.json" -newer "$server_js" -print -quit 2>/dev/null || true)"
+    if [[ -z "$changed" ]]; then
+      return
+    fi
+  fi
+
+  echo "[预检] control-api stable 包缺失或过期，正在构建..."
+  if ! (cd "$CONTROL_API_DIR" && npm run build); then
+    echo "[错误] control-api stable 包构建失败，请查看构建输出。" >&2
+    exit 1
+  fi
+}
+
 # ── 服务健康检查 ────────────────────────────────────────
 wait_for_postgres() {
   local db_url="${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops}"
@@ -265,6 +290,7 @@ prepare_frontend_deps
 prepare_control_api_deps
 clean_frontend_dev_cache
 prepare_frontend_standalone
+prepare_control_api_standalone
 
 # ── 进程管理 ────────────────────────────────────────────
 cleanup_orphan_processes() {
@@ -427,7 +453,7 @@ start_if_not_running() {
         echo "$bound_pid" >"$pid_file"
         return
       fi
-      echo "[$name] 端口 $port 上存在旧 control-api(pid=$bound_pid)，准备重启为 watch 模式。"
+      echo "[$name] 端口 $port 上存在旧 control-api(pid=$bound_pid)，准备重启为 $CONTROL_API_BOOT_MODE 模式。"
       terminate_pid "$bound_pid"
       wait_for_port_free "$port" 10 || true
     else
@@ -520,7 +546,7 @@ start_if_not_running "frontend" \
       if [[ "$FRONTEND_DEV_BUNDLER" == "webpack" ]]; then
         bundler_flag=" --webpack"
       elif [[ "$FRONTEND_DEV_BUNDLER" == "turbopack" ]]; then
-        bundler_flag=" --turbopack"
+        bundler_flag=" --turbo"
       fi
       printf '%s' "NODE_OPTIONS='$FRONTEND_NODE_OPTIONS' ./node_modules/next/dist/bin/next dev --hostname 0.0.0.0 --port $FRONTEND_PORT$bundler_flag"
     else
@@ -530,7 +556,11 @@ start_if_not_running "frontend" \
 start_if_not_running "control-api" \
   "$CONTROL_API_DIR" \
   "$CONTROL_API_PORT" \
-  "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} npx --no-install nest start --watch"
+  "$(if [[ "$CONTROL_API_BOOT_MODE" == "stable" ]]; then
+      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' node dist/src/main.js"
+    else
+      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' npx --no-install nest start --watch"
+    fi)"
 
 if [[ "$START_GATEWAY" == "true" ]]; then
   start_if_not_running "runtime-gateway" \
@@ -546,11 +576,13 @@ echo "✔ 所有服务已启动"
 echo "  前端:            http://localhost:$FRONTEND_PORT"
 if [[ "$FRONTEND_BOOT_MODE" == "dev" ]]; then
   echo "  前端模式:        dev"
-  echo "  前端内存:        NODE_OPTIONS=$FRONTEND_NODE_OPTIONS（内存紧张可用 --stable-frontend）"
 else
   echo "  前端模式:        stable"
 fi
+echo "  前端内存:        NODE_OPTIONS=$FRONTEND_NODE_OPTIONS（内存紧张可用 --stable-frontend）"
 echo "  control-api:     http://localhost:$CONTROL_API_PORT"
+echo "  control-api 模式: $CONTROL_API_BOOT_MODE"
+echo "  control-api 内存: NODE_OPTIONS=$CONTROL_API_NODE_OPTIONS（内存紧张可用 --stable-api）"
 echo "  swagger 文档:     http://localhost:$CONTROL_API_PORT/api/docs"
 if [[ "$START_GATEWAY" == "true" ]]; then
   echo "  runtime-gateway: ws://localhost:$RUNTIME_GATEWAY_PORT"

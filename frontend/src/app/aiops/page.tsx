@@ -49,6 +49,9 @@ export default function AiopsCenterPage() {
     queryKey: ["aiops", "summary", range, accessToken],
     queryFn: ({ signal }) => getAiopsSummary({ range }, accessToken || undefined, { signal }),
     enabled,
+    staleTime: 20_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
     refetchInterval: 30_000,
   });
   const summary = summaryQuery.data;

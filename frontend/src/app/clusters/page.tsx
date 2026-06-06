@@ -709,7 +709,7 @@ export default function ClustersPage() {
             danger: true,
             label: "删除",
           },
-        ].filter(Boolean) as MenuProps["items"];
+        ].filter(Boolean) as NonNullable<MenuProps["items"]>;
 
         return (
           <OpsActionDropdown

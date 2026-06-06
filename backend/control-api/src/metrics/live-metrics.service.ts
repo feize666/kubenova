@@ -53,6 +53,8 @@ type PodMetricItem = {
 export class LiveMetricsService {
   private readonly logger = new Logger(LiveMetricsService.name);
   private readonly freshnessWindowMs = 60_000;
+  private readonly cacheTtlMs = 5 * 60_000;
+  private readonly maxCacheEntries = 200;
   private readonly snapshotCache = new Map<string, ClusterLiveUsageSnapshot>();
 
   constructor(private readonly k8sClient: K8sClientService) {}
@@ -217,11 +219,31 @@ export class LiveMetricsService {
     return `${clusterId}::${namespace?.trim() || '*'}`;
   }
 
+  private pruneSnapshotCache(now = Date.now()): void {
+    for (const [key, snapshot] of this.snapshotCache) {
+      const capturedAt = new Date(snapshot.capturedAt).getTime();
+      if (!Number.isFinite(capturedAt) || now - capturedAt > this.cacheTtlMs) {
+        this.snapshotCache.delete(key);
+      }
+    }
+
+    while (this.snapshotCache.size > this.maxCacheEntries) {
+      const oldestKey = this.snapshotCache.keys().next().value as
+        | string
+        | undefined;
+      if (!oldestKey) {
+        break;
+      }
+      this.snapshotCache.delete(oldestKey);
+    }
+  }
+
   async getClusterSnapshot(
     clusterId: string,
     kubeconfigYaml: string,
     namespace?: string,
   ): Promise<ClusterLiveUsageSnapshot> {
+    this.pruneSnapshotCache();
     const key = this.cacheKey(clusterId, namespace);
     const cached = this.snapshotCache.get(key);
     if (cached) {
@@ -283,6 +305,7 @@ export class LiveMetricsService {
       }
 
       this.snapshotCache.set(key, nextSnapshot);
+      this.pruneSnapshotCache();
       return this.cloneSnapshot(nextSnapshot);
     } catch (err) {
       this.logger.warn(

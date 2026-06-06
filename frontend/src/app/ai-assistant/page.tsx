@@ -91,6 +91,7 @@ const AI_ASSISTANT_SESSIONS_CACHE_KEY = "kubenova.ai.assistant.sessions";
 const AI_ASSISTANT_MESSAGES_CACHE_PREFIX = "kubenova.ai.assistant.messages.";
 const CHAT_WORKSPACE_DESKTOP_HEIGHT = "clamp(520px, calc(100vh - 240px), 720px)";
 const MESSAGE_BUBBLE_MAX_HEIGHT = "min(42vh, 320px)";
+const PAGE_QUERY_GC_TIME_MS = 5 * 60_000;
 const HIGH_RISK_ACTIONS = new Set<AiAssistantCanonicalOperation>([
   "restart-workload",
   "vm-power-on",
@@ -442,6 +443,8 @@ export default function AiAssistantPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deferredQueryReady, setDeferredQueryReady] = useState(false);
+  const [cacheHydrated, setCacheHydrated] = useState(false);
 
   const [alertForm, setAlertForm] = useState({
     title: "Pod 持续重启",
@@ -461,13 +464,19 @@ export default function AiAssistantPage() {
   const { data: presets } = useQuery<PresetQuestion[]>({
     queryKey: ["ai-assistant", "presets"],
     queryFn: () => getPresetQuestions(accessToken || undefined),
-    enabled: !isInitializing && Boolean(accessToken) && isAdmin,
+    enabled: deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+    staleTime: 5 * 60_000,
+    gcTime: PAGE_QUERY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
   });
 
   const { data: suggestions } = useQuery({
     queryKey: ["ai-assistant", "suggestions"],
     queryFn: () => getAiSuggestions(accessToken || undefined),
-    enabled: !isInitializing && Boolean(accessToken) && isAdmin,
+    enabled: deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+    staleTime: 20_000,
+    gcTime: PAGE_QUERY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
     refetchInterval: 30000,
   });
   const { data: clustersData } = useQuery({
@@ -476,7 +485,10 @@ export default function AiAssistantPage() {
       const { getClusters } = await import("@/lib/api/clusters");
       return getClusters({ state: "active", selectableOnly: true }, accessToken!);
     },
-    enabled: !isInitializing && Boolean(accessToken) && isAdmin,
+    enabled: deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+    staleTime: 2 * 60_000,
+    gcTime: PAGE_QUERY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
@@ -495,14 +507,25 @@ export default function AiAssistantPage() {
   } = useQuery({
     queryKey: ["ai-assistant", "config-ping"],
     queryFn: () => pingAiConfig(accessToken || undefined),
-    enabled: !isInitializing && Boolean(accessToken) && isAdmin,
+    enabled: deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
     retry: false,
     staleTime: 60_000,
+    gcTime: PAGE_QUERY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
   });
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+    if (isInitializing || !accessToken || !isAdmin) {
+      setDeferredQueryReady(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => setDeferredQueryReady(true), 200);
+    return () => window.clearTimeout(timeout);
+  }, [accessToken, isAdmin, isInitializing]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: loading ? "smooth" : "auto" });
+  }, [messages.length, loading]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -546,14 +569,14 @@ export default function AiAssistantPage() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !cacheHydrated) {
       return;
     }
     localStorage.setItem(AI_ASSISTANT_SESSIONS_CACHE_KEY, JSON.stringify(sessions));
-  }, [sessions]);
+  }, [cacheHydrated, sessions]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || !cacheHydrated) {
       return;
     }
     if (!currentSessionId) {
@@ -561,23 +584,28 @@ export default function AiAssistantPage() {
       return;
     }
     localStorage.setItem(AI_ASSISTANT_CURRENT_SESSION_KEY, currentSessionId);
-  }, [currentSessionId]);
+  }, [cacheHydrated, currentSessionId]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !currentSessionId) {
+    if (typeof window === "undefined" || !cacheHydrated || !currentSessionId) {
       return;
     }
     localStorage.setItem(
       `${AI_ASSISTANT_MESSAGES_CACHE_PREFIX}${currentSessionId}`,
       JSON.stringify(messages),
     );
-  }, [currentSessionId, messages]);
+  }, [cacheHydrated, currentSessionId, messages]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || isInitializing || !accessToken || !isAdmin) {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (isInitializing || !accessToken || !isAdmin) {
+      setCacheHydrated(false);
       return;
     }
     let cancelled = false;
+    setCacheHydrated(false);
 
     const cachedSessionsRaw = localStorage.getItem(AI_ASSISTANT_SESSIONS_CACHE_KEY);
     if (cachedSessionsRaw) {
@@ -608,6 +636,7 @@ export default function AiAssistantPage() {
         }
       }
     }
+    setCacheHydrated(true);
 
     void (async () => {
       try {
@@ -1265,10 +1294,21 @@ export default function AiAssistantPage() {
     [handleSend, inputText],
   );
 
-  const currentSession = sessions.find((s) => s.id === currentSessionId);
+  const currentSession = useMemo(
+    () => sessions.find((s) => s.id === currentSessionId),
+    [currentSessionId, sessions],
+  );
 
   const criticalCount = useMemo(() => suggestions?.items.filter((item) => item.severity === "critical").length ?? 0, [suggestions]);
   const highCount = useMemo(() => suggestions?.items.filter((item) => item.severity === "high").length ?? 0, [suggestions]);
+  const clusterOptions = useMemo(
+    () =>
+      (clustersData?.items ?? []).map((cluster) => ({
+        label: `${cluster.name} (${cluster.id})`,
+        value: cluster.id,
+      })),
+    [clustersData?.items],
+  );
 
   if (!isInitializing && !isAdmin) {
     return (
@@ -1603,10 +1643,7 @@ export default function AiAssistantPage() {
                       value={actionClusterId || undefined}
                       onChange={setActionClusterId}
                       placeholder="选择集群"
-                      options={(clustersData?.items ?? []).map((cluster) => ({
-                        label: `${cluster.name} (${cluster.id})`,
-                        value: cluster.id,
-                      }))}
+                      options={clusterOptions}
                     />
                     {currentSession ? <OpsFilterChip tone="neutral">{currentSession.title}</OpsFilterChip> : null}
                   </Space>

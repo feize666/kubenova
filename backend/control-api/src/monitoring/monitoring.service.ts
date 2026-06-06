@@ -879,9 +879,7 @@ export class MonitoringService {
       {
         key: 'traces',
         title: '链路',
-        status: externalLinkByKey.traces
-          ? 'available'
-          : 'unavailable',
+        status: externalLinkByKey.traces ? 'available' : 'unavailable',
         summary: externalLinkByKey.traces
           ? 'Trace 后端深链已配置。'
           : '未配置 Trace 后端。',
@@ -904,9 +902,7 @@ export class MonitoringService {
       {
         key: 'slo',
         title: 'SLO',
-        status: externalLinkByKey.slo
-          ? 'available'
-          : 'unavailable',
+        status: externalLinkByKey.slo ? 'available' : 'unavailable',
         summary: externalLinkByKey.slo
           ? 'SLO 后端深链已配置。'
           : '未配置 SLO 后端。',
@@ -1612,7 +1608,11 @@ export class MonitoringService {
     format: InspectionExportFormat,
     timeFilter?: InspectionTimeFilter,
   ): Promise<InspectionReportExportResult> {
-    const report = await this.getClusterInspection(clusterId, namespace, timeFilter);
+    const report = await this.getClusterInspection(
+      clusterId,
+      namespace,
+      timeFilter,
+    );
     const clusterSegment = clusterId?.trim()
       ? clusterId.trim()
       : 'all-clusters';
@@ -1982,13 +1982,18 @@ export class MonitoringService {
   }
 
   private buildInspectionIssueId(raw: string): string {
-    const normalized = raw
+    const slug = raw
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 48);
+    let hash = 2166136261;
+    for (let index = 0; index < raw.length; index += 1) {
+      hash ^= raw.charCodeAt(index);
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
 
-    return `issue-${normalized || 'item'}`;
+    return `issue-${slug || 'item'}-${hash.toString(36)}`;
   }
 
   private parseResourceRef(

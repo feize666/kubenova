@@ -3,7 +3,7 @@
 import { Empty, Table } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { ReactNode } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 import {
   getStandardResourceTableScrollX,
   normalizeResourceTableColumns,
@@ -101,27 +101,74 @@ export function ResourceTable<T extends object>({
     );
   }
 
-  const normalizedLayoutOptions = {
-    ...layoutOptions,
-    autoFit:
-      typeof layoutOptions?.autoFit === "object"
-        ? { rows: restProps.dataSource, ...layoutOptions.autoFit }
-        : { rows: restProps.dataSource, enabled: layoutOptions?.autoFit },
-  };
-  const normalizedColumns = normalizeResourceTableColumns(columns, normalizedLayoutOptions);
-  const nextScroll = scroll ?? { x: getStandardResourceTableScrollX(normalizedColumns) };
-  const nextLoading = loading ?? buildResourceTableLoading(loadingOptions);
+  return (
+    <StandardResourceTable<T>
+      {...restProps}
+      bordered={bordered}
+      className={className}
+      columns={columns}
+      emptyDescription={emptyDescription}
+      layoutOptions={layoutOptions}
+      loading={loading}
+      loadingOptions={loadingOptions}
+      locale={locale}
+      pagination={pagination}
+      scroll={scroll}
+      size={size}
+    />
+  );
+}
+
+function StandardResourceTable<T extends object>({
+  bordered,
+  className,
+  columns,
+  emptyDescription,
+  layoutOptions,
+  loading,
+  loadingOptions,
+  locale,
+  pagination,
+  scroll,
+  size,
+  ...restProps
+}: ResourceTableProps<T>) {
+  const normalizedLayoutOptions = useMemo(
+    () => ({
+      ...layoutOptions,
+      autoFit:
+        typeof layoutOptions?.autoFit === "object"
+          ? { rows: restProps.dataSource, ...layoutOptions.autoFit }
+          : { rows: restProps.dataSource, enabled: layoutOptions?.autoFit },
+    }),
+    [layoutOptions, restProps.dataSource],
+  );
+  const normalizedColumns = useMemo(
+    () => normalizeResourceTableColumns(columns, normalizedLayoutOptions),
+    [columns, normalizedLayoutOptions],
+  );
+  const nextScroll = useMemo(
+    () => scroll ?? { x: getStandardResourceTableScrollX(normalizedColumns) },
+    [normalizedColumns, scroll],
+  );
+  const nextLoading = useMemo(
+    () => loading ?? buildResourceTableLoading(loadingOptions),
+    [loading, loadingOptions],
+  );
   const isLoading = typeof nextLoading === "boolean" ? nextLoading : Boolean(nextLoading?.spinning);
-  const nextLocale = {
-    ...locale,
-    emptyText:
-      locale?.emptyText ??
-      (isLoading ? (
-        "正在加载..."
-      ) : (
-        <Empty description={emptyDescription} />
-      )),
-  };
+  const nextLocale = useMemo(
+    () => ({
+      ...locale,
+      emptyText:
+        locale?.emptyText ??
+        (isLoading ? (
+          "正在加载..."
+        ) : (
+          <Empty description={emptyDescription} />
+        )),
+    }),
+    [emptyDescription, isLoading, locale],
+  );
 
   return (
     <Table<T>
@@ -178,30 +225,45 @@ function HeadlampResourceTable<T extends object>({
     preferencesClient,
     sort,
   });
-  const normalizedLayoutOptions = {
-    ...layoutOptions,
-    autoFit:
-      typeof layoutOptions?.autoFit === "object"
-        ? { rows: restProps.dataSource, ...layoutOptions.autoFit }
-        : { rows: restProps.dataSource, enabled: layoutOptions?.autoFit },
-  };
-  const normalizedColumns = normalizeResourceTableColumns(table.columns, normalizedLayoutOptions);
-  const nextScroll = scroll ?? { x: getStandardResourceTableScrollX(normalizedColumns) };
-  const nextLoading = loading ?? buildResourceTableLoading(loadingOptions);
+  const normalizedLayoutOptions = useMemo(
+    () => ({
+      ...layoutOptions,
+      autoFit:
+        typeof layoutOptions?.autoFit === "object"
+          ? { rows: restProps.dataSource, ...layoutOptions.autoFit }
+          : { rows: restProps.dataSource, enabled: layoutOptions?.autoFit },
+    }),
+    [layoutOptions, restProps.dataSource],
+  );
+  const normalizedColumns = useMemo(
+    () => normalizeResourceTableColumns(table.columns, normalizedLayoutOptions),
+    [normalizedLayoutOptions, table.columns],
+  );
+  const nextScroll = useMemo(
+    () => scroll ?? { x: getStandardResourceTableScrollX(normalizedColumns) },
+    [normalizedColumns, scroll],
+  );
+  const nextLoading = useMemo(
+    () => loading ?? buildResourceTableLoading(loadingOptions),
+    [loading, loadingOptions],
+  );
   const isLoading = typeof nextLoading === "boolean" ? nextLoading : Boolean(nextLoading?.spinning);
-  const nextLocale = {
-    ...locale,
-    emptyText:
-      locale?.emptyText ??
-      (isLoading ? (
-        "正在加载..."
-      ) : (
-        <Empty description={emptyDescription} />
-      )),
-  };
+  const nextLocale = useMemo(
+    () => ({
+      ...locale,
+      emptyText:
+        locale?.emptyText ??
+        (isLoading ? (
+          "正在加载..."
+        ) : (
+          <Empty description={emptyDescription} />
+        )),
+    }),
+    [emptyDescription, isLoading, locale],
+  );
 
   type TableChangeHandler = NonNullable<TableProps<T>["onChange"]>;
-  const handleChange: TableChangeHandler = (nextPagination, nextFilters, sorter, extra) => {
+  const handleChange = useCallback<TableChangeHandler>((nextPagination, nextFilters, sorter, extra) => {
     if (extra?.action === "sort" && !Array.isArray(sorter) && sort?.onChange) {
       const nextSortBy =
         typeof sorter.columnKey === "string"
@@ -214,7 +276,7 @@ function HeadlampResourceTable<T extends object>({
       sort.onChange(nextSortOrder ? nextSortBy : undefined, nextSortOrder);
     }
     onChange?.(nextPagination, nextFilters, sorter, extra);
-  };
+  }, [onChange, sort]);
 
   return (
     <div className="resource-table-shell">

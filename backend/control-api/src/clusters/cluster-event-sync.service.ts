@@ -77,6 +77,7 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly restartBaseDelayMs = 30_000;
   private readonly restartMaxDelayMs = 10 * 60_000;
   private readonly startupDelayMs = 120_000;
+  private startupTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly clustersService: ClustersService,
@@ -89,7 +90,8 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
     if (process.env.NODE_ENV === 'test') {
       return;
     }
-    setTimeout(() => {
+    this.startupTimer = setTimeout(() => {
+      this.startupTimer = null;
       void this.start().catch((error) => {
         this.logger.error(
           `cluster event sync bootstrap failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -99,6 +101,10 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    if (this.startupTimer) {
+      clearTimeout(this.startupTimer);
+      this.startupTimer = null;
+    }
     for (const handles of this.watches.values()) {
       for (const handle of handles) {
         handle.abort();
@@ -134,7 +140,6 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
 
   private async startForCluster(clusterId: string): Promise<void> {
     this.stopForCluster(clusterId);
-    this.restartFailures.delete(clusterId);
     const watchGeneration = (this.watchGenerations.get(clusterId) ?? 0) + 1;
     this.watchGenerations.set(clusterId, watchGeneration);
     const kubeconfig = await this.clustersService.getKubeconfig(clusterId);
@@ -226,6 +231,9 @@ export class ClusterEventSyncService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     this.watches.set(clusterId, handles);
+    if (handles.length === targets.length) {
+      this.restartFailures.delete(clusterId);
+    }
     this.logger.log(
       `cluster event sync started for ${clusterId}: ${handles.length} watch targets`,
     );

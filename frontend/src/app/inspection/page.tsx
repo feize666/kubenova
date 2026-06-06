@@ -20,7 +20,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import type { Dayjs } from "dayjs";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
@@ -62,6 +62,8 @@ const TIME_PRESETS: Array<{ label: string; value: MonitoringTimePreset | "custom
   { label: "7d", value: "7d" },
   { label: "自定义", value: "custom" },
 ];
+const PAGE_QUERY_STALE_TIME_MS = 20_000;
+const PAGE_QUERY_GC_TIME_MS = 5 * 60_000;
 
 function severityTag(level: InspectionIssue["severity"]) {
   if (level === "critical") return <OpsStatusTag tone="critical">严重</OpsStatusTag>;
@@ -157,6 +159,9 @@ export default function InspectionPage() {
     queryKey: ["clusters", "inspection", accessToken],
     queryFn: () => getClusters({ state: "active", selectableOnly: true, pageSize: 200 }, accessToken!),
     enabled,
+    staleTime: 2 * 60_000,
+    gcTime: PAGE_QUERY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
   });
 
   const reportQuery = useQuery({
@@ -169,13 +174,20 @@ export default function InspectionPage() {
         token: accessToken || undefined,
       }),
     enabled,
+    staleTime: PAGE_QUERY_STALE_TIME_MS,
+    gcTime: PAGE_QUERY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
     refetchInterval: 30_000,
   });
+  const refetchInspectionReport = reportQuery.refetch;
 
   const capabilityQuery = useQuery({
     queryKey: ["capability-baseline", accessToken],
     queryFn: () => getCapabilityBaseline(accessToken || undefined),
     enabled,
+    staleTime: 60_000,
+    gcTime: PAGE_QUERY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
     refetchInterval: 60_000,
   });
 
@@ -209,6 +221,8 @@ export default function InspectionPage() {
       message.error(error instanceof Error ? error.message : "执行修复动作失败");
     },
   });
+  const mutateInspectionAction = actionMutation.mutate;
+  const inspectionActionPending = actionMutation.isPending;
 
   const exportMutation = useMutation({
     mutationFn: async () =>
@@ -234,7 +248,7 @@ export default function InspectionPage() {
     },
   });
 
-  const handleRefreshInspection = async () => {
+  const handleRefreshInspection = useCallback(async () => {
     if (!enabled) {
       return;
     }
@@ -246,7 +260,7 @@ export default function InspectionPage() {
         ...timeQuery,
         token: accessToken || undefined,
       });
-      await reportQuery.refetch();
+      await refetchInspectionReport();
       message.success({ key: "inspection-refresh", content: "重新巡检完成，数据已更新" });
     } catch (error) {
       message.error({
@@ -256,9 +270,9 @@ export default function InspectionPage() {
     } finally {
       setRefreshingInspection(false);
     }
-  };
+  }, [accessToken, clusterId, enabled, refetchInspectionReport, timeQuery]);
 
-  const columns: Array<HeadlampResourceTableColumn<InspectionIssue>> = [
+  const columns = useMemo<Array<HeadlampResourceTableColumn<InspectionIssue>>>(() => [
     {
       title: "严重级别",
       dataIndex: "severity",
@@ -340,9 +354,9 @@ export default function InspectionPage() {
                 className="inspection-action-button"
                 size="small"
                 type={action.type === "create-hpa-draft" ? "primary" : "default"}
-                loading={actionMutation.isPending}
+                loading={inspectionActionPending}
                 title={action.label}
-                onClick={() => actionMutation.mutate({ issue: record, action: action.type })}
+                onClick={() => mutateInspectionAction({ issue: record, action: action.type })}
               >
                 {action.label}
               </Button>
@@ -351,9 +365,9 @@ export default function InspectionPage() {
         );
       },
     },
-  ];
+  ], [inspectionActionPending, mutateInspectionAction]);
 
-  const capabilityColumns: Array<HeadlampResourceTableColumn<CapabilityBaselineMatrixItem>> = [
+  const capabilityColumns = useMemo<Array<HeadlampResourceTableColumn<CapabilityBaselineMatrixItem>>>(() => [
     {
       title: "类别",
       dataIndex: "category",
@@ -430,7 +444,12 @@ export default function InspectionPage() {
       width: 180,
       render: (value?: string | null) => (value ? new Date(value).toLocaleString("zh-CN") : "-"),
     },
-  ];
+  ], []);
+
+  const tablePreferencesClient = useMemo(
+    () => createTablePreferencesClient(accessToken || undefined),
+    [accessToken],
+  );
 
   const capabilityStats = useMemo(() => {
     const items = capabilityQuery.data?.items ?? [];
@@ -535,6 +554,40 @@ export default function InspectionPage() {
     const start = (issuePage - 1) * issuePageSize;
     return issueItemsFiltered.slice(start, start + issuePageSize);
   }, [issueItemsFiltered, issuePage, issuePageSize]);
+  const capabilityPagination = useMemo(
+    () =>
+      buildTablePagination({
+        current: capabilityPage,
+        pageSize: capabilityPageSize,
+        total: capabilityItems.length,
+        onChange: (nextPage, nextPageSize) => {
+          if (nextPageSize !== capabilityPageSize) {
+            setCapabilityPageSize(nextPageSize);
+            setCapabilityPage(1);
+            return;
+          }
+          setCapabilityPage(nextPage);
+        },
+      }),
+    [capabilityItems.length, capabilityPage, capabilityPageSize],
+  );
+  const issuePagination = useMemo(
+    () =>
+      buildTablePagination({
+        current: issuePage,
+        pageSize: issuePageSize,
+        total: issueItemsFiltered.length,
+        onChange: (nextPage, nextPageSize) => {
+          if (nextPageSize !== issuePageSize) {
+            setIssuePageSize(nextPageSize);
+            setIssuePage(1);
+            return;
+          }
+          setIssuePage(nextPage);
+        },
+      }),
+    [issueItemsFiltered.length, issuePage, issuePageSize],
+  );
 
   useEffect(() => {
     setCapabilityPage((prev) => Math.min(prev, capabilityMaxPage));
@@ -708,26 +761,14 @@ export default function InspectionPage() {
           tableKey="business.inspection.capabilityBaseline"
           columns={capabilityColumns as ColumnsType<CapabilityBaselineMatrixItem>}
           dataSource={capabilityPagedItems}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          preferencesClient={tablePreferencesClient}
           filters={capabilityFilters}
           onFiltersChange={(nextFilters) => {
             setCapabilityFilters(nextFilters);
             setCapabilityPage(1);
           }}
           loading={capabilityQuery.isLoading}
-          pagination={buildTablePagination({
-            current: capabilityPage,
-            pageSize: capabilityPageSize,
-            total: capabilityItems.length,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== capabilityPageSize) {
-                setCapabilityPageSize(nextPageSize);
-                setCapabilityPage(1);
-                return;
-              }
-              setCapabilityPage(nextPage);
-            },
-          })}
+          pagination={capabilityPagination}
           scroll={{ x: 1300 }}
         />
       </Card>
@@ -747,7 +788,7 @@ export default function InspectionPage() {
           tableKey="business.inspection.issues"
           columns={columns as ColumnsType<InspectionIssue>}
           dataSource={issuePagedItems}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          preferencesClient={tablePreferencesClient}
           globalSearch={{
             value: keywordInput,
             onChange: (value) => {
@@ -763,19 +804,7 @@ export default function InspectionPage() {
             setIssuePage(1);
           }}
           loading={reportQuery.isLoading}
-          pagination={buildTablePagination({
-            current: issuePage,
-            pageSize: issuePageSize,
-            total: issueItemsFiltered.length,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== issuePageSize) {
-                setIssuePageSize(nextPageSize);
-                setIssuePage(1);
-                return;
-              }
-              setIssuePage(nextPage);
-            },
-          })}
+          pagination={issuePagination}
           className="inspection-issues-table"
           layoutOptions={{
             actionWidth: 156,

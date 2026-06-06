@@ -279,6 +279,17 @@ function normalizeSendMessageResponse(response: SendMessageResponse): SendMessag
   };
 }
 
+const SESSION_LIST_CACHE_TTL_MS = 30_000;
+const sessionListCache = new Map<string, { expiresAt: number; value: Promise<AiConversationSession[]> | AiConversationSession[] }>();
+
+function getSessionCacheKey(token?: string) {
+  return token || "anonymous";
+}
+
+function clearSessionListCache(token?: string) {
+  sessionListCache.delete(getSessionCacheKey(token));
+}
+
 export async function getAiSuggestions(token?: string): Promise<AiSuggestionsResponse> {
   return apiRequest<AiSuggestionsResponse>("/api/ai-assistant/suggestions", {
     method: "GET",
@@ -297,6 +308,7 @@ export async function createSession(
   input: CreateSessionInput,
   token?: string,
 ): Promise<SendMessageResponse | AiConversationSession> {
+  clearSessionListCache(token);
   const response = await apiRequest<SendMessageResponse | AiConversationSession>("/api/ai-assistant/sessions", {
     method: "POST",
     token,
@@ -317,14 +329,28 @@ export async function getSession(sessionId: string, token?: string): Promise<AiC
 }
 
 export async function listSessions(token?: string): Promise<AiConversationSession[]> {
-  const sessions = await apiRequest<AiConversationSession[]>("/api/ai-assistant/sessions", {
+  const cacheKey = getSessionCacheKey(token);
+  const cached = sessionListCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value instanceof Promise ? cached.value : cached.value;
+  }
+  const request = apiRequest<AiConversationSession[]>("/api/ai-assistant/sessions", {
     method: "GET",
     token,
+  }).then((sessions) => {
+    const normalized = sessions.map(normalizeConversationSession);
+    sessionListCache.set(cacheKey, { expiresAt: Date.now() + SESSION_LIST_CACHE_TTL_MS, value: normalized });
+    return normalized;
+  }).catch((error) => {
+    sessionListCache.delete(cacheKey);
+    throw error;
   });
-  return sessions.map(normalizeConversationSession);
+  sessionListCache.set(cacheKey, { expiresAt: Date.now() + SESSION_LIST_CACHE_TTL_MS, value: request });
+  return request;
 }
 
 export async function deleteSession(sessionId: string, token?: string): Promise<{ deleted: boolean; sessionId: string }> {
+  clearSessionListCache(token);
   return apiRequest<{ deleted: boolean; sessionId: string }>(`/api/ai-assistant/sessions/${sessionId}`, {
     method: "DELETE",
     token,
@@ -344,6 +370,7 @@ export async function sendMessage(
   },
   token?: string,
 ): Promise<SendMessageResponse> {
+  clearSessionListCache(token);
   const response = await apiRequest<SendMessageResponse>(`/api/ai-assistant/sessions/${sessionId}/messages`, {
     method: "POST",
     token,
