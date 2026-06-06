@@ -145,4 +145,19 @@ describe('DashboardService', () => {
       clusterIds.length,
     );
   });
+
+  it('keeps live snapshot cache under the entry limit', async () => {
+    const clusterIds = Array.from(
+      { length: 205 },
+      (_, index) => `cluster-${index}`,
+    );
+    const { service } = createService(clusterIds);
+
+    await service.getStats();
+
+    const harness = service as unknown as {
+      liveSnapshotCache: Map<string, unknown>;
+    };
+    expect(harness.liveSnapshotCache.size).toBeLessThanOrEqual(200);
+  });
 });

@@ -116,9 +116,52 @@ export interface AiopsSummaryResponse {
 
 @Injectable()
 export class AiopsService {
+  private readonly summaryCacheTtlMs = 5_000;
+  private readonly maxSummaryCacheEntries = 50;
+  private readonly summaryCache = new Map<
+    string,
+    { expiresAt: number; value: AiopsSummaryResponse }
+  >();
+  private readonly summaryInFlight = new Map<
+    string,
+    Promise<AiopsSummaryResponse>
+  >();
+
   constructor(private readonly monitoringService: MonitoringService) {}
 
   async getSummary(timeFilter: AiopsTimeFilter): Promise<AiopsSummaryResponse> {
+    const key = this.summaryCacheKey(timeFilter);
+    const now = Date.now();
+    this.pruneSummaryCache(now);
+
+    const cached = this.summaryCache.get(key);
+    if (cached && cached.expiresAt > now) {
+      return this.cloneSummary(cached.value);
+    }
+
+    const inFlight = this.summaryInFlight.get(key);
+    if (inFlight) {
+      return this.cloneSummary(await inFlight);
+    }
+
+    const next = this.buildSummary(timeFilter);
+    this.summaryInFlight.set(key, next);
+    try {
+      const summary = await next;
+      this.summaryCache.set(key, {
+        expiresAt: Date.now() + this.summaryCacheTtlMs,
+        value: this.cloneSummary(summary),
+      });
+      this.pruneSummaryCache();
+      return this.cloneSummary(summary);
+    } finally {
+      this.summaryInFlight.delete(key);
+    }
+  }
+
+  private async buildSummary(
+    timeFilter: AiopsTimeFilter,
+  ): Promise<AiopsSummaryResponse> {
     const [observability, alerts, inspection] = await Promise.all([
       this.monitoringService.getObservabilitySummary(timeFilter),
       this.monitoringService.getAlerts({
@@ -233,6 +276,54 @@ export class AiopsService {
         (alerts.degraded
           ? 'AIOps 当前使用派生告警和巡检问题构建事故队列。'
           : undefined),
+    };
+  }
+
+  private summaryCacheKey(timeFilter: AiopsTimeFilter): string {
+    return [
+      timeFilter.range ?? '24h',
+      timeFilter.from?.toISOString() ?? '',
+      timeFilter.to?.toISOString() ?? '',
+    ].join('|');
+  }
+
+  private pruneSummaryCache(now = Date.now()): void {
+    for (const [key, cached] of this.summaryCache) {
+      if (cached.expiresAt <= now) {
+        this.summaryCache.delete(key);
+      }
+    }
+
+    while (this.summaryCache.size > this.maxSummaryCacheEntries) {
+      const oldestKey = this.summaryCache.keys().next().value as
+        | string
+        | undefined;
+      if (!oldestKey) {
+        break;
+      }
+      this.summaryCache.delete(oldestKey);
+    }
+  }
+
+  private cloneSummary(summary: AiopsSummaryResponse): AiopsSummaryResponse {
+    return {
+      ...summary,
+      anomalyOverview: { ...summary.anomalyOverview },
+      incidentQueue: summary.incidentQueue.map((item) => ({ ...item })),
+      correlationGroups: summary.correlationGroups.map((group) => ({
+        ...group,
+        affectedScopes: [...group.affectedScopes],
+        evidence: [...group.evidence],
+      })),
+      topImpactedServices: summary.topImpactedServices.map((item) => ({
+        ...item,
+      })),
+      rootCauseCandidates: summary.rootCauseCandidates.map((item) => ({
+        ...item,
+        evidence: [...item.evidence],
+      })),
+      recommendations: summary.recommendations.map((item) => ({ ...item })),
+      auditState: { ...summary.auditState },
     };
   }
 

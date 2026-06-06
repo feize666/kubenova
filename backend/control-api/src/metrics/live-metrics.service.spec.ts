@@ -91,4 +91,40 @@ describe('LiveMetricsService cache bounds', () => {
 
     expect(harness.snapshotCache.size).toBeLessThanOrEqual(200);
   });
+
+  it('deduplicates in-flight snapshots for the same cache key', async () => {
+    const { service } = createService();
+    let resolveMetrics: (value: unknown) => void = () => undefined;
+    mockGetPodMetrics.mockReturnValue(
+      new Promise((resolve) => {
+        resolveMetrics = resolve;
+      }),
+    );
+
+    const first = service.getClusterSnapshot('cluster-a', 'apiVersion: v1');
+    const second = service.getClusterSnapshot('cluster-a', 'apiVersion: v1');
+
+    resolveMetrics({
+      items: [
+        {
+          metadata: { namespace: 'default', name: 'pod-1' },
+          timestamp: new Date().toISOString(),
+          containers: [
+            {
+              usage: {
+                cpu: '10m',
+                memory: '16Mi',
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const [firstSnapshot, secondSnapshot] = await Promise.all([first, second]);
+
+    expect(mockGetPodMetrics).toHaveBeenCalledTimes(1);
+    expect(secondSnapshot).toEqual(firstSnapshot);
+    expect(secondSnapshot).not.toBe(firstSnapshot);
+    expect(secondSnapshot.pods[0]).not.toBe(firstSnapshot.pods[0]);
+  });
 });

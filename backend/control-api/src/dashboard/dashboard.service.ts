@@ -54,6 +54,7 @@ export interface DashboardStats {
 export class DashboardService {
   private readonly statsCacheTtlMs = 5_000;
   private readonly liveMetricsCacheTtlMs = 15_000;
+  private readonly maxLiveSnapshotCacheEntries = 200;
   private readonly liveMetricsFanoutLimit = 4;
   private readonly liveMetricsTimeoutMs = 3_000;
   private statsCache: { expiresAt: number; value: DashboardStats } | undefined;
@@ -227,63 +228,57 @@ export class DashboardService {
       Math.max(0, Math.round(healthyRatio * 70 + (1 - criticalRatio) * 30)),
     );
 
-    const usageRows = activeClusters
-      .map((row) =>
+    let usageCount = 0;
+    let cpuTotal = 0;
+    let memoryTotal = 0;
+    for (const row of activeClusters) {
+      const meta =
         row.metadata &&
         typeof row.metadata === 'object' &&
         !Array.isArray(row.metadata)
           ? (row.metadata as Record<string, unknown>)
-          : {},
-      )
-      .map((meta) => {
-        const usageMetrics =
-          meta.usageMetrics &&
-          typeof meta.usageMetrics === 'object' &&
-          !Array.isArray(meta.usageMetrics)
-            ? (meta.usageMetrics as Record<string, unknown>)
-            : undefined;
-        const cpu =
-          usageMetrics &&
-          typeof usageMetrics.cpu === 'object' &&
-          usageMetrics.cpu !== null &&
-          !Array.isArray(usageMetrics.cpu) &&
-          typeof (usageMetrics.cpu as Record<string, unknown>).usagePercent ===
-            'number'
-            ? ((usageMetrics.cpu as Record<string, unknown>)
-                .usagePercent as number)
-            : typeof meta.cpuUsage === 'number'
-              ? meta.cpuUsage
-              : null;
-        const memory =
-          usageMetrics &&
-          typeof usageMetrics.memory === 'object' &&
-          usageMetrics.memory !== null &&
-          !Array.isArray(usageMetrics.memory) &&
-          typeof (usageMetrics.memory as Record<string, unknown>)
-            .usagePercent === 'number'
-            ? ((usageMetrics.memory as Record<string, unknown>)
-                .usagePercent as number)
-            : typeof meta.memoryUsage === 'number'
-              ? meta.memoryUsage
-              : null;
-        return { cpu, memory };
-      })
-      .filter(
-        (item) =>
-          typeof item.cpu === 'number' && typeof item.memory === 'number',
-      );
-    const hasUsage = usageRows.length > 0;
-    const cpuUsagePercent = hasUsage
-      ? Math.round(
-          usageRows.reduce((sum, item) => sum + (item.cpu as number), 0) /
-            usageRows.length,
-        )
-      : 0;
+          : {};
+      const usageMetrics =
+        meta.usageMetrics &&
+        typeof meta.usageMetrics === 'object' &&
+        !Array.isArray(meta.usageMetrics)
+          ? (meta.usageMetrics as Record<string, unknown>)
+          : undefined;
+      const cpu =
+        usageMetrics &&
+        typeof usageMetrics.cpu === 'object' &&
+        usageMetrics.cpu !== null &&
+        !Array.isArray(usageMetrics.cpu) &&
+        typeof (usageMetrics.cpu as Record<string, unknown>).usagePercent ===
+          'number'
+          ? ((usageMetrics.cpu as Record<string, unknown>)
+              .usagePercent as number)
+          : typeof meta.cpuUsage === 'number'
+            ? meta.cpuUsage
+            : null;
+      const memory =
+        usageMetrics &&
+        typeof usageMetrics.memory === 'object' &&
+        usageMetrics.memory !== null &&
+        !Array.isArray(usageMetrics.memory) &&
+        typeof (usageMetrics.memory as Record<string, unknown>).usagePercent ===
+          'number'
+          ? ((usageMetrics.memory as Record<string, unknown>)
+              .usagePercent as number)
+          : typeof meta.memoryUsage === 'number'
+            ? meta.memoryUsage
+            : null;
+
+      if (typeof cpu === 'number' && typeof memory === 'number') {
+        usageCount += 1;
+        cpuTotal += cpu;
+        memoryTotal += memory;
+      }
+    }
+    const hasUsage = usageCount > 0;
+    const cpuUsagePercent = hasUsage ? Math.round(cpuTotal / usageCount) : 0;
     const memoryUsagePercent = hasUsage
-      ? Math.round(
-          usageRows.reduce((sum, item) => sum + (item.memory as number), 0) /
-            usageRows.length,
-        )
+      ? Math.round(memoryTotal / usageCount)
       : 0;
     const liveSnapshots = await this.runBounded(
       activeClusters,
@@ -406,6 +401,7 @@ export class DashboardService {
     clusterId: string,
   ): Promise<ClusterLiveUsageSnapshot | null> {
     const now = Date.now();
+    this.pruneLiveSnapshotCache(now);
     const cached = this.liveSnapshotCache.get(clusterId);
     if (cached && cached.expiresAt > now) {
       return this.cloneLiveSnapshot(cached.value);
@@ -424,6 +420,7 @@ export class DashboardService {
         expiresAt: Date.now() + this.liveMetricsCacheTtlMs,
         value: this.cloneLiveSnapshot(snapshot),
       });
+      this.pruneLiveSnapshotCache();
       return this.cloneLiveSnapshot(snapshot);
     } finally {
       this.liveSnapshotInFlight.delete(clusterId);
@@ -444,6 +441,24 @@ export class DashboardService {
       );
     } catch {
       return null;
+    }
+  }
+
+  private pruneLiveSnapshotCache(now = Date.now()): void {
+    for (const [key, cached] of this.liveSnapshotCache) {
+      if (cached.expiresAt <= now) {
+        this.liveSnapshotCache.delete(key);
+      }
+    }
+
+    while (this.liveSnapshotCache.size > this.maxLiveSnapshotCacheEntries) {
+      const oldestKey = this.liveSnapshotCache.keys().next().value as
+        | string
+        | undefined;
+      if (!oldestKey) {
+        break;
+      }
+      this.liveSnapshotCache.delete(oldestKey);
     }
   }
 
