@@ -197,14 +197,57 @@ function formatRequestBrief(request) {
   return `${request.method} ${request.path} ${request.durationMs ?? "?"}ms status=${status} type=${request.type}`;
 }
 
+function formatTimingBrief(timings = {}) {
+  return [
+    `clickToUrl=${timings.clickToUrlMs ?? "n/a"}ms`,
+    `urlToSettle=${timings.urlToSettleMs ?? "n/a"}ms`,
+    `dcl=${timings.domContentLoadedWaitMs ?? "n/a"}ms`,
+    `ready=${timings.routeReadyWaitMs ?? "n/a"}ms`,
+    `settle=${timings.settleDelayMs ?? "n/a"}ms`,
+  ].join(",");
+}
+
+function classifySample(sample) {
+  if ((sample.failedRequestCount ?? 0) > 0 || (sample.serverErrorRequestCount ?? 0) > 0) {
+    return "network";
+  }
+  const hasFailedRequest = (sample.topRequests || []).some(
+    (request) => request.failureText || (typeof request.status === "number" && request.status >= 500),
+  );
+  if (hasFailedRequest) return "network";
+
+  const timings = sample.timings || {};
+  const clickToUrlMs = timings.clickToUrlMs ?? timings.gotoDomContentLoadedMs ?? 0;
+  const urlToSettleMs = timings.urlToSettleMs ?? 0;
+  if (clickToUrlMs > Math.max(urlToSettleMs, 0) * 1.5 && clickToUrlMs > 250) {
+    return "url-wait";
+  }
+  if (urlToSettleMs > Math.max(clickToUrlMs, 0) * 1.5 && urlToSettleMs > 250) {
+    return "settle";
+  }
+  if ((sample.longTaskCount ?? 0) > 0 || (sample.longTasks?.maxDurationMs ?? 0) >= 50) {
+    return "long-task";
+  }
+  if (sample.apiRequestCount > 0) return "api";
+  return "mixed";
+}
+
 function formatSampleBrief(sample) {
   const topRequests = (sample.topRequests || []).slice(0, 3).map(formatRequestBrief).join(" | ");
+  const quietState = sample.routeQuiet?.state ?? "unknown";
   return [
     `${sample.route}:${sample.durationMs}ms`,
+    `cause=${classifySample(sample)}`,
     `mode=${sample.navMode}`,
+    `timings=(${formatTimingBrief(sample.timings)})`,
     `requests=${sample.requestCount}`,
     `api=${sample.apiRequestCount}`,
     `xhrFetch=${sample.xhrFetchCount}`,
+    `failed=${sample.failedRequestCount ?? 0}`,
+    `5xx=${sample.serverErrorRequestCount ?? 0}`,
+    `longTasks=${sample.longTaskCount ?? "?"}/${sample.longTaskMaxMs ?? "?"}ms`,
+    `heap=${sample.jsHeap?.supported ? `${sample.jsHeap.deltaUsedBytes ?? "?"}B` : "unsupported"}`,
+    `quiet=${quietState}`,
     topRequests ? `top=[${topRequests}]` : "",
   ]
     .filter(Boolean)
@@ -388,6 +431,7 @@ function summarizeRequests(routeRequests) {
         path: path.length > 140 ? `${path.slice(0, 137)}...` : path,
         type: item.resourceType,
         status: item.status,
+        failureText: item.failureText,
         durationMs: item.durationMs,
       };
     })
@@ -403,6 +447,132 @@ function countApiRequests(routeRequests) {
       return item.url.includes("/api/");
     }
   }).length;
+}
+
+async function ensureRouteProbe(page) {
+  await page.addInitScript(() => {
+    window.__perfSwitchingProbe = {
+      installedAt: performance.now(),
+      longTasks: [],
+      longTaskSupported: false,
+      longTaskError: "",
+    };
+    try {
+      if ("PerformanceObserver" in window) {
+        const observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            window.__perfSwitchingProbe.longTasks.push({
+              name: entry.name,
+              startTime: entry.startTime,
+              duration: entry.duration,
+            });
+          }
+        });
+        observer.observe({ type: "longtask", buffered: true });
+        window.__perfSwitchingProbe.longTaskSupported = true;
+        window.__perfSwitchingProbe.longTaskObserver = observer;
+      }
+    } catch (error) {
+      window.__perfSwitchingProbe.longTaskError = error instanceof Error ? error.message : String(error);
+    }
+  });
+}
+
+async function readRouteProbeSnapshot(page) {
+  return page.evaluate(() => {
+    const probe = window.__perfSwitchingProbe || {
+      longTasks: [],
+      longTaskSupported: false,
+      longTaskError: "probe-not-installed",
+    };
+    const memory = performance.memory;
+    const htmlClass = document.documentElement.className || "";
+    const bodyClass = document.body?.className || "";
+    const classText = `${htmlClass} ${bodyClass}`;
+    const quietDataset = {
+      htmlRouteQuiet: document.documentElement.dataset.routeQuiet,
+      bodyRouteQuiet: document.body?.dataset.routeQuiet,
+      htmlRouteTransitionQuiet: document.documentElement.dataset.routeTransitionQuiet,
+      bodyRouteTransitionQuiet: document.body?.dataset.routeTransitionQuiet,
+    };
+    const quietClassNames = classText
+      .split(/\s+/)
+      .filter((item) => item.toLowerCase().includes("quiet") || item.toLowerCase().includes("transition"))
+      .slice(0, 20);
+    const activeDataset = Object.entries(quietDataset).filter(([, value]) => value !== undefined && value !== "");
+    return {
+      now: performance.now(),
+      timeOrigin: performance.timeOrigin,
+      longTasks: [...probe.longTasks],
+      longTaskSupported: probe.longTaskSupported === true,
+      longTaskError: probe.longTaskError || "",
+      jsHeap: memory
+        ? {
+            supported: true,
+            usedJSHeapSize: memory.usedJSHeapSize,
+            totalJSHeapSize: memory.totalJSHeapSize,
+            jsHeapSizeLimit: memory.jsHeapSizeLimit,
+          }
+        : { supported: false },
+      routeQuiet: {
+        state: activeDataset.length > 0 || quietClassNames.length > 0 ? "present" : "none",
+        classNames: quietClassNames,
+        dataset: Object.fromEntries(activeDataset),
+      },
+    };
+  });
+}
+
+async function safeReadRouteProbeSnapshot(page) {
+  try {
+    return await readRouteProbeSnapshot(page);
+  } catch (error) {
+    return {
+      now: 0,
+      timeOrigin: 0,
+      longTasks: [],
+      longTaskSupported: false,
+      longTaskError: describeError(error),
+      jsHeap: { supported: false },
+      routeQuiet: { state: "unreadable", classNames: [], dataset: {} },
+    };
+  }
+}
+
+function summarizeLongTasks(before, after) {
+  const beforeTime = before?.timeOrigin === after?.timeOrigin ? before?.now ?? 0 : 0;
+  const afterTasks = Array.isArray(after?.longTasks) ? after.longTasks : [];
+  const sampleTasks = afterTasks.filter((item) => item.startTime >= beforeTime);
+  const durations = sampleTasks.map((item) => Math.round(item.duration));
+  return {
+    supported: after?.longTaskSupported === true,
+    error: after?.longTaskError || "",
+    count: sampleTasks.length,
+    maxDurationMs: durations.length > 0 ? Math.max(...durations) : 0,
+    totalDurationMs: durations.reduce((sum, item) => sum + item, 0),
+    top: sampleTasks
+      .map((item) => ({
+        name: item.name,
+        startMs: Math.round(item.startTime - beforeTime),
+        durationMs: Math.round(item.duration),
+      }))
+      .sort((left, right) => right.durationMs - left.durationMs)
+      .slice(0, 5),
+  };
+}
+
+function summarizeHeap(before, after) {
+  if (before?.jsHeap?.supported !== true || after?.jsHeap?.supported !== true) {
+    return { supported: false };
+  }
+  return {
+    supported: true,
+    beforeUsedBytes: before.jsHeap.usedJSHeapSize,
+    afterUsedBytes: after.jsHeap.usedJSHeapSize,
+    deltaUsedBytes: after.jsHeap.usedJSHeapSize - before.jsHeap.usedJSHeapSize,
+    totalJSHeapSize: after.jsHeap.totalJSHeapSize,
+    jsHeapSizeLimit: after.jsHeap.jsHeapSizeLimit,
+  };
 }
 
 async function ensureLoggedIn(page) {
@@ -458,51 +628,84 @@ async function ensureStillLoggedIn(page) {
 }
 
 async function waitForStablePage(page) {
+  const timings = {};
+  let stageStart = Date.now();
   try {
     await page.waitForLoadState("domcontentloaded", { timeout });
+    timings.domContentLoadedWaitMs = Date.now() - stageStart;
   } catch (error) {
     fail(`页面加载未完成: url=${page.url()} timeout=${timeout}ms`, error);
   }
+  stageStart = Date.now();
   await ensureStillLoggedIn(page);
+  timings.loginGuardWaitMs = Date.now() - stageStart;
+  stageStart = Date.now();
   try {
     await page.locator("main, .ant-layout-content").first().waitFor({ state: "visible", timeout });
+    timings.routeReadyWaitMs = Date.now() - stageStart;
   } catch (error) {
     const snippet = await pageTextSnippet(page);
     fail(`页面主体未出现: url=${page.url()} selector="main, .ant-layout-content" body="${snippet}"`, error);
   }
   if (settleMs > 0) {
+    stageStart = Date.now();
     await page.waitForTimeout(settleMs);
+    timings.settleDelayMs = Date.now() - stageStart;
+  } else {
+    timings.settleDelayMs = 0;
   }
+  return timings;
 }
 
 async function clickRouteLink(page, route) {
   const selector = `a[href="${route}"], a[href="${routeUrl(route)}"]`;
+  const result = {
+    ok: false,
+    urlWaitMs: null,
+    linkProbeMs: 0,
+    sectionOpenMs: 0,
+    sectionLabel: null,
+  };
   let link = page.locator(selector).first();
+  let stageStart = Date.now();
   try {
     await link.waitFor({ state: "attached", timeout: Math.min(timeout, closedMenuLinkProbeMs) });
     await link.scrollIntoViewIfNeeded({ timeout: Math.min(timeout, closedMenuLinkProbeMs) });
+    result.linkProbeMs = Date.now() - stageStart;
+    stageStart = Date.now();
     await Promise.all([
       page.waitForURL((currentUrl) => currentUrl.pathname === route, { timeout }),
       link.click({ timeout: Math.min(timeout, 5000) }),
     ]);
-    return true;
+    result.urlWaitMs = Date.now() - stageStart;
+    result.ok = true;
+    return result;
   } catch {
+    result.linkProbeMs = Date.now() - stageStart;
     const sectionLabel = getRouteSectionLabel(route);
     if (!sectionLabel) {
-      return false;
+      return result;
     }
+    result.sectionLabel = sectionLabel;
     try {
+      stageStart = Date.now();
       await page.getByText(sectionLabel, { exact: true }).first().click({ timeout: Math.min(timeout, 2000) });
+      result.sectionOpenMs = Date.now() - stageStart;
       link = page.locator(selector).first();
+      stageStart = Date.now();
       await link.waitFor({ state: "attached", timeout: Math.min(timeout, 2000) });
       await link.scrollIntoViewIfNeeded({ timeout: Math.min(timeout, 2000) });
+      result.linkProbeMs += Date.now() - stageStart;
+      stageStart = Date.now();
       await Promise.all([
         page.waitForURL((currentUrl) => currentUrl.pathname === route, { timeout }),
         link.click({ timeout: Math.min(timeout, 5000) }),
       ]);
-      return true;
+      result.urlWaitMs = Date.now() - stageStart;
+      result.ok = true;
+      return result;
     } catch {
-      return false;
+      return result;
     }
   }
 }
@@ -510,42 +713,86 @@ async function clickRouteLink(page, route) {
 async function measureRoute(page, route) {
   const requestStartIndex = page.__perfRequests.length;
   const start = Date.now();
+  const probeBefore = await safeReadRouteProbeSnapshot(page);
+  const timings = {
+    clickToUrlMs: null,
+    urlToSettleMs: null,
+    domContentLoadedWaitMs: null,
+    routeReadyWaitMs: null,
+    settleDelayMs: null,
+    linkProbeMs: null,
+    sectionOpenMs: null,
+    gotoDomContentLoadedMs: null,
+  };
+  let urlSettledAt = start;
   let navMode = "current";
   try {
     if (!samePath(page, route)) {
-      if (await clickRouteLink(page, route)) {
+      const clickResult = await clickRouteLink(page, route);
+      timings.linkProbeMs = clickResult.linkProbeMs;
+      timings.sectionOpenMs = clickResult.sectionOpenMs;
+      if (clickResult.ok) {
         navMode = "click";
+        timings.clickToUrlMs = clickResult.urlWaitMs;
+        urlSettledAt = Date.now();
       } else {
         navMode = "goto";
+        const gotoStart = Date.now();
         await page.goto(routeUrl(route), { waitUntil: "domcontentloaded", timeout });
+        timings.gotoDomContentLoadedMs = Date.now() - gotoStart;
+        urlSettledAt = Date.now();
       }
+    } else {
+      timings.clickToUrlMs = 0;
+      urlSettledAt = Date.now();
     }
   } catch (error) {
     if (!isConnectionRefused(error)) {
-      fail(`路由切换失败: route=${route} mode=${navMode} from=${page.url()} target=${routeUrl(route)} timeout=${timeout}ms`, error);
+      fail(`路由切换失败: route=${route} stage=url-wait mode=${navMode} from=${page.url()} target=${routeUrl(route)} timeout=${timeout}ms`, error);
     }
     info(`检测到前端连接拒绝，等待恢复后重试 route=${route}`);
+    const retryStart = Date.now();
     await waitForBaseReachable(`route=${route}`);
+    timings.networkRecoveryWaitMs = Date.now() - retryStart;
     navMode = "goto-retry";
     try {
+      const gotoStart = Date.now();
       await page.goto(routeUrl(route), { waitUntil: "domcontentloaded", timeout });
+      timings.gotoDomContentLoadedMs = Date.now() - gotoStart;
+      urlSettledAt = Date.now();
     } catch (retryError) {
-      fail(`路由切换重试失败: route=${route} mode=${navMode} from=${page.url()} target=${routeUrl(route)} timeout=${timeout}ms`, retryError);
+      fail(`路由切换重试失败: route=${route} stage=url-wait mode=${navMode} from=${page.url()} target=${routeUrl(route)} timeout=${timeout}ms`, retryError);
     }
   }
+  let stableTimings;
   try {
-    await waitForStablePage(page);
+    stableTimings = await waitForStablePage(page);
   } catch (error) {
-    fail(`路由稳定等待失败: route=${route} mode=${navMode} current=${page.url()}`, error);
+    fail(`路由稳定等待失败: route=${route} stage=settle mode=${navMode} current=${page.url()}`, error);
   }
+  Object.assign(timings, stableTimings);
+  timings.urlToSettleMs = Date.now() - urlSettledAt;
+  const probeAfter = await safeReadRouteProbeSnapshot(page);
+  const longTasks = summarizeLongTasks(probeBefore, probeAfter);
+  const jsHeap = summarizeHeap(probeBefore, probeAfter);
   const routeRequests = page.__perfRequests.slice(requestStartIndex);
+  const failedRequestCount = routeRequests.filter((item) => item.failureText).length;
+  const serverErrorRequestCount = routeRequests.filter((item) => typeof item.status === "number" && item.status >= 500).length;
   return {
     durationMs: Date.now() - start,
     navMode,
+    timings,
     requestCount: routeRequests.length,
     xhrFetchCount: routeRequests.filter((item) => item.resourceType === "xhr" || item.resourceType === "fetch").length,
     apiRequestCount: countApiRequests(routeRequests),
+    failedRequestCount,
+    serverErrorRequestCount,
     topRequests: summarizeRequests(routeRequests),
+    longTasks,
+    longTaskCount: longTasks.count,
+    longTaskMaxMs: longTasks.maxDurationMs,
+    jsHeap,
+    routeQuiet: probeAfter.routeQuiet,
   };
 }
 
@@ -607,6 +854,7 @@ async function main() {
   const browser = await launchBrowser(chromium);
   const page = await browser.newPage();
   page.setDefaultTimeout(timeout);
+  await ensureRouteProbe(page);
 
   const consoleErrors = [];
   const pageErrors = [];
@@ -667,7 +915,15 @@ async function main() {
       for (const route of routes) {
         const result = await measureRoute(page, route);
         samples.push({ action: "routeSwitch", route, ...result });
-        info(`${route} ${result.durationMs}ms mode=${result.navMode} requests=${result.requestCount} xhrFetch=${result.xhrFetchCount}`);
+        info(
+          `${route} ${result.durationMs}ms cause=${classifySample({ route, ...result })} mode=${result.navMode} timings=(${formatTimingBrief(
+            result.timings,
+          )}) requests=${result.requestCount} xhrFetch=${result.xhrFetchCount} failed=${result.failedRequestCount} 5xx=${
+            result.serverErrorRequestCount
+          } longTasks=${result.longTaskCount}/${result.longTaskMaxMs}ms quiet=${
+            result.routeQuiet?.state ?? "unknown"
+          }`,
+        );
       }
     }
 
