@@ -98,6 +98,7 @@ export type HeadlampTableState<T extends object> = {
 };
 
 const TABLE_PREFERENCES_STORAGE_PREFIX = "resource-table-preferences:";
+const EMPTY_FILTERS: HeadlampTableFilters = {};
 
 function readStoragePreferences(tableKey: string): TablePreferences | null {
   if (typeof window === "undefined") {
@@ -130,12 +131,35 @@ function isActiveFilterValue(value: unknown): boolean {
   return value !== undefined && value !== null && value !== "";
 }
 
+function areColumnVisibilityEqual(
+  left: TableColumnVisibilityPreference | undefined,
+  right: TableColumnVisibilityPreference | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  const leftKeys = Object.keys(left ?? {});
+  const rightKeys = Object.keys(right ?? {});
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+  return leftKeys.every((key) => left?.[key] === right?.[key]);
+}
+
+function areTablePreferencesEqual(left: TablePreferences, right: TablePreferences): boolean {
+  return (
+    Boolean(left.filterRowVisible) === Boolean(right.filterRowVisible) &&
+    areColumnVisibilityEqual(left.columnVisibility, right.columnVisibility)
+  );
+}
+
 function normalizeColumnSettings<T extends object>(
   columns: Array<HeadlampResourceTableColumn<T>>,
   columnSettings: HeadlampTableColumnSetting[] | undefined,
   storedVisibility?: TableColumnVisibilityPreference,
+  columnSettingMap?: ReadonlyMap<string, HeadlampTableColumnSetting>,
 ): TableColumnVisibilityPreference {
-  const settingMap = new Map((columnSettings ?? []).map((setting) => [setting.key, setting]));
+  const settingMap = columnSettingMap ?? new Map((columnSettings ?? []).map((setting) => [setting.key, setting]));
 
   return columns.reduce<TableColumnVisibilityPreference>((acc, column) => {
     const setting = settingMap.get(column.key);
@@ -287,6 +311,14 @@ export function useHeadlampTableState<T extends object>({
   preferencesClient,
   sort,
 }: HeadlampTableStateOptions<T>): HeadlampTableState<T> {
+  const columnSettingMap = useMemo(
+    () => new Map((columnSettings ?? []).map((setting) => [setting.key, setting])),
+    [columnSettings],
+  );
+  const columnByKey = useMemo(
+    () => new Map(columns.map((column) => [column.key, column])),
+    [columns],
+  );
   const [preferences, setPreferences] = useState<TablePreferences>(() => {
     const stored = readStoragePreferences(tableKey);
     return {
@@ -308,14 +340,18 @@ export function useHeadlampTableState<T extends object>({
       if (canceled || !remotePreferences) {
         return;
       }
-      setPreferences((prev) => ({
-        columnVisibility: normalizeColumnSettings(
-          columns,
-          columnSettings,
-          remotePreferences.columnVisibility ?? prev.columnVisibility,
-        ),
-        filterRowVisible: prev.filterRowVisible,
-      }));
+      setPreferences((prev) => {
+        const nextPreferences = {
+          columnVisibility: normalizeColumnSettings(
+            columns,
+            undefined,
+            remotePreferences.columnVisibility ?? prev.columnVisibility,
+            columnSettingMap,
+          ),
+          filterRowVisible: prev.filterRowVisible,
+        };
+        return areTablePreferencesEqual(prev, nextPreferences) ? prev : nextPreferences;
+      });
     }
 
     void loadRemotePreferences();
@@ -323,7 +359,7 @@ export function useHeadlampTableState<T extends object>({
     return () => {
       canceled = true;
     };
-  }, [columnSettings, columns, preferencesClient, tableKey]);
+  }, [columnSettingMap, columns, preferencesClient, tableKey]);
 
   useEffect(() => {
     if (!preferencesDirtyRef.current) {
@@ -335,33 +371,44 @@ export function useHeadlampTableState<T extends object>({
   }, [preferences, preferencesClient, tableKey]);
 
   const effectiveColumnVisibility = useMemo(
-    () => normalizeColumnSettings(columns, columnSettings, preferences.columnVisibility),
-    [columnSettings, columns, preferences.columnVisibility],
+    () => normalizeColumnSettings(columns, undefined, preferences.columnVisibility, columnSettingMap),
+    [columnSettingMap, columns, preferences.columnVisibility],
   );
 
   const setColumnVisible = useCallback(
     (key: string, visible: boolean) => {
-      const column = columns.find((item) => item.key === key);
-      const setting = columnSettings?.find((item) => item.key === key);
-      if (column?.required || setting?.required) {
+      const column = columnByKey.get(key);
+      const setting = columnSettingMap.get(key);
+      if (column?.required || setting?.required || effectiveColumnVisibility[key] === visible) {
         return;
       }
 
-      preferencesDirtyRef.current = true;
-      setPreferences((prev) => ({
-        ...prev,
-        columnVisibility: {
+      setPreferences((prev) => {
+        const nextVisibility = {
           ...(prev.columnVisibility ?? {}),
           [key]: visible,
-        },
-      }));
+        };
+        if (areColumnVisibilityEqual(prev.columnVisibility, nextVisibility)) {
+          return prev;
+        }
+        preferencesDirtyRef.current = true;
+        return {
+          ...prev,
+          columnVisibility: nextVisibility,
+        };
+      });
     },
-    [columnSettings, columns],
+    [columnByKey, columnSettingMap, effectiveColumnVisibility],
   );
 
   const setFilterRowVisible = useCallback((visible: boolean) => {
-    preferencesDirtyRef.current = true;
-    setPreferences((prev) => ({ ...prev, filterRowVisible: visible }));
+    setPreferences((prev) => {
+      if (Boolean(prev.filterRowVisible) === visible) {
+        return prev;
+      }
+      preferencesDirtyRef.current = true;
+      return { ...prev, filterRowVisible: visible };
+    });
   }, []);
 
   const setFilterValue = useCallback(
@@ -383,19 +430,22 @@ export function useHeadlampTableState<T extends object>({
   }, [globalSearch, onFiltersChange]);
 
   const resetColumnVisibility = useCallback(() => {
-    preferencesDirtyRef.current = true;
-    setPreferences((prev) => ({
-      ...prev,
-      columnVisibility: normalizeColumnSettings(
-        columns,
-        columnSettings,
-      ),
-    }));
-  }, [columnSettings, columns]);
+    const nextColumnVisibility = normalizeColumnSettings(columns, undefined, undefined, columnSettingMap);
+    setPreferences((prev) => {
+      if (areColumnVisibilityEqual(prev.columnVisibility, nextColumnVisibility)) {
+        return prev;
+      }
+      preferencesDirtyRef.current = true;
+      return {
+        ...prev,
+        columnVisibility: nextColumnVisibility,
+      };
+    });
+  }, [columnSettingMap, columns]);
 
   const columnDescriptors = useMemo<HeadlampTableColumnDescriptor[]>(() => {
     return columns.map((column) => {
-      const setting = columnSettings?.find((item) => item.key === column.key);
+      const setting = columnSettingMap.get(column.key);
       const required = column.required ?? setting?.required ?? false;
       return {
         key: column.key,
@@ -405,35 +455,44 @@ export function useHeadlampTableState<T extends object>({
         visible: required || effectiveColumnVisibility[column.key] !== false,
       };
     });
-  }, [columnSettings, columns, effectiveColumnVisibility]);
+  }, [columnSettingMap, columns, effectiveColumnVisibility]);
 
   const visibleColumnKeys = useMemo(
     () => columnDescriptors.filter((column) => column.visible).map((column) => column.key),
     [columnDescriptors],
   );
+  const visibleColumnKeySet = useMemo(
+    () => new Set(visibleColumnKeys),
+    [visibleColumnKeys],
+  );
 
   const tableColumns = useMemo<ColumnsType<T>>(() => {
-    const visibleColumns = columns.filter((column) => visibleColumnKeys.includes(column.key));
-    return visibleColumns.map((column) => ({
-      ...column,
-      title: renderStackedColumnTitle(
-        column,
-        Boolean(preferences.filterRowVisible),
-        filters?.[column.key],
-        (value) => setFilterValue(column.key, value),
-      ),
-      className: [
-        preferences.filterRowVisible ? "resource-table-has-filter-header" : undefined,
-        column.className,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      sortOrder: sort?.sortBy === column.key ? toAntdSortOrder(sort.sortOrder) : column.sortOrder,
-      sorter: column.sorter ?? (sort?.onChange ? true : undefined),
-    }));
-  }, [columns, filters, preferences.filterRowVisible, setFilterValue, sort, visibleColumnKeys]);
+    return columns
+      .filter((column) => visibleColumnKeySet.has(column.key))
+      .map((column) => ({
+        ...column,
+        title: renderStackedColumnTitle(
+          column,
+          Boolean(preferences.filterRowVisible),
+          filters?.[column.key],
+          (value) => setFilterValue(column.key, value),
+        ),
+        className: [
+          preferences.filterRowVisible ? "resource-table-has-filter-header" : undefined,
+          column.className,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        sortOrder: sort?.sortBy === column.key ? toAntdSortOrder(sort.sortOrder) : column.sortOrder,
+        sorter: column.sorter ?? (sort?.onChange ? true : undefined),
+      }));
+  }, [columns, filters, preferences.filterRowVisible, setFilterValue, sort, visibleColumnKeySet]);
 
-  const activeFilterCount = Object.values(filters ?? {}).filter(isActiveFilterValue).length + (globalSearch?.value ? 1 : 0);
+  const resolvedFilters = filters ?? EMPTY_FILTERS;
+  const activeFilterCount = useMemo(
+    () => Object.values(resolvedFilters).filter(isActiveFilterValue).length + (globalSearch?.value ? 1 : 0),
+    [globalSearch?.value, resolvedFilters],
+  );
 
   return {
     tableKey,
@@ -444,7 +503,7 @@ export function useHeadlampTableState<T extends object>({
     setFilterRowVisible,
     toggleFilterRowVisible: () => setFilterRowVisible(!(preferences.filterRowVisible ?? initialFilterRowVisible)),
     globalSearch,
-    filters: filters ?? {},
+    filters: resolvedFilters,
     setFilterValue,
     clearFilters,
     hasActiveFilters: activeFilterCount > 0,

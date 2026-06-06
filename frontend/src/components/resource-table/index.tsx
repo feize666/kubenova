@@ -3,7 +3,7 @@
 import { Empty, Table } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, type Key, type ReactNode } from "react";
 import {
   getStandardResourceTableScrollX,
   normalizeResourceTableColumns,
@@ -22,6 +22,32 @@ import type { TablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceTableToolbar } from "@/components/resource-table-toolbar";
 
 export const RESOURCE_TABLE_CLASS_NAME = "resource-table";
+
+function getResourceTableClassName(...classNames: Array<string | undefined>) {
+  return classNames.filter(Boolean).join(" ");
+}
+
+function getStableResourceRowKey<T extends object>(record: T, index?: number): Key {
+  const value = record as Record<string, unknown>;
+  const metadata = value.metadata && typeof value.metadata === "object"
+    ? value.metadata as Record<string, unknown>
+    : undefined;
+  const directKey = value.key ?? value.id ?? value.uid ?? metadata?.uid;
+  if (typeof directKey === "string" || typeof directKey === "number") {
+    return directKey;
+  }
+
+  const namespace = metadata?.namespace ?? value.namespace;
+  const name = metadata?.name ?? value.name;
+  if ((typeof name === "string" || typeof name === "number") && (typeof namespace === "string" || typeof namespace === "number")) {
+    return `${namespace}/${name}`;
+  }
+  if (typeof name === "string" || typeof name === "number") {
+    return name;
+  }
+
+  return index ?? 0;
+}
 
 export type ResourceTableProps<T extends object> = Omit<
   TableProps<T>,
@@ -169,16 +195,22 @@ function StandardResourceTable<T extends object>({
     }),
     [emptyDescription, isLoading, locale],
   );
+  const nextClassName = useMemo(
+    () => getResourceTableClassName(RESOURCE_TABLE_CLASS_NAME, className),
+    [className],
+  );
+  const nextRowKey = restProps.rowKey ?? getStableResourceRowKey<T>;
 
   return (
     <Table<T>
       {...restProps}
       bordered={bordered}
-      className={[RESOURCE_TABLE_CLASS_NAME, className].filter(Boolean).join(" ")}
+      className={nextClassName}
       columns={normalizedColumns}
       loading={nextLoading}
       locale={nextLocale}
       pagination={pagination}
+      rowKey={nextRowKey}
       scroll={nextScroll}
       size={size}
     />
@@ -210,9 +242,13 @@ function HeadlampResourceTable<T extends object>({
   toolbarExtra,
   ...restProps
 }: ResourceTableProps<T> & { tableKey: string }) {
-  const headlampColumns = columns.filter(
-    (column): column is HeadlampResourceTableColumn<T> =>
-      Boolean(column && typeof column === "object" && "key" in column && typeof column.key === "string"),
+  const headlampColumns = useMemo(
+    () =>
+      columns.filter(
+        (column): column is HeadlampResourceTableColumn<T> =>
+          Boolean(column && typeof column === "object" && "key" in column && typeof column.key === "string"),
+      ),
+    [columns],
   );
   const table = useHeadlampTableState<T>({
     tableKey,
@@ -277,6 +313,17 @@ function HeadlampResourceTable<T extends object>({
     }
     onChange?.(nextPagination, nextFilters, sorter, extra);
   }, [onChange, sort]);
+  const nextClassName = useMemo(
+    () =>
+      getResourceTableClassName(
+        RESOURCE_TABLE_CLASS_NAME,
+        "resource-table-headlamp",
+        table.filterRowVisible ? "resource-table-filter-row-visible" : undefined,
+        className,
+      ),
+    [className, table.filterRowVisible],
+  );
+  const nextRowKey = restProps.rowKey ?? getStableResourceRowKey<T>;
 
   return (
     <div className="resource-table-shell">
@@ -284,19 +331,13 @@ function HeadlampResourceTable<T extends object>({
       <Table<T>
         {...restProps}
         bordered={bordered}
-        className={[
-          RESOURCE_TABLE_CLASS_NAME,
-          "resource-table-headlamp",
-          table.filterRowVisible ? "resource-table-filter-row-visible" : undefined,
-          className,
-        ]
-          .filter(Boolean)
-          .join(" ")}
+        className={nextClassName}
         columns={normalizedColumns}
         loading={nextLoading}
         locale={nextLocale}
         onChange={handleChange}
         pagination={pagination}
+        rowKey={nextRowKey}
         scroll={nextScroll}
         size={size}
       />

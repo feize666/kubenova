@@ -1530,6 +1530,12 @@ body.kubenova-route-transitioning .resource-map-shell * {
   transition-delay: 0ms !important;
 }
 
+body.kubenova-route-transitioning .ant-table *,
+body.kubenova-route-transitioning .resource-table * {
+  animation: none !important;
+  transition: none !important;
+}
+
 .terminal-xterm-host {
   height: 100%;
   padding: 18px;
