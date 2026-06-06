@@ -24,7 +24,7 @@ import {
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Alert, Empty, Input, Skeleton, Tooltip } from "antd";
 import { useRouter } from "next/navigation";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import ReactFlow, {
   Background,
@@ -68,8 +68,18 @@ const GROUP_WIDTH = 340;
 const GROUP_HEADER = 44;
 const STACK_GAP = 24;
 const STACK_PREVIEW_LIMIT = 6;
+const LARGE_GRAPH_STACK_PREVIEW_LIMIT = 4;
 const LARGE_GRAPH_NODE_LIMIT = 80;
 const LARGE_GRAPH_EDGE_LIMIT = 110;
+const CHILD_NODE_STYLE = { width: NODE_WIDTH, height: NODE_HEIGHT } as const;
+const EDGE_PATH_OPTIONS = { borderRadius: 24, offset: 28 } as const;
+const EDGE_STYLE_DEFAULT = { strokeWidth: 1.45 } as const;
+const EDGE_STYLE_OWNER = { strokeWidth: 1.7 } as const;
+const EDGE_STYLE_RELATED = { strokeWidth: 2.1 } as const;
+const NOOP_NODE_ACTIONS = {
+  onSelect: () => undefined,
+  onOpenEntity: () => undefined,
+};
 const handleReactFlowError = (id: string, message: string) => {
   if (id === "002") return;
   console.error(message);
@@ -213,6 +223,13 @@ type TopologyView = {
   nodes: Node<TopologyNodeData>[];
   edges: Edge[];
 };
+
+type TopologyNodeActions = {
+  onSelect: (id: string | null) => void;
+  onOpenEntity: (entity: GraphEntity) => void;
+};
+
+const TopologyNodeActionsContext = createContext<TopologyNodeActions>(NOOP_NODE_ACTIONS);
 
 const SOURCE_META: Record<SourceKey, { label: string; icon: ReactNode; color: string; enabled: boolean }> = {
   workloads: { label: "工作负载", icon: <DeploymentUnitOutlined />, color: "#60a5fa", enabled: true },
@@ -459,14 +476,18 @@ function specServiceName(entity: GraphEntity): string | undefined {
 
 function buildRelations(entities: GraphEntity[]): GraphRelation[] {
   const relations: GraphRelation[] = [];
+  const relationIds = new Set<string>();
   const byKind = new Map<string, GraphEntity[]>();
   entities.forEach((entity) => {
-    byKind.set(entity.kind, [...(byKind.get(entity.kind) ?? []), entity]);
+    const items = byKind.get(entity.kind);
+    if (items) items.push(entity);
+    else byKind.set(entity.kind, [entity]);
   });
   const push = (source: GraphEntity, target: GraphEntity, label: string, role: GraphRelation["role"]) => {
     if (source.id === target.id) return;
     const id = `${role}:${source.id}->${target.id}`;
-    if (relations.some((edge) => edge.id === id)) return;
+    if (relationIds.has(id)) return;
+    relationIds.add(id);
     relations.push({ id, source: source.id, target: target.id, label, role });
   };
 
@@ -638,6 +659,8 @@ function buildResourcePageUrl(data: Pick<TopologyNodeData, "kind" | "clusterId" 
 
 function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<SourceKey>; namespace: string; query: string; errorsOnly: boolean; groupBy: GroupBy; selectedId?: string | null; expandAll: boolean; }) {
   const query = options.query.trim().toLowerCase();
+  const isLargeGraph = model.entities.length > LARGE_GRAPH_NODE_LIMIT || model.relations.length > LARGE_GRAPH_EDGE_LIMIT;
+  const stackPreviewLimit = isLargeGraph ? LARGE_GRAPH_STACK_PREVIEW_LIMIT : STACK_PREVIEW_LIMIT;
   const filtered = model.entities.filter((entity) => {
     if (!options.selectedSources.has(entity.source)) return false;
     if (options.namespace !== ALL_NAMESPACE && entity.namespace !== options.namespace) return false;
@@ -646,12 +669,15 @@ function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<So
     return true;
   });
   const ids = new Set(filtered.map((entity) => entity.id));
+  const entityById = new Map(filtered.map((entity) => [entity.id, entity]));
   const relations = model.relations.filter((relation) => ids.has(relation.source) && ids.has(relation.target));
   const selectedEntity = options.selectedId ? filtered.find((entity) => entity.id === options.selectedId) : undefined;
   const groups = new Map<string, GraphEntity[]>();
   filtered.forEach((entity) => {
     const key = getGroupKey(entity, options.groupBy);
-    groups.set(key, [...(groups.get(key) ?? []), entity]);
+    const items = groups.get(key);
+    if (items) items.push(entity);
+    else groups.set(key, [entity]);
   });
 
   const groupEntries = Array.from(groups.entries()).sort((left, right) => right[1].length - left[1].length || left[0].localeCompare(right[0]));
@@ -670,7 +696,7 @@ function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<So
     const isFocusedGroup = groupKey === selectedGroupKey || selectedGroupId === groupId;
     const expanded = (options.expandAll && filtered.length <= 50) || isFocusedGroup;
     const visibleChildren = focusedIds && groupKey === selectedGroupKey ? orderedChildren.filter((entity) => focusedIds.has(entity.id)) : orderedChildren;
-    const previewChildren = orderedChildren.slice(0, STACK_PREVIEW_LIMIT);
+    const previewChildren = orderedChildren.slice(0, stackPreviewLimit);
     groupIds.set(groupKey, groupId);
     const layerCounts = visibleChildren.reduce((counts, entity) => {
       const layer = getTopologyLayer(entity);
@@ -719,7 +745,7 @@ function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<So
         draggable: false,
         selectable: true,
         position: getLayeredChildPosition(entity, layerIndexes),
-        style: { width: NODE_WIDTH, height: NODE_HEIGHT },
+        style: CHILD_NODE_STYLE,
         data: {
           label: entity.label,
           subtitle: entity.subtitle,
@@ -739,17 +765,19 @@ function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<So
   });
 
   const edges: Edge[] = [];
+  const edgeIds = new Set<string>();
   relations.forEach((relation) => {
     const sourceVisible = entityVisibleIds.has(relation.source);
     const targetVisible = entityVisibleIds.has(relation.target);
-    const sourceEntity = filtered.find((entity) => entity.id === relation.source);
-    const targetEntity = filtered.find((entity) => entity.id === relation.target);
+    const sourceEntity = entityById.get(relation.source);
+    const targetEntity = entityById.get(relation.target);
     if (!sourceEntity || !targetEntity) return;
     const source = sourceVisible ? relation.source : groupIds.get(getGroupKey(sourceEntity, options.groupBy));
     const target = targetVisible ? relation.target : groupIds.get(getGroupKey(targetEntity, options.groupBy));
     if (!source || !target || source === target) return;
-    const id = sourceVisible && targetVisible ? relation.id : `collapsed:${relation.id}:${source}->${target}`;
-    if (edges.some((edge) => edge.id === id)) return;
+    const id = sourceVisible && targetVisible ? relation.id : `collapsed:${relation.role}:${source}->${target}`;
+    if (edgeIds.has(id)) return;
+    edgeIds.add(id);
     const isRelated = Boolean(focusedIds?.has(sourceEntity.id) || focusedIds?.has(targetEntity.id));
     edges.push({
       id,
@@ -757,11 +785,11 @@ function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<So
       target,
       type: "smoothstep",
       animated: false,
-      label: sourceVisible && targetVisible ? relation.label : undefined,
+      label: !isLargeGraph && sourceVisible && targetVisible ? relation.label : undefined,
       className: `resource-map-edge resource-map-edge--${relation.role} ${isRelated ? "is-related" : ""}`,
-      pathOptions: { borderRadius: 24, offset: 28 },
+      pathOptions: EDGE_PATH_OPTIONS,
       interactionWidth: 18,
-      style: { strokeWidth: isRelated ? 2.1 : relation.role === "owner" ? 1.7 : 1.45 },
+      style: isRelated ? EDGE_STYLE_RELATED : relation.role === "owner" ? EDGE_STYLE_OWNER : EDGE_STYLE_DEFAULT,
     });
   });
   return { nodes, edges, filteredCount: filtered.length };
@@ -793,6 +821,7 @@ function layoutView(view: TopologyView): TopologyView {
 }
 
 function ResourceMapNodeBase({ id, data, selected }: NodeProps<TopologyNodeData>) {
+  const nodeActions = useContext(TopologyNodeActionsContext);
   const meta = KIND_META[data.kind] ?? KIND_META.Group;
   const isGroup = data.kind === "Group";
   const isCollapsedGroup = isGroup && Boolean(data.collapsedCount);
@@ -805,12 +834,12 @@ function ResourceMapNodeBase({ id, data, selected }: NodeProps<TopologyNodeData>
       style={{ "--node-accent": meta.color } as React.CSSProperties}
       onClick={(event) => {
         event.stopPropagation();
-        data.onSelect?.(id);
+        nodeActions.onSelect(id);
       }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          data.onSelect?.(id);
+          nodeActions.onSelect(id);
         }
       }}
     >
@@ -828,7 +857,7 @@ function ResourceMapNodeBase({ id, data, selected }: NodeProps<TopologyNodeData>
                 className="resource-map-node__collapse"
                 onClick={(event) => {
                   event.stopPropagation();
-                  data.onSelect?.(null);
+                  nodeActions.onSelect(null);
                 }}
               >
                 收起
@@ -847,7 +876,7 @@ function ResourceMapNodeBase({ id, data, selected }: NodeProps<TopologyNodeData>
                     style={{ "--node-accent": childMeta.color } as React.CSSProperties}
                     onClick={(event) => {
                       event.stopPropagation();
-                      data.onOpenEntity?.(child);
+                      nodeActions.onOpenEntity(child);
                     }}
                   >
                     <span className="resource-map-stack-card__icon">{childMeta.icon}</span>
@@ -935,13 +964,15 @@ function FlowCanvas({
       view.nodes.map((node) => ({
         ...node,
         selected: node.id === selectedNodeId,
-        data: {
-          ...node.data,
-          onSelect: setSelectedNodeId,
-          onOpenEntity,
-        },
       })),
-    [onOpenEntity, selectedNodeId, setSelectedNodeId, view.nodes],
+    [selectedNodeId, view.nodes],
+  );
+  const nodeActions = useMemo(
+    () => ({
+      onSelect: setSelectedNodeId,
+      onOpenEntity,
+    }),
+    [onOpenEntity, setSelectedNodeId],
   );
   const handleWheelZoom = useCallback((event: globalThis.WheelEvent) => {
     event.preventDefault();
@@ -971,57 +1002,59 @@ function FlowCanvas({
   }, [handleWheelZoom]);
   return (
     <div ref={hostRef} className="resource-map-flow-host">
-      <ReactFlow
-        nodes={selectableNodes}
-        edges={view.edges}
-        nodeTypes={nodeTypes}
-        minZoom={0.18}
-        maxZoom={1.8}
-        proOptions={REACT_FLOW_PRO_OPTIONS}
-        zoomOnScroll={false}
-        zoomOnPinch
-        panOnDrag
-        panOnScroll={false}
-        selectionOnDrag={false}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable
-        onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-        onPaneClick={() => {
-          if (movedRef.current) return;
-          setSelectedNodeId(null);
-        }}
-        onMoveStart={() => {
-          movedRef.current = false;
-          onMoveState(true);
-        }}
-        onMove={() => {
-          movedRef.current = true;
-        }}
-        onMoveEnd={() => {
-          window.setTimeout(() => {
+      <TopologyNodeActionsContext.Provider value={nodeActions}>
+        <ReactFlow
+          nodes={selectableNodes}
+          edges={view.edges}
+          nodeTypes={nodeTypes}
+          minZoom={0.18}
+          maxZoom={1.8}
+          proOptions={REACT_FLOW_PRO_OPTIONS}
+          zoomOnScroll={false}
+          zoomOnPinch
+          panOnDrag
+          panOnScroll={false}
+          selectionOnDrag={false}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable
+          onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+          onPaneClick={() => {
+            if (movedRef.current) return;
+            setSelectedNodeId(null);
+          }}
+          onMoveStart={() => {
             movedRef.current = false;
-          }, 0);
-          onMoveState(false);
-        }}
-        onError={handleReactFlowError}
-        className={`${motionEnabled ? "has-motion" : "is-static"} ${selectedNodeId ? "has-selection" : ""}`}
-      >
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} color="var(--map-dot)" />
-        <Controls showInteractive={false} position="bottom-left" />
-        <ZoomPercent />
-        <Panel position="top-left" className="resource-map-breadcrumbs">
-          <span>根</span>
-          {selectedNodeId ? (
-            <>
-              <span>/</span>
-              <strong>{selectedNodeId.startsWith("group:") ? "分组" : "资源"}</strong>
-              <button type="button" onClick={() => setSelectedNodeId(null)}>收起</button>
-            </>
-          ) : null}
-        </Panel>
-        <AutoFit nodes={view.nodes} version={fitVersion} />
-      </ReactFlow>
+            onMoveState(true);
+          }}
+          onMove={() => {
+            movedRef.current = true;
+          }}
+          onMoveEnd={() => {
+            window.setTimeout(() => {
+              movedRef.current = false;
+            }, 0);
+            onMoveState(false);
+          }}
+          onError={handleReactFlowError}
+          className={`${motionEnabled ? "has-motion" : "is-static"} ${selectedNodeId ? "has-selection" : ""}`}
+        >
+          <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} color="var(--map-dot)" />
+          <Controls showInteractive={false} position="bottom-left" />
+          <ZoomPercent />
+          <Panel position="top-left" className="resource-map-breadcrumbs">
+            <span>根</span>
+            {selectedNodeId ? (
+              <>
+                <span>/</span>
+                <strong>{selectedNodeId.startsWith("group:") ? "分组" : "资源"}</strong>
+                <button type="button" onClick={() => setSelectedNodeId(null)}>收起</button>
+              </>
+            ) : null}
+          </Panel>
+          <AutoFit nodes={view.nodes} version={fitVersion} />
+        </ReactFlow>
+      </TopologyNodeActionsContext.Provider>
     </div>
   );
 }
@@ -1101,6 +1134,7 @@ export default function NetworkTopologyPage() {
   const [yamlTarget, setYamlTarget] = useState<TopologyYamlTarget | null>(null);
   const [isMoving, setIsMoving] = useState(false);
   const [fitVersion, setFitVersion] = useState("initial");
+  const selectedSourceKey = useMemo(() => SOURCE_KEYS.filter((key) => selectedSources.has(key)).join(","), [selectedSources]);
 
   const clusterQuery = useQuery({
     queryKey: ["topology-map", "clusters", token],
@@ -1152,7 +1186,7 @@ export default function NetworkTopologyPage() {
   });
 
   const dynamicQuery = useQuery({
-    queryKey: ["topology-map", "dynamic", selectedCluster?.id, selectedNamespace, token, Array.from(selectedSources).join(",")],
+    queryKey: ["topology-map", "dynamic", selectedCluster?.id, selectedNamespace, token, selectedSourceKey],
     queryFn: async ({ signal }) => {
       const active = DYNAMIC_SOURCES.filter((meta) => selectedSources.has(meta.source));
       const results = await Promise.all(active.map((meta) => getDynamicResources({ clusterId: selectedCluster!.id, group: meta.group, version: meta.version, resource: meta.resource, namespace: meta.namespaced && selectedNamespace !== ALL_NAMESPACE ? selectedNamespace : undefined, pageSize: 500, missingAsEmpty: true }, token, { signal }).then((response) => response.items.map((item) => ({ item, meta }))).catch(() => [])));
@@ -1162,7 +1196,25 @@ export default function NetworkTopologyPage() {
     staleTime: QUERY_STALE_MS,
   });
 
-  const workloads = workloadQueries.flatMap((query) => query.data?.items ?? []);
+  const deploymentItems = workloadQueries[0]?.data?.items;
+  const statefulSetItems = workloadQueries[1]?.data?.items;
+  const daemonSetItems = workloadQueries[2]?.data?.items;
+  const replicaSetItems = workloadQueries[3]?.data?.items;
+  const podItems = workloadQueries[4]?.data?.items;
+  const jobItems = workloadQueries[5]?.data?.items;
+  const cronJobItems = workloadQueries[6]?.data?.items;
+  const workloads = useMemo(
+    () => [
+      ...(deploymentItems ?? []),
+      ...(statefulSetItems ?? []),
+      ...(daemonSetItems ?? []),
+      ...(replicaSetItems ?? []),
+      ...(podItems ?? []),
+      ...(jobItems ?? []),
+      ...(cronJobItems ?? []),
+    ],
+    [cronJobItems, daemonSetItems, deploymentItems, jobItems, podItems, replicaSetItems, statefulSetItems],
+  );
   const isLoading = clusterQuery.isLoading || namespaceSummaryQuery.isLoading || workloadQueries.some((query) => query.isLoading) || networkQuery.isLoading || dynamicQuery.isLoading;
   const error = clusterQuery.error ?? namespaceSummaryQuery.error ?? workloadQueries.find((query) => query.error)?.error ?? networkQuery.error ?? dynamicQuery.error;
 
@@ -1180,6 +1232,10 @@ export default function NetworkTopologyPage() {
   const visible = useMemo(() => buildVisibleGraph(model, { selectedSources, namespace: effectiveNamespace, query: queryText, errorsOnly, groupBy, selectedId: selectedNodeId, expandAll }), [effectiveNamespace, errorsOnly, expandAll, groupBy, model, queryText, selectedNodeId, selectedSources]);
   const view = useMemo(() => layoutView({ nodes: visible.nodes, edges: visible.edges }), [visible.edges, visible.nodes]);
   const selectedNode = useMemo(() => view.nodes.find((node) => node.id === selectedNodeId) ?? null, [selectedNodeId, view.nodes]);
+  const viewNodesRef = useRef(view.nodes);
+  useEffect(() => {
+    viewNodesRef.current = view.nodes;
+  }, [view.nodes]);
   const motionEnabled = !isMoving && view.nodes.length <= LARGE_GRAPH_NODE_LIMIT && view.edges.length <= LARGE_GRAPH_EDGE_LIMIT;
   const canExpandAll = visible.filteredCount <= 50;
 
@@ -1219,9 +1275,9 @@ export default function NetworkTopologyPage() {
   const selectNode = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
     if (!nodeId) return;
-    const node = view.nodes.find((item) => item.id === nodeId);
+    const node = viewNodesRef.current.find((item) => item.id === nodeId);
     if (node?.data.detail) setDetailRequest(node.data.detail);
-  }, [view.nodes]);
+  }, []);
 
   const jumpToResource = useCallback(() => {
     if (!selectedNode) return;
