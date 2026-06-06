@@ -16,10 +16,18 @@ import {
   Typography,
   message,
 } from "antd";
-import type { MenuProps } from "antd";
+import type { MenuProps, TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useDeferredValue,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
@@ -44,6 +52,7 @@ import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { buildTerminalRoute } from "@/lib/workloads/terminal";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
+import { QUERY_CACHE_TIMINGS } from "@/lib/query";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { OpsActionDropdown } from "@/components/ops/ops-action-dropdown";
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
@@ -258,6 +267,100 @@ type PodRow = WorkloadListItem & {
   usageNote?: string;
 };
 
+const POD_KIND = "Pod" as const;
+const POD_PATH = "/workloads/pods";
+const POD_TABLE_KEY = "workloads.pods";
+const EMPTY_WORKLOAD_ITEMS: WorkloadListItem[] = [];
+const EMPTY_CLUSTER_MAP: Record<string, string> = {};
+const POD_LIST_QUERY_CACHE_OPTIONS = {
+  staleTime: QUERY_CACHE_TIMINGS.listStaleTimeMs,
+  gcTime: QUERY_CACHE_TIMINGS.listGcTimeMs,
+  refetchOnMount: false,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: true,
+  retry: 1,
+} as const;
+type PodTableChangeHandler = NonNullable<TableProps<PodRow>["onChange"]>;
+const PodNowContext = createContext<number | undefined>(undefined);
+
+const POD_ACTION_ITEMS: NonNullable<MenuProps["items"]> = [
+  {
+    key: "description",
+    icon: <EyeOutlined />,
+    label: "描述",
+  },
+  {
+    key: "logs",
+    icon: <BugOutlined />,
+    label: "日志",
+  },
+  {
+    key: "terminal",
+    icon: <CodeOutlined />,
+    label: "终端",
+  },
+  {
+    key: "yaml",
+    icon: <FileTextOutlined />,
+    label: "YAML",
+  },
+  {
+    type: "divider",
+  },
+  {
+    key: "delete",
+    icon: <DeleteOutlined />,
+    danger: true,
+    label: "删除",
+  },
+];
+
+function PodCreatedAtCell({ value }: { value: string }) {
+  const now = useContext(PodNowContext);
+  return <ResourceTimeCell value={value} now={now} mode="relative" />;
+}
+
+function PodTimeProvider({ children }: { children: ReactNode }) {
+  const now = useNowTicker();
+  return <PodNowContext.Provider value={now}>{children}</PodNowContext.Provider>;
+}
+
+function resolveIdentity(row: PodRow): ResourceIdentity {
+  return {
+    clusterId: row.clusterId,
+    namespace: row.namespace,
+    kind: POD_KIND,
+    name: row.name,
+  };
+}
+
+function renderUsageCell(value: number | null, row: PodRow, kind: "cpu" | "memory") {
+  if (!row.usageAvailable || value === null) {
+    return (
+      <Space orientation="vertical" size={2} style={{ width: "100%", alignItems: "flex-start" }}>
+        <OpsFilterChip tone="neutral" style={{ marginInlineEnd: 0 }}>
+          无可用指标
+        </OpsFilterChip>
+        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+          {row.usageNote ?? "等待同步实时指标"}
+        </Typography.Text>
+      </Space>
+    );
+  }
+
+  return (
+    <PodMetricCell
+      kind={kind}
+      value={value}
+      percent={
+        kind === "cpu"
+          ? Math.min(100, Math.max(0, value * 100))
+          : Math.min(100, (value / (1024 ** 3)) * 100)
+      }
+    />
+  );
+}
+
 function mapItemToRow(item: WorkloadListItem): PodRow {
   const {
     phase,
@@ -329,7 +432,6 @@ export default function PodsPage() {
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
-  const now = useNowTicker();
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
 
@@ -373,22 +475,34 @@ export default function PodsPage() {
 
   // 集群列表（供筛选下拉）
   const clustersQuery = useQuery({
+    ...POD_LIST_QUERY_CACHE_OPTIONS,
+    placeholderData: (previousData) => previousData,
     queryKey: ["clusters", "list-for-pods", accessToken],
     queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
+  const clusterItems = clustersQuery.data?.items;
   const clusterFilterOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    [clustersQuery.data],
+    () => (clusterItems ?? []).map((c) => ({ label: c.name, value: c.id })),
+    [clusterItems],
   );
   const clusterMap = useMemo(
-    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name])),
-    [clustersQuery.data],
+    () =>
+      clusterItems
+        ? Object.fromEntries(clusterItems.map((c) => [c.id, c.name]))
+        : EMPTY_CLUSTER_MAP,
+    [clusterItems],
+  );
+  const preferencesClient = useMemo(
+    () => createTablePreferencesClient(accessToken || undefined),
+    [accessToken],
   );
 
   // 查询 Pod 列表
   const podsQuery = useQuery({
+    ...POD_LIST_QUERY_CACHE_OPTIONS,
+    placeholderData: (previousData) => previousData,
     queryKey: [
       "workloads",
       "pods",
@@ -405,7 +519,7 @@ export default function PodsPage() {
     ],
     queryFn: () =>
       getWorkloadsByKind(
-        "Pod" as WorkloadKindParam,
+        POD_KIND as WorkloadKindParam,
         {
           clusterId: clusterId || undefined,
           namespace: namespace.trim() || undefined,
@@ -421,51 +535,56 @@ export default function PodsPage() {
     enabled: !isInitializing && Boolean(accessToken),
   });
   const tableBusy = podsQuery.isFetching;
+  const isTableLoading = podsQuery.isLoading && !podsQuery.data;
+  const refetchPods = podsQuery.refetch;
+  const podItems = podsQuery.data?.items ?? EMPTY_WORKLOAD_ITEMS;
 
   const rows = useMemo<PodRow[]>(
-    () => (podsQuery.data?.items ?? []).map(mapItemToRow),
-    [podsQuery.data],
+    () => podItems.map(mapItemToRow),
+    [podItems],
   );
+  const deferredRows = useDeferredValue(rows);
+  const deferredMergedFilters = useDeferredValue(mergedFilters);
+  const deferredTableFilters = useDeferredValue(tableFilters);
+  const deferredClusterMap = useDeferredValue(clusterMap);
 
   // Extract known namespaces from loaded data for NamespaceSelect suggestions
   const knownNamespaces = useMemo(
     () =>
       Array.from(
-        new Set((podsQuery.data?.items ?? []).map((i) => i.namespace).filter(Boolean)),
+        new Set(podItems.map((i) => i.namespace).filter(Boolean)),
       ),
-    [podsQuery.data],
+    [podItems],
   );
 
   // Client-side filtering applies to the current backend page.
   const tableData = useMemo<PodRow[]>(() => {
-    const nameFilter = getTextFilter(tableFilters, "name");
-    const clusterFilter = getTextFilter(tableFilters, "clusterId");
-    const namespaceFilter = getTextFilter(tableFilters, "namespace");
-    const podIpFilter = getTextFilter(tableFilters, "podIP");
-    const nodeNameFilter = getTextFilter(tableFilters, "nodeName");
-    let nextRows = [...rows];
-    nextRows = nextRows.filter(
+    const nameFilter = getTextFilter(deferredTableFilters, "name");
+    const clusterFilter = getTextFilter(deferredTableFilters, "clusterId");
+    const namespaceFilter = getTextFilter(deferredTableFilters, "namespace");
+    const podIpFilter = getTextFilter(deferredTableFilters, "podIP");
+    const nodeNameFilter = getTextFilter(deferredTableFilters, "nodeName");
+    return deferredRows.filter(
       (row) =>
         textMatches(row.name, nameFilter) &&
-        textMatches(`${row.clusterId} ${getClusterDisplayName(clusterMap, row.clusterId)}`, clusterFilter) &&
+        textMatches(`${row.clusterId} ${getClusterDisplayName(deferredClusterMap, row.clusterId)}`, clusterFilter) &&
         textMatches(row.namespace, namespaceFilter) &&
         textMatches(row.podIP, podIpFilter) &&
-        textMatches(row.nodeName, nodeNameFilter),
+        textMatches(row.nodeName, nodeNameFilter) &&
+        (!phaseFilter || row.phase === phaseFilter) &&
+        (
+          deferredMergedFilters.length === 0 ||
+          deferredMergedFilters.every((lf) => {
+            const itemLabels = (row.labels as Record<string, string> | null | undefined) ?? {};
+            const [k, v] = lf.split("=");
+            return v ? itemLabels[k] === v : k in itemLabels;
+          })
+        ),
     );
-    if (phaseFilter) nextRows = nextRows.filter((row) => row.phase === phaseFilter);
-    if (mergedFilters.length > 0) {
-      nextRows = nextRows.filter((row) => {
-        const itemLabels = (row.labels as Record<string, string> | null | undefined) ?? {};
-        return mergedFilters.every((lf) => {
-          const [k, v] = lf.split("=");
-          return v ? itemLabels[k] === v : k in itemLabels;
-        });
-      });
-    }
-    return nextRows;
-  }, [clusterMap, mergedFilters, phaseFilter, rows, tableFilters]);
+  }, [deferredClusterMap, deferredMergedFilters, deferredRows, deferredTableFilters, phaseFilter]);
+  const deferredTableData = useDeferredValue(tableData);
   const displayedRows = useMemo<PodRow[]>(() => {
-    const rowsToSort = [...tableData];
+    const rowsToSort = [...deferredTableData];
     if (!sortBy || !sortOrder) {
       return rowsToSort;
     }
@@ -491,28 +610,53 @@ export default function PodsPage() {
       }
       return getString(leftValue).localeCompare(getString(rightValue), "zh-Hans-CN") * direction;
     });
-  }, [sortBy, sortOrder, tableData]);
+  }, [deferredTableData, sortBy, sortOrder]);
   const displayedTotal = podsQuery.data?.total ?? tableData.length;
-  const handleGlobalSearchChange = (value: string) => {
+  const nameWidth = useMemo(
+    () => getAdaptiveNameWidth(deferredTableData.map((row) => row.name), { max: 340 }),
+    [deferredTableData],
+  );
+  const handleGlobalSearchChange = useCallback((value: string) => {
     const parsed = parseSearchInput(value);
     setKeywordInput(value);
     resetPage();
     setMergedFilters(parsed.labels);
     setKeyword(parsed.keyword);
-  };
+  }, [resetPage]);
+  const globalSearch = useMemo(
+    () => ({
+      value: keywordInput,
+      onChange: handleGlobalSearchChange,
+      placeholder: "按 Pod 名称/标签搜索（示例：nginx app=web env=prod）",
+    }),
+    [handleGlobalSearchChange, keywordInput],
+  );
+  const handleFiltersChange = useCallback((nextFilters: HeadlampTableFilters) => {
+    setTableFilters(nextFilters);
+    resetPage();
+  }, [resetPage]);
+  const handleScopeApply = useCallback(({ clusterId: nextClusterId, namespace: nextNamespace }: { clusterId: string; namespace: string }) => {
+    onScopeChange(nextClusterId, nextNamespace);
+    resetPage();
+  }, [onScopeChange, resetPage]);
+  const handleResourceTableChange = useCallback<PodTableChangeHandler>(
+    (paginationInfo, filters, sorter, extra) =>
+      handleTableChange(paginationInfo, filters, sorter, extra, tableBusy),
+    [handleTableChange, tableBusy],
+  );
   useSyncResourceFilterUrlState({ clusterId, namespace, keyword });
 
-  const handleDelete = async (row: PodRow) => {
+  const handleDelete = useCallback(async (row: PodRow) => {
     try {
       await deleteWorkload(row.id, accessToken);
       void message.success(`Pod ${row.name} 删除成功`);
-      void podsQuery.refetch();
+      void refetchPods();
     } catch (err) {
       void message.error(err instanceof Error ? err.message : "删除失败，请重试");
     }
-  };
+  }, [accessToken, refetchPods]);
 
-  function buildTerminalParams(row: PodRow): string {
+  const buildTerminalParams = useCallback((row: PodRow): string => {
     return buildTerminalRoute({
       clusterId: row.clusterId,
       clusterName: getClusterDisplayName(clusterMap, row.clusterId),
@@ -520,7 +664,7 @@ export default function PodsPage() {
       pod: row.name,
       containerNames: row.containerNames,
       from: "pods",
-      returnTo: "/workloads/pods",
+      returnTo: POD_PATH,
       returnClusterId: clusterId || row.clusterId,
       returnClusterName: getClusterDisplayName(clusterMap, clusterId || row.clusterId),
       returnNamespace: namespace || row.namespace,
@@ -528,20 +672,20 @@ export default function PodsPage() {
       returnPhase: phaseFilter || undefined,
       returnPage: page,
     }).replace(/^\/terminal\?/, "");
-  }
+  }, [clusterId, clusterMap, keyword, namespace, page, phaseFilter]);
 
-  function buildLogsParams(row: PodRow): string {
+  const buildLogsParams = useCallback((row: PodRow): string => {
     return buildLogsRoute({
       clusterId: row.clusterId,
       clusterName: getClusterDisplayName(clusterMap, row.clusterId),
       namespace: row.namespace,
       pod: row.name,
       containerNames: row.containerNames,
-      resourceKind: "Pod",
+      resourceKind: POD_KIND,
       resourceName: row.name,
       resourceId: row.id,
       from: "pods",
-      returnTo: "/workloads/pods",
+      returnTo: POD_PATH,
       returnClusterId: clusterId || row.clusterId,
       returnClusterName: getClusterDisplayName(clusterMap, clusterId || row.clusterId),
       returnNamespace: namespace || row.namespace,
@@ -551,93 +695,23 @@ export default function PodsPage() {
       tailLines: 200,
       sinceSeconds: 24 * 60 * 60,
     }).replace(/^\/logs\?/, "");
-  }
+  }, [clusterId, clusterMap, keyword, namespace, page, phaseFilter]);
 
-  function resolveIdentity(row: PodRow): ResourceIdentity {
-    return {
-      clusterId: row.clusterId,
-      namespace: row.namespace,
-      kind: "Pod",
-      name: row.name,
-    };
-  }
-
-  function buildActionItems(): NonNullable<MenuProps["items"]> {
-    return [
-      {
-        key: "description",
-        icon: <EyeOutlined />,
-        label: "描述",
-      },
-      {
-        key: "logs",
-        icon: <BugOutlined />,
-        label: "日志",
-      },
-      {
-        key: "terminal",
-        icon: <CodeOutlined />,
-        label: "终端",
-      },
-      {
-        key: "yaml",
-        icon: <FileTextOutlined />,
-        label: "YAML",
-      },
-      {
-        type: "divider",
-      },
-      {
-        key: "delete",
-        icon: <DeleteOutlined />,
-        danger: true,
-        label: "删除",
-      },
-    ];
-  }
-
-  function renderUsageCell(value: number | null, row: PodRow, kind: "cpu" | "memory") {
-    if (!row.usageAvailable || value === null) {
-      return (
-        <Space orientation="vertical" size={2} style={{ width: "100%", alignItems: "flex-start" }}>
-          <OpsFilterChip tone="neutral" style={{ marginInlineEnd: 0 }}>
-            无可用指标
-          </OpsFilterChip>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-            {row.usageNote ?? "等待同步实时指标"}
-          </Typography.Text>
-        </Space>
-      );
-    }
-
-    return (
-      <PodMetricCell
-        kind={kind}
-        value={value}
-        percent={
-          kind === "cpu"
-            ? Math.min(100, Math.max(0, value * 100))
-            : Math.min(100, (value / (1024 ** 3)) * 100)
-        }
-      />
-    );
-  }
-
-  const columns: Array<HeadlampResourceTableColumn<PodRow>> = [
+  const columns: Array<HeadlampResourceTableColumn<PodRow>> = useMemo(() => [
     {
       title: "Pod 名称",
       dataIndex: "name",
       key: "name",
       required: true,
       filter: { type: "text", placeholder: "以名称过滤" },
-      width: getAdaptiveNameWidth(tableData.map((row) => row.name), { max: 340 }),
+      width: nameWidth,
       align: "left",
       ellipsis: true,
       ...getSortableColumnProps("name"),
-      render: (name: string, row: PodRow) =>
+      render: (_name: string, row: PodRow) =>
         row.id ? (
           <Typography.Link
-            onClick={() => setDetailTarget({ kind: "Pod", id: row.id })}
+            onClick={() => setDetailTarget({ kind: POD_KIND, id: row.id })}
             style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}
           >
             {row.name}
@@ -744,7 +818,7 @@ export default function PodsPage() {
       width: TABLE_COL_WIDTH.time,
       align: "left",
       ...getSortableColumnProps("createdAt"),
-      render: (v: string) => <ResourceTimeCell value={v} now={now} mode="relative" />,
+      render: (v: string) => <PodCreatedAtCell value={v} />,
     },
     {
       title: "操作",
@@ -755,10 +829,10 @@ export default function PodsPage() {
       align: "left",
       render: (_: unknown, row: PodRow) => (
         <OpsActionDropdown
-          items={buildActionItems()}
+          items={POD_ACTION_ITEMS}
           onClick={({ key }) => {
             if (key === "description") {
-              if (row.id) setDetailTarget({ kind: "Pod", id: row.id });
+              if (row.id) setDetailTarget({ kind: POD_KIND, id: row.id });
               return;
             }
             if (key === "logs") {
@@ -789,13 +863,21 @@ export default function PodsPage() {
         />
       ),
     },
-  ];
+  ], [buildLogsParams, buildTerminalParams, clusterMap, getSortableColumnProps, handleDelete, nameWidth, router]);
+  const loadingState = useMemo(
+    () => ({ spinning: isTableLoading, description: "Pod 数据加载中..." }),
+    [isTableLoading],
+  );
+  const sortState = useMemo(
+    () => ({ sortBy, sortOrder }),
+    [sortBy, sortOrder],
+  );
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
       <Card className="cyber-panel">
         <ResourcePageHeader
-          path="/workloads/pods"
+          path={POD_PATH}
           embedded
           description="查看和管理集群中运行的 Pod 实例。"
           style={{ marginBottom: 12 }}
@@ -814,10 +896,7 @@ export default function PodsPage() {
           knownNamespaces={knownNamespaces}
           namespaceDisabled={namespaceDisabled}
           namespacePlaceholder={namespacePlaceholder}
-          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-            onScopeChange(nextClusterId, nextNamespace);
-            resetPage();
-          }}
+          onApply={handleScopeApply}
         />
 
         {!isInitializing && !accessToken ? (
@@ -836,30 +915,24 @@ export default function PodsPage() {
           />
         ) : null}
 
-        <ResourceTable<PodRow>
-          rowKey="key"
-          tableKey="workloads.pods"
-          bordered
-          columns={columns as ColumnsType<PodRow>}
-          dataSource={displayedRows}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按 Pod 名称/标签搜索（示例：nginx app=web env=prod）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          loading={{ spinning: podsQuery.isLoading && !podsQuery.data, description: "Pod 数据加载中..." }}
-          onChange={(paginationInfo, filters, sorter, extra) =>
-            handleTableChange(paginationInfo, filters, sorter, extra, tableBusy)
-          }
-          pagination={getPaginationConfig(displayedTotal, tableBusy)}
-          emptyDescription="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。"
-        />
+        <PodTimeProvider>
+          <ResourceTable<PodRow>
+            rowKey="key"
+            tableKey={POD_TABLE_KEY}
+            bordered
+            columns={columns as ColumnsType<PodRow>}
+            dataSource={displayedRows}
+            preferencesClient={preferencesClient}
+            globalSearch={globalSearch}
+            filters={tableFilters}
+            onFiltersChange={handleFiltersChange}
+            sort={sortState}
+            loading={loadingState}
+            onChange={handleResourceTableChange}
+            pagination={getPaginationConfig(displayedTotal, tableBusy)}
+            emptyDescription="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。"
+          />
+        </PodTimeProvider>
       </Card>
 
       <ResourceDetailDrawer
@@ -877,7 +950,7 @@ export default function PodsPage() {
         token={accessToken || undefined}
         onUpdated={() => {
           void message.success("YAML 更新成功");
-          void podsQuery.refetch();
+          void refetchPods();
         }}
       />
     </Space>
