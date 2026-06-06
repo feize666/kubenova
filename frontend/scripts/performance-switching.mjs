@@ -56,17 +56,13 @@ const warmupCount = readNonNegativeInt("PERF_WARMUP_COUNT", 1);
 const settleMs = readNonNegativeInt("PERF_SETTLE_MS", 150);
 const closedMenuLinkProbeMs = readPositiveInt("PERF_CLOSED_MENU_LINK_PROBE_MS", 80);
 const routes = readRoutes();
-const outputPath =
-  process.env.PERF_OUTPUT ||
-  join(
-    tmpdir(),
-    "k8s-aiops-manager",
-    "performance-switching",
-    `${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "")}.json`,
-  );
+const outputPath = resolveOutputPath();
 const budgets = {
   maxP95Ms: readOptionalPositiveInt("PERF_MAX_P95_MS"),
   maxRouteMs: readOptionalPositiveInt("PERF_MAX_ROUTE_MS"),
+  maxRouteRequests: readOptionalNonNegativeInt("PERF_MAX_ROUTE_REQUESTS"),
+  maxRouteApiRequests: readOptionalNonNegativeInt("PERF_MAX_ROUTE_API_REQUESTS"),
+  maxSlowRequestMs: readOptionalPositiveInt("PERF_MAX_SLOW_REQUEST_MS"),
   maxConsoleErrors: readOptionalNonNegativeInt("PERF_MAX_CONSOLE_ERRORS") ?? 0,
 };
 
@@ -161,6 +157,15 @@ function readRoutes() {
   return parsed;
 }
 
+function resolveOutputPath() {
+  const explicitPath = process.env.PERF_OUTPUT?.trim();
+  if (explicitPath) return explicitPath;
+
+  const outputDir =
+    process.env.PERF_OUTPUT_DIR?.trim() || join(tmpdir(), "k8s-aiops-manager", "performance-switching");
+  return join(outputDir, `${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "")}.json`);
+}
+
 function percentile(values, p) {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((left, right) => left - right);
@@ -177,33 +182,114 @@ function formatBudgetValue(value) {
 }
 
 function describeBudgets() {
-  return `maxP95Ms=${formatBudgetValue(budgets.maxP95Ms)} maxRouteMs=${formatBudgetValue(budgets.maxRouteMs)} maxConsoleErrors=${budgets.maxConsoleErrors}`;
+  return [
+    `maxP95Ms=${formatBudgetValue(budgets.maxP95Ms)}`,
+    `maxRouteMs=${formatBudgetValue(budgets.maxRouteMs)}`,
+    `maxRouteRequests=${formatBudgetValue(budgets.maxRouteRequests)}`,
+    `maxRouteApiRequests=${formatBudgetValue(budgets.maxRouteApiRequests)}`,
+    `maxSlowRequestMs=${formatBudgetValue(budgets.maxSlowRequestMs)}`,
+    `maxConsoleErrors=${budgets.maxConsoleErrors}`,
+  ].join(" ");
+}
+
+function formatRequestBrief(request) {
+  const status = request.status === undefined ? request.failureText || "pending" : request.status;
+  return `${request.method} ${request.path} ${request.durationMs ?? "?"}ms status=${status} type=${request.type}`;
+}
+
+function formatSampleBrief(sample) {
+  const topRequests = (sample.topRequests || []).slice(0, 3).map(formatRequestBrief).join(" | ");
+  return [
+    `${sample.route}:${sample.durationMs}ms`,
+    `mode=${sample.navMode}`,
+    `requests=${sample.requestCount}`,
+    `api=${sample.apiRequestCount}`,
+    `xhrFetch=${sample.xhrFetchCount}`,
+    topRequests ? `top=[${topRequests}]` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function summarizeSlowSamples(samples, limit = 8) {
+  return [...samples].sort((left, right) => right.durationMs - left.durationMs).slice(0, limit).map(formatSampleBrief);
+}
+
+function summarizeSlowRequests(samples, limit = 12) {
+  return samples
+    .flatMap((sample) =>
+      (sample.topRequests || []).map((request) => ({
+        route: sample.route,
+        ...request,
+      })),
+    )
+    .filter((request) => request.durationMs !== undefined)
+    .sort((left, right) => right.durationMs - left.durationMs)
+    .slice(0, limit)
+    .map((request) => `${request.route} ${formatRequestBrief(request)}`);
 }
 
 function assessPerformanceBudgets(summary) {
   const failures = [];
   if (budgets.maxP95Ms !== null && summary.p95Ms > budgets.maxP95Ms) {
-    failures.push(`p95Ms=${summary.p95Ms}ms > PERF_MAX_P95_MS=${budgets.maxP95Ms}ms`);
+    failures.push(`p95Ms=${summary.p95Ms}ms > PERF_MAX_P95_MS=${budgets.maxP95Ms}ms slowest=${summary.slowestSamples[0] ?? ""}`);
   }
   if (budgets.maxRouteMs !== null) {
     const slowRoutes = summary.samples
       .filter((sample) => sample.durationMs > budgets.maxRouteMs)
       .sort((left, right) => right.durationMs - left.durationMs);
     if (slowRoutes.length > 0) {
-      const examples = slowRoutes
-        .slice(0, 5)
-        .map((sample) => `${sample.route}:${sample.durationMs}ms`)
-        .join(", ");
+      const examples = slowRoutes.slice(0, 5).map(formatSampleBrief).join("; ");
       failures.push(`route samples over PERF_MAX_ROUTE_MS=${budgets.maxRouteMs}ms count=${slowRoutes.length} slowest=${examples}`);
+    }
+  }
+  if (budgets.maxRouteRequests !== null) {
+    const heavyRoutes = summary.samples
+      .filter((sample) => sample.requestCount > budgets.maxRouteRequests)
+      .sort((left, right) => right.requestCount - left.requestCount);
+    if (heavyRoutes.length > 0) {
+      failures.push(
+        `route request budget exceeded PERF_MAX_ROUTE_REQUESTS=${budgets.maxRouteRequests} count=${heavyRoutes.length} heaviest=${heavyRoutes
+          .slice(0, 5)
+          .map(formatSampleBrief)
+          .join("; ")}`,
+      );
+    }
+  }
+  if (budgets.maxRouteApiRequests !== null) {
+    const apiHeavyRoutes = summary.samples
+      .filter((sample) => sample.apiRequestCount > budgets.maxRouteApiRequests)
+      .sort((left, right) => right.apiRequestCount - left.apiRequestCount);
+    if (apiHeavyRoutes.length > 0) {
+      failures.push(
+        `route API budget exceeded PERF_MAX_ROUTE_API_REQUESTS=${budgets.maxRouteApiRequests} count=${apiHeavyRoutes.length} heaviest=${apiHeavyRoutes
+          .slice(0, 5)
+          .map(formatSampleBrief)
+          .join("; ")}`,
+      );
+    }
+  }
+  if (budgets.maxSlowRequestMs !== null) {
+    const slowRequests = summary.samples
+      .flatMap((sample) => (sample.topRequests || []).map((request) => ({ route: sample.route, ...request })))
+      .filter((request) => (request.durationMs ?? 0) > budgets.maxSlowRequestMs)
+      .sort((left, right) => (right.durationMs ?? 0) - (left.durationMs ?? 0));
+    if (slowRequests.length > 0) {
+      failures.push(
+        `slow request budget exceeded PERF_MAX_SLOW_REQUEST_MS=${budgets.maxSlowRequestMs}ms count=${slowRequests.length} slowest=${slowRequests
+          .slice(0, 5)
+          .map((request) => `${request.route} ${formatRequestBrief(request)}`)
+          .join("; ")}`,
+      );
     }
   }
   if (summary.consoleErrorCount > budgets.maxConsoleErrors) {
     failures.push(
-      `consoleErrorCount=${summary.consoleErrorCount} > PERF_MAX_CONSOLE_ERRORS=${budgets.maxConsoleErrors} firstConsole="${summary.consoleErrors[0] ?? ""}"`,
+      `consoleErrorCount=${summary.consoleErrorCount} > PERF_MAX_CONSOLE_ERRORS=${budgets.maxConsoleErrors} firstConsole="${summary.consoleErrors[0] ?? ""}" slowest=${summary.slowestSamples[0] ?? ""}`,
     );
   }
   if (summary.pageErrorCount > 0) {
-    failures.push(`pageErrorCount=${summary.pageErrorCount} > 0 firstPage="${summary.pageErrors[0] ?? ""}"`);
+    failures.push(`pageErrorCount=${summary.pageErrorCount} > 0 firstPage="${summary.pageErrors[0] ?? ""}" slowest=${summary.slowestSamples[0] ?? ""}`);
   }
   return failures;
 }
@@ -598,6 +684,8 @@ async function main() {
       requestCount: requests.length,
       budgets,
       samples,
+      slowestSamples: summarizeSlowSamples(samples),
+      slowestRequests: summarizeSlowRequests(samples),
       consoleErrors,
       pageErrors,
       generatedAt: new Date().toISOString(),

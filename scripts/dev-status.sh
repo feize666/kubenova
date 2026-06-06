@@ -15,12 +15,20 @@ CONTROL_API_PORT="${CONTROL_API_PORT:-4000}"
 RUNTIME_GATEWAY_PORT="${RUNTIME_GATEWAY_PORT:-4100}"
 FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-dev}"
 USE_TMUX="${USE_TMUX:-false}"
+SERVICE_STATUS_ADOPT="${SERVICE_STATUS_ADOPT:-false}"
 SERVICE_LOG_SUFFIX="dev"
 source "$ROOT_DIR/scripts/_service-lib.sh"
 service_lib_init
+
+echo "开发服务状态"
+echo "  root: $ROOT_DIR"
+echo "  ports: frontend=$FRONTEND_PORT control-api=$CONTROL_API_PORT runtime-gateway=$RUNTIME_GATEWAY_PORT"
+echo "  status adopt: $SERVICE_STATUS_ADOPT (false=只检测，不接管监听 pid)"
+echo
 
 check_service_status "frontend" "$FRONTEND_PORT"
 check_service_status "control-api" "$CONTROL_API_PORT"
 check_service_status "runtime-gateway" "$RUNTIME_GATEWAY_PORT"
 
+echo
 service_log_dirs_summary

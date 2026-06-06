@@ -44,9 +44,23 @@ bash scripts/service.sh prod status
 - `db-init.sh`：初始化或重置本地 PostgreSQL + Prisma
 - `dev-up.sh`：启动开发环境服务
 - `dev-down.sh`：停止开发环境服务
-- `dev-status.sh`：查看开发环境状态，输出 pid、端口、健康状态、前端启动模式、CPU/RSS；无监听残留只报告不停止
+- `dev-status.sh`：查看开发环境状态，输出 pid、端口、健康状态、启动模式、进程数、CPU/RSS；默认 `SERVICE_STATUS_ADOPT=false`，只检测不接管监听 pid，无监听残留只报告不停止
 - `topology-verify.sh`：资源全景图关键静态校验
 - `topology-clean-artifacts.sh`：清理拓扑调试产物
+
+## 前端守卫
+
+在 `frontend/` 下运行：
+
+```bash
+npm run check:navigation
+npm run e2e:performance:switching:smoke
+npm run e2e:performance:switching:budget
+```
+
+- `check:navigation` 默认不写产物；需要 JSON 摘要时设置 `CHECK_NAVIGATION_OUTPUT=1`，文件写入系统临时目录，也可显式传路径
+- `e2e:performance:switching` 默认摘要写入系统临时目录；可用 `PERF_OUTPUT` 指定文件或 `PERF_OUTPUT_DIR` 指定目录
+- `e2e:performance:switching:budget` 默认启用 p95、单路由耗时、请求数、API 请求数、慢请求和 console error 预算；阈值可用同名 `PERF_MAX_*` 环境变量覆盖
 
 ## 正式链路
 

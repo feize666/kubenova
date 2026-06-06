@@ -5,6 +5,7 @@ service_lib_init() {
   : "${RUN_DIR:=$ROOT_DIR/.run}"
   : "${SERVICE_PID_SUFFIX:=}"
   : "${SERVICE_LOG_SUFFIX:=}"
+  : "${SERVICE_STATUS_ADOPT:=true}"
   mkdir -p "$RUN_DIR"
 }
 
@@ -375,7 +376,7 @@ process_resources_text() {
   if (( live == 0 )); then
     return 0
   fi
-  echo "cpu=${total_cpu}% rss=$(format_rss_kib "$total_rss")"
+  echo "pids=$live cpu=${total_cpu}% rss=$(format_rss_kib "$total_rss")"
 }
 
 service_mode_text() {
@@ -717,7 +718,7 @@ check_service_status() {
       local unmanaged_resources unmanaged_mode
       unmanaged_resources="$(process_resources_text "$pid")"
       unmanaged_mode="$(service_mode_text "$name" "$pid")"
-      echo "[$name] 未受管 pid=$pid port=$port health=$(health_text "$health_url")${unmanaged_mode:+ $unmanaged_mode}${unmanaged_resources:+ $unmanaged_resources}"
+      echo "[$name] 未受管 pid=$pid port=$port health=$(health_text "$health_url") scope=external${unmanaged_mode:+ $unmanaged_mode}${unmanaged_resources:+ $unmanaged_resources}"
     fi
     return
   fi
@@ -728,7 +729,7 @@ check_service_status() {
     local stale_resources stale_mode
     stale_resources="$(process_resources_text "${stale_pids[@]}")"
     stale_mode="$(service_mode_text "$name" "${stale_pids[@]}")"
-    echo "[$name] 残留 pids=$(join_pids "${stale_pids[@]}") port=$port${stale_mode:+ $stale_mode}${stale_resources:+ $stale_resources}"
+    echo "[$name] 残留 pids=$(join_pids "${stale_pids[@]}") port=$port no-listener=true${stale_mode:+ $stale_mode}${stale_resources:+ $stale_resources}"
     return
   fi
 

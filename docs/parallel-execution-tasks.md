@@ -133,3 +133,13 @@
   - 5-sample: `p50=425ms`, `p95=501ms`, `max=1628ms`, console/page errors `0`.
   - 3-sample: `p50=430ms`, `p95=487ms`, `max=1908ms`, console/page errors `0`.
 - [x] Resource sample: frontend `125MiB`, control-api `355MiB`, runtime-gateway `29MiB`.
+
+## 2026-06-06 Round 3 Probe Guard Hardening
+
+- [x] Add frontend npm shortcuts for route-switching smoke and budget probes.
+- [x] Keep performance summaries in system tmp by default, with `PERF_OUTPUT_DIR` override.
+- [x] Add optional route request, route API request, and slow request budgets.
+- [x] Include slow route/API/resource request detail in performance budget failure summaries.
+- [x] Add optional navigation JSON summary output; `CHECK_NAVIGATION_OUTPUT=1` writes to system tmp.
+- [x] Make dev status read-only by default with `SERVICE_STATUS_ADOPT=false`, so status detection does not adopt external listeners into pid files.
+- [x] Make dev status output easier to scan with ports, adopt mode, process count, CPU, and RSS.
