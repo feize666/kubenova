@@ -12,8 +12,10 @@ import {
   Typography,
   message,
 } from "antd";
+import type { TableProps } from "antd";
+import type { SortOrder as AntdSortOrder } from "antd/es/table/interface";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useDeferredValue, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
   matchLabelExpressions,
@@ -37,6 +39,7 @@ import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resource
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { QUERY_CACHE_TIMINGS } from "@/lib/query";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
@@ -52,6 +55,28 @@ interface ServiceFormValues {
   type: "ClusterIP" | "NodePort" | "LoadBalancer";
 }
 
+const SERVICE_KIND = "Service";
+const SERVICE_PATH = "/network/services";
+const SERVICE_TABLE_KEY = "network.services";
+const EMPTY_NETWORK_RESOURCES: NetworkResource[] = [];
+const EMPTY_CLUSTER_MAP: Record<string, string> = {};
+const SERVICE_TYPE_OPTIONS = [
+  { label: "ClusterIP", value: "ClusterIP" },
+  { label: "NodePort", value: "NodePort" },
+  { label: "LoadBalancer", value: "LoadBalancer" },
+] satisfies Array<{ label: ServiceFormValues["type"]; value: ServiceFormValues["type"] }>;
+const SERVICE_SORT_DIRECTIONS: AntdSortOrder[] = ["ascend", "descend", null];
+type ServiceTableChangeHandler = NonNullable<TableProps<NetworkResource>["onChange"]>;
+const ServiceNowContext = createContext<number | undefined>(undefined);
+const SERVICE_LIST_QUERY_CACHE_OPTIONS = {
+  staleTime: QUERY_CACHE_TIMINGS.listStaleTimeMs,
+  gcTime: QUERY_CACHE_TIMINGS.listGcTimeMs,
+  refetchOnMount: false,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: true,
+  retry: 1,
+} as const;
+
 function getTextFilter(filters: HeadlampTableFilters, key: string) {
   const value = filters[key];
   return typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -61,13 +86,58 @@ function textMatches(value: unknown, filterValue: string) {
   return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
 }
 
+function getServiceSortOrder(
+  columnKey: string,
+  sortBy: string | undefined,
+  sortOrder: "asc" | "desc" | undefined,
+): AntdSortOrder {
+  if (sortBy !== columnKey) {
+    return null;
+  }
+  if (sortOrder === "asc") {
+    return "ascend";
+  }
+  if (sortOrder === "desc") {
+    return "descend";
+  }
+  return null;
+}
+
+function getServiceSortableColumnProps(
+  columnKey: string,
+  sortBy: string | undefined,
+  sortOrder: "asc" | "desc" | undefined,
+  busy: boolean,
+) {
+  return {
+    sorter: true as const,
+    sortDirections: SERVICE_SORT_DIRECTIONS,
+    sortOrder: getServiceSortOrder(columnKey, sortBy, sortOrder),
+    onHeaderCell: () => ({
+      style: {
+        cursor: busy ? "not-allowed" : "pointer",
+        pointerEvents: busy ? ("none" as const) : undefined,
+      },
+    }),
+  };
+}
+
+function ServiceCreatedAtCell({ value }: { value: string }) {
+  const now = useContext(ServiceNowContext);
+  return <ResourceTimeCell value={value} now={now} mode="relative" />;
+}
+
+function ServiceTimeProvider({ children }: { children: ReactNode }) {
+  const now = useNowTicker();
+  return <ServiceNowContext.Provider value={now}>{children}</ServiceNowContext.Provider>;
+}
+
 export default function ServicesPage() {
   const searchParams = useSearchParams();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
-  const now = useNowTicker();
   const { clusterId, namespace, namespaceDisabled, onClusterChange, onNamespaceChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [keyword, setKeyword] = useState(initialKeyword);
@@ -80,7 +150,6 @@ export default function ServicesPage() {
     sortOrder,
     pagination,
     resetPage,
-    getSortableColumnProps,
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<NetworkResource>({
@@ -92,48 +161,62 @@ export default function ServicesPage() {
   const [editingItem, setEditingItem] = useState<NetworkResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<ServiceFormValues>();
+  const page = pagination.pageIndex + 1;
+  const serviceListParams = useMemo(
+    () => ({
+      kind: SERVICE_KIND,
+      clusterId: clusterId || undefined,
+      keyword: keyword.trim() || undefined,
+      namespace: namespace.trim() || undefined,
+      page,
+      pageSize: pagination.pageSize,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined,
+    }),
+    [clusterId, keyword, namespace, page, pagination.pageSize, sortBy, sortOrder],
+  );
 
   const { data, isLoading, isError, error, refetch } = useQuery({
+    ...SERVICE_LIST_QUERY_CACHE_OPTIONS,
+    placeholderData: (previousData) => previousData,
     queryKey: [
       "network",
-      "Service",
-      {
-        clusterId,
-        keyword,
-        namespace,
-        page: pagination.pageIndex + 1,
-        pageSize: pagination.pageSize,
-        sortBy,
-        sortOrder,
-      },
+      SERVICE_KIND,
+      serviceListParams,
       accessToken,
     ],
     queryFn: () =>
       getNetworkResources(
-        {
-          kind: "Service",
-          clusterId: clusterId || undefined,
-          keyword: keyword.trim() || undefined,
-          namespace: namespace.trim() || undefined,
-          page: pagination.pageIndex + 1,
-          pageSize: pagination.pageSize,
-          sortBy: sortBy || undefined,
-          sortOrder: sortOrder || undefined,
-        },
+        serviceListParams,
         accessToken || undefined,
     ),
     enabled: !isInitializing && Boolean(accessToken),
   });
+  const isTableBusy = isLoading && !data;
 
   const clustersQuery = useQuery({
+    ...SERVICE_LIST_QUERY_CACHE_OPTIONS,
+    placeholderData: (previousData) => previousData,
     queryKey: ["clusters", "all", accessToken],
     queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken!),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
-  const clusterFilterOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
-    [clustersQuery.data],
+  const clusterItems = clustersQuery.data?.items;
+  const clusterOptions = useMemo(
+    () => (clusterItems ?? []).map((c) => ({ label: c.name, value: c.id })),
+    [clusterItems],
+  );
+  const clusterMap = useMemo(
+    () =>
+      clusterItems
+        ? Object.fromEntries(clusterItems.map((c) => [c.id, c.name]))
+        : EMPTY_CLUSTER_MAP,
+    [clusterItems],
+  );
+  const preferencesClient = useMemo(
+    () => createTablePreferencesClient(accessToken || undefined),
+    [accessToken],
   );
 
   const createMutation = useMutation({
@@ -144,7 +227,7 @@ export default function ServicesPage() {
       setModalOpen(false);
       form.resetFields();
       void queryClient.invalidateQueries({
-        queryKey: ["network", "Service"],
+        queryKey: ["network", SERVICE_KIND],
       });
     },
     onError: (err) => {
@@ -157,13 +240,14 @@ export default function ServicesPage() {
     onSuccess: () => {
       void message.success("Service 删除成功");
       void queryClient.invalidateQueries({
-        queryKey: ["network", "Service"],
+        queryKey: ["network", SERVICE_KIND],
       });
     },
     onError: (err) => {
       void message.error(err instanceof Error ? err.message : "删除失败，请重试");
     },
   });
+  const deleteService = deleteMutation.mutate;
 
   const updateMutation = useMutation({
     mutationFn: ({ item, values }: { item: NetworkResource; values: ServiceFormValues }) =>
@@ -171,12 +255,12 @@ export default function ServicesPage() {
         {
           clusterId: item.clusterId,
           namespace: item.namespace,
-          kind: "Service",
+          kind: SERVICE_KIND,
           name: item.name,
           yaml: JSON.stringify(
             {
               apiVersion: "v1",
-              kind: "Service",
+              kind: SERVICE_KIND,
               metadata: {
                 name: item.name,
                 namespace: item.namespace,
@@ -199,7 +283,7 @@ export default function ServicesPage() {
       setEditingItem(null);
       form.resetFields();
       await queryClient.invalidateQueries({
-        queryKey: ["network", "Service"],
+        queryKey: ["network", SERVICE_KIND],
       });
     },
     onError: (err) => {
@@ -207,13 +291,13 @@ export default function ServicesPage() {
     },
   });
 
-  const handleOpenCreate = () => {
+  const handleOpenCreate = useCallback(() => {
     setEditingItem(null);
     form.resetFields();
     setModalOpen(true);
-  };
+  }, [form]);
 
-  const handleOpenEdit = (item: NetworkResource) => {
+  const handleOpenEdit = useCallback((item: NetworkResource) => {
     setEditingItem(item);
     form.setFieldsValue({
       name: item.name,
@@ -225,9 +309,9 @@ export default function ServicesPage() {
           : "ClusterIP",
     });
     setModalOpen(true);
-  };
+  }, [form]);
 
-  const handleModalSubmit = async () => {
+  const handleModalSubmit = useCallback(async () => {
     let values: ServiceFormValues;
     try {
       values = await form.validateFields();
@@ -241,143 +325,173 @@ export default function ServicesPage() {
     createMutation.mutate({
       clusterId: values.clusterId,
       namespace: values.namespace,
-      kind: "Service",
+      kind: SERVICE_KIND,
       name: values.name,
       spec: { type: values.type },
     });
-  };
+  }, [createMutation, editingItem, form, updateMutation]);
 
-  const clusterOptions = (clustersQuery.data?.items ?? []).map((c) => ({
-    label: c.name,
-    value: c.id,
-  }));
-
-  const clusterMap = Object.fromEntries(
-    (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
-  );
+  const serviceItems = data?.items ?? EMPTY_NETWORK_RESOURCES;
+  const deferredServiceItems = useDeferredValue(serviceItems);
+  const deferredMergedFilters = useDeferredValue(mergedFilters);
+  const deferredTableFilters = useDeferredValue(tableFilters);
+  const deferredClusterMap = useDeferredValue(clusterMap);
   const knownNamespaces = useMemo(
     () =>
-      Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean))),
-    [data?.items],
+      Array.from(new Set(serviceItems.map((i) => i.namespace).filter(Boolean))),
+    [serviceItems],
   );
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter(
+      deferredServiceItems.filter(
         (item) =>
-          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters) &&
-          textMatches(item.name, getTextFilter(tableFilters, "name")) &&
-          textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
-          textMatches(item.namespace, getTextFilter(tableFilters, "namespace")) &&
-          textMatches("Service", getTextFilter(tableFilters, "kind")),
+          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, deferredMergedFilters) &&
+          textMatches(item.name, getTextFilter(deferredTableFilters, "name")) &&
+          textMatches(getClusterDisplayName(deferredClusterMap, item.clusterId), getTextFilter(deferredTableFilters, "clusterId")) &&
+          textMatches(item.namespace, getTextFilter(deferredTableFilters, "namespace")) &&
+          textMatches(SERVICE_KIND, getTextFilter(deferredTableFilters, "kind")),
       ),
-    [clusterMap, data?.items, mergedFilters, tableFilters],
+    [deferredClusterMap, deferredMergedFilters, deferredServiceItems, deferredTableFilters],
   );
+  const deferredTableData = useDeferredValue(tableData);
   const nameWidth = useMemo(
-    () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 320 }),
-    [tableData],
+    () => getAdaptiveNameWidth(deferredTableData.map((item) => item.name), { max: 320 }),
+    [deferredTableData],
   );
-  const handleSearch = () => {
+  const handleSearch = useCallback(() => {
     const parsed = parseResourceSearchInput(keywordInput);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
-  };
-  const handleGlobalSearchChange = (value: string) => {
+  }, [keywordInput, resetPage]);
+  const handleGlobalSearchChange = useCallback((value: string) => {
     const parsed = parseResourceSearchInput(value);
     setKeywordInput(value);
     resetPage();
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
-  };
+  }, [resetPage]);
+  const handleClusterChange = useCallback((value: string) => {
+    onClusterChange(value);
+    resetPage();
+  }, [onClusterChange, resetPage]);
+  const handleNamespaceChange = useCallback((value: string) => {
+    onNamespaceChange(value);
+    resetPage();
+  }, [onNamespaceChange, resetPage]);
+  const handleFiltersChange = useCallback((nextFilters: HeadlampTableFilters) => {
+    setTableFilters(nextFilters);
+    resetPage();
+  }, [resetPage]);
+  const globalSearch = useMemo(
+    () => ({
+      value: keywordInput,
+      onChange: handleGlobalSearchChange,
+      placeholder: "按名称/标签搜索（示例：svc-a app=web env=prod）",
+    }),
+    [handleGlobalSearchChange, keywordInput],
+  );
+  const sortState = useMemo(
+    () => ({ sortBy, sortOrder }),
+    [sortBy, sortOrder],
+  );
+  const handleResourceTableChange = useCallback<ServiceTableChangeHandler>(
+    (nextPagination, filters, sorter, extra) =>
+      handleTableChange(nextPagination, filters, sorter, extra, isTableBusy),
+    [handleTableChange, isTableBusy],
+  );
   useSyncResourceFilterUrlState({
     clusterId,
     namespace,
     keyword,
-    path: "/network/services",
+    path: SERVICE_PATH,
   });
 
-  const columns: HeadlampResourceTableColumn<NetworkResource>[] = [
-    {
-      title: "服务名称",
-      dataIndex: "name",
-      key: "name",
-      required: true,
-      filter: { type: "text", placeholder: "名称" },
-      width: nameWidth,
-      ellipsis: true,
-      ...getSortableColumnProps("name", isLoading && !data),
-      render: (name: string, row: NetworkResource) =>
-        row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "Service", id: row.id })}>
-            {name}
-          </Typography.Link>
-        ) : (
-          name
+  const columns: HeadlampResourceTableColumn<NetworkResource>[] = useMemo(
+    () => [
+      {
+        title: "服务名称",
+        dataIndex: "name",
+        key: "name",
+        required: true,
+        filter: { type: "text", placeholder: "名称" },
+        width: nameWidth,
+        ellipsis: true,
+        ...getServiceSortableColumnProps("name", sortBy, sortOrder, isTableBusy),
+        render: (name: string, row: NetworkResource) =>
+          row.id ? (
+            <Typography.Link onClick={() => setDetailTarget({ kind: SERVICE_KIND, id: row.id })}>
+              {name}
+            </Typography.Link>
+          ) : (
+            name
+          ),
+      },
+      {
+        title: "集群",
+        key: "clusterId",
+        filter: { type: "text", placeholder: "集群" },
+        width: TABLE_COL_WIDTH.cluster,
+        ...getServiceSortableColumnProps("clusterId", sortBy, sortOrder, isTableBusy),
+        render: (_: unknown, row: NetworkResource) => getClusterDisplayName(clusterMap, row.clusterId),
+      },
+      {
+        title: "名称空间",
+        dataIndex: "namespace",
+        key: "namespace",
+        filter: { type: "text", placeholder: "名称空间" },
+        width: TABLE_COL_WIDTH.namespace,
+        ...getServiceSortableColumnProps("namespace", sortBy, sortOrder, isTableBusy),
+      },
+      {
+        title: "类型",
+        key: "kind",
+        filter: { type: "text", placeholder: "类型" },
+        width: TABLE_COL_WIDTH.type,
+        render: () => <OpsFilterChip tone="info">{SERVICE_KIND}</OpsFilterChip>,
+      },
+      {
+        title: "创建时间",
+        dataIndex: "createdAt",
+        key: "createdAt",
+        width: TABLE_COL_WIDTH.time,
+        ...getServiceSortableColumnProps("createdAt", sortBy, sortOrder, isTableBusy),
+        render: (value: string) => <ServiceCreatedAtCell value={value} />,
+      },
+      {
+        title: "操作",
+        key: "actions",
+        required: true,
+        width: TABLE_COL_WIDTH.actionCompact,
+        align: "left",
+        fixed: "right",
+        render: (_: unknown, row: NetworkResource) => (
+          <ResourceRowActions
+            deleteLabel="删除"
+            deleteTitle="删除 Service"
+            deleteContent={`确认删除 Service「${row.name}」吗？此操作不可恢复。`}
+            onYaml={() =>
+              setYamlTarget({
+                clusterId: row.clusterId,
+                namespace: row.namespace,
+                kind: SERVICE_KIND,
+                name: row.name,
+              })
+            }
+            extraActions={[{ key: "edit", label: "编辑", onClick: () => handleOpenEdit(row) }]}
+            onDelete={() => deleteService(row.id)}
+          />
         ),
-    },
-    {
-      title: "集群",
-      key: "clusterId",
-      filter: { type: "text", placeholder: "集群" },
-      width: TABLE_COL_WIDTH.cluster,
-      ...getSortableColumnProps("clusterId", isLoading && !data),
-      render: (_: unknown, row: NetworkResource) => getClusterDisplayName(clusterMap, row.clusterId),
-    },
-    {
-      title: "名称空间",
-      dataIndex: "namespace",
-      key: "namespace",
-      filter: { type: "text", placeholder: "名称空间" },
-      width: TABLE_COL_WIDTH.namespace,
-      ...getSortableColumnProps("namespace", isLoading && !data),
-    },
-    {
-      title: "类型",
-      key: "kind",
-      filter: { type: "text", placeholder: "类型" },
-      width: TABLE_COL_WIDTH.type,
-      render: () => <OpsFilterChip tone="info">Service</OpsFilterChip>,
-    },
-    {
-      title: "创建时间",
-      dataIndex: "createdAt",
-      key: "createdAt",
-      width: TABLE_COL_WIDTH.time,
-      ...getSortableColumnProps("createdAt", isLoading && !data),
-      render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
-    },
-    {
-      title: "操作",
-      key: "actions",
-      required: true,
-      width: TABLE_COL_WIDTH.actionCompact,
-      align: "left",
-      fixed: "right",
-      render: (_: unknown, row: NetworkResource) => (
-        <ResourceRowActions
-          deleteLabel="删除"
-          deleteTitle="删除 Service"
-          deleteContent={`确认删除 Service「${row.name}」吗？此操作不可恢复。`}
-          onYaml={() =>
-            setYamlTarget({
-              clusterId: row.clusterId,
-              namespace: row.namespace,
-              kind: "Service",
-              name: row.name,
-            })
-          }
-          extraActions={[{ key: "edit", label: "编辑", onClick: () => handleOpenEdit(row) }]}
-          onDelete={() => deleteMutation.mutate(row.id)}
-        />
-      ),
-    },
-  ];
+      },
+    ],
+    [clusterMap, deleteService, handleOpenEdit, isTableBusy, nameWidth, sortBy, sortOrder],
+  );
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
       <Card className="cyber-panel">
         <ResourcePageHeader
-          path="/network/services"
+          path={SERVICE_PATH}
           embedded
           description="管理集群 Service 访问策略、端口映射与服务暴露方式。"
           style={{ marginBottom: 8 }}
@@ -387,19 +501,13 @@ export default function ServicesPage() {
           clusterId={clusterId}
           namespace={namespace}
           keywordInput={keywordInput}
-          clusterOptions={clusterFilterOptions}
+          clusterOptions={clusterOptions}
           clusterLoading={clustersQuery.isLoading}
           knownNamespaces={knownNamespaces}
           namespaceDisabled={namespaceDisabled}
           namespacePlaceholder={namespaceDisabled ? "请先选择集群" : "全部名称空间"}
-          onClusterChange={(value) => {
-            onClusterChange(value);
-            resetPage();
-          }}
-          onNamespaceChange={(value) => {
-            onNamespaceChange(value);
-            resetPage();
-          }}
+          onClusterChange={handleClusterChange}
+          onNamespaceChange={handleNamespaceChange}
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
           keywordPlaceholder="按名称/标签搜索（示例：svc-a app=web env=prod）"
@@ -419,29 +527,22 @@ export default function ServicesPage() {
           />
         ) : null}
 
-        <ResourceTable<NetworkResource>
-          rowKey="id"
-          columns={columns}
-          tableKey="network.services"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按名称/标签搜索（示例：svc-a app=web env=prod）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{ sortBy, sortOrder }}
-          dataSource={tableData}
-          loading={isLoading && !data}
-          onChange={(nextPagination, filters, sorter, extra) =>
-            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
-          }
-          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-        />
+        <ServiceTimeProvider>
+          <ResourceTable<NetworkResource>
+            rowKey="id"
+            columns={columns}
+            tableKey={SERVICE_TABLE_KEY}
+            preferencesClient={preferencesClient}
+            globalSearch={globalSearch}
+            filters={tableFilters}
+            onFiltersChange={handleFiltersChange}
+            sort={sortState}
+            dataSource={tableData}
+            loading={isTableBusy}
+            onChange={handleResourceTableChange}
+            pagination={getPaginationConfig(data?.total ?? 0, isTableBusy)}
+          />
+        </ServiceTimeProvider>
       </Card>
 
       <Modal
@@ -485,7 +586,7 @@ export default function ServicesPage() {
               loading={clustersQuery.isLoading}
               showSearch
               filterOption={(input, option) =>
-                (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
               }
             />
           </Form.Item>
@@ -496,11 +597,7 @@ export default function ServicesPage() {
           >
             <Select
               placeholder="请选择服务类型"
-              options={[
-                { label: "ClusterIP", value: "ClusterIP" },
-                { label: "NodePort", value: "NodePort" },
-                { label: "LoadBalancer", value: "LoadBalancer" },
-              ]}
+              options={SERVICE_TYPE_OPTIONS}
             />
           </Form.Item>
         </Form>
