@@ -186,9 +186,9 @@ export class AiopsService {
       (item) => item.severity === 'warning',
     ).length;
     const groups = this.buildCorrelationGroups(incidentQueue);
-    const recommendations = incidentQueue.slice(0, 6).map((incident) =>
-      this.buildRecommendation(incident),
-    );
+    const recommendations = incidentQueue
+      .slice(0, 6)
+      .map((incident) => this.buildRecommendation(incident));
 
     return {
       range: observability.range,
@@ -306,10 +306,10 @@ export class AiopsService {
     };
   }
 
-  async precheckRecommendation(
+  precheckRecommendation(
     recommendationId: string,
     actor?: AiopsActionActor,
-  ): Promise<AiopsRecommendationPrecheckResponse> {
+  ): AiopsRecommendationPrecheckResponse {
     const recommendation = this.parseRecommendationId(recommendationId);
     const mutable = recommendationId.includes(':alert:');
     const checks = [
@@ -369,10 +369,10 @@ export class AiopsService {
     };
   }
 
-  async approveRecommendation(
+  approveRecommendation(
     recommendationId: string,
     actor?: AiopsActionActor,
-  ): Promise<AiopsRecommendationApprovalResponse> {
+  ): AiopsRecommendationApprovalResponse {
     assertWritePermission(actor);
     const recommendation = this.parseRecommendationId(recommendationId);
     const audit = appendAudit({

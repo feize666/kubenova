@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Input, Select } from "antd";
 import type { ColumnType, ColumnsType } from "antd/es/table";
 import type { SortOrder as AntdSortOrder } from "antd/es/table/interface";
@@ -298,6 +298,7 @@ export function useHeadlampTableState<T extends object>({
       filterRowVisible: initialFilterRowVisible,
     };
   });
+  const preferencesDirtyRef = useRef(false);
 
   useEffect(() => {
     let canceled = false;
@@ -325,6 +326,10 @@ export function useHeadlampTableState<T extends object>({
   }, [columnSettings, columns, preferencesClient, tableKey]);
 
   useEffect(() => {
+    if (!preferencesDirtyRef.current) {
+      return;
+    }
+    preferencesDirtyRef.current = false;
     writeStoragePreferences(tableKey, preferences);
     void preferencesClient?.saveTablePreferences?.(tableKey, preferences);
   }, [preferences, preferencesClient, tableKey]);
@@ -342,6 +347,7 @@ export function useHeadlampTableState<T extends object>({
         return;
       }
 
+      preferencesDirtyRef.current = true;
       setPreferences((prev) => ({
         ...prev,
         columnVisibility: {
@@ -354,6 +360,7 @@ export function useHeadlampTableState<T extends object>({
   );
 
   const setFilterRowVisible = useCallback((visible: boolean) => {
+    preferencesDirtyRef.current = true;
     setPreferences((prev) => ({ ...prev, filterRowVisible: visible }));
   }, []);
 
@@ -376,6 +383,7 @@ export function useHeadlampTableState<T extends object>({
   }, [globalSearch, onFiltersChange]);
 
   const resetColumnVisibility = useCallback(() => {
+    preferencesDirtyRef.current = true;
     setPreferences((prev) => ({
       ...prev,
       columnVisibility: normalizeColumnSettings(

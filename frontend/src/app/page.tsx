@@ -83,6 +83,9 @@ export default function HomePage() {
     queryKey: ["dashboard", "stats"],
     queryFn: () => getDashboardStats(accessToken || undefined),
     enabled: !isInitializing && Boolean(accessToken),
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const riskSummary = useMemo(() => {

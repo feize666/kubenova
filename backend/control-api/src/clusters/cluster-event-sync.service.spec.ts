@@ -6,6 +6,7 @@ const mockWatchResolvers: Array<
   (value: { abort: jest.Mock<void, []> }) => void
 > = [];
 let mockWatchPendingCount = 0;
+let mockWatchRejectCount = 0;
 
 jest.mock('@kubernetes/client-node', () => ({
   KubeConfig: jest.fn().mockImplementation(() => ({
@@ -23,6 +24,10 @@ jest.mock('@kubernetes/client-node', () => ({
         mockWatchDoneCallbacks.push(done);
         const abort = jest.fn(() => done(new Error('aborted')));
         mockAbortFns.push(abort);
+        if (mockWatchRejectCount > 0) {
+          mockWatchRejectCount -= 1;
+          throw new Error('watch unavailable');
+        }
         if (mockWatchPendingCount > 0) {
           mockWatchPendingCount -= 1;
           return new Promise<{ abort: jest.Mock<void, []> }>((resolve) => {
@@ -44,6 +49,7 @@ type WatchStateHarness = {
   debounceTimers: Map<string, NodeJS.Timeout>;
   restartFailures: Map<string, number>;
   restartTimers: Map<string, NodeJS.Timeout>;
+  startupTimer: NodeJS.Timeout | null;
   stopForCluster: (clusterId: string) => void;
   watches: Map<string, Array<{ abort: () => void }>>;
 };
@@ -70,6 +76,8 @@ describe('ClusterEventSyncService watch restarts', () => {
     return {
       service,
       harness: service as unknown as WatchStateHarness,
+      clustersService,
+      clusterSyncService,
     };
   }
 
@@ -80,6 +88,7 @@ describe('ClusterEventSyncService watch restarts', () => {
     mockAbortFns.length = 0;
     mockWatchResolvers.length = 0;
     mockWatchPendingCount = 0;
+    mockWatchRejectCount = 0;
     jest.clearAllMocks();
   });
 
@@ -97,6 +106,29 @@ describe('ClusterEventSyncService watch restarts', () => {
     await service.ensureClusterWatching('c-1');
 
     expect(harness.restartTimers.size).toBe(0);
+  });
+
+  it('clears startup timer on destroy before bootstrap starts', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    const { service, harness, clustersService } = createService();
+
+    try {
+      service.onModuleInit();
+      expect(harness.startupTimer).toBeTruthy();
+
+      service.onModuleDestroy();
+      jest.advanceTimersByTime(120_000);
+
+      expect(harness.startupTimer).toBeNull();
+      expect(clustersService.list).not.toHaveBeenCalled();
+    } finally {
+      if (previousNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = previousNodeEnv;
+      }
+    }
   });
 
   it('keeps one restart timer when multiple watch targets end together', async () => {
@@ -130,6 +162,35 @@ describe('ClusterEventSyncService watch restarts', () => {
     expect(events).toHaveLength(0);
     expect(harness.debounceTimers.size).toBe(0);
     expect(harness.restartTimers.size).toBe(0);
+  });
+
+  it('clears pending debounce sync on destroy', async () => {
+    const { service, harness, clusterSyncService } = createService();
+
+    await service.ensureClusterWatching('c-1');
+    mockWatchEventCallbacks[0]?.('MODIFIED', {
+      metadata: { name: 'pod-1', resourceVersion: '1' },
+    });
+    expect(harness.debounceTimers.size).toBe(1);
+
+    service.onModuleDestroy();
+    jest.advanceTimersByTime(1500);
+    await Promise.resolve();
+
+    expect(harness.debounceTimers.size).toBe(0);
+    expect(clusterSyncService.syncCluster).not.toHaveBeenCalled();
+  });
+
+  it('keeps restart backoff when a replacement watch only partially starts', async () => {
+    const { service, harness } = createService();
+    harness.restartFailures.set('c-1', 2);
+    mockWatchRejectCount = 1;
+
+    await service.ensureClusterWatching('c-1');
+
+    expect(harness.watches.get('c-1')).toHaveLength(20);
+    expect(harness.restartTimers.size).toBe(1);
+    expect(harness.restartFailures.get('c-1')).toBe(3);
   });
 
   it('does not restart after stop clears an existing restart timer', async () => {

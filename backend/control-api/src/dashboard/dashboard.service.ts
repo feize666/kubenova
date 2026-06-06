@@ -52,6 +52,21 @@ export interface DashboardStats {
 
 @Injectable()
 export class DashboardService {
+  private readonly statsCacheTtlMs = 5_000;
+  private readonly liveMetricsCacheTtlMs = 15_000;
+  private readonly liveMetricsFanoutLimit = 4;
+  private readonly liveMetricsTimeoutMs = 3_000;
+  private statsCache: { expiresAt: number; value: DashboardStats } | undefined;
+  private statsInFlight: Promise<DashboardStats> | undefined;
+  private readonly liveSnapshotCache = new Map<
+    string,
+    { expiresAt: number; value: ClusterLiveUsageSnapshot | null }
+  >();
+  private readonly liveSnapshotInFlight = new Map<
+    string,
+    Promise<ClusterLiveUsageSnapshot | null>
+  >();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly clustersService: ClustersService,
@@ -69,6 +84,28 @@ export class DashboardService {
   }
 
   async getStats(): Promise<DashboardStats> {
+    const now = Date.now();
+    if (this.statsCache && this.statsCache.expiresAt > now) {
+      return this.cloneDashboardStats(this.statsCache.value);
+    }
+    if (this.statsInFlight) {
+      return this.cloneDashboardStats(await this.statsInFlight);
+    }
+
+    this.statsInFlight = this.buildStats();
+    try {
+      const stats = await this.statsInFlight;
+      this.statsCache = {
+        expiresAt: Date.now() + this.statsCacheTtlMs,
+        value: stats,
+      };
+      return this.cloneDashboardStats(stats);
+    } finally {
+      this.statsInFlight = undefined;
+    }
+  }
+
+  private async buildStats(): Promise<DashboardStats> {
     const [
       clusterTotal,
       clusterHealthy,
@@ -248,24 +285,14 @@ export class DashboardService {
             usageRows.length,
         )
       : 0;
-    const liveSnapshots = await Promise.allSettled(
-      activeClusters.map(async (row) => {
-        const kubeconfig = await this.clustersService.getKubeconfig(row.id);
-        if (!kubeconfig) {
-          return null;
-        }
-        return this.withTimeout(
-          this.liveMetricsService.getClusterSnapshot(row.id, kubeconfig),
-          3_000,
-        );
-      }),
+    const liveSnapshots = await this.runBounded(
+      activeClusters,
+      this.liveMetricsFanoutLimit,
+      (row) => this.getCachedLiveSnapshot(row.id),
     );
     const availableSnapshots = liveSnapshots.filter(
-      (
-        snapshot,
-      ): snapshot is PromiseFulfilledResult<ClusterLiveUsageSnapshot | null> =>
-        snapshot.status === 'fulfilled' &&
-        Boolean(snapshot.value?.available),
+      (snapshot): snapshot is ClusterLiveUsageSnapshot =>
+        Boolean(snapshot?.available),
     );
 
     const recentEvents =
@@ -325,7 +352,7 @@ export class DashboardService {
             : hasUsage
               ? undefined
               : '未检测到可用的 live metrics 数据，请先确认 metrics-server 与集群连通性。',
-        liveSnapshot: availableSnapshots[0]?.value ?? undefined,
+        liveSnapshot: availableSnapshots[0] ?? undefined,
       },
       topology: {
         services: topologyServices,
@@ -360,5 +387,95 @@ export class DashboardService {
         clearTimeout(timer);
       }
     }
+  }
+
+  private async runBounded<TInput, TOutput>(
+    items: TInput[],
+    limit: number,
+    worker: (item: TInput) => Promise<TOutput>,
+  ): Promise<TOutput[]> {
+    const results: TOutput[] = [];
+    for (let index = 0; index < items.length; index += limit) {
+      const batch = items.slice(index, index + limit);
+      results.push(...(await Promise.all(batch.map((item) => worker(item)))));
+    }
+    return results;
+  }
+
+  private async getCachedLiveSnapshot(
+    clusterId: string,
+  ): Promise<ClusterLiveUsageSnapshot | null> {
+    const now = Date.now();
+    const cached = this.liveSnapshotCache.get(clusterId);
+    if (cached && cached.expiresAt > now) {
+      return this.cloneLiveSnapshot(cached.value);
+    }
+
+    const inFlight = this.liveSnapshotInFlight.get(clusterId);
+    if (inFlight) {
+      return this.cloneLiveSnapshot(await inFlight);
+    }
+
+    const next = this.fetchLiveSnapshot(clusterId);
+    this.liveSnapshotInFlight.set(clusterId, next);
+    try {
+      const snapshot = await next;
+      this.liveSnapshotCache.set(clusterId, {
+        expiresAt: Date.now() + this.liveMetricsCacheTtlMs,
+        value: this.cloneLiveSnapshot(snapshot),
+      });
+      return this.cloneLiveSnapshot(snapshot);
+    } finally {
+      this.liveSnapshotInFlight.delete(clusterId);
+    }
+  }
+
+  private async fetchLiveSnapshot(
+    clusterId: string,
+  ): Promise<ClusterLiveUsageSnapshot | null> {
+    try {
+      const kubeconfig = await this.clustersService.getKubeconfig(clusterId);
+      if (!kubeconfig) {
+        return null;
+      }
+      return await this.withTimeout(
+        this.liveMetricsService.getClusterSnapshot(clusterId, kubeconfig),
+        this.liveMetricsTimeoutMs,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  private cloneDashboardStats(stats: DashboardStats): DashboardStats {
+    return {
+      clusters: { ...stats.clusters },
+      workloads: { ...stats.workloads },
+      alerts: { ...stats.alerts },
+      namespaces: stats.namespaces,
+      healthScore: stats.healthScore,
+      resourceUsage: {
+        ...stats.resourceUsage,
+        liveSnapshot: this.cloneLiveSnapshot(stats.resourceUsage.liveSnapshot),
+      },
+      topology: { ...stats.topology },
+      recentEvents: stats.recentEvents.map((event) => ({ ...event })),
+    };
+  }
+
+  private cloneLiveSnapshot<
+    T extends ClusterLiveUsageSnapshot | null | undefined,
+  >(snapshot: T): T {
+    if (!snapshot) {
+      return snapshot;
+    }
+    return {
+      ...snapshot,
+      pods: snapshot.pods.map((pod) => ({
+        ...pod,
+        history: pod.history.map((point) => ({ ...point })),
+      })),
+      history: snapshot.history.map((point) => ({ ...point })),
+    } as T;
   }
 }

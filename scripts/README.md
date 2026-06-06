@@ -44,7 +44,7 @@ bash scripts/service.sh prod status
 - `db-init.sh`：初始化或重置本地 PostgreSQL + Prisma
 - `dev-up.sh`：启动开发环境服务
 - `dev-down.sh`：停止开发环境服务
-- `dev-status.sh`：查看开发环境状态
+- `dev-status.sh`：查看开发环境状态，输出 pid、端口、健康状态、前端启动模式、CPU/RSS；无监听残留只报告不停止
 - `topology-verify.sh`：资源全景图关键静态校验
 - `topology-clean-artifacts.sh`：清理拓扑调试产物
 

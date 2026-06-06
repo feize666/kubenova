@@ -14,8 +14,8 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   onDemandEntries: {
-    maxInactiveAge: 60_000,
-    pagesBufferLength: 2,
+    maxInactiveAge: 2 * 60_000,
+    pagesBufferLength: 4,
   },
   experimental: {
     optimizePackageImports: ["antd", "@ant-design/icons", "reactflow"],

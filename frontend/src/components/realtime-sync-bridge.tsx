@@ -13,9 +13,71 @@ import {
 const STREAM_PATH = "/api/v1/clusters/events/stream";
 const RECONNECT_DELAY_MS = 1500;
 const INVALIDATE_BATCH_DELAY_MS = 250;
+const INITIAL_CONNECT_DELAY_MS = 1200;
 
 function buildStreamUrl() {
   return STREAM_PATH;
+}
+
+function isRouteTransitionSettling() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const routeWindow = window as Window & { __KUBENOVA_ROUTE_TRANSITION_UNTIL?: number };
+  return (routeWindow.__KUBENOVA_ROUTE_TRANSITION_UNTIL ?? 0) > performance.now();
+}
+
+function waitForRealtimeIdleWindow(signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    if (typeof window === "undefined" || signal.aborted) {
+      resolve();
+      return;
+    }
+
+    let idleId: number | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    let settled = false;
+    const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (idleId !== null) {
+        idleWindow.cancelIdleCallback?.(idleId);
+        idleId = null;
+      }
+      signal.removeEventListener("abort", done);
+    };
+    const done = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const scheduleWhenQuiet = () => {
+      if (signal.aborted) {
+        done();
+        return;
+      }
+      if (document.hidden || isRouteTransitionSettling()) {
+        timer = setTimeout(scheduleWhenQuiet, 500);
+        return;
+      }
+      if (idleWindow.requestIdleCallback) {
+        idleId = idleWindow.requestIdleCallback(done, { timeout: 2000 });
+      } else {
+        timer = setTimeout(done, INITIAL_CONNECT_DELAY_MS);
+      }
+    };
+    signal.addEventListener("abort", done, { once: true });
+    timer = setTimeout(scheduleWhenQuiet, INITIAL_CONNECT_DELAY_MS);
+  });
 }
 
 export function RealtimeSyncBridge() {
@@ -29,7 +91,7 @@ export function RealtimeSyncBridge() {
   }, [pathname]);
 
   useEffect(() => {
-    if (pathname === "/login" || !accessToken || !isAuthenticated) {
+    if (!accessToken || !isAuthenticated) {
       return;
     }
 
@@ -95,7 +157,12 @@ export function RealtimeSyncBridge() {
     };
 
     const connect = async () => {
+      await waitForRealtimeIdleWindow(controller.signal);
       while (!controller.signal.aborted) {
+        if (typeof document !== "undefined" && document.hidden) {
+          await new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAY_MS));
+          continue;
+        }
         try {
           const response = await fetch(buildStreamUrl(), {
             method: "GET",
@@ -141,7 +208,7 @@ export function RealtimeSyncBridge() {
       }
       controller.abort();
     };
-  }, [accessToken, isAuthenticated, pathname, queryClient]);
+  }, [accessToken, isAuthenticated, queryClient]);
 
   return null;
 }

@@ -49,13 +49,16 @@ const SIDEBAR_SECTION_ORDER = [
   "section-system-management",
 ] as const;
 const PREFETCHABLE_NAV_PATHS = new Set(navSections.flatMap((section) => [section.path, ...section.items.map((item) => item.path)].filter(Boolean) as string[]));
-const MAX_REMEMBERED_PREFETCH_PATHS = 32;
-const MAX_IDLE_PREFETCH_PATHS = 3;
+const MAX_REMEMBERED_PREFETCH_PATHS = 48;
+const MAX_IDLE_PREFETCH_PATHS = 5;
+const MAX_OPEN_SIDEBAR_SECTIONS = 1;
+const ROUTE_TRANSITION_QUIET_MS = 650;
 
 type SidebarOpenSectionKey = string | null;
 
 type StoredSidebarOpenState = {
   openSectionKey: SidebarOpenSectionKey;
+  openSectionKeys?: string[];
   updatedAt?: number;
 };
 
@@ -120,6 +123,13 @@ function readStoredSidebarOpenState(): StoredSidebarOpenState | null {
   }
   try {
     const parsed = JSON.parse(raw) as Partial<StoredSidebarOpenState>;
+    if (Array.isArray(parsed.openSectionKeys)) {
+      return {
+        openSectionKey: typeof parsed.openSectionKey === "string" || parsed.openSectionKey === null ? parsed.openSectionKey : null,
+        openSectionKeys: parsed.openSectionKeys.filter((item): item is string => typeof item === "string"),
+        updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : undefined,
+      };
+    }
     if (typeof parsed.openSectionKey === "string" || parsed.openSectionKey === null) {
       return {
         openSectionKey: parsed.openSectionKey,
@@ -132,14 +142,23 @@ function readStoredSidebarOpenState(): StoredSidebarOpenState | null {
   return null;
 }
 
-function writeStoredSidebarOpenState(openSectionKey: SidebarOpenSectionKey) {
+function writeStoredSidebarOpenKeys(openSectionKeys: string[]) {
   if (typeof window === "undefined") {
     return;
   }
   window.localStorage.setItem(
     SIDEBAR_OPEN_SECTION_KEY,
-    JSON.stringify({ openSectionKey, updatedAt: Date.now() }),
+    JSON.stringify({
+      openSectionKey: openSectionKeys[openSectionKeys.length - 1] ?? null,
+      openSectionKeys,
+      updatedAt: Date.now(),
+    }),
   );
+}
+
+function normalizeOpenSectionKeys(keys: string[], sectionKeySet: Set<string>) {
+  const next = keys.filter((key, index) => sectionKeySet.has(key) && keys.indexOf(key) === index);
+  return next.slice(-MAX_OPEN_SIDEBAR_SECTIONS);
 }
 
 function scheduleIdleTask(task: () => void, timeout = 900) {
@@ -156,6 +175,25 @@ function scheduleIdleTask(task: () => void, timeout = 900) {
   }
   const id = window.setTimeout(task, Math.min(timeout, 250));
   return () => window.clearTimeout(id);
+}
+
+function markRouteTransitionQuietWindow() {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  const routeWindow = window as Window & { __KUBENOVA_ROUTE_TRANSITION_UNTIL?: number };
+  routeWindow.__KUBENOVA_ROUTE_TRANSITION_UNTIL = performance.now() + ROUTE_TRANSITION_QUIET_MS;
+  document.body.classList.add("kubenova-route-transitioning");
+  const timer = window.setTimeout(() => {
+    if ((routeWindow.__KUBENOVA_ROUTE_TRANSITION_UNTIL ?? 0) <= performance.now()) {
+      document.body.classList.remove("kubenova-route-transitioning");
+    }
+  }, ROUTE_TRANSITION_QUIET_MS + 50);
+  return () => {
+    window.clearTimeout(timer);
+    document.body.classList.remove("kubenova-route-transitioning");
+  };
 }
 
 function rememberPrefetchedPath(paths: Set<string>, path: string) {
@@ -224,29 +262,22 @@ const AppSider = memo(function AppSider({
     [visibleSections],
   );
   const sectionKeySet = useMemo(() => new Set(sectionKeys), [sectionKeys]);
-  const directTopLevelPathSet = useMemo(
-    () =>
-      new Set(
-        visibleSections
-          .filter((section) => section.items.length === 0 && section.path)
-          .map((section) => section.path as string),
-      ),
-    [visibleSections],
-  );
   const activeSectionKey = useMemo(
     () => findActiveSectionKey(pathname, visibleSections),
     [pathname, visibleSections],
   );
   const activeExpandableSectionKey =
     activeSectionKey && sectionKeySet.has(activeSectionKey) ? activeSectionKey : undefined;
-  const [openSectionKey, setOpenSectionKey] = useState<SidebarOpenSectionKey>(null);
+  const [openSectionKeys, setOpenSectionKeys] = useState<string[]>([]);
   const [sidebarStateRestored, setSidebarStateRestored] = useState(false);
   const previousPathnameRef = useRef(pathname);
   const prefetchedPathsRef = useRef(new Set<string>());
   const pendingPrefetchPathsRef = useRef(new Set<string>());
   const router = useRouter();
-  const effectiveOpenSectionKey = openSectionKey && sectionKeySet.has(openSectionKey) ? openSectionKey : null;
-  const expandedSectionKeys = effectiveOpenSectionKey ? [effectiveOpenSectionKey] : [];
+  const expandedSectionKeys = useMemo(
+    () => normalizeOpenSectionKeys(openSectionKeys, sectionKeySet),
+    [openSectionKeys, sectionKeySet],
+  );
   const prefetchPath = useCallback((path: string, timeout = 700) => {
     if (
       !PREFETCHABLE_NAV_PATHS.has(path) ||
@@ -266,6 +297,11 @@ const AppSider = memo(function AppSider({
       }
     }, timeout);
   }, [router]);
+  const prefetchPaths = useCallback((paths: readonly string[], timeout = 700, stepMs = 120) => {
+    paths.forEach((path, index) => {
+      prefetchPath(path, timeout + index * stepMs);
+    });
+  }, [prefetchPath]);
   const activeSectionPrefetchPaths = useMemo(() => {
     if (!activeSectionKey) {
       return [];
@@ -307,7 +343,15 @@ const AppSider = memo(function AppSider({
         return {
           key: section.key,
           icon,
-          label: section.label,
+          label: (
+            <span
+              className="app-sidebar-menu__label"
+              onMouseEnter={() => prefetchPaths(section.items.map((item) => item.path).slice(0, MAX_IDLE_PREFETCH_PATHS), 250)}
+              onFocus={() => prefetchPaths(section.items.map((item) => item.path).slice(0, MAX_IDLE_PREFETCH_PATHS), 250)}
+            >
+              {section.label}
+            </span>
+          ),
           children: section.items.map((item) => ({
             key: item.path,
             icon:
@@ -333,7 +377,7 @@ const AppSider = memo(function AppSider({
           })),
         };
       }),
-    [prefetchPath, visibleSections],
+    [prefetchPath, prefetchPaths, visibleSections],
   );
 
   useEffect(() => {
@@ -342,13 +386,18 @@ const AppSider = memo(function AppSider({
     }
     const timer = window.setTimeout(() => {
       const storedState = readStoredSidebarOpenState();
+      const storedOpenSectionKeys = storedState?.openSectionKeys;
       const storedOpenSectionKey = storedState?.openSectionKey;
-      if (storedOpenSectionKey && sectionKeySet.has(storedOpenSectionKey)) {
-        setOpenSectionKey(storedOpenSectionKey);
+      if (activeExpandableSectionKey) {
+        setOpenSectionKeys([activeExpandableSectionKey]);
+      } else if (storedOpenSectionKeys?.length) {
+        setOpenSectionKeys(normalizeOpenSectionKeys(storedOpenSectionKeys, sectionKeySet));
+      } else if (storedOpenSectionKey && sectionKeySet.has(storedOpenSectionKey)) {
+        setOpenSectionKeys(normalizeOpenSectionKeys([storedOpenSectionKey], sectionKeySet));
       } else if (storedOpenSectionKey === null) {
-        setOpenSectionKey(null);
+        setOpenSectionKeys([]);
       } else {
-        setOpenSectionKey(activeExpandableSectionKey ?? null);
+        setOpenSectionKeys([]);
       }
       setSidebarStateRestored(true);
     }, 0);
@@ -356,12 +405,16 @@ const AppSider = memo(function AppSider({
   }, [activeExpandableSectionKey, sectionKeySet, sidebarStateRestored]);
 
   useEffect(() => {
-    if (!sidebarStateRestored || !openSectionKey || sectionKeySet.has(openSectionKey)) {
+    if (!sidebarStateRestored) {
       return undefined;
     }
-    const timer = window.setTimeout(() => setOpenSectionKey(activeExpandableSectionKey ?? null), 0);
+    const nextOpenSectionKeys = normalizeOpenSectionKeys(openSectionKeys, sectionKeySet);
+    if (nextOpenSectionKeys.length === openSectionKeys.length && nextOpenSectionKeys.every((key, index) => key === openSectionKeys[index])) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setOpenSectionKeys(nextOpenSectionKeys), 0);
     return () => window.clearTimeout(timer);
-  }, [activeExpandableSectionKey, openSectionKey, sectionKeySet, sidebarStateRestored]);
+  }, [activeExpandableSectionKey, openSectionKeys, sectionKeySet, sidebarStateRestored]);
 
   useEffect(() => {
     if (!sidebarStateRestored) {
@@ -372,25 +425,56 @@ const AppSider = memo(function AppSider({
       return undefined;
     }
     previousPathnameRef.current = pathname;
-    const timer = window.setTimeout(() => setOpenSectionKey(activeExpandableSectionKey ?? null), 0);
+    const timer = window.setTimeout(() => {
+      setOpenSectionKeys(activeExpandableSectionKey ? [activeExpandableSectionKey] : []);
+    }, 0);
     return () => window.clearTimeout(timer);
-  }, [activeExpandableSectionKey, pathname, sidebarStateRestored]);
+  }, [activeExpandableSectionKey, pathname, sectionKeySet, sidebarStateRestored]);
 
   useEffect(() => {
     if (!sidebarStateRestored || activeSectionPrefetchPaths.length === 0) {
       return undefined;
     }
     return scheduleIdleTask(() => {
-      activeSectionPrefetchPaths.forEach((path) => prefetchPath(path, 450));
+      prefetchPaths(activeSectionPrefetchPaths, 450);
     }, 1400);
-  }, [activeSectionPrefetchPaths, prefetchPath, sidebarStateRestored]);
+  }, [activeSectionPrefetchPaths, prefetchPaths, sidebarStateRestored]);
+
+  useEffect(() => {
+    if (!sidebarStateRestored) {
+      return undefined;
+    }
+    const visiblePaths = visibleSections.flatMap((section) =>
+      section.items.length > 0 ? section.items.map((item) => item.path) : section.path ? [section.path] : [],
+    );
+    const currentIndex = visiblePaths.findIndex((path) => matchesPath(pathname, path));
+    const sectionIndex = activeSectionKey ? visibleSections.findIndex((section) => section.key === activeSectionKey) : -1;
+    const candidates = new Set<string>();
+    activeSectionPrefetchPaths.forEach((path) => candidates.add(path));
+    [currentIndex - 1, currentIndex + 1].forEach((index) => {
+      const path = visiblePaths[index];
+      if (path) candidates.add(path);
+    });
+    [sectionIndex - 1, sectionIndex + 1].forEach((index) => {
+      const section = visibleSections[index];
+      const path = section?.path ?? section?.items[0]?.path;
+      if (path) candidates.add(path);
+    });
+    const paths = [...candidates].filter((path) => path !== pathname).slice(0, MAX_IDLE_PREFETCH_PATHS);
+    if (paths.length === 0) {
+      return undefined;
+    }
+    return scheduleIdleTask(() => {
+      prefetchPaths(paths, 650);
+    }, 1800);
+  }, [activeSectionKey, activeSectionPrefetchPaths, pathname, prefetchPath, prefetchPaths, sidebarStateRestored, visibleSections]);
 
   useEffect(() => {
     if (!sidebarStateRestored) {
       return;
     }
-    writeStoredSidebarOpenState(effectiveOpenSectionKey);
-  }, [effectiveOpenSectionKey, sidebarStateRestored]);
+    writeStoredSidebarOpenKeys(expandedSectionKeys);
+  }, [expandedSectionKeys, sidebarStateRestored]);
 
   return (
     <Sider
@@ -459,14 +543,13 @@ const AppSider = memo(function AppSider({
         items={items}
         // Link 已接管导航，无需 onClick 处理路由跳转
         onOpenChange={(keys) => {
+          markRouteTransitionQuietWindow();
           const expandedRaw = (keys as string[]).filter((key) => sectionKeySet.has(key));
-          const latestKey = expandedRaw[expandedRaw.length - 1];
-          setOpenSectionKey(latestKey ?? null);
+          const latestOpenKey = expandedRaw.find((key) => !expandedSectionKeys.includes(key)) ?? expandedRaw.at(-1);
+          setOpenSectionKeys(latestOpenKey ? [latestOpenKey] : []);
         }}
         onClick={({ key }) => {
-          if (directTopLevelPathSet.has(String(key))) {
-            setOpenSectionKey(null);
-          }
+          markRouteTransitionQuietWindow();
           logNavigationMetric("sidebar-click", { key, pathname });
         }}
         style={{
@@ -572,6 +655,13 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     window.addEventListener("kubenova:navigation-metric", handler);
     return () => window.removeEventListener("kubenova:navigation-metric", handler);
   }, []);
+
+  useEffect(() => {
+    if (isLoginPage) {
+      return undefined;
+    }
+    return markRouteTransitionQuietWindow();
+  }, [isLoginPage, pathname]);
 
   useEffect(() => {
     if (isLoginPage || isInitializing || isAuthenticated) {
