@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -8,6 +9,7 @@ const navigationPath = path.join(projectRoot, "src/config/navigation.ts");
 const shellLayoutPath = path.join(projectRoot, "src/components/shell-layout.tsx");
 const appRoot = path.join(projectRoot, "src/app");
 const forbiddenSidebarPaths = new Set(["/dashboard", "/monitoring"]);
+const outputPath = resolveOutputPath();
 
 function isIdentifierChar(char) {
   return /[A-Za-z0-9_$-]/.test(char);
@@ -281,6 +283,27 @@ function findDuplicates(values) {
   return [...new Set(values.filter((value, index) => values.indexOf(value) !== index))];
 }
 
+function resolveOutputPath() {
+  const raw = process.env.CHECK_NAVIGATION_OUTPUT?.trim();
+  if (!raw) return "";
+  if (raw === "1" || raw === "true" || raw === "default") {
+    return path.join(
+      os.tmpdir(),
+      "k8s-aiops-manager",
+      "check-navigation",
+      `${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "")}.json`,
+    );
+  }
+  return raw;
+}
+
+function writeSummary(summary) {
+  if (!outputPath) return;
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  console.log(`[check-navigation] summary=${outputPath}`);
+}
+
 function main() {
   const navigationText = fs.readFileSync(navigationPath, "utf8");
   const shellLayoutText = fs.readFileSync(shellLayoutPath, "utf8");
@@ -338,11 +361,33 @@ function main() {
   if (invalidSections.length > 0) failures.push(`Invalid section shapes:\n${formatList(invalidSections)}`);
   if (missingShellContracts.length > 0) failures.push(`Missing shell navigation contracts:\n${formatList(missingShellContracts)}`);
 
+  const summary = {
+    status: failures.length > 0 ? "fail" : "pass",
+    sectionCount: sections.length,
+    pathCount: navigationPaths.length,
+    orderedKeyCount: sidebarOrder.length,
+    failures,
+    missingPages,
+    missingFromOrder,
+    missingFromIcons,
+    unknownOrderKeys,
+    duplicateSections,
+    duplicateItems,
+    duplicateSectionItemKeys,
+    duplicatePaths,
+    forbiddenPaths: [...new Set(forbiddenPaths)],
+    invalidSections,
+    missingShellContracts,
+    generatedAt: new Date().toISOString(),
+  };
+
   if (failures.length > 0) {
+    writeSummary(summary);
     console.error(`[check-navigation] FAIL\n${failures.join("\n\n")}`);
     process.exit(1);
   }
 
+  writeSummary(summary);
   console.log(
     `[check-navigation] PASS: ${sections.length} sections, ${navigationPaths.length} paths, ${sidebarOrder.length} ordered keys.`,
   );
