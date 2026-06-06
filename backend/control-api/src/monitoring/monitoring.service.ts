@@ -298,8 +298,18 @@ export interface UpdateAlertRuleRequest {
 
 @Injectable()
 export class MonitoringService {
+  private readonly observabilitySummaryCacheTtlMs = 5_000;
+  private readonly maxObservabilitySummaryCacheEntries = 50;
   private readonly liveMetricsFanoutLimit = 4;
   private readonly liveMetricsTimeoutMs = 2500;
+  private readonly observabilitySummaryCache = new Map<
+    string,
+    { expiresAt: number; value: ObservabilitySummaryResponse }
+  >();
+  private readonly observabilitySummaryInFlight = new Map<
+    string,
+    Promise<ObservabilitySummaryResponse>
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -506,31 +516,27 @@ export class MonitoringService {
     const availableSnapshots = liveSnapshots.filter((snapshot) =>
       Boolean(snapshot?.available),
     );
-    const livePodSnapshots = availableSnapshots.flatMap(
-      (snapshot) => snapshot?.pods ?? [],
-    );
-    const cpuValues = livePodSnapshots
-      .map((item) => item.cpuUsage)
-      .filter((value): value is number => typeof value === 'number');
-    const memoryValues = livePodSnapshots
-      .map((item) => item.memoryUsage)
-      .filter((value): value is number => typeof value === 'number');
+    let cpuTotal = 0;
+    let cpuCount = 0;
+    let memoryTotal = 0;
+    let memoryCount = 0;
+    for (const snapshot of availableSnapshots) {
+      for (const pod of snapshot?.pods ?? []) {
+        if (typeof pod.cpuUsage === 'number') {
+          cpuTotal += pod.cpuUsage;
+          cpuCount += 1;
+        }
+        if (typeof pod.memoryUsage === 'number') {
+          memoryTotal += pod.memoryUsage;
+          memoryCount += 1;
+        }
+      }
+    }
     const cpuUsagePercent =
-      cpuValues.length > 0
-        ? Math.round(
-            (cpuValues.reduce((sum, item) => sum + item, 0) /
-              cpuValues.length) *
-              100,
-          )
-        : 0;
+      cpuCount > 0 ? Math.round((cpuTotal / cpuCount) * 100) : 0;
     const memoryUsagePercent =
-      memoryValues.length > 0
-        ? Math.round(
-            (memoryValues.reduce((sum, item) => sum + item, 0) /
-              memoryValues.length /
-              (1024 * 1024 * 1024)) *
-              100,
-          )
+      memoryCount > 0
+        ? Math.round((memoryTotal / memoryCount / (1024 * 1024 * 1024)) * 100)
         : 0;
 
     const usageDataSource: MonitoringOverviewResponse['usageDataSource'] =
@@ -564,6 +570,40 @@ export class MonitoringService {
     timeFilter: InspectionTimeFilter,
   ): Promise<ObservabilitySummaryResponse> {
     const window = this.resolveTimeWindow(timeFilter, '24h');
+    const key = this.observabilitySummaryCacheKey(window);
+    const now = Date.now();
+    this.pruneObservabilitySummaryCache(now);
+
+    const cached = this.observabilitySummaryCache.get(key);
+    if (cached && cached.expiresAt > now) {
+      return this.cloneObservabilitySummary(cached.value);
+    }
+
+    const inFlight = this.observabilitySummaryInFlight.get(key);
+    if (inFlight) {
+      return this.cloneObservabilitySummary(await inFlight);
+    }
+
+    const next = this.buildObservabilitySummary(window);
+    this.observabilitySummaryInFlight.set(key, next);
+    try {
+      const summary = await next;
+      this.observabilitySummaryCache.set(key, {
+        expiresAt: Date.now() + this.observabilitySummaryCacheTtlMs,
+        value: this.cloneObservabilitySummary(summary),
+      });
+      this.pruneObservabilitySummaryCache();
+      return this.cloneObservabilitySummary(summary);
+    } finally {
+      this.observabilitySummaryInFlight.delete(key);
+    }
+  }
+
+  private async buildObservabilitySummary(window: {
+    range: MonitoringRange;
+    from?: Date;
+    to?: Date;
+  }): Promise<ObservabilitySummaryResponse> {
     const [overview, alerts, events, inspection] = await Promise.all([
       this.getOverview(window),
       this.getAlerts({
@@ -952,6 +992,66 @@ export class MonitoringService {
       ]
         .filter(Boolean)
         .join(' '),
+    };
+  }
+
+  private observabilitySummaryCacheKey(window: {
+    range: MonitoringRange;
+    from?: Date;
+    to?: Date;
+  }): string {
+    return [
+      window.range,
+      window.from?.toISOString() ?? '',
+      window.to?.toISOString() ?? '',
+      process.env.OBSERVABILITY_GRAFANA_URL ?? '',
+      process.env.OBSERVABILITY_LOGS_URL ?? '',
+      process.env.OBSERVABILITY_TRACES_URL ?? '',
+      process.env.OBSERVABILITY_ALERTS_URL ?? '',
+      process.env.OBSERVABILITY_SLO_URL ?? '',
+      process.env.OBSERVABILITY_RUNBOOK_URL ?? '',
+      process.env.OBSERVABILITY_ALERT_OWNER ?? '',
+    ].join('|');
+  }
+
+  private pruneObservabilitySummaryCache(now = Date.now()): void {
+    for (const [key, cached] of this.observabilitySummaryCache) {
+      if (cached.expiresAt <= now) {
+        this.observabilitySummaryCache.delete(key);
+      }
+    }
+
+    while (
+      this.observabilitySummaryCache.size >
+      this.maxObservabilitySummaryCacheEntries
+    ) {
+      const oldestKey = this.observabilitySummaryCache.keys().next().value as
+        | string
+        | undefined;
+      if (!oldestKey) {
+        break;
+      }
+      this.observabilitySummaryCache.delete(oldestKey);
+    }
+  }
+
+  private cloneObservabilitySummary(
+    summary: ObservabilitySummaryResponse,
+  ): ObservabilitySummaryResponse {
+    return {
+      ...summary,
+      timeRange: { ...summary.timeRange },
+      activeAlerts: { ...summary.activeAlerts },
+      sourceStatus: summary.sourceStatus.map((item) => ({ ...item })),
+      entities: summary.entities.map((entity) => ({
+        ...entity,
+        signals: { ...entity.signals },
+        slo: { ...entity.slo },
+        deepLinks: entity.deepLinks.map((link) => ({ ...link })),
+      })),
+      signalPanels: summary.signalPanels.map((panel) => ({ ...panel })),
+      recentEvents: summary.recentEvents.map((event) => ({ ...event })),
+      externalLinks: summary.externalLinks.map((link) => ({ ...link })),
     };
   }
 

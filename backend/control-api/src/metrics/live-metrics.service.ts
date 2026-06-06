@@ -56,6 +56,10 @@ export class LiveMetricsService {
   private readonly cacheTtlMs = 5 * 60_000;
   private readonly maxCacheEntries = 200;
   private readonly snapshotCache = new Map<string, ClusterLiveUsageSnapshot>();
+  private readonly snapshotInFlight = new Map<
+    string,
+    Promise<ClusterLiveUsageSnapshot>
+  >();
 
   constructor(private readonly k8sClient: K8sClientService) {}
 
@@ -70,7 +74,11 @@ export class LiveMetricsService {
     if (trimmed.endsWith('n')) {
       return numeric / 1_000_000_000;
     }
-    if (trimmed.endsWith('u') || trimmed.endsWith('µ') || trimmed.endsWith('μ')) {
+    if (
+      trimmed.endsWith('u') ||
+      trimmed.endsWith('µ') ||
+      trimmed.endsWith('μ')
+    ) {
       return numeric / 1_000_000;
     }
     if (trimmed.endsWith('m')) {
@@ -139,26 +147,18 @@ export class LiveMetricsService {
     podName: string,
     metric?: PodMetricItem,
   ): LiveUsageSnapshot {
-    const containerUsages = (metric?.containers ?? []).map((container) => ({
-      cpu: this.parseCpuToCores(container.usage?.cpu),
-      memory: this.parseMemoryToBytes(container.usage?.memory),
-    }));
-
-    const cpuValues = containerUsages
-      .map((item) => item.cpu)
-      .filter((value): value is number => typeof value === 'number');
-    const memoryValues = containerUsages
-      .map((item) => item.memory)
-      .filter((value): value is number => typeof value === 'number');
-
-    const cpuUsage =
-      cpuValues.length > 0
-        ? cpuValues.reduce((sum, item) => sum + item, 0)
-        : null;
-    const memoryUsage =
-      memoryValues.length > 0
-        ? memoryValues.reduce((sum, item) => sum + item, 0)
-        : null;
+    let cpuUsage: number | null = null;
+    let memoryUsage: number | null = null;
+    for (const container of metric?.containers ?? []) {
+      const cpu = this.parseCpuToCores(container.usage?.cpu);
+      if (typeof cpu === 'number') {
+        cpuUsage = (cpuUsage ?? 0) + cpu;
+      }
+      const memory = this.parseMemoryToBytes(container.usage?.memory);
+      if (typeof memory === 'number') {
+        memoryUsage = (memoryUsage ?? 0) + memory;
+      }
+    }
     const available = cpuUsage !== null || memoryUsage !== null;
     const capturedAt = metric?.timestamp ?? new Date().toISOString();
 
@@ -186,14 +186,16 @@ export class LiveMetricsService {
     ClusterLiveUsageSnapshot,
     'cpuUsage' | 'memoryUsage' | 'history' | 'available'
   > {
-    const cpuUsage = pods
-      .map((item) => item.cpuUsage)
-      .filter((value): value is number => typeof value === 'number')
-      .reduce((sum, item) => sum + item, 0);
-    const memoryUsage = pods
-      .map((item) => item.memoryUsage)
-      .filter((value): value is number => typeof value === 'number')
-      .reduce((sum, item) => sum + item, 0);
+    let cpuUsage = 0;
+    let memoryUsage = 0;
+    for (const pod of pods) {
+      if (typeof pod.cpuUsage === 'number') {
+        cpuUsage += pod.cpuUsage;
+      }
+      if (typeof pod.memoryUsage === 'number') {
+        memoryUsage += pod.memoryUsage;
+      }
+    }
     const available = pods.length > 0;
     return {
       cpuUsage: available ? cpuUsage : null,
@@ -212,7 +214,14 @@ export class LiveMetricsService {
   private cloneSnapshot(
     snapshot: ClusterLiveUsageSnapshot,
   ): ClusterLiveUsageSnapshot {
-    return JSON.parse(JSON.stringify(snapshot)) as ClusterLiveUsageSnapshot;
+    return {
+      ...snapshot,
+      pods: snapshot.pods.map((pod) => ({
+        ...pod,
+        history: pod.history.map((point) => ({ ...point })),
+      })),
+      history: snapshot.history.map((point) => ({ ...point })),
+    };
   }
 
   private cacheKey(clusterId: string, namespace?: string): string {
@@ -256,6 +265,33 @@ export class LiveMetricsService {
       }
     }
 
+    const inFlight = this.snapshotInFlight.get(key);
+    if (inFlight) {
+      return this.cloneSnapshot(await inFlight);
+    }
+
+    const next = this.fetchClusterSnapshot(
+      clusterId,
+      kubeconfigYaml,
+      namespace,
+      cached,
+      key,
+    );
+    this.snapshotInFlight.set(key, next);
+    try {
+      return this.cloneSnapshot(await next);
+    } finally {
+      this.snapshotInFlight.delete(key);
+    }
+  }
+
+  private async fetchClusterSnapshot(
+    clusterId: string,
+    kubeconfigYaml: string,
+    namespace: string | undefined,
+    cached: ClusterLiveUsageSnapshot | undefined,
+    key: string,
+  ): Promise<ClusterLiveUsageSnapshot> {
     try {
       const kc = this.k8sClient.createClient(kubeconfigYaml);
       const metricsApi = new k8s.Metrics(kc);
@@ -289,11 +325,11 @@ export class LiveMetricsService {
           ...cached.history,
           ...nextSnapshot.history,
         ].slice(-12);
+        const previousByPod = new Map(
+          cached.pods.map((pod) => [`${pod.namespace}/${pod.podName}`, pod]),
+        );
         nextSnapshot.pods = nextSnapshot.pods.map((pod) => {
-          const previous = cached.pods.find(
-            (item) =>
-              item.podName === pod.podName && item.namespace === pod.namespace,
-          );
+          const previous = previousByPod.get(`${pod.namespace}/${pod.podName}`);
           if (!previous) {
             return pod;
           }
@@ -306,17 +342,17 @@ export class LiveMetricsService {
 
       this.snapshotCache.set(key, nextSnapshot);
       this.pruneSnapshotCache();
-      return this.cloneSnapshot(nextSnapshot);
+      return nextSnapshot;
     } catch (err) {
       this.logger.warn(
         `live metrics snapshot failed for cluster ${clusterId}: ${(err as Error).message}`,
       );
       if (cached) {
-        return this.cloneSnapshot({
+        return {
           ...cached,
           source: 'cluster-metrics-cache',
           note: (err as Error).message,
-        });
+        };
       }
       return {
         capturedAt: new Date().toISOString(),

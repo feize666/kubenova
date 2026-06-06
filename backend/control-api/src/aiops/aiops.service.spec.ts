@@ -59,4 +59,52 @@ describe('AiopsService', () => {
       'inspection:duplicate:2',
     ]);
   });
+
+  it('reuses cached summary and returns clones', async () => {
+    const service = createService();
+
+    const first = await service.getSummary({ range: '24h' });
+    first.incidentQueue[0].title = 'mutated';
+    const second = await service.getSummary({ range: '24h' });
+
+    expect(second.incidentQueue[0].title).toBe('first issue');
+    expect(second).not.toBe(first);
+    expect(second.incidentQueue[0]).not.toBe(first.incidentQueue[0]);
+    expect(
+      (service as unknown as { monitoringService: Record<string, jest.Mock> })
+        .monitoringService.getObservabilitySummary,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it('deduplicates in-flight summary work for the same time filter', async () => {
+    let resolveObservability: (value: unknown) => void = () => undefined;
+    const observability = new Promise((resolve) => {
+      resolveObservability = resolve;
+    });
+    const service = createService({
+      getObservabilitySummary: jest.fn().mockReturnValue(observability),
+    });
+
+    const first = service.getSummary({ range: '24h' });
+    const second = service.getSummary({ range: '24h' });
+
+    resolveObservability({
+      range: '24h',
+      timestamp: new Date().toISOString(),
+      activeAlerts: { degraded: true },
+      degraded: true,
+    });
+    await Promise.all([first, second]);
+
+    const harness = service as unknown as {
+      monitoringService: Record<string, jest.Mock>;
+    };
+    expect(
+      harness.monitoringService.getObservabilitySummary,
+    ).toHaveBeenCalledTimes(1);
+    expect(harness.monitoringService.getAlerts).toHaveBeenCalledTimes(1);
+    expect(
+      harness.monitoringService.getClusterInspection,
+    ).toHaveBeenCalledTimes(1);
+  });
 });
