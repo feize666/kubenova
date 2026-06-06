@@ -143,3 +143,10 @@
 - [x] Add optional navigation JSON summary output; `CHECK_NAVIGATION_OUTPUT=1` writes to system tmp.
 - [x] Make dev status read-only by default with `SERVICE_STATUS_ADOPT=false`, so status detection does not adopt external listeners into pid files.
 - [x] Make dev status output easier to scan with ports, adopt mode, process count, CPU, and RSS.
+
+## 2026-06-06 Round 4 Performance Probe Attribution
+
+- [x] Add route sample timing splits for click-to-URL, URL-to-settle, domContentLoaded, route-ready, and settle delay.
+- [x] Add per-route long task, JS heap, and route quiet class diagnostics.
+- [x] Run `node --check frontend/scripts/performance-switching.mjs`.
+- [ ] Run `npm run e2e:performance:switching:smoke` when `frontend/node_modules/playwright` is available.
