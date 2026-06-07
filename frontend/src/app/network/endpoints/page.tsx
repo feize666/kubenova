@@ -12,7 +12,6 @@ import {
   Modal,
   message,
 } from "antd";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -24,10 +23,10 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
-import { OpsStatusTag } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { NetworkKindChip } from "@/components/network/network-table-cells";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -119,38 +118,6 @@ function parsePorts(input?: string): EndpointPort[] {
     });
     return result;
   }, []);
-}
-
-function getSubsets(resource: EndpointsResource): EndpointSubset[] {
-  return Array.isArray(resource.spec?.subsets) ? resource.spec.subsets : [];
-}
-
-function countAddresses(resource: EndpointsResource, key: "addresses" | "notReadyAddresses") {
-  return getSubsets(resource).reduce((sum, subset) => {
-    const list = subset[key];
-    return sum + (Array.isArray(list) ? list.length : 0);
-  }, 0);
-}
-
-function listAddressPreview(resource: EndpointsResource) {
-  const values = getSubsets(resource)
-    .flatMap((subset) => [...(subset.addresses ?? []), ...(subset.notReadyAddresses ?? [])])
-    .map((item) => item.ip || item.hostname)
-    .filter((item): item is string => Boolean(item));
-  return Array.from(new Set(values));
-}
-
-function listPortPreview(resource: EndpointsResource) {
-  const values = getSubsets(resource).flatMap((subset) => subset.ports ?? []);
-  const formatted = values
-    .map((item) => {
-      if (!item.port) return null;
-      const prefix = item.name ? `${item.name}:` : "";
-      const protocol = item.protocol ? `/${item.protocol}` : "";
-      return `${prefix}${item.port}${protocol}`;
-    })
-    .filter((item): item is string => Boolean(item));
-  return Array.from(new Set(formatted));
 }
 
 export default function EndpointsPage() {
@@ -277,10 +244,7 @@ export default function EndpointsPage() {
           matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters) &&
           textMatches(item.name, getTextFilter(tableFilters, "name")) &&
           textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
-          textMatches(item.namespace, getTextFilter(tableFilters, "namespace")) &&
-          textMatches(item.name, getTextFilter(tableFilters, "service")) &&
-          textMatches(listPortPreview(item).join(", "), getTextFilter(tableFilters, "ports")) &&
-          textMatches(listAddressPreview(item).join(", "), getTextFilter(tableFilters, "addresses")),
+          textMatches(item.namespace, getTextFilter(tableFilters, "namespace")),
       ),
     [clusterMap, data?.items, mergedFilters, tableFilters],
   );
@@ -378,50 +342,11 @@ export default function EndpointsPage() {
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
     {
-      title: "关联 Service",
-      key: "service",
-      filter: { type: "text", placeholder: "Service" },
-      width: TABLE_COL_WIDTH.release,
-      render: (_: unknown, row: EndpointsResource) => (
-        <Link href={`/network/services?namespace=${encodeURIComponent(row.namespace)}&keyword=${encodeURIComponent(row.name)}`}>
-          <Typography.Text style={{ color: "var(--ant-color-link)", cursor: "pointer" }}>{row.name}</Typography.Text>
-        </Link>
-      ),
-    },
-    {
-      title: "端点状态",
-      key: "endpoints",
-      width: TABLE_COL_WIDTH.status,
-      render: (_: unknown, row: EndpointsResource) => {
-        const ready = countAddresses(row, "addresses");
-        const notReady = countAddresses(row, "notReadyAddresses");
-        return (
-          <Space size={4} wrap>
-            <OpsStatusTag tone="success">就绪 {ready}</OpsStatusTag>
-            <OpsStatusTag tone={notReady > 0 ? "warning" : "neutral"}>未就绪 {notReady}</OpsStatusTag>
-          </Space>
-        );
-      },
-    },
-    {
-      title: "端口",
-      key: "ports",
-      width: TABLE_COL_WIDTH.ports,
-      render: (_: unknown, row: EndpointsResource) => {
-        const ports = listPortPreview(row);
-        return ports.length > 0 ? ports.slice(0, 3).join(", ") : "-";
-      },
-    },
-    {
-      title: "地址预览",
-      key: "addresses",
-      width: TABLE_COL_WIDTH.address,
-      render: (_: unknown, row: EndpointsResource) => {
-        const addresses = listAddressPreview(row);
-        if (addresses.length === 0) return "-";
-        const preview = addresses.slice(0, 3).join(", ");
-        return addresses.length > 3 ? `${preview} ...` : preview;
-      },
+      title: "类型",
+      key: "kind",
+      filter: { type: "text", placeholder: "类型" },
+      width: TABLE_COL_WIDTH.type,
+      render: () => <NetworkKindChip kind="Endpoints" />,
     },
     {
       title: "创建时间",

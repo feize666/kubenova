@@ -22,7 +22,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
-import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
+import { StorageStateCell } from "@/components/storage/storage-table-cells";
 import {
   buildResourceActionMenuItems,
   matchLabelExpressions,
@@ -75,7 +75,7 @@ interface ScEditFormValues {
 }
 
 function defaultTag(isDefault: boolean) {
-  return isDefault ? <OpsStatusTag tone="success">默认</OpsStatusTag> : <OpsFilterChip tone="neutral">普通</OpsFilterChip>;
+  return isDefault ? <StorageStateCell tone="success" label="默认" /> : <StorageStateCell tone="neutral" label="普通" />;
 }
 
 function getTextFilter(filters: HeadlampTableFilters, key: string) {
@@ -349,7 +349,7 @@ export default function StorageClassPage() {
             row.spec &&
             (row.spec as { allowVolumeExpansion?: boolean }).allowVolumeExpansion,
         );
-        return allow ? <OpsStatusTag tone="info">允许</OpsStatusTag> : <OpsFilterChip tone="neutral">不允许</OpsFilterChip>;
+        return allow ? <StorageStateCell tone="info" label="允许" /> : <StorageStateCell tone="neutral" label="不允许" />;
       },
     },
     {

@@ -1776,64 +1776,54 @@ export default function NetworkTopologyPage() {
       <style jsx global>{`
         body.topology-overview-active { overflow: hidden; }
         .resource-map-shell {
-          --map-page-bg: linear-gradient(180deg, #f7f9fc 0%, #eef3f8 100%);
-          --map-panel-bg: rgba(255,255,255,.9);
-          --map-canvas-bg: linear-gradient(180deg, #ffffff 0%, #f9fbfd 100%);
-          --map-card-bg: #ffffff;
-          --map-card-bg-soft: rgba(246,249,252,.92);
-          --map-text: #1f2937;
-          --map-heading: #0f172a;
-          --map-muted: #6b7280;
-          --map-border: rgba(15,23,42,.1);
-          --map-border-strong: rgba(15,23,42,.18);
-          --map-shadow: 0 14px 34px rgba(15,23,42,.08), 0 1px 2px rgba(15,23,42,.06);
-          --map-dot: rgba(100,116,139,.2);
+          --map-page-bg: var(--ops-bg);
+          --map-panel-bg: var(--ops-surface-overlay);
+          --map-canvas-bg: linear-gradient(180deg, var(--ops-surface-overlay), color-mix(in srgb, var(--ops-bg) 88%, var(--ops-surface-overlay)));
+          --map-card-bg: var(--ops-surface-overlay);
+          --map-card-bg-soft: var(--ops-subtle-bg);
+          --map-text: var(--ops-text);
+          --map-heading: var(--ops-text);
+          --map-muted: var(--ops-text-muted);
+          --map-border: var(--ops-border-subtle);
+          --map-border-strong: var(--ops-border-strong);
+          --map-shadow: var(--ops-shadow-subtle);
           --map-grid: rgba(100,116,139,.08);
-          --map-edge: #64748b;
-          --map-edge-owner: #475569;
-          --map-edge-network: #0891b2;
-          --map-edge-config: #7c3aed;
-          --map-edge-storage: #059669;
+          --map-edge: var(--ops-text-faint);
           --map-edge-filter: none;
           height: calc(100dvh - 104px); min-height: 640px; display: flex; flex-direction: column; gap: 12px; padding: 14px; color: var(--map-text); background: var(--map-page-bg);
         }
         [data-theme="dark"] .resource-map-shell {
-          --map-page-bg: linear-gradient(180deg, #0a0f17 0%, #101722 100%);
-          --map-panel-bg: rgba(17,24,39,.9);
-          --map-canvas-bg: linear-gradient(180deg, rgba(15,23,42,.96), rgba(17,24,39,.92));
-          --map-card-bg: linear-gradient(180deg, rgba(30,41,59,.98), rgba(17,24,39,.96));
-          --map-card-bg-soft: rgba(30,41,59,.66);
-          --map-text: #dbeafe;
-          --map-heading: #f8fafc;
-          --map-muted: #93a4b8;
-          --map-border: rgba(148,163,184,.22);
-          --map-border-strong: rgba(148,163,184,.32);
-          --map-shadow: 0 14px 34px rgba(0,0,0,.28);
-          --map-dot: rgba(125,211,252,.22);
-          --map-grid: rgba(56,189,248,.07);
-          --map-edge: #7dd3fc;
-          --map-edge-owner: #93c5fd;
-          --map-edge-network: #22d3ee;
-          --map-edge-config: #a78bfa;
-          --map-edge-storage: #34d399;
+          --map-page-bg: var(--ops-bg);
+          --map-panel-bg: color-mix(in srgb, var(--ops-surface) 88%, transparent);
+          --map-canvas-bg: linear-gradient(180deg, rgba(15,23,42,.96), var(--ops-bg));
+          --map-card-bg: var(--ops-surface);
+          --map-card-bg-soft: var(--ops-subtle-bg);
+          --map-text: var(--ops-text);
+          --map-heading: var(--ops-text);
+          --map-muted: var(--ops-text-muted);
+          --map-border: var(--ops-border-subtle);
+          --map-border-strong: var(--ops-border-strong);
+          --map-shadow: var(--ops-shadow-subtle);
+          --map-grid: rgba(148,163,184,.07);
+          --map-edge: var(--ops-text-faint);
           --map-edge-filter: drop-shadow(0 0 5px rgba(34,211,238,.38));
         }
         .resource-map-header { display: flex; align-items: center; justify-content: space-between; min-height: 52px; }
         .resource-map-header span { color: var(--map-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
         .resource-map-header h1 { margin: 0; font-size: 26px; line-height: 1.1; font-weight: 780; color: var(--map-heading); }
         .resource-map-header__stats { display: flex; gap: 8px; }
-        .resource-map-header__stats span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); background: var(--map-panel-bg); border-radius: 10px; padding: 8px 11px; color: var(--map-muted); text-transform: none; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+        .resource-map-header__stats span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); background: var(--map-panel-bg); border-radius: 8px; padding: 7px 10px; color: var(--map-muted); text-transform: none; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
         .resource-map-header__stats strong { color: var(--map-heading); }
-        .resource-map-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid var(--map-border); background: var(--map-panel-bg); box-shadow: var(--map-shadow); border-radius: 10px; padding: 9px; backdrop-filter: blur(10px); }
+        .resource-map-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid var(--map-border); background: var(--map-panel-bg); box-shadow: var(--map-shadow); border-radius: 10px; padding: 8px; backdrop-filter: blur(8px); }
         .resource-map-toolbar__scope,
         .resource-map-toolbar__filters,
         .resource-map-toolbar__actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
         .resource-map-toolbar__filters { overflow: hidden; }
         .resource-map-toolbar__actions { justify-content: flex-end; }
-        .resource-map-toolbar select, .resource-map-toolbar button { height: 34px; border-radius: 8px; border: 1px solid var(--map-border-strong); background: var(--map-card-bg-soft); color: var(--map-text); padding: 0 10px; font-size: 13px; box-shadow: inset 0 1px 0 rgba(255,255,255,.5); }
+        .resource-map-toolbar select, .resource-map-toolbar button { height: 34px; border-radius: 8px; border: 1px solid var(--map-border-strong); background: var(--map-card-bg-soft); color: var(--map-text); padding: 0 10px; font-size: 13px; white-space: nowrap; box-shadow: none; }
         .resource-map-toolbar button { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
-        .resource-map-toolbar button:hover { border-color: color-mix(in srgb, #2563eb 34%, var(--map-border)); background: color-mix(in srgb, var(--map-card-bg-soft) 78%, #ffffff); }
-        .resource-map-toolbar button.is-active { background: color-mix(in srgb, var(--source-color, #0ea5e9) 14%, #ffffff); border-color: color-mix(in srgb, var(--source-color, #0ea5e9) 58%, var(--map-border)); color: var(--map-heading); }
+        .resource-map-toolbar button:hover { border-color: color-mix(in srgb, #2563eb 34%, var(--map-border)); background: color-mix(in srgb, var(--map-card-bg-soft) 82%, var(--map-card-bg)); }
+        .resource-map-toolbar button.is-active { background: color-mix(in srgb, var(--source-color, #0ea5e9) 16%, var(--map-card-bg)); border-color: color-mix(in srgb, var(--source-color, #0ea5e9) 58%, var(--map-border)); color: var(--map-heading); }
         .resource-map-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
         .resource-map-toolbar .ant-input-affix-wrapper { width: 220px; height: 34px; border-radius: 8px; background: var(--map-card-bg-soft); border-color: var(--map-border-strong); color: var(--map-text); }
         .resource-map-toolbar .ant-input { background: transparent; color: var(--map-text); }
@@ -1841,24 +1831,27 @@ export default function NetworkTopologyPage() {
         .resource-map-source-chips { min-width: 0; overflow: auto hidden; scrollbar-width: none; }
         .resource-map-source-chips::-webkit-scrollbar { display: none; }
         .resource-map-source-chips button, .resource-map-segments button { border-radius: 0; margin-left: -1px; }
+        .resource-map-source-chips button { flex: 0 0 auto; min-width: 84px; justify-content: center; }
+        .resource-map-source-chips button span { white-space: nowrap; }
+        .resource-map-segments button { min-width: 48px; justify-content: center; }
         .resource-map-source-chips button:first-child, .resource-map-segments button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
         .resource-map-source-chips button:last-child, .resource-map-segments button:last-child { border-radius: 0 8px 8px 0; }
         .resource-map-source-chips button.is-active { box-shadow: inset 0 -2px 0 var(--source-color); }
-        .resource-map-source-chips strong { color: var(--source-color); }
+        .resource-map-source-chips strong { color: var(--source-color); font-variant-numeric: tabular-nums; }
         .resource-map-workbench { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 12px; }
-        .resource-map-canvas { position: relative; overflow: hidden; border-radius: 12px; border: 1px solid var(--map-border); background: var(--map-canvas-bg); box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 20px 46px rgba(15,23,42,.07); }
+        .resource-map-canvas { position: relative; overflow: hidden; border-radius: 10px; border: 1px solid var(--map-border); background: var(--map-canvas-bg); box-shadow: inset 0 1px 0 rgba(255,255,255,.12); }
         .resource-map-canvas::before { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(var(--map-grid) 1px, transparent 1px), linear-gradient(90deg, var(--map-grid) 1px, transparent 1px); background-size: 40px 40px; mask-image: linear-gradient(180deg, #000 0 72%, transparent 100%); }
         .resource-map-flow-host { position: relative; width: 100%; height: 100%; min-height: 420px; }
         .resource-map-canvas .react-flow { width: 100%; height: 100%; background: transparent; }
         .resource-map-canvas .react-flow__pane { cursor: grab; }
         .resource-map-canvas .react-flow__pane:active { cursor: grabbing; }
         .resource-map-loading { max-width: 760px; margin: 80px auto; padding: 32px; }
-        .resource-map-node { width: 100%; height: 100%; position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 10px; color: var(--map-text); background: var(--map-card-bg); border: 1px solid var(--map-border); box-shadow: 0 12px 26px rgba(15,23,42,.08), 0 1px 2px rgba(15,23,42,.08); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+        .resource-map-node { width: 100%; height: 100%; position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 8px; color: var(--map-text); background: var(--map-card-bg); border: 1px solid var(--map-border); box-shadow: 0 1px 3px rgba(15,23,42,.08); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
         .resource-map-node::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(90deg, var(--node-accent), transparent 34%); opacity: .1; }
         .resource-map-node::after { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 0 999px 999px 0; background: var(--node-accent); opacity: .8; }
-        .resource-map-node:hover, .resource-map-node.is-selected { border-color: var(--node-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--node-accent) 42%, transparent), 0 18px 38px rgba(15,23,42,.12); transform: translateY(-1px); }
+        .resource-map-node:hover, .resource-map-node.is-selected { border-color: var(--node-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--node-accent) 34%, transparent), 0 8px 18px rgba(15,23,42,.1); transform: translateY(-1px); }
         .resource-map-node__handle { opacity: 0; }
-        .resource-map-node__icon { width: 40px; height: 40px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 13%, #ffffff); border: 1px solid color-mix(in srgb, var(--node-accent) 22%, transparent); }
+        .resource-map-node__icon { width: 40px; height: 40px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 13%, var(--map-card-bg)); border: 1px solid color-mix(in srgb, var(--node-accent) 22%, transparent); }
         .resource-map-node__text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
         .resource-map-node__text span { color: var(--map-muted); font-size: 12px; }
         .resource-map-node__text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-heading); font-size: 15px; }
@@ -1876,7 +1869,7 @@ export default function NetworkTopologyPage() {
         .resource-map-node__stack-grid { position: absolute; inset: 56px 24px 22px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
         .resource-map-stack-card { position: relative; min-width: 0; height: 86px; display: flex; align-items: center; gap: 14px; border: 1px solid var(--map-border); border-radius: 10px; background: var(--map-card-bg); color: var(--map-text); padding: 12px 14px; text-align: left; cursor: pointer; box-shadow: 8px 8px 0 color-mix(in srgb, var(--map-card-bg-soft) 78%, transparent), 15px 15px 0 color-mix(in srgb, var(--map-card-bg-soft) 45%, transparent); transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
         .resource-map-stack-card:hover { border-color: var(--node-accent); transform: translateY(-1px); }
-        .resource-map-stack-card__icon { width: 46px; height: 46px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 14%, #ffffff); }
+        .resource-map-stack-card__icon { width: 46px; height: 46px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 14%, var(--map-card-bg)); }
         .resource-map-stack-card__copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
         .resource-map-stack-card__copy small { color: var(--map-muted); font-size: 13px; }
         .resource-map-stack-card__copy strong { color: var(--map-heading); font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
@@ -1899,7 +1892,7 @@ export default function NetworkTopologyPage() {
         .resource-map-motion-state { position: absolute; right: 12px; bottom: 12px; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 6px 10px; background: var(--map-panel-bg); border: 1px solid var(--map-border); color: var(--map-muted); font-size: 12px; pointer-events: none; }
         .resource-map-motion-state span { width: 7px; height: 7px; border-radius: 999px; background: #64748b; }
         .resource-map-motion-state span.is-on { background: #22c55e; box-shadow: 0 0 10px rgba(34,197,94,.8); }
-        .resource-map-rail { min-width: 0; overflow: hidden; border-radius: 12px; border: 1px solid var(--map-border); background: var(--map-panel-bg); display: flex; flex-direction: column; box-shadow: var(--map-shadow); backdrop-filter: blur(10px); }
+        .resource-map-rail { min-width: 0; overflow: hidden; border-radius: 10px; border: 1px solid var(--map-border); background: var(--map-panel-bg); display: flex; flex-direction: column; box-shadow: var(--map-shadow); backdrop-filter: blur(8px); }
         .resource-map-rail > .ant-empty { margin: auto; color: var(--map-muted); }
         .resource-map-rail__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px; border-bottom: 1px solid var(--map-border); }
         .resource-map-rail__title { min-width: 0; display: flex; flex-direction: column; gap: 4px; }

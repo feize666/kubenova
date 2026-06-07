@@ -65,8 +65,17 @@ function podPhaseTone(phase: PodPhase) {
   if (phase === "Running") return "success";
   if (phase === "Pending") return "warning";
   if (phase === "Failed") return "danger";
+  if (phase === "CrashLoopBackOff") return "danger";
   if (phase === "Succeeded") return "info";
   return "neutral";
+}
+
+function podPhaseClass(phase: PodPhase) {
+  if (phase === "Running") return "running";
+  if (phase === "Pending") return "pending";
+  if (phase === "Failed" || phase === "CrashLoopBackOff") return "error";
+  if (phase === "Succeeded") return "succeeded";
+  return "unknown";
 }
 
 // 从 statusJson 中提取 Pod 扩展字段
@@ -764,7 +773,12 @@ export default function PodsPage() {
         options: PHASE_OPTIONS.filter((item) => item.value).map((item) => ({ label: item.label, value: item.value })),
       },
       ...getSortableColumnProps("phase"),
-      render: (phase: string) => <OpsStatusTag tone={podPhaseTone(phase)}>{phase}</OpsStatusTag>,
+      render: (phase: string) => (
+        <span className={`pod-phase-pill is-${podPhaseClass(phase)}`}>
+          <span className="pod-phase-pill__dot" />
+          <OpsStatusTag tone={podPhaseTone(phase)}>{phase}</OpsStatusTag>
+        </span>
+      ),
     },
     {
       title: "CPU 使用率",
@@ -875,7 +889,7 @@ export default function PodsPage() {
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <Card className="cyber-panel pods-workbench-card">
         <ResourcePageHeader
           path={POD_PATH}
           embedded
@@ -919,6 +933,7 @@ export default function PodsPage() {
           <ResourceTable<PodRow>
             rowKey="key"
             tableKey={POD_TABLE_KEY}
+            className="pod-table"
             bordered
             columns={columns as ColumnsType<PodRow>}
             dataSource={displayedRows}

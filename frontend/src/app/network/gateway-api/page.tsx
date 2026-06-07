@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
-import { OpsFilterChip } from "@/components/ops";
+import { NetworkKindChip } from "@/components/network/network-table-cells";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
@@ -954,20 +954,11 @@ export default function GatewayApiPage() {
       render: (value: string) => value || "-",
     },
     {
-      title: "标签",
-      key: "labels",
-      render: (_: unknown, row) => {
-        const entries = Object.entries(row.labels ?? {}).slice(0, 3);
-        return entries.length > 0 ? (
-          <Space wrap size={[4, 4]}>
-            {entries.map(([key, value]) => (
-              <OpsFilterChip key={`${row.id}-${key}`} tone="neutral">{`${key}=${value}`}</OpsFilterChip>
-            ))}
-          </Space>
-        ) : (
-          "-"
-        );
-      },
+      title: "类型",
+      key: "kind",
+      filter: { type: "text", placeholder: "类型" },
+      width: TABLE_COL_WIDTH.type,
+      render: () => <NetworkKindChip kind={kindMeta.title} />,
     },
     {
       title: "更新时间",

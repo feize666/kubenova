@@ -24,7 +24,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
-import { OpsStatusTag } from "@/components/ops";
+import { StorageCapacityCell, StorageStateCell } from "@/components/storage/storage-table-cells";
 import {
   matchLabelExpressions,
   parseResourceSearchInput,
@@ -81,12 +81,12 @@ function readPhase(resource: StorageResource) {
 
 function pvcStatusTag(resource: StorageResource) {
   const phase = normalizePhase(readPhase(resource));
-  if (phase === "bound") return <OpsStatusTag tone="success">Bound</OpsStatusTag>;
-  if (phase === "pending") return <OpsStatusTag tone="warning">Pending</OpsStatusTag>;
-  if (phase === "lost") return <OpsStatusTag tone="danger">Lost</OpsStatusTag>;
-  if (phase === "terminating") return <OpsStatusTag tone="warning">Terminating</OpsStatusTag>;
-  if (phase === "released") return <OpsStatusTag tone="neutral">Released</OpsStatusTag>;
-  return <OpsStatusTag tone="neutral">{readPhase(resource) || "-"}</OpsStatusTag>;
+  if (phase === "bound") return <StorageStateCell tone="success" label="Bound" />;
+  if (phase === "pending") return <StorageStateCell tone="warning" label="Pending" />;
+  if (phase === "lost") return <StorageStateCell tone="danger" label="Lost" />;
+  if (phase === "terminating") return <StorageStateCell tone="warning" label="Terminating" />;
+  if (phase === "released") return <StorageStateCell tone="neutral" label="Released" />;
+  return <StorageStateCell tone="neutral" label={readPhase(resource) || "-"} />;
 }
 
 function getTextFilter(filters: HeadlampTableFilters, key: string) {
@@ -418,6 +418,7 @@ export default function PvcPage() {
       filter: { type: "text", placeholder: "容量" },
       width: TABLE_COL_WIDTH.capacity,
       ...getSortableColumnProps("capacity", isLoading && !data),
+      render: (value: string | undefined) => <StorageCapacityCell value={value} />,
     },
     {
       title: "存储类",

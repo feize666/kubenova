@@ -343,6 +343,13 @@ function formatMetaLine(input: {
   return `${level.toLowerCase()} ${body}`;
 }
 
+function colorizeTerminalLogLine(text: string): string {
+  const level = inferSeverity(text);
+  if (level === "ERROR") return `\x1b[31m${text}\x1b[0m`;
+  if (level === "WARN") return `\x1b[33m${text}\x1b[0m`;
+  return `\x1b[36m${text}\x1b[0m`;
+}
+
 function toDownloadText(lines: RuntimeLogItem[], options: { beautify: boolean; formatJson: boolean; includeTimestamp: boolean }): string {
   return lines
     .map((line) =>
@@ -370,14 +377,15 @@ function writeTerminalBatch(
   if (!terminal || lines.length === 0) return;
   terminal.write(
     lines
-      .map((line) =>
-        `${formatMetaLine({
+      .map((line) => {
+        const formatted = formatMetaLine({
           item: line,
           beautify: options.beautify,
           formatJson: options.formatJson,
           includeTimestamp: options.includeTimestamp,
-        })}\r\n`,
-      )
+        });
+        return `${colorizeTerminalLogLine(formatted)}\r\n`;
+      })
       .join(""),
   );
 }
@@ -1693,17 +1701,17 @@ export default function LogsPage() {
       <style jsx>{`
 	        .logs-terminal-frame {
 	          position: relative;
-	          border-radius: 16px 16px 0 0;
+	          border-radius: 10px 10px 0 0;
           overflow: hidden;
           border: 1px solid var(--ops-frame-border);
           background:
-            linear-gradient(90deg, transparent 0 18px, color-mix(in srgb, var(--ops-log-info) 10%, transparent) 18px 19px, transparent 19px 38px),
+            linear-gradient(90deg, transparent 0 18px, color-mix(in srgb, var(--ops-log-info) 7%, transparent) 18px 19px, transparent 19px 38px),
             linear-gradient(180deg, #07111f 0%, var(--ops-terminal-bg) 100%);
         }
 
         :global(.logs-toolbar-card.ant-card),
         :global(.logs-terminal-card.ant-card) {
-          border-radius: var(--ops-control-radius);
+          border-radius: 10px;
           border-color: var(--ops-frame-border);
           background: var(--ops-frame-header-bg);
           overflow: hidden;
@@ -1711,7 +1719,10 @@ export default function LogsPage() {
 
         .headlamp-log-toolbar {
           display: grid;
-          grid-template-columns: minmax(500px, 1fr) max-content max-content;
+          grid-template-columns: minmax(0, 1fr) 306px;
+          grid-template-areas:
+            "main actions"
+            "mode actions";
           justify-content: space-between;
           gap: 10px;
           width: 100%;
@@ -1727,29 +1738,32 @@ export default function LogsPage() {
           flex-wrap: wrap;
           min-width: 0;
           min-height: 64px;
-          padding: 10px;
+          padding: 8px;
           border: 1px solid var(--ops-border-subtle);
-          border-radius: 14px;
+          border-radius: 8px;
           background: var(--ops-subtle-bg);
         }
 
         .headlamp-log-group-main {
+          grid-area: main;
           align-content: end;
         }
 
         .headlamp-log-group-mode {
+          grid-area: mode;
           align-content: end;
-          justify-content: center;
-          justify-self: end;
+          justify-content: flex-start;
+          min-height: 48px;
         }
 
         .headlamp-log-group-actions {
+          grid-area: actions;
           display: inline-flex;
           justify-content: flex-end;
           align-content: end;
-          justify-self: end;
-          flex-wrap: nowrap;
-          width: max-content;
+          align-self: stretch;
+          flex-wrap: wrap;
+          width: 100%;
         }
 
         .headlamp-log-control {
@@ -1774,15 +1788,19 @@ export default function LogsPage() {
           height: 32px;
           flex: 0 0 auto;
           white-space: nowrap;
-          color: var(--surface-subtle);
+          color: var(--ops-text-muted);
+          font-size: 12px;
+          font-weight: 650;
         }
 
         .headlamp-log-actions {
           display: inline-flex;
           align-items: center;
+          justify-content: flex-end;
           gap: 2px;
           height: 32px;
           flex: 0 0 auto;
+          width: 100%;
         }
 
         .headlamp-time-trigger {
@@ -1933,9 +1951,9 @@ export default function LogsPage() {
 	          display: grid;
 	          gap: 6px;
 	          min-width: min(360px, calc(100% - 32px));
-	          padding: 18px 20px;
+	          padding: 16px 18px;
 	          border: 1px solid var(--ops-frame-border);
-	          border-radius: 14px;
+	          border-radius: 10px;
 	          background: var(--ops-frame-header-bg);
 	          box-shadow: var(--ops-shadow-overlay);
 	          text-align: center;
@@ -1943,11 +1961,11 @@ export default function LogsPage() {
 	        }
 
         .logs-empty-hint :global(.ant-typography) {
-          color: #e5f4ff;
+          color: var(--ops-terminal-fg);
         }
 
         .logs-empty-hint :global(.ant-typography-secondary) {
-          color: #bfd7ef !important;
+          color: color-mix(in srgb, var(--ops-terminal-fg) 70%, transparent) !important;
         }
 
         :global(.logs-workbench-body) :global(.xterm) {
@@ -1966,6 +1984,10 @@ export default function LogsPage() {
         @media (max-width: 1440px) {
           .headlamp-log-toolbar {
             grid-template-columns: 1fr;
+            grid-template-areas:
+              "main"
+              "mode"
+              "actions";
             justify-content: stretch;
           }
 

@@ -55,12 +55,12 @@ import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
-import { OpsStatusTag } from "@/components/ops/ops-status";
+import { WorkloadReplicaCell, WorkloadStateTag } from "@/components/workloads/workload-table-cells";
 
 function stateTag(state: string) {
-  if (state === "active") return <OpsStatusTag tone="success">运行中</OpsStatusTag>;
-  if (state === "disabled") return <OpsStatusTag tone="warning">已暂停</OpsStatusTag>;
-  return <OpsStatusTag tone="danger">已删除</OpsStatusTag>;
+  if (state === "active") return <WorkloadStateTag tone="success" label="运行中" />;
+  if (state === "disabled") return <WorkloadStateTag tone="warning" label="已暂停" />;
+  return <WorkloadStateTag tone="danger" label="已删除" />;
 }
 
 const STATE_FILTER_OPTIONS = [
@@ -361,8 +361,26 @@ export default function JobsPage() {
     },
     { title: "集群", dataIndex: "clusterId", key: "clusterId", filter: { type: "text", placeholder: "以集群过滤" }, width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
     { title: "名称空间", dataIndex: "namespace", key: "namespace", filter: { type: "text", placeholder: "以命名空间过滤" }, width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
-    { title: "完成数", dataIndex: "readyReplicas", key: "readyReplicas", filter: { type: "text", placeholder: "过滤" }, width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
-    { title: "期望完成", dataIndex: "replicas", key: "replicas", filter: { type: "text", placeholder: "过滤" }, width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
+    {
+      title: "完成数",
+      dataIndex: "readyReplicas",
+      key: "readyReplicas",
+      filter: { type: "text", placeholder: "过滤" },
+      width: TABLE_COL_WIDTH.ready,
+      render: (value: number, row: WorkloadListItem) => (
+        <WorkloadReplicaCell value={value} target={row.replicas} variant="ready" />
+      ),
+      ...getSortableColumnProps("readyReplicas"),
+    },
+    {
+      title: "期望完成",
+      dataIndex: "replicas",
+      key: "replicas",
+      filter: { type: "text", placeholder: "过滤" },
+      width: TABLE_COL_WIDTH.replicas,
+      render: (value: number) => <WorkloadReplicaCell value={value} variant="desired" />,
+      ...getSortableColumnProps("replicas"),
+    },
     {
       title: "状态",
       dataIndex: "state",

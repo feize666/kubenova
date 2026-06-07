@@ -54,12 +54,12 @@ import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
-import { OpsStatusTag } from "@/components/ops/ops-status";
+import { WorkloadStateTag } from "@/components/workloads/workload-table-cells";
 
 function stateTag(state: string) {
-  if (state === "active") return <OpsStatusTag tone="success">调度中</OpsStatusTag>;
-  if (state === "disabled") return <OpsStatusTag tone="warning">暂停</OpsStatusTag>;
-  return <OpsStatusTag tone="danger">已删除</OpsStatusTag>;
+  if (state === "active") return <WorkloadStateTag tone="success" label="调度中" />;
+  if (state === "disabled") return <WorkloadStateTag tone="warning" label="暂停" />;
+  return <WorkloadStateTag tone="danger" label="已删除" />;
 }
 
 const STATE_FILTER_OPTIONS = [

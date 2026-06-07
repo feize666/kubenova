@@ -21,8 +21,8 @@ import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ConfigCountCell, ConfigVersionCell } from "@/components/configs/config-table-cells";
 import { ResourceTable } from "@/components/resource-table";
-import { OpsFilterChip } from "@/components/ops";
 import type { HeadlampTableFilters, HeadlampResourceTableColumn } from "@/components/resource-table";
 import {
   matchLabelExpressions,
@@ -440,7 +440,7 @@ export default function SecretsPage() {
       dataIndex: "dataCount",
       key: "dataCount",
       width: TABLE_COL_WIDTH.type,
-      render: (v: number) => <OpsFilterChip tone="info">{v}</OpsFilterChip>,
+      render: (v: number) => <ConfigCountCell value={v} label="items" />,
     },
     {
       title: "版本",
@@ -448,7 +448,7 @@ export default function SecretsPage() {
       key: "version",
       filter: { type: "text", placeholder: "以版本过滤" },
       width: TABLE_COL_WIDTH.version,
-      render: (v?: number) => (typeof v === "number" ? `v${v}` : "-"),
+      render: (v?: number) => <ConfigVersionCell value={v} />,
     },
     {
       title: "更新时间",

@@ -73,7 +73,7 @@ import {
   type ScaleConvergenceRound,
 } from "@/lib/workloads/scale-convergence";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { OpsStatusTag } from "@/components/ops/ops-status";
+import { WorkloadReplicaCell, WorkloadStateTag } from "@/components/workloads/workload-table-cells";
 
 type WorkloadAction =
   | "scale"
@@ -742,7 +742,7 @@ export default function DeploymentsPage() {
       key: "status",
       filter: { type: "status", placeholder: "以状态过滤", options: DEPLOYMENT_STATUS_FILTER_OPTIONS },
       width: TABLE_COL_WIDTH.status,
-      render: (value: DeploymentStatus) => <OpsStatusTag tone={状态色调[value]}>{value}</OpsStatusTag>,
+      render: (value: DeploymentStatus) => <WorkloadStateTag tone={状态色调[value]} label={value} />,
       ...getSortableColumnProps("status"),
     },
     {
@@ -752,18 +752,39 @@ export default function DeploymentsPage() {
       filter: { type: "status", placeholder: "以启用状态过滤", options: DEPLOYMENT_STATE_FILTER_OPTIONS },
       width: TABLE_COL_WIDTH.status,
       render: (value: "启用" | "禁用") => (
-        <OpsStatusTag tone={value === "禁用" ? "neutral" : "success"}>{value}</OpsStatusTag>
+        <WorkloadStateTag tone={value === "禁用" ? "neutral" : "success"} label={value} />
       ),
       ...getSortableColumnProps("state"),
     },
-    { title: "副本", dataIndex: "副本数", key: "replicas", filter: { type: "text", placeholder: "过滤" }, width: TABLE_COL_WIDTH.replicas, ...getSortableColumnProps("replicas") },
-    { title: "就绪", dataIndex: "就绪数", key: "readyReplicas", filter: { type: "text", placeholder: "过滤" }, width: TABLE_COL_WIDTH.ready, ...getSortableColumnProps("readyReplicas") },
+    {
+      title: "副本",
+      dataIndex: "副本数",
+      key: "replicas",
+      filter: { type: "text", placeholder: "过滤" },
+      width: TABLE_COL_WIDTH.replicas,
+      render: (value: number) => <WorkloadReplicaCell value={value} variant="desired" />,
+      ...getSortableColumnProps("replicas"),
+    },
+    {
+      title: "就绪",
+      dataIndex: "就绪数",
+      key: "readyReplicas",
+      filter: { type: "text", placeholder: "过滤" },
+      width: TABLE_COL_WIDTH.ready,
+      render: (value: number, row: DeploymentRow) => (
+        <WorkloadReplicaCell value={value} target={row.副本数} variant="ready" />
+      ),
+      ...getSortableColumnProps("readyReplicas"),
+    },
     {
       title: "可用",
       dataIndex: "可用数",
       key: "availableReplicas",
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.available,
+      render: (value: number, row: DeploymentRow) => (
+        <WorkloadReplicaCell value={value} target={row.副本数} variant="available" />
+      ),
       ...getSortableColumnProps("availableReplicas"),
     },
     {

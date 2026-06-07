@@ -22,11 +22,11 @@ import {
   parseResourceSearchInput,
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
-import { OpsFilterChip } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceRowActions } from "@/components/resource-row-actions";
+import { NetworkKindChip } from "@/components/network/network-table-cells";
 import {
   applyNetworkResourceYaml,
   createNetworkResource,
@@ -448,7 +448,7 @@ export default function ServicesPage() {
         key: "kind",
         filter: { type: "text", placeholder: "类型" },
         width: TABLE_COL_WIDTH.type,
-        render: () => <OpsFilterChip tone="info">{SERVICE_KIND}</OpsFilterChip>,
+        render: () => <NetworkKindChip kind={SERVICE_KIND} />,
       },
       {
         title: "创建时间",

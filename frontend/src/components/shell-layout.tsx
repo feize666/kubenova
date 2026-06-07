@@ -12,6 +12,7 @@ import {
   MoonFilled,
   NodeIndexOutlined,
   PartitionOutlined,
+  ReloadOutlined,
   RobotOutlined,
   SearchOutlined,
   SettingOutlined,
@@ -20,7 +21,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Avatar, Breadcrumb, Dropdown, Input, Layout, Menu, Skeleton, Space } from "antd";
 import type { MenuProps } from "antd";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -585,9 +586,11 @@ function LoadingSkeleton() {
 
 export function ShellLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { mode, toggleTheme } = useThemeMode();
   const { accessToken, isAuthenticated, isInitializing, username, role, logout } = useAuth();
   const isLoginPage = pathname === "/login";
+  const currentTitle = getTitleFromPath(pathname);
   const capabilitiesQuery = useQuery({
     queryKey: queryKeys.capabilities.list(accessToken),
     queryFn: () => listCapabilities(accessToken),
@@ -619,6 +622,19 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
         .filter(Boolean),
     );
   }, [accessToken, capabilitiesQuery.data, isAuthenticated]);
+  const shellScope = useMemo(
+    () => ({
+      cluster: searchParams.get("clusterName")?.trim() || searchParams.get("clusterId")?.trim() || "全部集群",
+      namespace: searchParams.get("namespace")?.trim() || "全部名称空间",
+    }),
+    [searchParams],
+  );
+  const capabilityStats = useMemo(() => {
+    const items = capabilitiesQuery.data ?? [];
+    const enabled = items.filter((item) => item.enabled).length;
+    const disabled = items.length - enabled;
+    return { enabled, disabled, total: items.length };
+  }, [capabilitiesQuery.data]);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") {
@@ -747,12 +763,35 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
                       fontSize: 13,
                     }}
                   >
-                    {getTitleFromPath(pathname)}
+                    {currentTitle}
                   </span>
                 ),
               },
             ]}
           />
+          <div className="shell-status-band" aria-label="当前工作区状态">
+            <span className="shell-status-chip shell-status-chip--scope">
+              <span>集群</span>
+              <strong>{shellScope.cluster}</strong>
+            </span>
+            <span className="shell-status-chip shell-status-chip--scope">
+              <span>命名空间</span>
+              <strong>{shellScope.namespace}</strong>
+            </span>
+            <span className="shell-status-chip shell-status-chip--success">
+              <i aria-hidden="true" />
+              <span>能力</span>
+              <strong>{capabilityStats.total ? `${capabilityStats.enabled}/${capabilityStats.total}` : "同步中"}</strong>
+            </span>
+            <span className="shell-status-chip shell-status-chip--warning">
+              <span>告警</span>
+              <strong>{capabilityStats.disabled}</strong>
+            </span>
+            <span className="shell-status-chip shell-status-chip--neutral">
+              <span>角色</span>
+              <strong>{role || "user"}</strong>
+            </span>
+          </div>
           <Space size={12}>
             <Input
               id="shell-global-search"
@@ -763,29 +802,22 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               style={{ width: 280 }}
             />
             <OpsIconActionButton className="shell-topbar-action" icon={<BellOutlined />}>通知中心</OpsIconActionButton>
+            <OpsIconActionButton className="shell-topbar-action" icon={<ReloadOutlined />} onClick={() => window.location.reload()}>
+              刷新
+            </OpsIconActionButton>
             <OpsIconActionButton
               className="shell-theme-toggle"
               onClick={toggleTheme}
-              style={{
-                background:
-                  mode === "dark"
-                    ? "linear-gradient(135deg, #1e3a5f, #0a1628)"
-                    : "linear-gradient(135deg, #dbeafe, #eff6ff)",
-                border: `1px solid ${mode === "dark" ? "#3b82f6" : "#93c5fd"}`,
-                color: mode === "dark" ? "#60a5fa" : "#1d4ed8",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                borderRadius: 20,
-                padding: "0 14px",
-                height: 34,
-              }}
+              aria-label={`切换到${mode === "dark" ? "浅色" : "深色"}主题`}
             >
-              {mode === "dark" ? (
-                <><MoonFilled style={{ color: "#818cf8", fontSize: 14 }} /> 深色</>
-              ) : (
-                <><SunFilled style={{ color: "#f59e0b", fontSize: 14 }} /> 浅色</>
-              )}
+              <span className={`shell-theme-segment ${mode === "light" ? "is-active" : ""}`}>
+                <SunFilled />
+                浅色
+              </span>
+              <span className={`shell-theme-segment ${mode === "dark" ? "is-active" : ""}`}>
+                <MoonFilled />
+                深色
+              </span>
             </OpsIconActionButton>
             <Dropdown
               menu={{

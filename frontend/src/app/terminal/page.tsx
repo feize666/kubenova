@@ -971,6 +971,7 @@ export default function TerminalPage() {
       <style jsx global>{`
         .terminal-workbench-shell.ops-frame-shell {
           min-height: calc(100vh - 112px);
+          border-radius: 10px;
         }
 
         .terminal-workbench-shell .ops-frame-shell__header {
@@ -984,7 +985,7 @@ export default function TerminalPage() {
         .terminal-workbench-body {
           display: grid;
           min-height: 0;
-          padding: 16px;
+          padding: 14px;
         }
 
         .terminal-workbench-toolbar.ant-space {
@@ -1002,9 +1003,9 @@ export default function TerminalPage() {
           min-height: 72vh;
           overflow: hidden;
           border: 1px solid var(--ops-frame-border);
-          border-radius: var(--ops-control-radius);
+          border-radius: 10px;
           background: var(--ops-terminal-bg);
-          box-shadow: inset 0 1px 0 var(--ops-frame-divider);
+          box-shadow: inset 0 1px 0 var(--ops-frame-divider), 0 1px 2px rgba(15, 23, 42, 0.08);
         }
 
         .terminal-workbench-stage--connecting,
@@ -1026,7 +1027,7 @@ export default function TerminalPage() {
           align-items: center;
           justify-content: space-between;
           gap: 12px;
-          padding: 12px 14px;
+          padding: 10px 14px;
           border-bottom: 1px solid var(--ops-frame-divider);
           background: var(--ops-frame-header-bg);
         }
@@ -1098,7 +1099,7 @@ export default function TerminalPage() {
 
         @media (max-width: 720px) {
           .terminal-workbench-body {
-            padding: 12px;
+            padding: 10px;
           }
 
           .terminal-workbench-titlebar {

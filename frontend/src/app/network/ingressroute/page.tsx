@@ -20,13 +20,13 @@ import {
   parseResourceSearchInput,
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
-import { OpsFilterChip } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { NetworkKindChip } from "@/components/network/network-table-cells";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
@@ -417,68 +417,11 @@ export default function IngressRoutePage() {
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
     {
-      title: "入口点",
-      key: "entryPoints",
-      filter: { type: "text", placeholder: "入口点" },
-      width: TABLE_COL_WIDTH.schedule,
-      render: (_: unknown, record: IngressRouteResource) => {
-        const entryPoints = record.spec?.entryPoints ?? [];
-        if (entryPoints.length === 0) return "-";
-        return (
-          <Space size={[4, 4]} wrap>
-            <Typography.Text ellipsis={{ tooltip: entryPoints[0] }}>{entryPoints[0]}</Typography.Text>
-            {entryPoints.length > 1 ? <OpsFilterChip tone="info">+{entryPoints.length - 1}</OpsFilterChip> : null}
-          </Space>
-        );
-      },
-    },
-    {
-      title: "匹配规则",
-      key: "match",
-      filter: { type: "text", placeholder: "匹配" },
-      width: TABLE_COL_WIDTH.url,
-      render: (_: unknown, record: IngressRouteResource) => (
-        <Typography.Text ellipsis={{ tooltip: record.spec?.routes?.[0]?.match ?? "-" }}>
-          {record.spec?.routes?.[0]?.match ?? "-"}
-        </Typography.Text>
-      ),
-    },
-    {
-      title: "后端服务",
-      key: "serviceName",
-      filter: { type: "text", placeholder: "服务" },
-      width: TABLE_COL_WIDTH.ports,
-      render: (_: unknown, record: IngressRouteResource) => {
-        const services = record.spec?.routes?.[0]?.services ?? [];
-        const primary = services[0];
-        if (!primary?.name) return "-";
-        const serviceId = `live:${record.clusterId}:Service:${record.namespace}:${primary.name}`;
-        return (
-          <Space size={[4, 4]} wrap>
-            <Typography.Link onClick={() => setDetailTarget({ kind: "Service", id: serviceId })}>
-              {primary.name}
-            </Typography.Link>
-            <Typography.Text type="secondary">:{primary.port ?? "-"}</Typography.Text>
-            {services.length > 1 ? <OpsFilterChip tone="info">+{services.length - 1}</OpsFilterChip> : null}
-          </Space>
-        );
-      },
-    },
-    {
-      title: "中间件",
-      key: "middlewares",
-      width: TABLE_COL_WIDTH.address,
-      render: (_: unknown, record: IngressRouteResource) => {
-        const middlewares =
-          record.spec?.routes?.[0]?.middlewares?.map((item) => item.name).filter(Boolean) ?? [];
-        if (middlewares.length === 0) return "-";
-        return (
-          <Space size={[4, 4]} wrap>
-            <Typography.Text ellipsis={{ tooltip: middlewares[0] }}>{middlewares[0]}</Typography.Text>
-            {middlewares.length > 1 ? <OpsFilterChip tone="info">+{middlewares.length - 1}</OpsFilterChip> : null}
-          </Space>
-        );
-      },
+      title: "类型",
+      key: "kind",
+      filter: { type: "text", placeholder: "类型" },
+      width: TABLE_COL_WIDTH.type,
+      render: () => <NetworkKindChip kind="IngressRoute" />,
     },
     {
       title: "创建时间",

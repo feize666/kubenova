@@ -123,3 +123,31 @@ For repo-wide scans, use `rg ... .` or existing subpaths discovered with `rg --f
 ### Metadata
 - Source: error
 - Tags: rg, scanning
+
+## [ERR-20260607-001] Python Playwright unavailable
+
+**Logged**: 2026-06-07T10:40:00+08:00
+**Area**: tests
+
+### Summary
+Local `python` missing and `python3` lacks `playwright`; for this repo use frontend Node Playwright scripts instead.
+
+### Command
+`python /case/temp/kubenova-ui-continue/verify_workload_ui.py` -> `python: command not found`; `python3 ...` -> `ModuleNotFoundError: No module named playwright`.
+
+### Suggested Action
+Prefer `node` scripts under `frontend` where Playwright is installed.
+
+## [ERR-20260607-002] Node Playwright browser missing
+
+**Logged**: 2026-06-07T10:41:00+08:00
+**Area**: tests
+
+### Summary
+Frontend has Playwright package but browser executable missing from `/root/.cache/ms-playwright`.
+
+### Command
+`node /case/temp/kubenova-ui-continue/verify_workload_ui.mjs` failed with `Executable doesn't exist`.
+
+### Suggested Action
+Use system Chrome executable when present, or run `npx playwright install chromium` before Node Playwright verification.
