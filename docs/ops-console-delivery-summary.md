@@ -12,8 +12,8 @@
 - NetworkPolicy 与 Gateway API：后端 live resource 支持与前端入口对齐。
 - 全局详情抽屉审计：补充覆盖矩阵，记录 Headlamp 对标缺口。
 - 可观测性中心：新增 summary API、数据源状态、实体健康、SLO、深链字段和前端中心页。
-- AIOps 中台：新增 summary API、事故队列、根因候选、推荐动作、precheck、审批审计和前端工作台。
-- 性能与稳定性硬化：前端请求取消、切换性能脚本覆盖新路由、后端 metrics fanout 并发上限与超时兜底、AIOps 时间范围校验。
+- KubeNova 智能运维中台：新增 summary API、事故队列、根因候选、推荐动作、precheck、审批审计和前端工作台。
+- 性能与稳定性硬化：前端请求取消、切换性能脚本覆盖新路由、后端 metrics fanout 并发上限与超时兜底、KubeNova 时间范围校验。
 - 文档收口草案：项目使用、二进制、Docker/Compose、Kubernetes、Delivery Summary。
 
 ## 关键变更
@@ -29,14 +29,14 @@
 
 - `GET /api/clusters/:id/nodes` 工作节点只读链路。
 - `GET /api/monitoring/observability/summary` 可观测性聚合链路。
-- `GET /api/aiops/summary` AIOps 聚合链路。
+- `GET /api/aiops/summary` KubeNova 聚合链路。
 - `POST /api/aiops/recommendations/precheck` 与 `POST /api/aiops/recommendations/approve` 审计链路。
 - monitoring overview live metrics 分批 fanout，默认并发上限 4，单集群 live metrics 2500ms timeout fallback。
 
 前端：
 
 - 新增 `/clusters/nodes`、`/observability`、`/aiops`。
-- 导航补充 `集群域管理`、`可观测性中心`、`AIOps中台`。
+- 导航补充 `集群域管理`、`可观测性中心`、`KubeNova中台`。
 - 新中心页接入统一时间范围、数据源降级、详情抽屉和请求取消。
 
 文档：
@@ -48,7 +48,7 @@
 - [性能稳定性回归](performance-stability-regression.md)
 - [全局详情抽屉审计](global-detail-drawer-audit.md)
 - [可观测性回归矩阵](observability-regression-matrix.md)
-- [AIOps 回归矩阵](aiops-regression-matrix.md)
+- [KubeNova 回归矩阵](kubenova-regression-matrix.md)
 
 ## 验证证据
 
@@ -73,7 +73,7 @@
 - Browser route loop via Playwright MCP：10 routes reachable, `consoleErrorCount=0`, `pageErrorCount=0`。
 - Backend pressure smoke：20 authenticated requests, concurrency 5, all `200`, no 5xx, p95 about `2554ms`。
 - Table preference smoke：`GET`/`PUT /api/users/preferences/table/business.clusters` returned `200` with volatile fallback when preference storage is unavailable。
-- AIOps inverted time-range smoke：returned `400 REQUEST_FAILED`。
+- KubeNova inverted time-range smoke：returned `400 REQUEST_FAILED`。
 - `git diff --check`：passed。
 
 本轮 12.8 服务脚本与部署文档专项回归（2026-05-29）：
@@ -101,7 +101,7 @@
 - Markdown 本地文件引用检查：passed，`docs/ops-console-delivery-summary.md`、`docs/ops-console-unified-execution-plan.md`、`docs/ops-console-usage.md`、`docs/ops-console-binary-deployment.md`、`docs/ops-console-docker-compose.md`、`docs/ops-console-kubernetes-deployment.md`、`.codex/specs/ops-console-unified-experience/tasks.md` 内相对文件链接均存在。
 - 部署/回滚文件存在性检查：passed，确认 `docs/ops-console-usage.md`、`docs/ops-console-binary-deployment.md`、`docs/ops-console-docker-compose.md`、`docs/ops-console-kubernetes-deployment.md`、`scripts/service.sh`、`scripts/prod-switch.sh`、`scripts/prod-rollback.sh` 存在。
 - `bash scripts/service.sh prod rollback`：expected failure，未传 `<version>` 时输出 `用法: bash scripts/prod-rollback.sh <version>`，未修改服务状态。
-- 隔离回滚演练：passed，在临时 `RELEASE_BASE` 与临时 `systemctl` shim 下执行 `bash scripts/prod-rollback.sh previous`，验证 `current` symlink 可切到 `releases/previous`；临时目录已清理，未触碰真实 `/opt/k8s-aiops-manager` 或真实 systemd 服务。
+- 隔离回滚演练：passed，在临时 `RELEASE_BASE` 与临时 `systemctl` shim 下执行 `bash scripts/prod-rollback.sh previous`，验证 `current` symlink 可切到 `releases/previous`；临时目录已清理，未触碰真实 `/opt/kubenova` 或真实 systemd 服务。
 - `git diff --check`：passed（编辑前）；`git diff --no-index --check /dev/null docs/ops-console-delivery-summary.md`：passed，用于覆盖当前未跟踪 summary 文件的 whitespace 检查。
 
 12.10 判定：可判定通过。理由是本轮已完成 go/no-go 评估输入核对、文档回滚路径核对、service 回滚入口核对和隔离回滚可用性验证。
@@ -120,8 +120,8 @@
 - `bash scripts/service.sh dev status`：passed，frontend/control-api/runtime-gateway 在 3000/4000/4100 均 `health=正常`。
 - Playwright MCP route-switch fresh smoke：covered `/dashboard`、`/clusters`、`/clusters/nodes`、`/network/networkpolicy`、`/network/gateway-api`、`/network/topology`、`/observability`、`/observability/cluster-health`、`/aiops`、`/ai-assistant`；`p50Ms=2279`、`p95Ms=4046`、`maxMs=4046`、`consoleErrorCount=0`、`pageErrorCount=0`、`requestCount=240`。
 - Playwright MCP interaction fresh smoke：cluster drawer open `152ms`，Gateway API tab switch `343ms`，Gateway API filter panel `374ms`，topology cluster selector `1823ms`，observability time range `837ms`；all with `consoleErrorCount=0` and `pageErrorCount=0`。
-- Authenticated backend pressure smoke：20 requests, concurrency 5, endpoints `capabilities`、table preferences、observability summary、AIOps summary；`20/20` returned 200, no 5xx, `p50Ms=9`、`p95Ms=2531`、`maxMs=2532`。
-- AIOps error-path smoke：inverted `from`/`to` returned `400 REQUEST_FAILED` with message `` `from` 不能晚于 `to` ``。
+- Authenticated backend pressure smoke：20 requests, concurrency 5, endpoints `capabilities`、table preferences、observability summary、KubeNova summary；`20/20` returned 200, no 5xx, `p50Ms=9`、`p95Ms=2531`、`maxMs=2532`。
+- KubeNova error-path smoke：inverted `from`/`to` returned `400 REQUEST_FAILED` with message `` `from` 不能晚于 `to` ``。
 - 12.9 follow-up：fixed topology selectable-cluster fallback and optional Gateway API dynamic reads. `/network/topology` retest rendered `7` React Flow nodes, focused the first node in `708ms`, and produced `consoleErrorCount=0`、`pageErrorCount=0`、API 4xx/5xx count `0`。
 - 12.9 decision：representative release-gate scope passed. Long soak, heap/memory leak, shutdown/recovery, and production-mode stress remain deeper follow-up items.
 
@@ -157,9 +157,9 @@ docker compose -f docker-compose.prod.yml ps
 Kubernetes：
 
 ```bash
-kubectl rollout undo deploy/control-api -n aiops
-kubectl rollout undo deploy/runtime-gateway -n aiops
-kubectl rollout undo deploy/frontend -n aiops
+kubectl rollout undo deploy/control-api -n kubenova
+kubectl rollout undo deploy/runtime-gateway -n kubenova
+kubectl rollout undo deploy/frontend -n kubenova
 ```
 
 如配置或 Secret 变更也参与发布，需同步恢复对应清单版本。

@@ -54,11 +54,11 @@ Historical generation settings:
 
 Prompt summary:
 
-> Kubernetes AIOps operations console component planning board, Ant Design feel, compact enterprise density, dark and light themes, 8px radius, no decorative gradient blobs, include menu/table/filter/dropdown/drawer/YAML drawer/modal/topology/AI states.
+> Kubernetes KubeNova operations console component planning board, Ant Design feel, compact enterprise density, dark and light themes, 8px radius, no decorative gradient blobs, include menu/table/filter/dropdown/drawer/YAML drawer/modal/topology/AI states.
 
 Official prompt summary:
 
-> Enterprise Kubernetes AIOps console UI design system board, compact Ant Design style, dark/light themes, semantic blue/green/amber/red/cyan/gray palette, 8px radius, focus ring, hover/active/disabled/loading/error states, no decorative blobs, no purple gradients, no nested cards.
+> Enterprise Kubernetes KubeNova console UI design system board, compact Ant Design style, dark/light themes, semantic blue/green/amber/red/cyan/gray palette, 8px radius, focus ring, hover/active/disabled/loading/error states, no decorative blobs, no purple gradients, no nested cards.
 
 ## Current Component Map
 
@@ -172,7 +172,7 @@ Official prompt summary:
 | `frontend/src/app/dashboard` | Dashboard migration | Use ops status/surface tokens. |
 | `frontend/src/app/monitoring` | Monitoring surface/tag migration | Align severity and time/filter controls. |
 | `frontend/src/app/observability` | Observability workbench migration | Drawer width and health/status panels need mobile verification. |
-| `frontend/src/app/aiops` | AIOps center migration | Align incident cards, drawers, severity tags, and workbench controls. |
+| `frontend/src/app/aiops` | KubeNova center migration | Align incident cards, drawers, severity tags, and workbench controls. |
 | `frontend/src/app/inspection` | Inspection modal/tag migration | Capability and report severity tags. |
 | `frontend/src/app/terminal` | Runtime toolbar/status migration | Align terminal toolbar, session status, reconnect/empty/error states. |
 | `frontend/src/app/logs` | Logs workbench migration | Align log toolbar, stream state, terminal frame, search controls, mobile behavior. |

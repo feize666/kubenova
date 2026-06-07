@@ -4,26 +4,26 @@
 
 Primary spec: `.codex/specs/ops-console-unified-experience`, Requirement 13.
 
-This record captures the current feature-switching and stability hardening evidence after the Observability and AIOps center routes were added.
+This record captures the current feature-switching and stability hardening evidence after the Observability and KubeNova center routes were added.
 
 ## Implemented Hardening
 
 | Area | Change | Evidence |
 | --- | --- | --- |
-| Route switch coverage | `frontend/scripts/performance-switching.mjs` now includes `/observability` and `/aiops` in addition to the legacy cluster/network/topology/AIOps assistant routes. | `node --check frontend/scripts/performance-switching.mjs` |
+| Route switch coverage | `frontend/scripts/performance-switching.mjs` now includes `/observability` and `/aiops` in addition to the legacy cluster/network/topology/KubeNova assistant routes. | `node --check frontend/scripts/performance-switching.mjs` |
 | Request cancellation | `/observability` and `/aiops` React Query calls pass the provided `AbortSignal` through API wrappers into `apiRequest`. | `getObservabilitySummary(..., { signal })`, `getAiopsSummary(..., { signal })` |
 | Auth-expiry cancellation | API client already merges per-request signal with auth-expiry signal. | `frontend/src/lib/api/client.ts` |
-| Degraded state | Observability and AIOps pages render source-specific degraded alerts instead of blank or misleading normal state. | `/observability`, `/aiops` |
-| Console/error regression | Browser route loop covered dashboard, cluster, node, network, topology, observability, AIOps, and AI assistant routes with zero console errors and zero page errors. | Playwright MCP route loop result: 10 routes, `consoleErrorCount=0`, `pageErrorCount=0`. |
+| Degraded state | Observability and KubeNova pages render source-specific degraded alerts instead of blank or misleading normal state. | `/observability`, `/aiops` |
+| Console/error regression | Browser route loop covered dashboard, cluster, node, network, topology, observability, KubeNova, and AI assistant routes with zero console errors and zero page errors. | Playwright MCP route loop result: 10 routes, `consoleErrorCount=0`, `pageErrorCount=0`. |
 | Backend bounded fanout | Monitoring overview live metrics fanout now runs in bounded batches with per-cluster timeout fallback. | `MonitoringService.runBounded`, `liveMetricsTimeoutMs` |
-| Backend input validation | AIOps summary rejects inverted `from`/`to` ranges before service execution. | `aiops.controller.spec.ts` |
+| Backend input validation | KubeNova summary rejects inverted `from`/`to` ranges before service execution. | `aiops.controller.spec.ts` |
 | Table preference resilience | Missing or stale Prisma preference storage no longer returns 500 during route switches; preference reads return empty state and writes are accepted as volatile. | `users.service.preferences.spec.ts`, curl smoke for `/api/users/preferences/table/business.clusters`. |
 | Authenticated route compatibility | `/dashboard` and `/login` avoid dev-console/runtime blank states during redirect and existing-session flows. | Browser route loop and login redirect smoke. |
 
 ## Current Constraints
 
 - The npm performance switching script still requires installing Playwright in frontend dependencies; the browser regression in this session used the available Playwright MCP runtime instead.
-- Backend timeout/recovery/bounded-concurrency hardening is in place for the new monitoring live-metrics fanout and AIOps time parsing path; broader Kubernetes/database/shared-query paths remain deeper follow-up work.
+- Backend timeout/recovery/bounded-concurrency hardening is in place for the new monitoring live-metrics fanout and KubeNova time parsing path; broader Kubernetes/database/shared-query paths remain deeper follow-up work.
 - Long soak validation is not executed in this local session; a bounded pressure smoke was executed.
 
 ## Minimal Verification
@@ -39,8 +39,8 @@ This record captures the current feature-switching and stability hardening evide
   - `GET /api/users/preferences/table/business.clusters`: `200`
   - `PUT /api/users/preferences/table/business.clusters`: `200`
   - `GET /api/monitoring/observability/summary?range=1h`: `200`, about `2.46s`
-  - inverted AIOps range: `400 REQUEST_FAILED`
-- Pressure smoke: 20 authenticated backend requests, concurrency 5, endpoints `capabilities`, table preferences, observability summary, and AIOps summary; result all `200`, no 5xx, p95 about `2554ms`.
+  - inverted KubeNova range: `400 REQUEST_FAILED`
+- Pressure smoke: 20 authenticated backend requests, concurrency 5, endpoints `capabilities`, table preferences, observability summary, and KubeNova summary; result all `200`, no 5xx, p95 about `2554ms`.
 - `git diff --check`
 
 ## 2026-05-30 Independent 12.9 Audit
@@ -66,7 +66,7 @@ This pass re-checked the performance/stability evidence without modifying runtim
 Task 12.9 is partially passable for the current non-browser scope:
 
 - Performance probe script syntax and route-list wiring are valid.
-- Backend focused stability tests for monitoring fanout, AIOps time validation, and user preference resilience pass.
+- Backend focused stability tests for monitoring fanout, KubeNova time validation, and user preference resilience pass.
 - Frontend lint and typecheck pass.
 - Backend compile passes.
 
@@ -108,7 +108,7 @@ Route-switch sample summary:
 
 - `bash scripts/service.sh dev status`: frontend/control-api/runtime-gateway all reported `health=正常` on ports `3000`/`4000`/`4100`.
 - Authenticated pressure smoke: 20 backend requests at concurrency 5 across `/api/capabilities`, `/api/users/preferences/table/business.clusters`, `/api/monitoring/observability/summary?range=1h`, and `/api/aiops/summary?range=1h`; result `20/20` status `200`, no 5xx, `p50Ms=9`, `p95Ms=2531`, `maxMs=2532`.
-- AIOps error-path smoke: inverted time range returned `400 REQUEST_FAILED` with message `` `from` 不能晚于 `to` `` in `3ms`.
+- KubeNova error-path smoke: inverted time range returned `400 REQUEST_FAILED` with message `` `from` 不能晚于 `to` `` in `3ms`.
 
 ### 12.9 Follow-Up Decision
 

@@ -1,6 +1,6 @@
 # Ops Console Binary Deployment
 
-本文件对应任务 11.3，说明二进制 / 发布目录 / systemd 部署。现有脚本默认使用 `/opt/k8s-aiops-manager/current` 作为运行目录。
+本文件对应任务 11.3，说明二进制 / 发布目录 / systemd 部署。现有脚本默认使用 `/opt/kubenova/current` 作为运行目录。
 
 ## 构建
 
@@ -29,16 +29,16 @@ bash scripts/service.sh build all
 目标布局见 [deploy/binary/install-layout.md](../deploy/binary/install-layout.md)：
 
 ```text
-/opt/k8s-aiops-manager/
+/opt/kubenova/
   releases/
     <version>/
       control-api/
       runtime-gateway/
       frontend/
       metadata.json
-  current -> /opt/k8s-aiops-manager/releases/<version>
+  current -> /opt/kubenova/releases/<version>
 
-/etc/k8s-aiops-manager/
+/etc/kubenova/
   control-api.env
   runtime-gateway.env
 ```
@@ -51,7 +51,7 @@ bash scripts/service.sh build all
 
 ```bash
 VERSION=1.2.3
-RELEASE_BASE=/opt/k8s-aiops-manager
+RELEASE_BASE=/opt/kubenova
 TARGET=${RELEASE_BASE}/releases/${VERSION}
 
 sudo mkdir -p "${TARGET}/control-api" "${TARGET}/runtime-gateway" "${TARGET}/frontend"
@@ -71,14 +71,14 @@ sudo test -x "${TARGET}/runtime-gateway/runtime-gateway"
 安装 systemd 和环境模板：
 
 ```bash
-sudo ln -sfn /opt/k8s-aiops-manager/releases/<version> /opt/k8s-aiops-manager/current
+sudo ln -sfn /opt/kubenova/releases/<version> /opt/kubenova/current
 sudo bash scripts/service.sh prod install
 ```
 
 环境文件：
 
-- `/etc/k8s-aiops-manager/control-api.env`
-- `/etc/k8s-aiops-manager/runtime-gateway.env`
+- `/etc/kubenova/control-api.env`
+- `/etc/kubenova/runtime-gateway.env`
 
 模板来源：
 
@@ -92,7 +92,7 @@ sudo bash scripts/service.sh prod install
 不走 systemd 的脚本运行：
 
 ```bash
-RELEASE_ROOT=/opt/k8s-aiops-manager/current bash scripts/service.sh prod up
+RELEASE_ROOT=/opt/kubenova/current bash scripts/service.sh prod up
 bash scripts/service.sh prod status
 bash scripts/service.sh prod logs
 ```
@@ -109,23 +109,23 @@ bash scripts/service.sh prod down
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl start aiops-control-api.service aiops-runtime-gateway.service
-sudo systemctl status aiops-control-api.service --no-pager
-sudo systemctl status aiops-runtime-gateway.service --no-pager
+sudo systemctl start kubenova-control-api.service kubenova-runtime-gateway.service
+sudo systemctl status kubenova-control-api.service --no-pager
+sudo systemctl status kubenova-runtime-gateway.service --no-pager
 ```
 
 聚合 target：
 
 ```bash
-sudo systemctl start aiops.target
-sudo systemctl status aiops.target --no-pager
+sudo systemctl start kubenova.target
+sudo systemctl status kubenova.target --no-pager
 ```
 
 日志：
 
 ```bash
-journalctl -u aiops-control-api.service -n 200 --no-pager
-journalctl -u aiops-runtime-gateway.service -n 200 --no-pager
+journalctl -u kubenova-control-api.service -n 200 --no-pager
+journalctl -u kubenova-runtime-gateway.service -n 200 --no-pager
 ```
 
 ## 健康检查
@@ -157,7 +157,7 @@ bash scripts/service.sh prod rollback <previous-version>
 bash scripts/service.sh prod status
 ```
 
-回滚依赖旧版本目录仍保留在 `/opt/k8s-aiops-manager/releases/<previous-version>`。
+回滚依赖旧版本目录仍保留在 `/opt/kubenova/releases/<previous-version>`。
 
 ## 卸载
 
@@ -169,7 +169,7 @@ sudo bash scripts/service.sh prod uninstall
 
 该脚本会删除：
 
-- systemd 单元：`aiops.target`、`aiops-control-api.service`、`aiops-runtime-gateway.service`
-- 环境文件：`/etc/k8s-aiops-manager/control-api.env`、`/etc/k8s-aiops-manager/runtime-gateway.env`
+- systemd 单元：`kubenova.target`、`kubenova-control-api.service`、`kubenova-runtime-gateway.service`
+- 环境文件：`/etc/kubenova/control-api.env`、`/etc/kubenova/runtime-gateway.env`
 
 发布目录和数据库数据需由运维按保留策略单独处理。

@@ -272,7 +272,7 @@ describe('DashboardService', () => {
       mode: 'cluster',
       clusterId: 'missing-cluster',
       degraded: true,
-      degradedReason: 'Selected cluster not found or deleted.',
+      degradedReason: '当前选择的集群不存在或已删除。',
     });
     expect(stats.clusters).toBeDefined();
     expect(stats.workloads).toBeDefined();

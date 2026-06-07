@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/usr/lib/systemd/system}"
-ENV_DIR="${ENV_DIR:-/etc/k8s-aiops-manager}"
-RELEASE_ROOT="${RELEASE_ROOT:-/opt/k8s-aiops-manager}"
+ENV_DIR="${ENV_DIR:-/etc/kubenova}"
+RELEASE_ROOT="${RELEASE_ROOT:-/opt/kubenova}"
 CURRENT_DIR="${CURRENT_DIR:-${RELEASE_ROOT}/current}"
 
 require_cmd() {
@@ -28,9 +28,9 @@ if [[ ! -d "$CURRENT_DIR" ]]; then
   exit 1
 fi
 
-install -m 0644 "$ROOT_DIR/deploy/systemd/aiops.target" "$SYSTEMD_DIR/aiops.target"
-install -m 0644 "$ROOT_DIR/deploy/systemd/aiops-control-api.service" "$SYSTEMD_DIR/aiops-control-api.service"
-install -m 0644 "$ROOT_DIR/deploy/systemd/aiops-runtime-gateway.service" "$SYSTEMD_DIR/aiops-runtime-gateway.service"
+install -m 0644 "$ROOT_DIR/deploy/systemd/kubenova.target" "$SYSTEMD_DIR/kubenova.target"
+install -m 0644 "$ROOT_DIR/deploy/systemd/kubenova-control-api.service" "$SYSTEMD_DIR/kubenova-control-api.service"
+install -m 0644 "$ROOT_DIR/deploy/systemd/kubenova-runtime-gateway.service" "$SYSTEMD_DIR/kubenova-runtime-gateway.service"
 
 install -m 0644 "$ROOT_DIR/deploy/systemd/env/control-api.env.example" "$CURRENT_DIR/env/control-api.env.example"
 install -m 0644 "$ROOT_DIR/deploy/systemd/env/runtime-gateway.env.example" "$CURRENT_DIR/env/runtime-gateway.env.example"
@@ -44,9 +44,9 @@ if [[ ! -f "$ENV_DIR/runtime-gateway.env" ]]; then
 fi
 
 systemctl daemon-reload
-systemctl enable aiops.target >/dev/null 2>&1 || true
-systemctl enable aiops-control-api.service >/dev/null 2>&1 || true
-systemctl enable aiops-runtime-gateway.service >/dev/null 2>&1 || true
+systemctl enable kubenova.target >/dev/null 2>&1 || true
+systemctl enable kubenova-control-api.service >/dev/null 2>&1 || true
+systemctl enable kubenova-runtime-gateway.service >/dev/null 2>&1 || true
 
 echo "✔ systemd 与环境模板安装完成"
 echo "  单元目录: $SYSTEMD_DIR"

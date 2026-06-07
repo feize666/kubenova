@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-pvc
-  namespace: aiops
+  namespace: kubenova
 spec:
   accessModes:
     - ReadWriteOnce

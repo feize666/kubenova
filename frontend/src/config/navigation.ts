@@ -338,7 +338,7 @@ export const navSections: NavSection[] = [
   },
   {
     key: "section-intelligence",
-    label: "AIOps",
+    label: "智能运维",
     requiredRole: "admin",
     items: [
       { key: "aiops-center", path: "/aiops", label: "事故中台", requiredRole: "admin" },

@@ -106,3 +106,20 @@ Manual dashboard smoke misread API/page state twice: first assumed `/api/dashboa
 For dashboard probes, unwrap API envelopes before field checks. In browser tests, use `domcontentloaded` plus visible shell/data selectors, not `networkidle`.
 
 ---
+## [ERR-20260607-001] command
+
+**Logged**: 2026-06-07T16:08:26+08:00
+**Area**: tooling
+
+### Summary
+`rg` included a nonexistent root `package.json` path during brand-cleanup scan.
+
+### Details
+The command still returned useful matches but exited non-zero because this repository has `frontend/package.json`, not root `package.json`.
+
+### Suggested Action
+For repo-wide scans, use `rg ... .` or existing subpaths discovered with `rg --files`.
+
+### Metadata
+- Source: error
+- Tags: rg, scanning

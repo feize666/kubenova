@@ -109,6 +109,14 @@ export interface DashboardStats {
     source: string;
     timestamp: string;
   }>;
+  scope?: {
+    mode: "all" | "cluster";
+    clusterId?: string;
+    clusterName?: string;
+    generatedAt: string;
+    degraded?: boolean;
+    degradedReason?: string;
+  };
 }
 
 export interface DashboardStatsParams {

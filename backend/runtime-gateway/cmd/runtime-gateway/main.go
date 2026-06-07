@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Feize1995/aiops-k8s-manager/runtime-gateway/internal/httpapi"
+	"github.com/Feize1995/kubenova/runtime-gateway/internal/httpapi"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 )

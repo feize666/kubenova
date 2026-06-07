@@ -288,10 +288,10 @@ bash scripts/prod-uninstall.sh
 正式环境默认看这类目录：
 
 ```text
-/opt/k8s-aiops-manager/
-  current -> /opt/k8s-aiops-manager/releases/<version>
+/opt/kubenova/
+  current -> /opt/kubenova/releases/<version>
   releases/<version>/
-/etc/k8s-aiops-manager/*.env
+/etc/kubenova/*.env
 ```
 
 `current` 是唯一建议给 systemd 读的路径。

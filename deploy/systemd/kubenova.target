@@ -1,6 +1,6 @@
 [Unit]
 Description=KubeNova Platform Target
-Wants=aiops-control-api.service aiops-runtime-gateway.service
+Wants=kubenova-control-api.service kubenova-runtime-gateway.service
 After=network-online.target
 
 [Install]

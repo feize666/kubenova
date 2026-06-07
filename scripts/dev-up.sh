@@ -258,7 +258,7 @@ prepare_control_api_standalone() {
 
 # ── 服务健康检查 ────────────────────────────────────────
 wait_for_postgres() {
-  local db_url="${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops}"
+  local db_url="${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/kubenova}"
   local check_url="${db_url%%\?*}"
   echo "[预检] 正在检查 PostgreSQL..."
   if ! psql "$check_url" -c "SELECT 1" &>/dev/null; then
@@ -557,9 +557,9 @@ start_if_not_running "control-api" \
   "$CONTROL_API_DIR" \
   "$CONTROL_API_PORT" \
   "$(if [[ "$CONTROL_API_BOOT_MODE" == "stable" ]]; then
-      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' node dist/src/main.js"
+      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/kubenova} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' node dist/src/main.js"
     else
-      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://k8s_aiops:k8s_aiops_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' npx --no-install nest start --watch"
+      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/kubenova} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' npx --no-install nest start --watch"
     fi)"
 
 if [[ "$START_GATEWAY" == "true" ]]; then

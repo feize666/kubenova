@@ -24,7 +24,7 @@ bash scripts/package-release.sh
 主要产物：
 
 ```text
-tmp/release/k8s-aiops-manager-ubuntu.tar.gz
+tmp/release/kubenova-ubuntu.tar.gz
 ```
 
 脚本内部步骤：
@@ -56,33 +56,33 @@ sudo systemctl enable --now postgresql redis-server
 
 ```bash
 sudo -u postgres psql <<'SQL'
-CREATE USER aiops WITH PASSWORD 'change-me';
-CREATE DATABASE aiops OWNER aiops;
+CREATE USER kubenova WITH PASSWORD 'change-me';
+CREATE DATABASE kubenova OWNER kubenova;
 SQL
 ```
 
 ## 安装发布包
 
 ```bash
-sudo mkdir -p /opt/k8s-aiops-manager/current
-sudo tar -xzf tmp/release/k8s-aiops-manager-ubuntu.tar.gz \
-  -C /opt/k8s-aiops-manager/current \
+sudo mkdir -p /opt/kubenova/current
+sudo tar -xzf tmp/release/kubenova-ubuntu.tar.gz \
+  -C /opt/kubenova/current \
   --strip-components=1
-sudo mkdir -p /etc/k8s-aiops-manager
+sudo mkdir -p /etc/kubenova
 sudo bash scripts/service.sh prod install
 ```
 
 ## 配置
 
 ```bash
-sudo vi /etc/k8s-aiops-manager/control-api.env
-sudo vi /etc/k8s-aiops-manager/runtime-gateway.env
+sudo vi /etc/kubenova/control-api.env
+sudo vi /etc/kubenova/runtime-gateway.env
 ```
 
 最少确认：
 
 ```bash
-DATABASE_URL=postgresql://aiops:change-me@127.0.0.1:5432/aiops
+DATABASE_URL=postgresql://kubenova:change-me@127.0.0.1:5432/kubenova
 REDIS_URL=redis://127.0.0.1:6379/0
 JWT_SECRET=replace-with-long-random-jwt-secret
 RUNTIME_TOKEN_SECRET=replace-with-runtime-token-secret
@@ -123,7 +123,7 @@ sudo bash scripts/service.sh prod uninstall
 ## 路径
 
 ```text
-/opt/k8s-aiops-manager/current
-/etc/k8s-aiops-manager/control-api.env
-/etc/k8s-aiops-manager/runtime-gateway.env
+/opt/kubenova/current
+/etc/kubenova/control-api.env
+/etc/kubenova/runtime-gateway.env
 ```

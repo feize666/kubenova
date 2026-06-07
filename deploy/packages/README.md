@@ -21,29 +21,29 @@ PKG_ARCH=amd64
 mkdir -p .release/packages
 
 nfpm package --config deploy/packages/nfpm.yaml --packager deb \
-  --target .release/packages/aiops-manager_${PKG_VERSION}_${PKG_ARCH}.deb
+  --target .release/packages/kubenova_${PKG_VERSION}_${PKG_ARCH}.deb
 nfpm package --config deploy/packages/nfpm.yaml --packager rpm \
-  --target .release/packages/aiops-manager-${PKG_VERSION}-1.${PKG_ARCH}.rpm
+  --target .release/packages/kubenova-${PKG_VERSION}-1.${PKG_ARCH}.rpm
 ```
 
 输出默认位于：`.release/packages/`
 
 ## 打包内容
 
-- `/opt/k8s-aiops-manager/current/runtime-gateway/runtime-gateway`
-- `/usr/lib/systemd/system/aiops-runtime-gateway.service`
-- `/usr/lib/systemd/system/aiops-control-api.service`
-- `/usr/lib/systemd/system/aiops.target`
-- `/opt/k8s-aiops-manager/current/env/*.env.example`
+- `/opt/kubenova/current/runtime-gateway/runtime-gateway`
+- `/usr/lib/systemd/system/kubenova-runtime-gateway.service`
+- `/usr/lib/systemd/system/kubenova-control-api.service`
+- `/usr/lib/systemd/system/kubenova.target`
+- `/opt/kubenova/current/env/*.env.example`
 
 ## 生命周期 Hook
 
 - `postinstall`:
   - `systemctl daemon-reload`
-  - 尝试 `systemctl enable aiops.target`
+  - 尝试 `systemctl enable kubenova.target`
 - `preremove`:
-  - 停止 `aiops-runtime-gateway.service`
-  - 停止 `aiops-control-api.service`
+  - 停止 `kubenova-runtime-gateway.service`
+  - 停止 `kubenova-control-api.service`
   - `systemctl daemon-reload`
 
 脚本均对非 systemd 环境做兼容处理（命令不存在则跳过）。

@@ -405,7 +405,7 @@ export class DashboardService {
 
     const scopeDegraded = clusterScope && activeClusters.length === 0;
     const scopeDegradedReason = scopeDegraded
-      ? 'Selected cluster not found or deleted.'
+      ? '当前选择的集群不存在或已删除。'
       : undefined;
 
     return {

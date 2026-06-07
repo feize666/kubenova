@@ -30,13 +30,13 @@ cp .env.example .env
 
 ## 2) 卷（Volumes）
 
-- `aiops_postgres_data`: PostgreSQL 持久化数据
-- `aiops_redis_data`: Redis AOF 持久化数据
+- `kubenova_postgres_data`: PostgreSQL 持久化数据
+- `kubenova_redis_data`: Redis AOF 持久化数据
 
 查看：
 
 ```bash
-docker volume ls | grep aiops_
+docker volume ls | grep kubenova_
 ```
 
 ## 3) 启动/停止

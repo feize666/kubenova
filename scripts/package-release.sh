@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/tmp/release}"
 SKIP_BUILD="${SKIP_BUILD:-false}"
-PACKAGE_NAME="k8s-aiops-manager-ubuntu"
+PACKAGE_NAME="kubenova-ubuntu"
 
 usage() {
   cat <<'USAGE'
@@ -17,7 +17,7 @@ Options:
   -h, --help                Show help
 
 Outputs:
-  <out-dir>/k8s-aiops-manager-ubuntu.tar.gz
+  <out-dir>/kubenova-ubuntu.tar.gz
   <out-dir>/metadata.json
 USAGE
 }
@@ -118,7 +118,7 @@ cp "$ROOT_DIR/deploy/systemd/env/runtime-gateway.env.example" "$STAGE_DIR/env/ru
 
 cat > "$STAGE_DIR/metadata.json" <<EOF
 {
-  "name": "k8s-aiops-manager",
+  "name": "kubenova",
   "package": "$PACKAGE_NAME",
   "target": "ubuntu-systemd",
   "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
@@ -127,10 +127,10 @@ cat > "$STAGE_DIR/metadata.json" <<EOF
 EOF
 
 require_release_layout "$STAGE_DIR"
-tar -C "$OUT_DIR/stage" -czf "$OUT_DIR/k8s-aiops-manager-ubuntu.tar.gz" "$PACKAGE_NAME"
+tar -C "$OUT_DIR/stage" -czf "$OUT_DIR/kubenova-ubuntu.tar.gz" "$PACKAGE_NAME"
 
 cp "$STAGE_DIR/metadata.json" "$OUT_DIR/metadata.json"
 
 echo "✔ release packaged"
-echo "  tar: $OUT_DIR/k8s-aiops-manager-ubuntu.tar.gz"
+echo "  tar: $OUT_DIR/kubenova-ubuntu.tar.gz"
 echo "  metadata: $OUT_DIR/metadata.json"

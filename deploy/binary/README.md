@@ -12,21 +12,21 @@ binary-based deployment (with systemd).
 
 ## Recommended Runtime Paths
 
-- Base: `/opt/k8s-aiops-manager`
-- Releases: `/opt/k8s-aiops-manager/releases/<version>`
-- Current symlink: `/opt/k8s-aiops-manager/current`
-- Shared runtime data: `/var/lib/k8s-aiops-manager`
-- Logs: `/var/log/k8s-aiops-manager`
-- Env files: `/etc/k8s-aiops-manager/*.env`
+- Base: `/opt/kubenova`
+- Releases: `/opt/kubenova/releases/<version>`
+- Current symlink: `/opt/kubenova/current`
+- Shared runtime data: `/var/lib/kubenova`
+- Logs: `/var/log/kubenova`
+- Env files: `/etc/kubenova/*.env`
 
 ## Artifact Placement
 
 Release artifact should be unpacked into:
 
-- `/opt/k8s-aiops-manager/releases/<version>/control-api`
-- `/opt/k8s-aiops-manager/releases/<version>/runtime-gateway`
-- `/opt/k8s-aiops-manager/releases/<version>/frontend` (if statically served)
-- `/opt/k8s-aiops-manager/releases/<version>/metadata.json`
+- `/opt/kubenova/releases/<version>/control-api`
+- `/opt/kubenova/releases/<version>/runtime-gateway`
+- `/opt/kubenova/releases/<version>/frontend` (if statically served)
+- `/opt/kubenova/releases/<version>/metadata.json`
 
 Never deploy into `current` directly.
 
@@ -35,7 +35,7 @@ Never deploy into `current` directly.
 1. Install new release into a new versioned directory.
 2. Validate files, permissions, and checksum.
 3. Atomically update symlink:
-   - `ln -sfn /opt/k8s-aiops-manager/releases/<version> /opt/k8s-aiops-manager/current`
+   - `ln -sfn /opt/kubenova/releases/<version> /opt/kubenova/current`
 4. Restart/reload services.
 5. Verify health endpoints.
 

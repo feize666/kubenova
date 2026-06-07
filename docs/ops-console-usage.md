@@ -163,12 +163,12 @@ bash scripts/service.sh prod status
 Kubernetes 状态：
 
 ```bash
-kubectl get pods -n aiops
-kubectl get svc -n aiops
-kubectl get ingress -n aiops
-kubectl rollout status deploy/control-api -n aiops
-kubectl rollout status deploy/runtime-gateway -n aiops
-kubectl rollout status deploy/frontend -n aiops
+kubectl get pods -n kubenova
+kubectl get svc -n kubenova
+kubectl get ingress -n kubenova
+kubectl rollout status deploy/control-api -n kubenova
+kubectl rollout status deploy/runtime-gateway -n kubenova
+kubectl rollout status deploy/frontend -n kubenova
 ```
 
 ## 日志
@@ -192,16 +192,16 @@ bash scripts/service.sh prod logs control-api
 systemd 日志：
 
 ```bash
-journalctl -u aiops-control-api.service -n 200 --no-pager
-journalctl -u aiops-runtime-gateway.service -n 200 --no-pager
+journalctl -u kubenova-control-api.service -n 200 --no-pager
+journalctl -u kubenova-runtime-gateway.service -n 200 --no-pager
 ```
 
 Kubernetes 日志：
 
 ```bash
-kubectl logs -n aiops deploy/control-api --tail=200
-kubectl logs -n aiops deploy/runtime-gateway --tail=200
-kubectl logs -n aiops deploy/frontend --tail=200
+kubectl logs -n kubenova deploy/control-api --tail=200
+kubectl logs -n kubenova deploy/runtime-gateway --tail=200
+kubectl logs -n kubenova deploy/frontend --tail=200
 ```
 
 ## 升级与回滚
@@ -233,17 +233,17 @@ Kubernetes 升级：
 
 ```bash
 kubectl apply -k deploy/k8s
-kubectl rollout status deploy/control-api -n aiops
-kubectl rollout status deploy/runtime-gateway -n aiops
-kubectl rollout status deploy/frontend -n aiops
+kubectl rollout status deploy/control-api -n kubenova
+kubectl rollout status deploy/runtime-gateway -n kubenova
+kubectl rollout status deploy/frontend -n kubenova
 ```
 
 Kubernetes 回滚：
 
 ```bash
-kubectl rollout undo deploy/control-api -n aiops
-kubectl rollout undo deploy/runtime-gateway -n aiops
-kubectl rollout undo deploy/frontend -n aiops
+kubectl rollout undo deploy/control-api -n kubenova
+kubectl rollout undo deploy/runtime-gateway -n kubenova
+kubectl rollout undo deploy/frontend -n kubenova
 ```
 
 ## 排障速查
@@ -254,7 +254,7 @@ kubectl rollout undo deploy/frontend -n aiops
 - `curl -fsS http://127.0.0.1:4100/healthz`：确认 runtime-gateway。
 - `psql "$DATABASE_URL" -c "SELECT 1"`：确认 PostgreSQL。
 - `redis-cli ping`：确认 Redis。
-- `kubectl describe pod -n aiops <pod>`：确认 K8s 事件、探针、镜像拉取。
+- `kubectl describe pod -n kubenova <pod>`：确认 K8s 事件、探针、镜像拉取。
 
 ## 关联文档
 

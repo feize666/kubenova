@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
-  namespace: aiops
+  namespace: kubenova
 spec:
   replicas: 1
   selector:
@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: ghcr.io/feize1995/aiops-frontend:latest
+          image: ghcr.io/feize1995/kubenova-frontend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
@@ -25,7 +25,7 @@ spec:
             - name: NEXT_PUBLIC_CONTROL_API_BASE
               valueFrom:
                 configMapKeyRef:
-                  name: aiops-platform-config
+                  name: kubenova-platform-config
                   key: NEXT_PUBLIC_CONTROL_API_BASE
           readinessProbe:
             httpGet:
@@ -44,7 +44,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: frontend
-  namespace: aiops
+  namespace: kubenova
 spec:
   selector:
     app: frontend

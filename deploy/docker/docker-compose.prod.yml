@@ -3,27 +3,27 @@ version: "3.9"
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: aiops-postgres
+    container_name: kubenova-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-aiops}
+      POSTGRES_USER: ${POSTGRES_USER:-kubenova}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-      POSTGRES_DB: ${POSTGRES_DB:-aiops}
+      POSTGRES_DB: ${POSTGRES_DB:-kubenova}
     volumes:
-      - aiops_postgres_data:/var/lib/postgresql/data
+      - kubenova_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aiops} -d ${POSTGRES_DB:-aiops}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kubenova} -d ${POSTGRES_DB:-kubenova}"]
       interval: 10s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: aiops-redis
+    container_name: kubenova-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - aiops_redis_data:/data
+      - kubenova_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -31,8 +31,8 @@ services:
       retries: 10
 
   control-api:
-    image: ${CONTROL_API_IMAGE:-ghcr.io/feize1995/aiops-control-api:latest}
-    container_name: aiops-control-api
+    image: ${CONTROL_API_IMAGE:-ghcr.io/feize1995/kubenova-control-api:latest}
+    container_name: kubenova-control-api
     restart: unless-stopped
     env_file:
       - .env
@@ -40,7 +40,7 @@ services:
       NODE_ENV: production
       PORT: ${CONTROL_API_PORT:-4000}
       CONTROL_API_BASE_URL: ${CONTROL_API_BASE_URL:-http://localhost:4000}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-aiops}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kubenova}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-kubenova}
       REDIS_URL: redis://redis:6379
       RUNTIME_GATEWAY_BASE_URL: ${RUNTIME_GATEWAY_BASE_URL:-ws://localhost:4100}
       RUNTIME_GATEWAY_PUBLIC_BASE_URL: ${RUNTIME_GATEWAY_PUBLIC_BASE_URL:-}
@@ -66,8 +66,8 @@ services:
       retries: 10
 
   runtime-gateway:
-    image: ${RUNTIME_GATEWAY_IMAGE:-ghcr.io/feize1995/aiops-runtime-gateway:latest}
-    container_name: aiops-runtime-gateway
+    image: ${RUNTIME_GATEWAY_IMAGE:-ghcr.io/feize1995/kubenova-runtime-gateway:latest}
+    container_name: kubenova-runtime-gateway
     restart: unless-stopped
     env_file:
       - .env
@@ -90,8 +90,8 @@ services:
       retries: 10
 
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/feize1995/aiops-frontend:latest}
-    container_name: aiops-frontend
+    image: ${FRONTEND_IMAGE:-ghcr.io/feize1995/kubenova-frontend:latest}
+    container_name: kubenova-frontend
     restart: unless-stopped
     env_file:
       - .env
@@ -110,5 +110,5 @@ services:
       retries: 10
 
 volumes:
-  aiops_postgres_data:
-  aiops_redis_data:
+  kubenova_postgres_data:
+  kubenova_redis_data:

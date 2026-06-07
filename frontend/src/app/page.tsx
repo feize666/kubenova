@@ -374,6 +374,7 @@ export default function HomePage() {
   const stats = statsQuery.data?.stats;
   const isLoading = statsQuery.isLoading;
   const scopedFallback = Boolean(statsQuery.data?.scopedFallback);
+  const scopedDegraded = Boolean(stats?.scope?.degraded);
   const scopeLabel = selectedCluster?.name ?? (clusterId ? `Cluster ${clusterId.slice(0, 8)}` : "全部集群");
 
   const riskSummary = useMemo(() => {
@@ -500,6 +501,15 @@ export default function HomePage() {
           showIcon
           title="集群作用域数据暂不可用"
           description="已回退到全局仪表盘数据，页面仍可继续使用。"
+        />
+      ) : null}
+
+      {scopedDegraded ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="集群作用域数据不可用"
+          description={stats?.scope?.degradedReason ?? "当前选择的集群不存在或已删除。"}
         />
       ) : null}
 

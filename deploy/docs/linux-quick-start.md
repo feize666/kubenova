@@ -31,9 +31,9 @@ bash scripts/prod-uninstall.sh
 ## 目录
 
 ```text
-/opt/k8s-aiops-manager/current
-/opt/k8s-aiops-manager/releases/<version>
-/etc/k8s-aiops-manager/*.env
+/opt/kubenova/current
+/opt/kubenova/releases/<version>
+/etc/kubenova/*.env
 ```
 
 ## 常看命令

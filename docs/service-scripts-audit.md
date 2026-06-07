@@ -119,7 +119,7 @@ bash scripts/service.sh test topology
 
 ```bash
 bash scripts/service.sh prod status
-RELEASE_ROOT=/opt/k8s-aiops-manager/current bash scripts/service.sh prod up
+RELEASE_ROOT=/opt/kubenova/current bash scripts/service.sh prod up
 ```
 
 ## 风险

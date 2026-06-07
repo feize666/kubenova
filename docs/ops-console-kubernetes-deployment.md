@@ -6,15 +6,15 @@
 
 当前清单包含：
 
-- Namespace: `aiops`
-- ConfigMap: `aiops-platform-config`
-- Secret: `aiops-platform-secret`
+- Namespace: `kubenova`
+- ConfigMap: `kubenova-platform-config`
+- Secret: `kubenova-platform-secret`
 - PostgreSQL Deployment / Service / PVC
 - Redis Deployment / Service
 - control-api Deployment / Service
 - runtime-gateway Deployment / Service
 - frontend Deployment / Service
-- Ingress: `aiops`
+- Ingress: `kubenova`
 
 当前清单未包含显式 RBAC 资源。若目标集群策略要求 ServiceAccount、Role 或 RoleBinding，需要在上线前补充 overlay。
 
@@ -30,7 +30,7 @@ kubectl cluster-info
 - 可拉取清单中镜像，或通过 Kustomize 覆盖镜像。
 - 有默认 StorageClass，供 `postgres-pvc` 申请 `10Gi`。
 - 已安装 Ingress Controller。现有 `ingress.yaml` 使用 `ingressClassName: nginx`。
-- DNS 或 hosts 将业务域名指向 Ingress 地址。默认 host 为 `aiops.local`。
+- DNS 或 hosts 将业务域名指向 Ingress 地址。默认 host 为 `kubenova.local`。
 
 ## 配置
 
@@ -69,7 +69,7 @@ Secret 关键项：
 ## 渲染检查
 
 ```bash
-kubectl kustomize deploy/k8s >/tmp/aiops-rendered.yaml
+kubectl kustomize deploy/k8s >/tmp/kubenova-rendered.yaml
 ```
 
 可选服务端校验：
@@ -91,9 +91,9 @@ kubectl apply -k deploy/k8s
 ```bash
 cd deploy/k8s
 kustomize edit set image \
-  ghcr.io/feize1995/aiops-frontend=registry.example.com/aiops/frontend:v1.2.3 \
-  ghcr.io/feize1995/aiops-control-api=registry.example.com/aiops/control-api:v1.2.3 \
-  ghcr.io/feize1995/aiops-runtime-gateway=registry.example.com/aiops/runtime-gateway:v1.2.3
+  ghcr.io/feize1995/kubenova-frontend=registry.example.com/kubenova/frontend:v1.2.3 \
+  ghcr.io/feize1995/kubenova-control-api=registry.example.com/kubenova/control-api:v1.2.3 \
+  ghcr.io/feize1995/kubenova-runtime-gateway=registry.example.com/kubenova/runtime-gateway:v1.2.3
 ```
 
 若无 standalone `kustomize` 命令，可直接编辑 `deploy/k8s/kustomization.yaml` 或各 Deployment image 字段。
@@ -101,14 +101,14 @@ kustomize edit set image \
 ## 验证
 
 ```bash
-kubectl get pods -n aiops
-kubectl get svc -n aiops
-kubectl get ingress -n aiops
-kubectl rollout status deploy/postgres -n aiops
-kubectl rollout status deploy/redis -n aiops
-kubectl rollout status deploy/control-api -n aiops
-kubectl rollout status deploy/runtime-gateway -n aiops
-kubectl rollout status deploy/frontend -n aiops
+kubectl get pods -n kubenova
+kubectl get svc -n kubenova
+kubectl get ingress -n kubenova
+kubectl rollout status deploy/postgres -n kubenova
+kubectl rollout status deploy/redis -n kubenova
+kubectl rollout status deploy/control-api -n kubenova
+kubectl rollout status deploy/runtime-gateway -n kubenova
+kubectl rollout status deploy/frontend -n kubenova
 ```
 
 探针路径：
@@ -122,9 +122,9 @@ kubectl rollout status deploy/frontend -n aiops
 端口转发检查：
 
 ```bash
-kubectl port-forward -n aiops svc/frontend 3000:3000
-kubectl port-forward -n aiops svc/control-api 4000:4000
-kubectl port-forward -n aiops svc/runtime-gateway 4100:4100
+kubectl port-forward -n kubenova svc/frontend 3000:3000
+kubectl port-forward -n kubenova svc/control-api 4000:4000
+kubectl port-forward -n kubenova svc/runtime-gateway 4100:4100
 ```
 
 另一个终端执行：
@@ -138,11 +138,11 @@ curl -fsS http://127.0.0.1:4100/healthz && echo
 ## 日志与排障
 
 ```bash
-kubectl logs -n aiops deploy/control-api --tail=200
-kubectl logs -n aiops deploy/runtime-gateway --tail=200
-kubectl logs -n aiops deploy/frontend --tail=200
-kubectl describe pod -n aiops -l app=control-api
-kubectl describe ingress -n aiops aiops
+kubectl logs -n kubenova deploy/control-api --tail=200
+kubectl logs -n kubenova deploy/runtime-gateway --tail=200
+kubectl logs -n kubenova deploy/frontend --tail=200
+kubectl describe pod -n kubenova -l app=control-api
+kubectl describe ingress -n kubenova kubenova
 ```
 
 常见检查：
@@ -172,28 +172,28 @@ kubectl describe ingress -n aiops aiops
 
 ```bash
 kubectl apply -k deploy/k8s
-kubectl rollout status deploy/control-api -n aiops
-kubectl rollout status deploy/runtime-gateway -n aiops
-kubectl rollout status deploy/frontend -n aiops
+kubectl rollout status deploy/control-api -n kubenova
+kubectl rollout status deploy/runtime-gateway -n kubenova
+kubectl rollout status deploy/frontend -n kubenova
 ```
 
 查看历史：
 
 ```bash
-kubectl rollout history deploy/control-api -n aiops
-kubectl rollout history deploy/runtime-gateway -n aiops
-kubectl rollout history deploy/frontend -n aiops
+kubectl rollout history deploy/control-api -n kubenova
+kubectl rollout history deploy/runtime-gateway -n kubenova
+kubectl rollout history deploy/frontend -n kubenova
 ```
 
 ## 回滚
 
 ```bash
-kubectl rollout undo deploy/control-api -n aiops
-kubectl rollout undo deploy/runtime-gateway -n aiops
-kubectl rollout undo deploy/frontend -n aiops
-kubectl rollout status deploy/control-api -n aiops
-kubectl rollout status deploy/runtime-gateway -n aiops
-kubectl rollout status deploy/frontend -n aiops
+kubectl rollout undo deploy/control-api -n kubenova
+kubectl rollout undo deploy/runtime-gateway -n kubenova
+kubectl rollout undo deploy/frontend -n kubenova
+kubectl rollout status deploy/control-api -n kubenova
+kubectl rollout status deploy/runtime-gateway -n kubenova
+kubectl rollout status deploy/frontend -n kubenova
 ```
 
 如 ConfigMap 或 Secret 也发生变更，需配合恢复对应清单版本后重新 `kubectl apply -k deploy/k8s`。

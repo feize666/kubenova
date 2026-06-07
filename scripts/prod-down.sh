@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="$ROOT_DIR/.run"
 
-RELEASE_ROOT="${RELEASE_ROOT:-/opt/k8s-aiops-manager/current}"
+RELEASE_ROOT="${RELEASE_ROOT:-/opt/kubenova/current}"
 FRONTEND_DIR="$RELEASE_ROOT/frontend"
 CONTROL_API_DIR="$RELEASE_ROOT/control-api"
 RUNTIME_GATEWAY_DIR="$RELEASE_ROOT/runtime-gateway"
