@@ -182,17 +182,36 @@ function markRouteTransitionQuietWindow() {
     return () => undefined;
   }
 
-  const routeWindow = window as Window & { __KUBENOVA_ROUTE_TRANSITION_UNTIL?: number };
+  const routeWindow = window as Window & {
+    __KUBENOVA_ROUTE_TRANSITION_MARKER_ID?: number;
+    __KUBENOVA_ROUTE_TRANSITION_UNTIL?: number;
+  };
+  const markerId = (routeWindow.__KUBENOVA_ROUTE_TRANSITION_MARKER_ID ?? 0) + 1;
+  routeWindow.__KUBENOVA_ROUTE_TRANSITION_MARKER_ID = markerId;
   routeWindow.__KUBENOVA_ROUTE_TRANSITION_UNTIL = performance.now() + ROUTE_TRANSITION_QUIET_MS;
+  document.documentElement.dataset.routeTransitionQuiet = "true";
+  document.body.dataset.routeTransitionQuiet = "true";
   document.body.classList.add("kubenova-route-transitioning");
-  const timer = window.setTimeout(() => {
-    if ((routeWindow.__KUBENOVA_ROUTE_TRANSITION_UNTIL ?? 0) <= performance.now()) {
-      document.body.classList.remove("kubenova-route-transitioning");
+
+  const clearQuietMarker = (force = false) => {
+    if (routeWindow.__KUBENOVA_ROUTE_TRANSITION_MARKER_ID !== markerId) {
+      return;
     }
+    if (!force && (routeWindow.__KUBENOVA_ROUTE_TRANSITION_UNTIL ?? 0) > performance.now()) {
+      return;
+    }
+    routeWindow.__KUBENOVA_ROUTE_TRANSITION_UNTIL = 0;
+    document.body.classList.remove("kubenova-route-transitioning");
+    delete document.documentElement.dataset.routeTransitionQuiet;
+    delete document.body.dataset.routeTransitionQuiet;
+  };
+
+  const timer = window.setTimeout(() => {
+    clearQuietMarker();
   }, ROUTE_TRANSITION_QUIET_MS + 50);
   return () => {
     window.clearTimeout(timer);
-    document.body.classList.remove("kubenova-route-transitioning");
+    clearQuietMarker(true);
   };
 }
 

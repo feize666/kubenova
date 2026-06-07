@@ -24,8 +24,6 @@ Commands:
   prod logs [service]          Tail production service logs
   prod install                 Install systemd units and env templates
   prod uninstall               Uninstall systemd units and env templates
-  prod switch <version>        Switch current release
-  prod rollback <version>      Roll back current release
 
   install-deps                 Install local dependencies
   db-init                      Initialize local database
@@ -33,6 +31,7 @@ Commands:
   build control-api            Build control-api
   build runtime-gateway        Build runtime-gateway binary
   build all                    Build all production artifacts
+  package release              Build and package Ubuntu binary release tarball
   test topology                Run topology verification
   clean topology-artifacts     Clean topology artifacts
   topology verify              Run topology verification
@@ -240,14 +239,6 @@ case "$cmd" in
         preflight_common
         run_script prod-uninstall.sh "$@"
         ;;
-      switch)
-        preflight_common
-        run_script prod-switch.sh "$@"
-        ;;
-      rollback)
-        preflight_common
-        run_script prod-rollback.sh "$@"
-        ;;
       help|-h|--help) usage ;;
       *) die "未知 prod 命令: $sub" ;;
     esac
@@ -278,6 +269,17 @@ case "$cmd" in
         ;;
       help|-h|--help) usage ;;
       *) die "未知 build 命令: $sub" ;;
+    esac
+    ;;
+  package)
+    sub="${1:-help}"
+    shift || true
+    case "$sub" in
+      release)
+        run_script package-release.sh "$@"
+        ;;
+      help|-h|--help) usage ;;
+      *) die "未知 package 命令: $sub" ;;
     esac
     ;;
   test)

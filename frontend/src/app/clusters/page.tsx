@@ -33,9 +33,9 @@ import {
   Typography,
   message,
 } from "antd";
-import type { MenuProps } from "antd";
+import type { MenuProps, TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterDetailDrawer } from "@/components/cluster-detail-drawer";
 import { OpsActionDropdown, OpsFilterChip, type OpsFilterChipTone } from "@/components/ops";
@@ -66,10 +66,56 @@ import {
   type RuntimeStatus,
 } from "@/lib/api/cluster-health";
 import type { Cluster } from "@/lib/api/types";
-import { queryKeys } from "@/lib/query/keys";
+import { QUERY_CACHE_TIMINGS, queryKeys } from "@/lib/query";
 import { useAntdTableSortPagination } from "@/lib/table";
 
 export type ClusterTableRecord = Cluster & { key: string };
+type ClusterTableChangeHandler = NonNullable<TableProps<ClusterTableRecord>["onChange"]>;
+
+const CLUSTERS_TABLE_KEY = "business.clusters";
+const CLUSTER_HEALTH_REFRESH_INTERVAL_MS = 15_000;
+const CLUSTER_HEALTH_ROUTE_QUIET_DELAY_MS = 750;
+const EMPTY_CLUSTERS: Cluster[] = [];
+const EMPTY_HEALTH_RESULTS: Record<string, ClusterHealthListItem> = {};
+const CLUSTER_LIST_QUERY_OPTIONS = {
+  staleTime: QUERY_CACHE_TIMINGS.listStaleTimeMs,
+  gcTime: QUERY_CACHE_TIMINGS.listGcTimeMs,
+  refetchOnMount: false,
+  refetchOnWindowFocus: false,
+  refetchOnReconnect: true,
+  retry: 1,
+} as const;
+const CLUSTER_COLUMN_SETTINGS = [
+  { key: "latencyMs", visible: false },
+  { key: "healthSource", visible: false },
+  { key: "healthReason", visible: false },
+];
+const ENVIRONMENT_OPTIONS = [
+  { label: "全部环境", value: "" },
+  { label: "公有云", value: "公有云" },
+  { label: "私有云", value: "私有云" },
+  { label: "本地", value: "本地" },
+];
+const CLUSTER_STATE_FILTER_OPTIONS = [
+  { label: "运行中", value: "running" },
+  { label: "离线", value: "offline" },
+  { label: "探测中", value: "checking" },
+  { label: "已停用", value: "disabled" },
+  { label: "离线模式", value: "offline-mode" },
+];
+const KUBECONFIG_FILTER_OPTIONS = [
+  { label: "已接入", value: "true" },
+  { label: "离线模式", value: "false" },
+];
+const GLOBAL_SEARCH_PLACEHOLDER = "搜索名称 / ID / 供应商";
+
+function isRouteTransitionSettling() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const routeWindow = window as Window & { __KUBENOVA_ROUTE_TRANSITION_UNTIL?: number };
+  return (routeWindow.__KUBENOVA_ROUTE_TRANSITION_UNTIL ?? 0) > performance.now();
+}
 
 /**
  * 主流运行状态模型（单状态）：
@@ -236,6 +282,8 @@ export default function ClustersPage() {
   });
 
   const query = useQuery({
+    ...CLUSTER_LIST_QUERY_OPTIONS,
+    placeholderData: (previousData) => previousData,
     queryKey,
     queryFn: () =>
       getClusters(
@@ -256,25 +304,35 @@ export default function ClustersPage() {
     queryFn: () => getClusterHealthDetail(healthDetailCluster?.id ?? "", accessToken),
     enabled: Boolean(accessToken && healthDetailCluster?.id),
   });
+  const clusterItems = query.data?.items ?? EMPTY_CLUSTERS;
+  const isTableBusy = query.isLoading && !query.data;
+  const healthResultsView = healthResults ?? EMPTY_HEALTH_RESULTS;
+  const deferredHealthResults = useDeferredValue(healthResultsView);
+  const deferredTableFilters = useDeferredValue(tableFilters);
+  const preferencesClient = useMemo(
+    () => createTablePreferencesClient(accessToken || undefined),
+    [accessToken],
+  );
 
   const tableData = useMemo<ClusterTableRecord[]>(() => {
     // 已删除的集群完全不显示，直接从列表过滤掉
-    return (query.data?.items ?? [])
+    return clusterItems
       .filter((item) => item.state !== "deleted")
       .map((item) => ({ ...item, key: item.id }));
-  }, [query.data]);
+  }, [clusterItems]);
+  const deferredTableData = useDeferredValue(tableData);
 
   const visibleTableData = useMemo<ClusterTableRecord[]>(() => {
-    const nameFilter = typeof tableFilters.name === "string" ? tableFilters.name.toLowerCase() : "";
-    const envFilter = typeof tableFilters.environment === "string" ? tableFilters.environment.toLowerCase() : "";
-    const providerFilter = typeof tableFilters.provider === "string" ? tableFilters.provider.toLowerCase() : "";
-    const versionFilter = typeof tableFilters.kubernetesVersion === "string" ? tableFilters.kubernetesVersion.toLowerCase() : "";
-    const stateFilter = typeof tableFilters.state === "string" ? tableFilters.state : "";
-    const kubeconfigFilter = typeof tableFilters.hasKubeconfig === "string" ? tableFilters.hasKubeconfig : "";
-    const reasonFilter = typeof tableFilters.healthReason === "string" ? tableFilters.healthReason.toLowerCase() : "";
-    return tableData.filter((row) => {
-      const runtimeStatus = resolveRuntimeStatus(row, healthResults[row.id]).kind;
-      const health = healthResults[row.id];
+    const nameFilter = typeof deferredTableFilters.name === "string" ? deferredTableFilters.name.toLowerCase() : "";
+    const envFilter = typeof deferredTableFilters.environment === "string" ? deferredTableFilters.environment.toLowerCase() : "";
+    const providerFilter = typeof deferredTableFilters.provider === "string" ? deferredTableFilters.provider.toLowerCase() : "";
+    const versionFilter = typeof deferredTableFilters.kubernetesVersion === "string" ? deferredTableFilters.kubernetesVersion.toLowerCase() : "";
+    const stateFilter = typeof deferredTableFilters.state === "string" ? deferredTableFilters.state : "";
+    const kubeconfigFilter = typeof deferredTableFilters.hasKubeconfig === "string" ? deferredTableFilters.hasKubeconfig : "";
+    const reasonFilter = typeof deferredTableFilters.healthReason === "string" ? deferredTableFilters.healthReason.toLowerCase() : "";
+    return deferredTableData.filter((row) => {
+      const runtimeStatus = resolveRuntimeStatus(row, deferredHealthResults[row.id]).kind;
+      const health = deferredHealthResults[row.id];
       const matchName = nameFilter ? row.name.toLowerCase().includes(nameFilter) : true;
       const matchEnv = envFilter ? (row.environment ?? "").toLowerCase().includes(envFilter) : true;
       const matchProvider = providerFilter ? (row.provider ?? "").toLowerCase().includes(providerFilter) : true;
@@ -285,22 +343,22 @@ export default function ClustersPage() {
       return matchName && matchEnv && matchProvider && matchVersion && matchState && matchKubeconfig && matchReason;
     });
   }, [
-    healthResults,
-    tableData,
-    tableFilters.environment,
-    tableFilters.hasKubeconfig,
-    tableFilters.kubernetesVersion,
-    tableFilters.name,
-    tableFilters.provider,
-    tableFilters.healthReason,
-    tableFilters.state,
+    deferredHealthResults,
+    deferredTableData,
+    deferredTableFilters.environment,
+    deferredTableFilters.hasKubeconfig,
+    deferredTableFilters.healthReason,
+    deferredTableFilters.kubernetesVersion,
+    deferredTableFilters.name,
+    deferredTableFilters.provider,
+    deferredTableFilters.state,
   ]);
 
   const healthStats = useMemo(() => {
     const total = visibleTableData.length;
     const counts = visibleTableData.reduce(
       (acc, row) => {
-        const status = resolveRuntimeStatus(row, healthResults[row.id]).kind;
+        const status = resolveRuntimeStatus(row, deferredHealthResults[row.id]).kind;
         acc[status] += 1;
         return acc;
       },
@@ -313,16 +371,13 @@ export default function ClustersPage() {
       } satisfies Record<RuntimeStatus, number>,
     );
     return { total, ...counts };
-  }, [healthResults, visibleTableData]);
-
-  const refetchList = async () => {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.clusters.all });
-    await query.refetch();
-    await refreshHealthSummaries(tableData);
-  };
+  }, [deferredHealthResults, visibleTableData]);
 
   const refreshHealthSummaries = useCallback(
     async (rows: ClusterTableRecord[]) => {
+      if (isRouteTransitionSettling()) {
+        return;
+      }
       if (!accessToken || rows.length === 0) {
         return;
       }
@@ -381,9 +436,20 @@ export default function ClustersPage() {
     },
     [accessToken, environment, keyword],
   );
+  const refetchList = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: queryKeys.clusters.all });
+    await query.refetch();
+    await refreshHealthSummaries(tableData);
+  }, [query, queryClient, refreshHealthSummaries, tableData]);
 
   useEffect(() => {
-    void refreshHealthSummaries(tableData);
+    if (tableData.length === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void refreshHealthSummaries(tableData);
+    }, isRouteTransitionSettling() ? CLUSTER_HEALTH_ROUTE_QUIET_DELAY_MS : 0);
+    return () => window.clearTimeout(timer);
   }, [tableData, refreshHealthSummaries]);
 
   useEffect(() => {
@@ -392,17 +458,17 @@ export default function ClustersPage() {
     }
     const timer = window.setInterval(() => {
       void refreshHealthSummaries(tableData);
-    }, 15000);
+    }, CLUSTER_HEALTH_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [accessToken, tableData, refreshHealthSummaries]);
 
-  const openAddModal = () => {
+  const openAddModal = useCallback(() => {
     setEditingCluster(null);
     form.resetFields();
     setModalOpen(true);
-  };
+  }, [form]);
 
-  const openEditModal = (row: ClusterTableRecord) => {
+  const openEditModal = useCallback((row: ClusterTableRecord) => {
     setEditingCluster(row);
     form.setFieldsValue({
       name: row.name,
@@ -414,14 +480,14 @@ export default function ClustersPage() {
       kubeconfig: undefined,
     });
     setModalOpen(true);
-  };
+  }, [form]);
 
-  const handleModalCancel = () => {
+  const handleModalCancel = useCallback(() => {
     setModalOpen(false);
     form.resetFields();
-  };
+  }, [form]);
 
-  const handleModalSubmit = async () => {
+  const handleModalSubmit = useCallback(async () => {
     let values: ClusterPayload;
     try {
       values = await form.validateFields();
@@ -446,9 +512,9 @@ export default function ClustersPage() {
     } finally {
       setSubmitting(false);
     }
-  };
+  }, [accessToken, editingCluster, form, refetchList]);
 
-  const handleDelete = async (row: ClusterTableRecord) => {
+  const handleDelete = useCallback(async (row: ClusterTableRecord) => {
     try {
       await deleteCluster(row.id, accessToken);
       void message.success("集群删除成功");
@@ -456,9 +522,9 @@ export default function ClustersPage() {
     } catch (err) {
       void message.error(err instanceof Error ? err.message : "删除失败，请重试");
     }
-  };
+  }, [accessToken, refetchList]);
 
-  const handleToggleState = async (row: ClusterTableRecord) => {
+  const handleToggleState = useCallback(async (row: ClusterTableRecord) => {
     const isDisabled = row.state === "disabled";
     setTogglingId(row.id);
     try {
@@ -475,7 +541,7 @@ export default function ClustersPage() {
     } finally {
       setTogglingId("");
     }
-  };
+  }, [accessToken, refetchList]);
 
   const manualProbeMutation = useMutation({
     mutationFn: (clusterId: string) => probeClusterHealth(clusterId, accessToken),
@@ -495,15 +561,60 @@ export default function ClustersPage() {
     },
   });
 
-  const columns: Array<HeadlampResourceTableColumn<ClusterTableRecord>> = [
+  const nameWidth = useMemo(
+    () => getAdaptiveNameWidth(deferredTableData.map((item) => item.name)),
+    [deferredTableData],
+  );
+  const handleEnvironmentChange = useCallback((value: string) => {
+    resetPage();
+    setEnvironment(value);
+  }, [resetPage]);
+  const handleGlobalSearchChange = useCallback((value: string) => {
+    setKeywordInput(value);
+    setKeyword(value.trim());
+    resetPage();
+  }, [resetPage]);
+  const globalSearch = useMemo(
+    () => ({
+      value: keywordInput,
+      onChange: handleGlobalSearchChange,
+      placeholder: GLOBAL_SEARCH_PLACEHOLDER,
+    }),
+    [handleGlobalSearchChange, keywordInput],
+  );
+  const handleFiltersChange = useCallback((nextFilters: HeadlampTableFilters) => {
+    setTableFilters(nextFilters);
+    resetPage();
+  }, [resetPage]);
+  const handleResourceTableChange = useCallback<ClusterTableChangeHandler>(
+    (nextPagination, filters, sorter, extra) =>
+      handleTableChange(nextPagination, filters, sorter, extra, isTableBusy),
+    [handleTableChange, isTableBusy],
+  );
+  const loadingState = useMemo(
+    () => ({ spinning: isTableBusy, description: "集群数据加载中..." }),
+    [isTableBusy],
+  );
+  const detailRuntimeStatus = useMemo(
+    () =>
+      selectedCluster
+        ? resolveRuntimeStatus(selectedCluster, deferredHealthResults[selectedCluster.id]).kind
+        : undefined,
+    [deferredHealthResults, selectedCluster],
+  );
+  const handleCloseDetail = useCallback(() => setDetailOpen(false), []);
+  const handleCloseHealthDetail = useCallback(() => setHealthDetailCluster(null), []);
+  const handleDetailRefreshRequest = useCallback(() => void refetchList(), [refetchList]);
+
+  const columns: Array<HeadlampResourceTableColumn<ClusterTableRecord>> = useMemo(() => [
     {
       title: "集群名称",
       dataIndex: "name",
       key: "name",
       required: true,
       filter: { type: "text", placeholder: "以集群过滤" },
-      width: getAdaptiveNameWidth((query.data?.items ?? []).map((item) => item.name)),
-      ...getSortableColumnProps("name", query.isLoading),
+      width: nameWidth,
+      ...getSortableColumnProps("name", isTableBusy),
       ellipsis: true,
       render: (name: string, row) => (
         <Space orientation="vertical" size={2}>
@@ -536,7 +647,7 @@ export default function ClustersPage() {
       key: "environment",
       width: 120,
       filter: { type: "text", placeholder: "以环境过滤" },
-      ...getSortableColumnProps("environment", query.isLoading),
+      ...getSortableColumnProps("environment", isTableBusy),
     },
     {
       title: "供应商",
@@ -544,7 +655,7 @@ export default function ClustersPage() {
       key: "provider",
       width: 150,
       filter: { type: "text", placeholder: "以供应商过滤" },
-      ...getSortableColumnProps("provider", query.isLoading),
+      ...getSortableColumnProps("provider", isTableBusy),
     },
     {
       title: "K8s 版本",
@@ -579,18 +690,12 @@ export default function ClustersPage() {
       filter: {
         type: "select",
         placeholder: "以状态过滤",
-        options: [
-          { label: "运行中", value: "running" },
-          { label: "离线", value: "offline" },
-          { label: "探测中", value: "checking" },
-          { label: "已停用", value: "disabled" },
-          { label: "离线模式", value: "offline-mode" },
-        ],
+        options: CLUSTER_STATE_FILTER_OPTIONS,
       },
       render: (_: unknown, row: ClusterTableRecord) => {
         const runtimeStatus = resolveRuntimeStatus(
           row,
-          healthResults[row.id],
+          deferredHealthResults[row.id],
         );
         return (
           <Tooltip title={runtimeStatus.reason ?? `状态：${runtimeStatus.label}`}>
@@ -606,7 +711,7 @@ export default function ClustersPage() {
       key: "checkedAt",
       width: TABLE_COL_WIDTH.time,
       render: (_: unknown, row) => {
-        const health = healthResults[row.id];
+        const health = deferredHealthResults[row.id];
         return health?.checkedAt ? (
           <Tooltip title={health.isStale ? "结果已过期" : "结果新鲜"}>
             <Typography.Text type={health.isStale ? "warning" : undefined}>
@@ -622,13 +727,13 @@ export default function ClustersPage() {
       title: "探测延迟",
       key: "latencyMs",
       width: 110,
-      render: (_: unknown, row) => formatLatency(healthResults[row.id]?.latencyMs),
+      render: (_: unknown, row) => formatLatency(deferredHealthResults[row.id]?.latencyMs),
     },
     {
       title: "探测来源",
       key: "healthSource",
       width: 120,
-      render: (_: unknown, row) => sourceText(healthResults[row.id]?.source),
+      render: (_: unknown, row) => sourceText(deferredHealthResults[row.id]?.source),
     },
     {
       title: "失败原因",
@@ -636,7 +741,7 @@ export default function ClustersPage() {
       width: 220,
       filter: { type: "text", placeholder: "以失败原因过滤" },
       ellipsis: true,
-      render: (_: unknown, row) => healthResults[row.id]?.reason || "-",
+      render: (_: unknown, row) => deferredHealthResults[row.id]?.reason || "-",
     },
     {
       title: "接入状态",
@@ -645,10 +750,7 @@ export default function ClustersPage() {
       filter: {
         type: "select",
         placeholder: "以接入过滤",
-        options: [
-          { label: "已接入", value: "true" },
-          { label: "离线模式", value: "false" },
-        ],
+        options: KUBECONFIG_FILTER_OPTIONS,
       },
       render: (_: unknown, row: ClusterTableRecord) => {
         return row.hasKubeconfig ? (
@@ -767,7 +869,17 @@ export default function ClustersPage() {
         );
       },
     },
-  ];
+  ], [
+    deferredHealthResults,
+    getSortableColumnProps,
+    handleDelete,
+    handleToggleState,
+    isTableBusy,
+    manualProbeMutation,
+    nameWidth,
+    openEditModal,
+    togglingId,
+  ]);
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -831,16 +943,8 @@ export default function ClustersPage() {
               className="resource-filter-select"
               style={{ width: "100%" }}
               value={environment}
-              onChange={(value) => {
-                resetPage();
-                setEnvironment(value);
-              }}
-              options={[
-                { label: "全部环境", value: "" },
-                { label: "公有云", value: "公有云" },
-                { label: "私有云", value: "私有云" },
-                { label: "本地", value: "本地" },
-              ]}
+              onChange={handleEnvironmentChange}
+              options={ENVIRONMENT_OPTIONS}
             />
           </ResourceFilterToolbarItem>
         </ResourceFilterToolbar>
@@ -862,56 +966,35 @@ export default function ClustersPage() {
       <Card>
         <ResourceTable<ClusterTableRecord>
           rowKey="key"
-          tableKey="business.clusters"
+          tableKey={CLUSTERS_TABLE_KEY}
           columns={columns as ColumnsType<ClusterTableRecord>}
-          columnSettings={[
-            { key: "latencyMs", visible: false },
-            { key: "healthSource", visible: false },
-            { key: "healthReason", visible: false },
-          ]}
+          columnSettings={CLUSTER_COLUMN_SETTINGS}
           dataSource={visibleTableData}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: (value) => {
-              setKeywordInput(value);
-              setKeyword(value.trim());
-              resetPage();
-            },
-            placeholder: "搜索名称 / ID / 供应商",
-          }}
+          preferencesClient={preferencesClient}
+          globalSearch={globalSearch}
           filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          loading={{ spinning: query.isLoading, description: "集群数据加载中..." }}
-          onChange={(nextPagination, filters, sorter, extra) =>
-            handleTableChange(nextPagination, filters, sorter, extra, query.isLoading)
-          }
-          pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, query.isLoading)}
+          onFiltersChange={handleFiltersChange}
+          loading={loadingState}
+          onChange={handleResourceTableChange}
+          pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, isTableBusy)}
           emptyDescription="暂无符合条件的集群数据"
         />
       </Card>
 
       <ClusterDetailDrawer
         open={detailOpen}
-        onClose={() => setDetailOpen(false)}
+        onClose={handleCloseDetail}
         token={accessToken ?? undefined}
         cluster={selectedCluster}
-        runtimeStatus={
-          selectedCluster
-            ? resolveRuntimeStatus(selectedCluster, healthResults[selectedCluster.id]).kind
-            : undefined
-        }
-        onRefreshRequest={() => void refetchList()}
+        runtimeStatus={detailRuntimeStatus}
+        onRefreshRequest={handleDetailRefreshRequest}
       />
 
       <Drawer
         title={healthDetailCluster ? `健康详情 · ${healthDetailCluster.name}` : "健康详情"}
         open={Boolean(healthDetailCluster)}
         size="large"
-        onClose={() => setHealthDetailCluster(null)}
+        onClose={handleCloseHealthDetail}
         styles={{ wrapper: { width: "min(100vw, 840px)" } }}
         extra={
           healthDetailCluster ? (

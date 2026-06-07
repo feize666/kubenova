@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Col, Descriptions, Drawer, Empty, Row, Select, Space, Statistic, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -20,6 +20,20 @@ import {
   type ObservabilitySourceStatus,
 } from "@/lib/api/observability";
 import type { MonitoringTimePreset } from "@/lib/api/monitoring";
+import { listQueryOptions } from "@/lib/query";
+
+const OBSERVABILITY_PATH = "/observability";
+const OBSERVABILITY_RANGE_OPTIONS: Array<{ label: string; value: MonitoringTimePreset }> = [
+  { label: "15 分钟", value: "15m" },
+  { label: "1 小时", value: "1h" },
+  { label: "6 小时", value: "6h" },
+  { label: "24 小时", value: "24h" },
+  { label: "7 天", value: "7d" },
+];
+const EMPTY_SOURCE_STATUS: ObservabilitySourceStatus[] = [];
+const EMPTY_ENTITIES: ObservabilityEntityHealth[] = [];
+const EMPTY_SIGNAL_PANELS: ObservabilitySignalPanel[] = [];
+const EMPTY_EVENTS: ObservabilityEvent[] = [];
 
 function sourceTag(item: ObservabilitySourceStatus) {
   if (item.available && !item.degraded) {
@@ -56,19 +70,27 @@ export default function ObservabilityCenterPage() {
   const [selectedScope, setSelectedScope] = useState<ObservabilityEntityHealth["scope"] | "">("");
   const enabled = !isInitializing && Boolean(accessToken);
   const summaryQuery = useQuery({
+    ...listQueryOptions,
     queryKey: ["observability", "summary", range, accessToken],
     queryFn: ({ signal }) => getObservabilitySummary({ range }, accessToken || undefined, { signal }),
     enabled,
-    staleTime: 20_000,
-    gcTime: 5 * 60_000,
+    refetchInterval: enabled ? 30_000 : false,
     refetchOnWindowFocus: false,
-    refetchInterval: 30_000,
+    refetchOnMount: false,
   });
   const summary = summaryQuery.data;
+  const sourceStatus = summary?.sourceStatus ?? EMPTY_SOURCE_STATUS;
+  const entities = summary?.entities ?? EMPTY_ENTITIES;
+  const signalPanels = summary?.signalPanels ?? EMPTY_SIGNAL_PANELS;
+  const recentEvents = summary?.recentEvents ?? EMPTY_EVENTS;
   const selectedEntity = useMemo(
-    () => summary?.entities.find((item) => item.scope === selectedScope) ?? null,
-    [selectedScope, summary?.entities],
+    () => entities.find((item) => item.scope === selectedScope) ?? null,
+    [entities, selectedScope],
   );
+  const handleRefresh = useCallback(() => {
+    void summaryQuery.refetch();
+  }, [summaryQuery]);
+  const closeEntityDrawer = useCallback(() => setSelectedScope(""), []);
 
   const entityColumns = useMemo<ColumnsType<ObservabilityEntityHealth>>(
     () => [
@@ -179,7 +201,7 @@ export default function ObservabilityCenterPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Card className="cyber-panel">
         <ResourcePageHeader
-          path="/observability"
+          path={OBSERVABILITY_PATH}
           embedded
           freshness={summary ? { label: "采集时间", value: summary.timestamp, color: "blue" } : undefined}
           extra={
@@ -188,15 +210,9 @@ export default function ObservabilityCenterPage() {
                 value={range}
                 style={{ width: 120 }}
                 onChange={setRange}
-                options={[
-                  { label: "15 分钟", value: "15m" },
-                  { label: "1 小时", value: "1h" },
-                  { label: "6 小时", value: "6h" },
-                  { label: "24 小时", value: "24h" },
-                  { label: "7 天", value: "7d" },
-                ]}
+                options={OBSERVABILITY_RANGE_OPTIONS}
               />
-              <Button icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={() => void summaryQuery.refetch()}>
+              <Button icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
                 刷新
               </Button>
             </Space>
@@ -237,9 +253,9 @@ export default function ObservabilityCenterPage() {
       </Row>
 
       <Card className="cyber-panel" title="数据源状态">
-        {summary?.sourceStatus.length ? (
+        {sourceStatus.length ? (
           <Row gutter={[12, 12]}>
-            {summary.sourceStatus.map((item) => (
+            {sourceStatus.map((item) => (
               <Col xs={24} md={8} xl={4} key={item.key}>
                 <Space orientation="vertical" size={6} style={{ width: "100%" }}>
                   <Space>
@@ -265,7 +281,7 @@ export default function ObservabilityCenterPage() {
               rowKey="scope"
               size="small"
               columns={entityColumns}
-              dataSource={summary?.entities ?? []}
+              dataSource={entities}
               pagination={false}
               loading={summaryQuery.isLoading}
             />
@@ -277,7 +293,7 @@ export default function ObservabilityCenterPage() {
               rowKey="key"
               size="small"
               columns={signalColumns}
-              dataSource={summary?.signalPanels ?? []}
+              dataSource={signalPanels}
               pagination={false}
               loading={summaryQuery.isLoading}
             />
@@ -290,7 +306,7 @@ export default function ObservabilityCenterPage() {
           rowKey="id"
           size="small"
           columns={eventColumns}
-          dataSource={summary?.recentEvents ?? []}
+          dataSource={recentEvents}
           pagination={false}
           loading={summaryQuery.isLoading}
         />
@@ -300,7 +316,7 @@ export default function ObservabilityCenterPage() {
         title="实体信号详情"
         open={Boolean(selectedEntity)}
         size="large"
-        onClose={() => setSelectedScope("")}
+        onClose={closeEntityDrawer}
         styles={{ wrapper: { width: "min(52vw, 960px)", minWidth: 720 } }}
       >
         {selectedEntity ? (

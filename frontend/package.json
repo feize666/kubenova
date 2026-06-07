@@ -17,7 +17,8 @@
     "e2e:filters:list": "FILTER_MODE=list node ./scripts/filter-regression-matrix.mjs",
     "e2e:performance:switching": "node ./scripts/performance-switching.mjs",
     "e2e:performance:switching:smoke": "PERF_SAMPLE_COUNT=${PERF_SAMPLE_COUNT:-1} PERF_WARMUP_COUNT=${PERF_WARMUP_COUNT:-0} PERF_MAX_P95_MS=${PERF_MAX_P95_MS:-1500} PERF_MAX_ROUTE_MS=${PERF_MAX_ROUTE_MS:-2500} PERF_MAX_CONSOLE_ERRORS=${PERF_MAX_CONSOLE_ERRORS:-0} node ./scripts/performance-switching.mjs",
-    "e2e:performance:switching:budget": "PERF_MAX_P95_MS=${PERF_MAX_P95_MS:-900} PERF_MAX_ROUTE_MS=${PERF_MAX_ROUTE_MS:-1800} PERF_MAX_ROUTE_REQUESTS=${PERF_MAX_ROUTE_REQUESTS:-80} PERF_MAX_ROUTE_API_REQUESTS=${PERF_MAX_ROUTE_API_REQUESTS:-30} PERF_MAX_SLOW_REQUEST_MS=${PERF_MAX_SLOW_REQUEST_MS:-1200} PERF_MAX_CONSOLE_ERRORS=${PERF_MAX_CONSOLE_ERRORS:-0} node ./scripts/performance-switching.mjs"
+    "e2e:performance:switching:budget": "PERF_MAX_P95_MS=${PERF_MAX_P95_MS:-900} PERF_MAX_ROUTE_MS=${PERF_MAX_ROUTE_MS:-1800} PERF_MAX_ROUTE_REQUESTS=${PERF_MAX_ROUTE_REQUESTS:-80} PERF_MAX_ROUTE_API_REQUESTS=${PERF_MAX_ROUTE_API_REQUESTS:-30} PERF_MAX_SLOW_REQUEST_MS=${PERF_MAX_SLOW_REQUEST_MS:-1200} PERF_MAX_CONSOLE_ERRORS=${PERF_MAX_CONSOLE_ERRORS:-0} node ./scripts/performance-switching.mjs",
+    "e2e:ui-tech:smoke": "node ./scripts/ui-tech-smoke.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.1",

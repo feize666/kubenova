@@ -4,7 +4,7 @@ import { ReloadOutlined, RobotOutlined, SafetyOutlined, WarningOutlined } from "
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Col, Descriptions, Drawer, Empty, Row, Select, Space, Statistic, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -18,6 +18,20 @@ import {
   type AiopsRecommendationPrecheck,
 } from "@/lib/api/aiops";
 import type { MonitoringTimePreset } from "@/lib/api/monitoring";
+import { listQueryOptions } from "@/lib/query";
+
+const AIOPS_PATH = "/aiops";
+const AIOPS_RANGE_OPTIONS: Array<{ label: string; value: MonitoringTimePreset }> = [
+  { label: "15 分钟", value: "15m" },
+  { label: "1 小时", value: "1h" },
+  { label: "6 小时", value: "6h" },
+  { label: "24 小时", value: "24h" },
+  { label: "7 天", value: "7d" },
+];
+const EMPTY_INCIDENTS: AiopsIncidentItem[] = [];
+const EMPTY_RECOMMENDATIONS: AiopsRecommendationItem[] = [];
+const EMPTY_ROOT_CAUSES: NonNullable<Awaited<ReturnType<typeof getAiopsSummary>>["rootCauseCandidates"]> = [];
+const EMPTY_CORRELATION_GROUPS: NonNullable<Awaited<ReturnType<typeof getAiopsSummary>>["correlationGroups"]> = [];
 
 function severityTag(value: "critical" | "warning" | "info") {
   if (value === "critical") return <OpsStatusTag tone="danger">严重</OpsStatusTag>;
@@ -46,34 +60,42 @@ export default function AiopsCenterPage() {
   const [approvalResults, setApprovalResults] = useState<Record<string, AiopsRecommendationApproval>>({});
   const enabled = !isInitializing && Boolean(accessToken);
   const summaryQuery = useQuery({
+    ...listQueryOptions,
     queryKey: ["aiops", "summary", range, accessToken],
     queryFn: ({ signal }) => getAiopsSummary({ range }, accessToken || undefined, { signal }),
     enabled,
-    staleTime: 20_000,
-    gcTime: 5 * 60_000,
+    refetchInterval: enabled ? 30_000 : false,
     refetchOnWindowFocus: false,
-    refetchInterval: 30_000,
+    refetchOnMount: false,
   });
   const summary = summaryQuery.data;
+  const incidentQueue = summary?.incidentQueue ?? EMPTY_INCIDENTS;
+  const recommendations = summary?.recommendations ?? EMPTY_RECOMMENDATIONS;
+  const rootCauseCandidates = summary?.rootCauseCandidates ?? EMPTY_ROOT_CAUSES;
+  const correlationGroups = summary?.correlationGroups ?? EMPTY_CORRELATION_GROUPS;
   const selectedIncident = useMemo(
-    () => summary?.incidentQueue.find((item) => item.id === selectedIncidentId) ?? null,
-    [selectedIncidentId, summary?.incidentQueue],
+    () => incidentQueue.find((item) => item.id === selectedIncidentId) ?? null,
+    [incidentQueue, selectedIncidentId],
   );
   const selectedRootCause = useMemo(
-    () => summary?.rootCauseCandidates.find((item) => item.incidentId === selectedIncidentId) ?? null,
-    [selectedIncidentId, summary?.rootCauseCandidates],
+    () => rootCauseCandidates.find((item) => item.incidentId === selectedIncidentId) ?? null,
+    [rootCauseCandidates, selectedIncidentId],
   );
   const selectedRecommendations = useMemo(
-    () => (summary?.recommendations ?? []).filter((item) => item.incidentId === selectedIncidentId),
-    [selectedIncidentId, summary?.recommendations],
+    () => recommendations.filter((item) => item.incidentId === selectedIncidentId),
+    [recommendations, selectedIncidentId],
   );
   const selectedCorrelationGroup = useMemo(
     () =>
-      summary?.correlationGroups.find((group) =>
+      correlationGroups.find((group) =>
         selectedIncident ? group.affectedScopes.includes(selectedIncident.affectedScope) : false,
       ) ?? null,
-    [selectedIncident, summary?.correlationGroups],
+    [correlationGroups, selectedIncident],
   );
+  const handleRefresh = useCallback(() => {
+    void summaryQuery.refetch();
+  }, [summaryQuery]);
+  const closeIncidentDrawer = useCallback(() => setSelectedIncidentId(""), []);
   const precheckMutation = useMutation({
     mutationFn: (recommendationId: string) => precheckAiopsRecommendation(recommendationId, accessToken || undefined),
     onSuccess: (result) => {
@@ -181,7 +203,7 @@ export default function AiopsCenterPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Card className="cyber-panel">
         <ResourcePageHeader
-          path="/aiops"
+          path={AIOPS_PATH}
           embedded
           freshness={summary ? { label: "分析时间", value: summary.timestamp, color: "purple" } : undefined}
           extra={
@@ -190,15 +212,9 @@ export default function AiopsCenterPage() {
                 value={range}
                 style={{ width: 120 }}
                 onChange={setRange}
-                options={[
-                  { label: "15 分钟", value: "15m" },
-                  { label: "1 小时", value: "1h" },
-                  { label: "6 小时", value: "6h" },
-                  { label: "24 小时", value: "24h" },
-                  { label: "7 天", value: "7d" },
-                ]}
+                options={AIOPS_RANGE_OPTIONS}
               />
-              <Button icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={() => void summaryQuery.refetch()}>
+              <Button icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
                 刷新
               </Button>
             </Space>
@@ -247,7 +263,7 @@ export default function AiopsCenterPage() {
           rowKey="id"
           size="small"
           columns={incidentColumns}
-          dataSource={summary?.incidentQueue ?? []}
+          dataSource={incidentQueue}
           pagination={false}
           loading={summaryQuery.isLoading}
           locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事故" /> }}
@@ -258,7 +274,7 @@ export default function AiopsCenterPage() {
         <Col xs={24} xl={12}>
           <Card className="cyber-panel" title="根因候选">
             <Space orientation="vertical" size={10} style={{ width: "100%" }}>
-              {(summary?.rootCauseCandidates ?? []).map((item) => (
+              {rootCauseCandidates.map((item) => (
                 <Card size="small" key={item.incidentId}>
                   <Space orientation="vertical" size={4}>
                     <Space>
@@ -270,7 +286,7 @@ export default function AiopsCenterPage() {
                   </Space>
                 </Card>
               ))}
-              {summary && summary.rootCauseCandidates.length === 0 ? (
+              {summary && rootCauseCandidates.length === 0 ? (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无根因候选" />
               ) : null}
             </Space>
@@ -282,7 +298,7 @@ export default function AiopsCenterPage() {
               rowKey="id"
               size="small"
               columns={recommendationColumns}
-              dataSource={summary?.recommendations ?? []}
+              dataSource={recommendations}
               pagination={false}
               loading={summaryQuery.isLoading}
             />
@@ -294,7 +310,7 @@ export default function AiopsCenterPage() {
         title="Incident Workbench"
         open={Boolean(selectedIncident)}
         size="large"
-        onClose={() => setSelectedIncidentId("")}
+        onClose={closeIncidentDrawer}
         styles={{ wrapper: { width: "min(100vw, 1040px, max(56vw, 760px))" } }}
       >
         {selectedIncident ? (

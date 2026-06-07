@@ -5,6 +5,7 @@ import {
   LiveMetricsService,
   type ClusterLiveUsageSnapshot,
 } from '../metrics/live-metrics.service';
+import { listAudits } from '../common/governance';
 
 export interface DashboardStats {
   clusters: {
@@ -48,6 +49,54 @@ export interface DashboardStats {
     source: string;
     timestamp: string;
   }>;
+  serviceImpact: {
+    nodes: Array<{
+      id: string;
+      label: string;
+      kind: 'internet' | 'ingress' | 'service' | 'workload' | 'database';
+      status: 'healthy' | 'warning' | 'critical' | 'unknown';
+    }>;
+    edges: Array<{
+      id: string;
+      source: string;
+      target: string;
+      status: 'healthy' | 'warning' | 'critical' | 'unknown';
+    }>;
+    impactedServices: Array<{
+      name: string;
+      namespace?: string;
+      clusterId?: string;
+      severity: 'critical' | 'warning' | 'info' | 'healthy';
+      impactScore: number;
+      alertCount: number;
+      workloadCount: number;
+    }>;
+    generatedAt: string;
+    degraded: boolean;
+    note?: string;
+  };
+  recentOperations: Array<{
+    id: string;
+    action: string;
+    resourceType: string;
+    resourceId?: string;
+    actor: string;
+    result: 'success' | 'failure';
+    timestamp: string;
+    reason?: string;
+  }>;
+  scope?: {
+    mode: 'all' | 'cluster';
+    clusterId?: string;
+    clusterName?: string;
+    generatedAt: string;
+    degraded?: boolean;
+    degradedReason?: string;
+  };
+}
+
+export interface DashboardStatsOptions {
+  clusterId?: string;
 }
 
 @Injectable()
@@ -57,8 +106,11 @@ export class DashboardService {
   private readonly maxLiveSnapshotCacheEntries = 200;
   private readonly liveMetricsFanoutLimit = 4;
   private readonly liveMetricsTimeoutMs = 3_000;
-  private statsCache: { expiresAt: number; value: DashboardStats } | undefined;
-  private statsInFlight: Promise<DashboardStats> | undefined;
+  private readonly statsCache = new Map<
+    string,
+    { expiresAt: number; value: DashboardStats }
+  >();
+  private readonly statsInFlight = new Map<string, Promise<DashboardStats>>();
   private readonly liveSnapshotCache = new Map<
     string,
     { expiresAt: number; value: ClusterLiveUsageSnapshot | null }
@@ -84,29 +136,64 @@ export class DashboardService {
     };
   }
 
-  async getStats(): Promise<DashboardStats> {
+  async getStats(options: DashboardStatsOptions = {}): Promise<DashboardStats> {
     const now = Date.now();
-    if (this.statsCache && this.statsCache.expiresAt > now) {
-      return this.cloneDashboardStats(this.statsCache.value);
+    const clusterId = this.normalizeClusterId(options.clusterId);
+    const cacheKey = this.getStatsCacheKey(clusterId);
+    const cached = this.statsCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return this.cloneDashboardStats(cached.value);
     }
-    if (this.statsInFlight) {
-      return this.cloneDashboardStats(await this.statsInFlight);
+    const inFlight = this.statsInFlight.get(cacheKey);
+    if (inFlight) {
+      return this.cloneDashboardStats(await inFlight);
     }
 
-    this.statsInFlight = this.buildStats();
+    const next = this.buildStats({ clusterId });
+    this.statsInFlight.set(cacheKey, next);
     try {
-      const stats = await this.statsInFlight;
-      this.statsCache = {
+      const stats = await next;
+      this.statsCache.set(cacheKey, {
         expiresAt: Date.now() + this.statsCacheTtlMs,
         value: stats,
-      };
+      });
       return this.cloneDashboardStats(stats);
     } finally {
-      this.statsInFlight = undefined;
+      this.statsInFlight.delete(cacheKey);
     }
   }
 
-  private async buildStats(): Promise<DashboardStats> {
+  private async buildStats(options: {
+    clusterId?: string;
+  }): Promise<DashboardStats> {
+    const clusterId = options.clusterId;
+    const clusterScope = Boolean(clusterId);
+    const activeClusterWhere = {
+      deletedAt: null,
+      status: { not: 'deleted' },
+      ...(clusterId ? { id: clusterId } : {}),
+    };
+    const activeClusterRelationWhere = {
+      deletedAt: null,
+      status: { not: 'deleted' },
+      ...(clusterId ? { id: clusterId } : {}),
+    };
+    const activeWorkloadWhere = {
+      state: 'active',
+      ...(clusterId ? { clusterId } : {}),
+      cluster: activeClusterRelationWhere,
+    };
+    const activeNamespaceWhere = {
+      state: 'active',
+      ...(clusterId ? { clusterId } : {}),
+      cluster: activeClusterRelationWhere,
+    };
+    const activeNetworkWhere = {
+      state: 'active',
+      ...(clusterId ? { clusterId } : {}),
+      cluster: activeClusterRelationWhere,
+    };
+
     const [
       clusterTotal,
       clusterHealthy,
@@ -123,85 +210,86 @@ export class DashboardService {
       topologyPods,
       recentAlertRows,
       activeClusters,
+      serviceImpact,
+      recentOperations,
     ] = await Promise.all([
       this.prisma.clusterRegistry.count({
-        where: { deletedAt: null, status: { not: 'deleted' } },
+        where: activeClusterWhere,
       }),
       this.prisma.clusterRegistry.count({
-        where: { deletedAt: null, status: { in: ['healthy', '正常'] } },
-      }),
-      this.prisma.workloadRecord.count({
         where: {
-          state: 'active',
-          cluster: { deletedAt: null, status: { not: 'deleted' } },
+          deletedAt: null,
+          status: { in: ['healthy', '正常'] },
+          ...(clusterId ? { id: clusterId } : {}),
         },
       }),
       this.prisma.workloadRecord.count({
+        where: activeWorkloadWhere,
+      }),
+      this.prisma.workloadRecord.count({
         where: {
-          state: 'active',
-          cluster: { deletedAt: null, status: { not: 'deleted' } },
+          ...activeWorkloadWhere,
           readyReplicas: { gt: 0 },
         },
       }),
       this.prisma.monitoringAlert.count({
         where: this.activeAlertWhere({
+          ...(clusterId ? { clusterId } : {}),
           severity: 'critical',
           status: 'firing',
         }),
       }),
       this.prisma.monitoringAlert.count({
-        where: this.activeAlertWhere({ severity: 'warning', status: 'firing' }),
+        where: this.activeAlertWhere({
+          ...(clusterId ? { clusterId } : {}),
+          severity: 'warning',
+          status: 'firing',
+        }),
       }),
       this.prisma.namespaceRecord.count({
-        where: {
-          state: 'active',
-          cluster: { deletedAt: null, status: { not: 'deleted' } },
-        },
+        where: activeNamespaceWhere,
       }),
       this.prisma.networkResource.count({
         where: {
-          state: 'active',
+          ...activeNetworkWhere,
           kind: 'Service',
-          cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
       this.prisma.networkResource.count({
         where: {
-          state: 'active',
+          ...activeNetworkWhere,
           kind: 'Ingress',
-          cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
       this.prisma.workloadRecord.count({
         where: {
-          state: 'active',
+          ...activeWorkloadWhere,
           kind: 'Deployment',
-          cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
       this.prisma.workloadRecord.count({
         where: {
-          state: 'active',
+          ...activeWorkloadWhere,
           kind: 'StatefulSet',
-          cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
       this.prisma.workloadRecord.count({
         where: {
-          state: 'active',
+          ...activeWorkloadWhere,
           kind: 'DaemonSet',
-          cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
       this.prisma.workloadRecord.count({
         where: {
-          state: 'active',
+          ...activeWorkloadWhere,
           kind: 'Pod',
-          cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
       this.prisma.monitoringAlert.findMany({
-        where: this.activeAlertWhere({ status: 'firing' }),
+        where: this.activeAlertWhere({
+          ...(clusterId ? { clusterId } : {}),
+          status: 'firing',
+        }),
         orderBy: { firedAt: 'desc' },
         take: 8,
         select: {
@@ -213,9 +301,11 @@ export class DashboardService {
         },
       }),
       this.prisma.clusterRegistry.findMany({
-        where: { deletedAt: null, status: { not: 'deleted' } },
+        where: activeClusterWhere,
         select: { id: true, name: true, metadata: true },
       }),
+      this.buildServiceImpact({ clusterId, activeClusterRelationWhere }),
+      this.buildRecentOperations({ clusterId }),
     ]);
 
     const clusterWarning = clusterTotal - clusterHealthy;
@@ -313,6 +403,11 @@ export class DashboardService {
       topologyStatefulsets +
       topologyDaemonsets;
 
+    const scopeDegraded = clusterScope && activeClusters.length === 0;
+    const scopeDegradedReason = scopeDegraded
+      ? 'Selected cluster not found or deleted.'
+      : undefined;
+
     return {
       clusters: {
         total: clusterTotal,
@@ -359,7 +454,308 @@ export class DashboardService {
         edges: topologyEdges,
       },
       recentEvents,
+      serviceImpact,
+      recentOperations,
+      scope: {
+        mode: clusterScope ? 'cluster' : 'all',
+        ...(clusterId ? { clusterId } : {}),
+        ...(activeClusters[0]?.name
+          ? { clusterName: activeClusters[0].name }
+          : {}),
+        generatedAt: new Date().toISOString(),
+        ...(scopeDegraded ? { degraded: true } : {}),
+        ...(scopeDegradedReason ? { degradedReason: scopeDegradedReason } : {}),
+      },
     };
+  }
+
+  private async buildServiceImpact(options: {
+    clusterId?: string;
+    activeClusterRelationWhere: Record<string, unknown>;
+  }): Promise<DashboardStats['serviceImpact']> {
+    const activeNetworkWhere = {
+      state: 'active',
+      ...(options.clusterId ? { clusterId: options.clusterId } : {}),
+      cluster: options.activeClusterRelationWhere,
+    };
+    const activeWorkloadWhere = {
+      state: 'active',
+      ...(options.clusterId ? { clusterId: options.clusterId } : {}),
+      cluster: options.activeClusterRelationWhere,
+    };
+    const [services, ingresses, workloads, alerts] = await Promise.all([
+      this.prisma.networkResource.findMany({
+        where: { ...activeNetworkWhere, kind: 'Service' },
+        orderBy: { updatedAt: 'desc' },
+        take: 12,
+        select: {
+          id: true,
+          clusterId: true,
+          namespace: true,
+          name: true,
+          labels: true,
+        },
+      }),
+      this.prisma.networkResource.findMany({
+        where: { ...activeNetworkWhere, kind: 'Ingress' },
+        orderBy: { updatedAt: 'desc' },
+        take: 4,
+        select: {
+          id: true,
+          clusterId: true,
+          namespace: true,
+          name: true,
+        },
+      }),
+      this.prisma.workloadRecord.findMany({
+        where: activeWorkloadWhere,
+        orderBy: { updatedAt: 'desc' },
+        take: 80,
+        select: {
+          id: true,
+          clusterId: true,
+          namespace: true,
+          kind: true,
+          name: true,
+          readyReplicas: true,
+          replicas: true,
+          labels: true,
+        },
+      }),
+      this.prisma.monitoringAlert.findMany({
+        where: this.activeAlertWhere({
+          ...(options.clusterId ? { clusterId: options.clusterId } : {}),
+          status: 'firing',
+        }),
+        orderBy: { firedAt: 'desc' },
+        take: 80,
+        select: {
+          id: true,
+          clusterId: true,
+          namespace: true,
+          severity: true,
+          resourceType: true,
+          resourceName: true,
+        },
+      }),
+    ]);
+
+    const serviceCandidates =
+      services.length > 0
+        ? services
+        : workloads.slice(0, 6).map((item) => ({
+            id: item.id,
+            clusterId: item.clusterId,
+            namespace: item.namespace,
+            name: item.name,
+            labels: item.labels,
+          }));
+
+    const impactedServices = serviceCandidates
+      .map((service) => {
+        const namespaceAlerts = alerts.filter(
+          (alert) =>
+            (!service.clusterId ||
+              !alert.clusterId ||
+              alert.clusterId === service.clusterId) &&
+            (!alert.namespace || alert.namespace === service.namespace),
+        );
+        const directAlerts = namespaceAlerts.filter((alert) => {
+          const resourceName = alert.resourceName?.trim();
+          if (!resourceName) return false;
+          return (
+            resourceName === service.name ||
+            resourceName.includes(service.name) ||
+            service.name.includes(resourceName)
+          );
+        });
+        const matchedAlerts =
+          directAlerts.length > 0 ? directAlerts : namespaceAlerts;
+        const critical = matchedAlerts.filter(
+          (alert) => alert.severity === 'critical',
+        ).length;
+        const warning = matchedAlerts.filter(
+          (alert) => alert.severity === 'warning',
+        ).length;
+        const namespaceWorkloads = workloads.filter(
+          (workload) =>
+            workload.clusterId === service.clusterId &&
+            workload.namespace === service.namespace,
+        );
+        const unhealthyWorkloads = namespaceWorkloads.filter((workload) => {
+          const ready = workload.readyReplicas ?? 0;
+          const desired = workload.replicas ?? 0;
+          return desired > 0 ? ready < desired : ready === 0;
+        }).length;
+        const impactScore = Math.min(
+          100,
+          critical * 32 + warning * 16 + unhealthyWorkloads * 7,
+        );
+        const severity =
+          critical > 0
+            ? ('critical' as const)
+            : warning > 0 || unhealthyWorkloads > 0
+              ? ('warning' as const)
+              : impactScore > 0
+                ? ('info' as const)
+                : ('healthy' as const);
+        return {
+          name: service.name,
+          namespace: service.namespace,
+          clusterId: service.clusterId,
+          severity,
+          impactScore,
+          alertCount: matchedAlerts.length,
+          workloadCount: namespaceWorkloads.length,
+        };
+      })
+      .sort((a, b) => b.impactScore - a.impactScore)
+      .slice(0, 5);
+
+    const primaryIngress = ingresses[0];
+    const visibleServices = impactedServices.slice(0, 3);
+    const nodes: DashboardStats['serviceImpact']['nodes'] = [
+      {
+        id: 'internet',
+        label: 'Internet',
+        kind: 'internet',
+        status: 'healthy',
+      },
+      {
+        id: 'ingress',
+        label: primaryIngress?.name ?? 'Ingress',
+        kind: 'ingress',
+        status: primaryIngress ? 'healthy' : 'unknown',
+      },
+      ...visibleServices.map((service, index) => ({
+        id: `service-${index}`,
+        label: service.name,
+        kind: 'service' as const,
+        status: this.mapImpactSeverityToStatus(service.severity),
+      })),
+      {
+        id: 'backend',
+        label: alerts.some(
+          (alert) => alert.resourceType === 'PersistentVolumeClaim',
+        )
+          ? 'storage'
+          : 'backend',
+        kind: 'database',
+        status: alerts.some((alert) => alert.severity === 'critical')
+          ? 'critical'
+          : alerts.some((alert) => alert.severity === 'warning')
+            ? 'warning'
+            : 'unknown',
+      },
+    ];
+
+    const edges: DashboardStats['serviceImpact']['edges'] = [
+      {
+        id: 'internet-ingress',
+        source: 'internet',
+        target: 'ingress',
+        status: 'healthy',
+      },
+      ...visibleServices.map((service, index) => ({
+        id: `ingress-service-${index}`,
+        source: 'ingress',
+        target: `service-${index}`,
+        status: this.mapImpactSeverityToStatus(service.severity),
+      })),
+      {
+        id: 'service-backend',
+        source: visibleServices.length > 0 ? 'service-0' : 'ingress',
+        target: 'backend',
+        status: nodes[nodes.length - 1]?.status ?? 'unknown',
+      },
+    ];
+
+    return {
+      nodes,
+      edges,
+      impactedServices,
+      generatedAt: new Date().toISOString(),
+      degraded: serviceCandidates.length === 0,
+      note:
+        serviceCandidates.length === 0
+          ? '未发现可用于服务影响分析的 Service 或 Workload。'
+          : undefined,
+    };
+  }
+
+  private async buildRecentOperations(options: {
+    clusterId?: string;
+  }): Promise<DashboardStats['recentOperations']> {
+    const [auditLogs, volatileAudits] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where: {
+          ...(options.clusterId ? { clusterId: options.clusterId } : {}),
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+        select: {
+          id: true,
+          action: true,
+          resourceType: true,
+          resourceId: true,
+          message: true,
+          clusterId: true,
+          createdAt: true,
+          actorUser: { select: { email: true, name: true } },
+        },
+      }),
+      Promise.resolve(
+        listAudits({
+          page: 1,
+          pageSize: 8,
+        }).items,
+      ),
+    ]);
+
+    const durable = auditLogs.map((item) => ({
+      id: item.id,
+      action: item.action,
+      resourceType: item.resourceType,
+      resourceId: item.resourceId ?? undefined,
+      actor: item.actorUser?.name ?? item.actorUser?.email ?? 'system',
+      result: 'success' as const,
+      timestamp: item.createdAt.toISOString(),
+      reason: item.message ?? undefined,
+    }));
+    const volatile = volatileAudits
+      .filter(
+        (item) =>
+          !options.clusterId || item.resourceId.includes(options.clusterId),
+      )
+      .map((item) => ({
+        id: item.id,
+        action: item.action,
+        resourceType: item.resourceType,
+        resourceId: item.resourceId,
+        actor: item.actor,
+        result: item.result,
+        timestamp: item.timestamp,
+        reason: item.reason,
+      }));
+
+    const seen = new Set<string>();
+    return [...durable, ...volatile]
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .slice(0, 6);
+  }
+
+  private mapImpactSeverityToStatus(
+    severity: 'critical' | 'warning' | 'info' | 'healthy',
+  ): 'healthy' | 'warning' | 'critical' | 'unknown' {
+    if (severity === 'critical') return 'critical';
+    if (severity === 'warning') return 'warning';
+    if (severity === 'healthy') return 'healthy';
+    return 'unknown';
   }
 
   private async withTimeout<T>(
@@ -475,7 +871,30 @@ export class DashboardService {
       },
       topology: { ...stats.topology },
       recentEvents: stats.recentEvents.map((event) => ({ ...event })),
+      serviceImpact: {
+        nodes: stats.serviceImpact.nodes.map((node) => ({ ...node })),
+        edges: stats.serviceImpact.edges.map((edge) => ({ ...edge })),
+        impactedServices: stats.serviceImpact.impactedServices.map((item) => ({
+          ...item,
+        })),
+        generatedAt: stats.serviceImpact.generatedAt,
+        degraded: stats.serviceImpact.degraded,
+        note: stats.serviceImpact.note,
+      },
+      recentOperations: stats.recentOperations.map((item) => ({ ...item })),
+      scope: stats.scope ? { ...stats.scope } : undefined,
     };
+  }
+
+  private normalizeClusterId(
+    clusterId: string | undefined,
+  ): string | undefined {
+    const normalized = clusterId?.trim();
+    return normalized ? normalized : undefined;
+  }
+
+  private getStatsCacheKey(clusterId: string | undefined): string {
+    return clusterId ? `cluster:${clusterId}` : 'all';
   }
 
   private cloneLiveSnapshot<

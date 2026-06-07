@@ -31,7 +31,7 @@
 - [x] `npx eslint <resource edit changed files>`
 - [x] `npx tsc --noEmit --pretty false --incremental false`
 - [x] `npm run build`
-- [ ] Relevant backend tests for touched API contracts.
+- [x] Relevant backend tests for touched API contracts: `cd backend/control-api && npm test -- dashboard/dashboard.service.spec.ts dashboard/dashboard.controller.spec.ts --runInBand`.
 - [x] Browser smoke for offline cluster drawer and representative edit drawers.
 - [x] `npx eslint src/components/resource-detail/resource-detail-drawer.tsx src/app/network/topology/page.tsx`
 - [x] `npx tsc --noEmit --pretty false`
@@ -46,7 +46,6 @@
 ### Plan And Setup
 
 - [x] Create root `task_plan.md`, `findings.md`, and `progress.md`.
-- [ ] Classify current dirty files before integration.
 - [x] Classify current dirty files before integration.
 - [x] Create isolated worktrees for first parallel batch.
 - [x] Spawn subagents with disjoint write scopes.
@@ -62,7 +61,7 @@
 
 - [x] Boole `019e9c10-5fbe-7522-9a48-ee1ce19210e3`: FE pages slice consumed and closed.
 - [x] Dalton `019e9c10-604c-7be2-8f76-937519decfdd`: backend events slice consumed and closed.
-- [ ] Kierkegaard `019e9c10-60c1-7163-b534-c96a69141933`: ops scripts slice in `/case/k8s-aiops-worktrees/ops-scripts`.
+- [x] Kierkegaard `019e9c10-60c1-7163-b534-c96a69141933`: stale record reconciled; `git worktree list` shows no ops-scripts worktree, and `close_agent` returned agent not found.
 - [x] Kuhn `019e9c10-6153-7123-aaa1-8d00e80a444d`: probe guards slice consumed and closed.
 
 ### Integration Gates
@@ -149,4 +148,4 @@
 - [x] Add route sample timing splits for click-to-URL, URL-to-settle, domContentLoaded, route-ready, and settle delay.
 - [x] Add per-route long task, JS heap, and route quiet class diagnostics.
 - [x] Run `node --check frontend/scripts/performance-switching.mjs`.
-- [ ] Run `npm run e2e:performance:switching:smoke` when `frontend/node_modules/playwright` is available.
+- [x] Run `npm run e2e:performance:switching:smoke` when `frontend/node_modules/playwright` is available; passed on 2026-06-07 after replacing deprecated AntD `Space.direction` usage with `orientation`.
