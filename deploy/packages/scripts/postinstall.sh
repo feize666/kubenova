@@ -3,5 +3,5 @@ set -euo pipefail
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
-  systemctl enable aiops.target >/dev/null 2>&1 || true
+  systemctl enable kubenova.target >/dev/null 2>&1 || true
 fi

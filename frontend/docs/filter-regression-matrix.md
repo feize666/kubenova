@@ -12,7 +12,7 @@
 ## 2) 前置条件
 
 ```bash
-cd /case/k8s-aiops-manager/frontend
+cd /case/kubenova/frontend
 npm i -D playwright
 npx playwright install chromium
 ```

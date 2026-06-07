@@ -100,7 +100,7 @@ preflight_prod() {
   preflight_common
   require_command prod node "安装 Node.js"
   require_command prod curl "安装 curl"
-  local release_root="${RELEASE_ROOT:-/opt/k8s-aiops-manager/current}"
+  local release_root="${RELEASE_ROOT:-/opt/kubenova/current}"
   if [[ "${1:-}" == "start" || "${1:-}" == "up" ]]; then
     ensure_dir prod "$release_root"
   fi
@@ -125,9 +125,9 @@ service_log_dir() {
     dev:frontend) echo "$ROOT_DIR/frontend/logs" ;;
     dev:control-api) echo "$ROOT_DIR/backend/control-api/logs" ;;
     dev:runtime-gateway) echo "$ROOT_DIR/backend/runtime-gateway/logs" ;;
-    prod:frontend) echo "${RELEASE_ROOT:-/opt/k8s-aiops-manager/current}/frontend/logs" ;;
-    prod:control-api) echo "${RELEASE_ROOT:-/opt/k8s-aiops-manager/current}/control-api/logs" ;;
-    prod:runtime-gateway) echo "${RELEASE_ROOT:-/opt/k8s-aiops-manager/current}/runtime-gateway/logs" ;;
+    prod:frontend) echo "${RELEASE_ROOT:-/opt/kubenova/current}/frontend/logs" ;;
+    prod:control-api) echo "${RELEASE_ROOT:-/opt/kubenova/current}/control-api/logs" ;;
+    prod:runtime-gateway) echo "${RELEASE_ROOT:-/opt/kubenova/current}/runtime-gateway/logs" ;;
     *) return 1 ;;
   esac
 }

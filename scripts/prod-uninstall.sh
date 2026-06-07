@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV_DIR="${ENV_DIR:-/etc/k8s-aiops-manager}"
+ENV_DIR="${ENV_DIR:-/etc/kubenova}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/usr/lib/systemd/system}"
 
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl stop aiops-runtime-gateway.service >/dev/null 2>&1 || true
-  systemctl stop aiops-control-api.service >/dev/null 2>&1 || true
-  systemctl disable aiops.target >/dev/null 2>&1 || true
+  systemctl stop kubenova-runtime-gateway.service >/dev/null 2>&1 || true
+  systemctl stop kubenova-control-api.service >/dev/null 2>&1 || true
+  systemctl disable kubenova.target >/dev/null 2>&1 || true
 fi
 
-rm -f "$SYSTEMD_DIR/aiops.target" \
-      "$SYSTEMD_DIR/aiops-control-api.service" \
-      "$SYSTEMD_DIR/aiops-runtime-gateway.service"
+rm -f "$SYSTEMD_DIR/kubenova.target" \
+      "$SYSTEMD_DIR/kubenova-control-api.service" \
+      "$SYSTEMD_DIR/kubenova-runtime-gateway.service"
 
 rm -f "$ENV_DIR/control-api.env" \
       "$ENV_DIR/runtime-gateway.env"

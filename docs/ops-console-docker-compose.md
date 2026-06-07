@@ -13,9 +13,9 @@
 示例构建：
 
 ```bash
-docker build -t aiops-frontend:local frontend
-docker build -t aiops-control-api:local backend/control-api
-docker build -t aiops-runtime-gateway:local backend/runtime-gateway
+docker build -t kubenova-frontend:local frontend
+docker build -t kubenova-control-api:local backend/control-api
+docker build -t kubenova-runtime-gateway:local backend/runtime-gateway
 ```
 
 ## 配置
@@ -43,9 +43,9 @@ cp .env.example .env
 如使用本地镜像，设置：
 
 ```dotenv
-FRONTEND_IMAGE=aiops-frontend:local
-CONTROL_API_IMAGE=aiops-control-api:local
-RUNTIME_GATEWAY_IMAGE=aiops-runtime-gateway:local
+FRONTEND_IMAGE=kubenova-frontend:local
+CONTROL_API_IMAGE=kubenova-control-api:local
+RUNTIME_GATEWAY_IMAGE=kubenova-runtime-gateway:local
 ```
 
 ## 启动
@@ -78,20 +78,20 @@ docker compose -f docker-compose.prod.yml down
 
 Compose 定义两个持久卷：
 
-- `aiops_postgres_data`
-- `aiops_redis_data`
+- `kubenova_postgres_data`
+- `kubenova_redis_data`
 
 查看：
 
 ```bash
-docker volume ls | grep aiops_
+docker volume ls | grep kubenova_
 ```
 
 备份示例：
 
 ```bash
-docker run --rm -v aiops_postgres_data:/data -v "$PWD":/backup alpine tar czf /backup/aiops_postgres_data.tgz -C /data .
-docker run --rm -v aiops_redis_data:/data -v "$PWD":/backup alpine tar czf /backup/aiops_redis_data.tgz -C /data .
+docker run --rm -v kubenova_postgres_data:/data -v "$PWD":/backup alpine tar czf /backup/kubenova_postgres_data.tgz -C /data .
+docker run --rm -v kubenova_redis_data:/data -v "$PWD":/backup alpine tar czf /backup/kubenova_redis_data.tgz -C /data .
 ```
 
 ## 网络
@@ -150,9 +150,9 @@ docker compose -f docker-compose.prod.yml ps
 使用本地新镜像：
 
 ```bash
-docker build -t aiops-frontend:local frontend
-docker build -t aiops-control-api:local backend/control-api
-docker build -t aiops-runtime-gateway:local backend/runtime-gateway
+docker build -t kubenova-frontend:local frontend
+docker build -t kubenova-control-api:local backend/control-api
+docker build -t kubenova-runtime-gateway:local backend/runtime-gateway
 cd deploy/docker
 docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```

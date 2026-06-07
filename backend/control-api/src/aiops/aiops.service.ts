@@ -274,7 +274,7 @@ export class AiopsService {
       note:
         observability.note ||
         (alerts.degraded
-          ? 'AIOps 当前使用派生告警和巡检问题构建事故队列。'
+          ? 'KubeNova 当前使用派生告警和巡检问题构建事故队列。'
           : undefined),
     };
   }

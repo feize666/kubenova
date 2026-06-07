@@ -29,8 +29,8 @@
 
 ```bash
 # binary/systemd
-systemctl status aiops-runtime-gateway.service --no-pager
-systemctl status aiops-control-api.service --no-pager
+systemctl status kubenova-runtime-gateway.service --no-pager
+systemctl status kubenova-control-api.service --no-pager
 curl -fsS http://127.0.0.1:4100/healthz
 curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null
 
@@ -38,7 +38,7 @@ curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null
 docker compose -f deploy/docker/docker-compose.prod.yml --env-file deploy/docker/.env ps
 
 # kubernetes
-kubectl rollout status deploy/control-api -n aiops
-kubectl rollout status deploy/runtime-gateway -n aiops
-kubectl rollout status deploy/frontend -n aiops
+kubectl rollout status deploy/control-api -n kubenova
+kubectl rollout status deploy/runtime-gateway -n kubenova
+kubectl rollout status deploy/frontend -n kubenova
 ```

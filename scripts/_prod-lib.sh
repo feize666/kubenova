@@ -5,13 +5,13 @@ prod_lib::root_dir() {
 }
 
 prod_lib::current_root() {
-  local release_root="${RELEASE_BASE:-/opt/k8s-aiops-manager}"
+  local release_root="${RELEASE_BASE:-/opt/kubenova}"
   echo "${release_root}/current"
 }
 
 prod_lib::release_dir() {
   local version="$1"
-  local release_root="${RELEASE_BASE:-/opt/k8s-aiops-manager}"
+  local release_root="${RELEASE_BASE:-/opt/kubenova}"
   echo "${release_root}/releases/${version}"
 }
 
@@ -31,6 +31,6 @@ prod_lib::reload_systemd() {
 
 prod_lib::restart_services() {
   if command -v systemctl >/dev/null 2>&1; then
-    systemctl restart aiops-runtime-gateway.service aiops-control-api.service
+    systemctl restart kubenova-runtime-gateway.service kubenova-control-api.service
   fi
 }

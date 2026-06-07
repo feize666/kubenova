@@ -222,12 +222,12 @@ export default function AiopsCenterPage() {
         />
       </Card>
 
-      {!enabled ? <Alert type="warning" showIcon title="未检测到登录状态，请先登录后查看 AIOps 中台。" /> : null}
+      {!enabled ? <Alert type="warning" showIcon title="未检测到登录状态，请先登录后查看 KubeNova 中台。" /> : null}
       {summaryQuery.isError ? (
         <Alert
           type="error"
           showIcon
-          title="AIOps 汇总加载失败"
+          title="KubeNova 汇总加载失败"
           description={summaryQuery.error instanceof Error ? summaryQuery.error.message : "请求失败，请稍后重试"}
         />
       ) : null}

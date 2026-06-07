@@ -51,7 +51,7 @@ artifacts/stability/<yyyyMMdd-HHmm>/<scope>/
 
 | 动作 | 场景 | 测量方式 | 建议阈值 | 通过标准 | 证据路径 |
 |---|---|---|---|---|---|
-| route switch | 在 overview、集群管理、工作负载、网络、资源全景图、可观测性、AIOps 间切换 | 点击导航到主内容首个稳定状态；记录 `navigationStart -> content-ready` 或自定义 mark | p50 <= 600ms；p95 <= 1200ms；max <= 2000ms | 不触发全页 reload；shell、主题、用户态保持；无重复初始化请求 | `artifacts/performance/<run>/route-switch/` |
+| route switch | 在 overview、集群管理、工作负载、网络、资源全景图、可观测性、KubeNova 间切换 | 点击导航到主内容首个稳定状态；记录 `navigationStart -> content-ready` 或自定义 mark | p50 <= 600ms；p95 <= 1200ms；max <= 2000ms | 不触发全页 reload；shell、主题、用户态保持；无重复初始化请求 | `artifacts/performance/<run>/route-switch/` |
 | tab switch | 同页内资源 Tab、Gateway API Tab、可观测性信号 Tab 切换 | 点击 Tab 到目标面板稳定；统计渲染次数和 API 请求 | p50 <= 250ms；p95 <= 500ms；max <= 900ms | 非当前 Tab 不阻塞；已缓存 Tab 不重复拉取；加载态不残留 | `artifacts/performance/<run>/tab-switch/` |
 | drawer open | 集群、节点、NetworkPolicy、Gateway、工作负载等详情抽屉打开 | 点击资源名到抽屉主体可读；分离 shell 打开耗时和数据完成耗时 | 抽屉框架 p95 <= 300ms；主体数据 p95 <= 1000ms；max <= 1800ms | 抽屉先打开后局部加载；错误可重试；关闭后请求可取消 | `artifacts/performance/<run>/drawer-open/` |
 | filter change | clusterId、namespace、keyword、资源类型筛选 | 修改筛选到列表稳定；记录 debounce、请求数、URL 状态恢复 | p50 <= 500ms；p95 <= 1000ms；max <= 1800ms | 请求参数正确；旧请求取消或被忽略；不清空无关状态 | `artifacts/performance/<run>/filter-change/` |
@@ -66,7 +66,7 @@ artifacts/stability/<yyyyMMdd-HHmm>/<scope>/
 |---|---|---|---|---|
 | console error | 六类功能切换动作 | 监听 `pageerror`、`console.error`、未处理 Promise rejection | 任一未解释错误即失败；已知第三方噪声需白名单和原因 | `artifacts/stability/<run>/frontend-console/` |
 | request cancellation | drawer close、filter change、route switch、time-range change | 旧请求取消、忽略或被新请求覆盖；无 stale state | 旧响应覆盖新页面、新筛选、新时间范围 | `artifacts/stability/<run>/frontend-request-cancel/` |
-| error boundary | 资源详情、图谱、可观测性、AIOps 工作台 | 局部异常进入降级 UI；全局 shell 可继续操作 | 白屏、导航失效、登录态丢失、全局崩溃 | `artifacts/stability/<run>/frontend-error-boundary/` |
+| error boundary | 资源详情、图谱、可观测性、KubeNova 工作台 | 局部异常进入降级 UI；全局 shell 可继续操作 | 白屏、导航失效、登录态丢失、全局崩溃 | `artifacts/stability/<run>/frontend-error-boundary/` |
 | degraded state | API 失败、空数据、权限拒绝、数据源不可用 | 显示明确错误、空态、权限或数据源不可用信息 | 静默空白、无限 loading、误导性正常状态 | `artifacts/stability/<run>/frontend-degraded/` |
 | memory leak | route switch、graph focus、time-range change 反复执行 | 订阅、timer、WebSocket、event listener 可清理 | 长循环后 heap 持续上升且不回落；重复事件处理 | `artifacts/stability/<run>/frontend-memory/` |
 | layout stability | drawer、table、graph、observability panels | 无明显 layout thrashing；关键文本不遮挡 | 切换时布局大幅跳动、按钮不可点、内容重叠 | `artifacts/stability/<run>/frontend-layout/` |
@@ -74,7 +74,7 @@ artifacts/stability/<yyyyMMdd-HHmm>/<scope>/
 建议前端检查命令：
 
 ```bash
-cd /case/k8s-aiops-manager/frontend
+cd /case/kubenova/frontend
 npm run lint
 npm run typecheck
 FILTER_BASE_URL=http://127.0.0.1:3000 FILTER_USER=<账号> FILTER_PASS=<密码> npm run e2e:filters:matrix
@@ -92,9 +92,9 @@ npm run e2e:stability:console
 | 检查项 | 覆盖服务 | 验收点 | 失败判定 | 证据路径 |
 |---|---|---|---|---|
 | error-path | control-api、runtime-gateway | 输入非法、资源不存在、权限拒绝、外部依赖失败均返回可诊断错误 | 500 泄漏、空响应、错误结构不一致、进程异常退出 | `artifacts/stability/<run>/backend-error-path/` |
-| timeout | Kubernetes API、数据库、Redis、观测后端、AIOps 分析 | 每类外部调用有上限；超时返回局部降级或 partial result | 请求无限等待、阻塞线程池、前端无限 loading | `artifacts/stability/<run>/backend-timeout/` |
+| timeout | Kubernetes API、数据库、Redis、观测后端、KubeNova 智能分析 | 每类外部调用有上限；超时返回局部降级或 partial result | 请求无限等待、阻塞线程池、前端无限 loading | `artifacts/stability/<run>/backend-timeout/` |
 | recovery | controller、service、后台任务、WebSocket handler | panic/异常被 recovery 捕获；结构化日志包含 component、requestId、reason | 单请求导致服务退出；后台任务异常中断主进程 | `artifacts/stability/<run>/backend-recovery/` |
-| bounded concurrency | 图谱、观测查询、AIOps 分析、批量资源同步 | 并发有上限，队列或拒绝策略明确 | 突发请求耗尽连接池、CPU 飙满、内存失控 | `artifacts/stability/<run>/backend-concurrency/` |
+| bounded concurrency | 图谱、观测查询、KubeNova 智能分析、批量资源同步 | 并发有上限，队列或拒绝策略明确 | 突发请求耗尽连接池、CPU 飙满、内存失控 | `artifacts/stability/<run>/backend-concurrency/` |
 | resource cleanup | WebSocket、日志流、终端、外部连接 | 断开后释放连接、goroutine、timer、订阅 | 连接泄漏、goroutine 泄漏、句柄持续增长 | `artifacts/stability/<run>/backend-cleanup/` |
 | health / readiness | control-api、runtime-gateway、依赖状态 | 健康检查反映核心依赖；非核心依赖失败可降级 | 健康接口误报正常或误杀可降级场景 | `artifacts/stability/<run>/backend-health/` |
 | graceful shutdown | control-api、runtime-gateway | SIGTERM 后停止接新请求，完成或中止进行中请求，释放资源 | 进程挂起、数据写半截、WebSocket 无关闭信号 | `artifacts/stability/<run>/backend-shutdown/` |
@@ -102,7 +102,7 @@ npm run e2e:stability:console
 建议后端检查命令：
 
 ```bash
-cd /case/k8s-aiops-manager/backend/control-api
+cd /case/kubenova/backend/control-api
 npm run test
 npm run test:e2e
 ```
@@ -110,7 +110,7 @@ npm run test:e2e
 如 runtime-gateway 有独立 Go 测试：
 
 ```bash
-cd /case/k8s-aiops-manager/backend/runtime-gateway
+cd /case/kubenova/backend/runtime-gateway
 go test ./...
 ```
 
@@ -122,7 +122,7 @@ go test ./...
 | feature-switch loop | 验证切换稳定性 | 六类动作循环 200 次，记录 console、network、heap | 无未解释 console error；无明显 heap 单调增长；无卡死 | `artifacts/stability/<run>/switch-loop/` |
 | graph stress | 验证资源全景图 | 100、500、1000 节点三档；执行 focus/filter/regroup | 节点 identity 稳定；p95 不超过基线 2 倍；无焦点漂移 | `artifacts/stability/<run>/graph-stress/` |
 | observability fanout | 验证多数据源并发 | metrics/logs/traces/events/alerts 同时查询；注入单源失败 | 单源失败只降级单 panel；其他 panel 可用 | `artifacts/stability/<run>/observability-fanout/` |
-| backend soak | 验证服务长稳 | 2-8 小时，混合读请求、WebSocket、观测查询、AIOps 查询 | 进程不退出；错误率 <= 0.1%；内存无不可解释持续上涨 | `artifacts/stability/<run>/backend-soak/` |
+| backend soak | 验证服务长稳 | 2-8 小时，混合读请求、WebSocket、观测查询、KubeNova 查询 | 进程不退出；错误率 <= 0.1%；内存无不可解释持续上涨 | `artifacts/stability/<run>/backend-soak/` |
 | timeout injection | 验证超时和恢复 | 模拟 Kubernetes API、数据库、Redis、观测后端慢响应或拒绝 | 请求按阈值超时；日志可诊断；服务恢复后自动可用 | `artifacts/stability/<run>/timeout-injection/` |
 
 ## 7. 发布门禁

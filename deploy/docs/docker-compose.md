@@ -43,4 +43,4 @@ docker compose -f deploy/docker/docker-compose.prod.yml --env-file deploy/docker
 - 容器反复重启：`docker compose -f deploy/docker/docker-compose.prod.yml logs --tail=200 <service>`
 - API 不通：检查 `CONTROL_API_INTERNAL_BASE_URL` 与服务依赖健康状态
 - 浏览器访问空白/登录失败：检查 `NEXT_PUBLIC_CONTROL_API_BASE` 是否留空或指向容器内可达 `http://control-api:4000`
-- 持久化问题：检查 `aiops_postgres_data` / `aiops_redis_data`
+- 持久化问题：检查 `kubenova_postgres_data` / `kubenova_redis_data`

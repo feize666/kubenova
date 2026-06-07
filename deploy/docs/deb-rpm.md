@@ -23,5 +23,5 @@
 
 - `control-api/dist`、`node_modules`、`prisma/`
 - 前端 standalone 产物
-- 发布目录与 `/opt/k8s-aiops-manager/current` 一致的完整文件映射
+- 发布目录与 `/opt/kubenova/current` 一致的完整文件映射
 - 宿主机 `node` / `npx` 依赖约束

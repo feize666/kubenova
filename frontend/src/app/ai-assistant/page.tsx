@@ -691,7 +691,7 @@ export default function AiAssistantPage() {
     try {
       const result = await createSession(
         {
-          title: "AIOps 会话",
+          title: "KubeNova 会话",
           surface: "console",
           clusterId: actionClusterId || undefined,
           namespace: alertForm.namespace || undefined,
@@ -1315,7 +1315,7 @@ export default function AiAssistantPage() {
       <Card style={{ borderRadius: 12 }}>
         <Result
           status="403"
-          title="无权限访问 AIOps 中台"
+          title="无权限访问 KubeNova 中台"
           subTitle="当前账号不是管理员，无法查看会话、建议与执行任何 AI 运维动作。"
           extra={
             <OpsIconActionButton opsTone="primary" onClick={() => router.push("/")}>
@@ -1425,7 +1425,7 @@ export default function AiAssistantPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div>
             <Typography.Title level={3} style={{ margin: 0 }}>
-              AIOps
+              KubeNova
             </Typography.Title>
             <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0" }}>
               通过告警接入、智能诊断、ChatOps 会话和可执行建议形成闭环运维。
@@ -1681,7 +1681,7 @@ export default function AiAssistantPage() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 12 }}>
                       <Spin size="small" />
                       <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                        AIOps 中台正在分析...
+                        KubeNova 中台正在分析...
                       </Typography.Text>
                     </div>
                   )}

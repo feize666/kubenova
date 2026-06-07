@@ -1,4 +1,4 @@
-module github.com/Feize1995/aiops-k8s-manager/runtime-gateway
+module github.com/Feize1995/kubenova/runtime-gateway
 
 go 1.25.0
 

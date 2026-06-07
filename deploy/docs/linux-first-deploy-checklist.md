@@ -29,13 +29,13 @@
 
 ## 3. 正式包准备
 
-- [ ] 发布包已解压到 `/opt/k8s-aiops-manager/releases/<version>`
-- [ ] `/opt/k8s-aiops-manager/current` 已指向目标版本
+- [ ] 发布包已解压到 `/opt/kubenova/releases/<version>`
+- [ ] `/opt/kubenova/current` 已指向目标版本
 - [ ] `control-api/dist/src/main.js` 存在
 - [ ] `runtime-gateway/runtime-gateway` 可执行
 - [ ] `frontend/.next/standalone/server.js` 存在
 - [ ] `frontend/.next/standalone/.next/static` 存在
-- [ ] `/etc/k8s-aiops-manager/*.env` 已配置
+- [ ] `/etc/kubenova/*.env` 已配置
 
 ## 4. 正式安装
 

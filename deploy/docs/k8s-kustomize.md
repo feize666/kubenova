@@ -11,7 +11,7 @@
 ## 安装/应用
 
 ```bash
-kubectl kustomize deploy/k8s >/tmp/aiops-rendered.yaml
+kubectl kustomize deploy/k8s >/tmp/kubenova-rendered.yaml
 kubectl apply -k deploy/k8s
 ```
 
@@ -19,8 +19,8 @@ kubectl apply -k deploy/k8s
 
 ```bash
 cd deploy/k8s
-kustomize edit set image kubenova/backend=registry.example.com/aiops/backend:v1.2.3
-kustomize edit set image kubenova/frontend=registry.example.com/aiops/frontend:v1.2.3
+kustomize edit set image kubenova/backend=registry.example.com/kubenova/backend:v1.2.3
+kustomize edit set image kubenova/frontend=registry.example.com/kubenova/frontend:v1.2.3
 ```
 
 ## 验证

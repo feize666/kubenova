@@ -549,7 +549,7 @@ const AppSider = memo(function AppSider({
             KubeNova
           </div>
           <div style={{ fontSize: 11, color: "#64748b", letterSpacing: "0.16em" }}>
-            CLOUD NATIVE AIOps
+            CLOUD NATIVE OPS
           </div>
         </div>
       </div>

@@ -289,7 +289,7 @@ function resolveOutputPath() {
   if (raw === "1" || raw === "true" || raw === "default") {
     return path.join(
       os.tmpdir(),
-      "k8s-aiops-manager",
+      "kubenova",
       "check-navigation",
       `${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "")}.json`,
     );

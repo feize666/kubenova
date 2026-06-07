@@ -353,7 +353,7 @@ function LoginPageContent() {
                     KubeNova
                   </div>
                   <div style={{ fontSize: 12, color: brandSubtitleColor, letterSpacing: 2, marginTop: 2 }}>
-                    CLOUD NATIVE AIOps
+                    CLOUD NATIVE OPS
                   </div>
                 </div>
               </div>
@@ -396,7 +396,7 @@ function LoginPageContent() {
                   KubeNova
                 </div>
                 <div style={{ fontSize: 11, color: brandSubtitleColor, letterSpacing: 1.4, marginTop: 2 }}>
-                  CLOUD NATIVE AIOps
+                  CLOUD NATIVE OPS
                 </div>
               </div>
             </div>

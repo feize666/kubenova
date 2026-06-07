@@ -1,6 +1,6 @@
 # KubeNova 前端
 
-本项目是基于 **React + Next.js(App Router) + TypeScript** 的 AIOps 运维控制台前端。
+本项目是基于 **React + Next.js(App Router) + TypeScript** 的 KubeNova 运维控制台前端。
 
 ## 已接入技术栈
 

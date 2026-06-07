@@ -14,7 +14,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import process from "node:process";
 
-const ARTIFACT_ROOT = "/case/temp/k8s-aiops-manager/ui-tech-smoke";
+const ARTIFACT_ROOT = "/case/temp/kubenova/ui-tech-smoke";
 const DEFAULT_RUNTIME_QUERY =
   "clusterId=local&namespace=default&pod=smoke-pod&container=smoke-container&clusterName=local";
 const cliOptions = parseCliOptions(process.argv.slice(2));
@@ -443,7 +443,7 @@ async function loadPlaywright() {
     const fallbackRoots = [
       process.env.UI_TECH_PLAYWRIGHT_ROOT,
       process.cwd(),
-      "/case/k8s-aiops-manager/frontend",
+      "/case/kubenova/frontend",
     ].filter(Boolean);
 
     for (const root of fallbackRoots) {

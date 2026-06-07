@@ -7,9 +7,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTROL_API_DIR="$ROOT_DIR/backend/control-api"
 
-DB_NAME="${DB_NAME:-k8s_aiops}"
-DB_USER="${DB_USER:-k8s_aiops}"
-DB_PASS="${DB_PASS:-k8s_aiops_dev}"
+DB_NAME="${DB_NAME:-kubenova}"
+DB_USER="${DB_USER:-kubenova}"
+DB_PASS="${DB_PASS:-kubenova_dev}"
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
 DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"

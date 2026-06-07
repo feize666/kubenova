@@ -1,10 +1,10 @@
-# AIOps Regression Matrix
+# KubeNova Regression Matrix
 
 ## Scope
 
 Primary spec: `.codex/specs/ops-console-unified-experience`, Requirement 10.
 
-This matrix records the current AIOps Center regression scope after the read-path, Incident Workbench, recommendation, precheck, approval, audit, and rollback-hint foundation landed.
+This matrix records the current KubeNova Center regression scope after the read-path, Incident Workbench, recommendation, precheck, approval, audit, and rollback-hint foundation landed.
 
 ## Coverage
 
@@ -23,7 +23,7 @@ This matrix records the current AIOps Center regression scope after the read-pat
 
 ## Current Constraints
 
-- AIOps execution remains intentionally separated from approval. `approve` returns `executionStatus: not-executed` and records audit only.
+- KubeNova execution remains intentionally separated from approval. `approve` returns `executionStatus: not-executed` and records audit only.
 - Incident correlation currently derives from existing monitoring alerts, inspection issues, and observability summary; no external ML/anomaly backend is integrated yet.
 - Human review state is represented in root-cause candidates, but no persistent reviewer workflow exists yet.
 - Topology impact is a stable textual reference today; graph focus integration remains part of the broader resource panorama follow-up.
@@ -35,7 +35,7 @@ This matrix records the current AIOps Center regression scope after the read-pat
   - Incident Workbench opened for `集群健康状态异常`; evidence timeline, correlation group, root-cause candidate, and recommendation/approval sections rendered with `consoleErrorCount=0`.
   - Recommendation row expanded; Precheck and approval actions completed with `consoleErrorCount=0`.
 - 2026-05-29 task 12.7 fix evidence:
-  - AIOps now deduplicates derived incident ids before creating React table rows, recommendations, and root-cause candidates.
+  - KubeNova now deduplicates derived incident ids before creating React table rows, recommendations, and root-cause candidates.
   - `/aiops` and `/observability/cluster-health` use contextual Ant Design message APIs, avoiding static message context warnings during action feedback.
   - Incident Workbench no longer uses deprecated Ant Design `List`.
 - `cd backend/control-api && npm run test -- aiops.controller.spec.ts aiops.service.spec.ts monitoring.controller.spec.ts --runInBand`

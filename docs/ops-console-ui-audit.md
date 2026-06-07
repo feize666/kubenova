@@ -27,7 +27,7 @@ This audit is based on static route/component scans plus existing browser route-
 
 ## Route Coverage Snapshot
 
-Static navigation currently covers overview, topology, cluster domain, workloads, network, storage, config, autoscaling, Helm, IAM/security, observability, AIOps, and system update routes.
+Static navigation currently covers overview, topology, cluster domain, workloads, network, storage, config, autoscaling, Helm, IAM/security, observability, KubeNova, and system update routes.
 
 Browser loop coverage is partial. It covers the newly added centers and several high-risk routes, but not every workload, storage, config, Helm, IAM, terminal, logs, or system-management page.
 
@@ -79,7 +79,7 @@ rg -n "path:" frontend/src/config/navigation.ts
 
 | Finding | Evidence | Impact | Priority | Proposed Action | Test Status |
 | --- | --- | --- | --- | --- | --- |
-| Page header hierarchy and density still vary between legacy resource pages and new center pages. | Static scan shows mixed direct `Card`, `Typography.Title`, `ResourcePageHeader`, and center-page custom layouts. | Console feels less unified, especially when switching from resource lists to Observability/AIOps. | P1 | Standardize page title, subtitle, status summary, and primary action placement through shared header patterns. | Static only. |
+| Page header hierarchy and density still vary between legacy resource pages and new center pages. | Static scan shows mixed direct `Card`, `Typography.Title`, `ResourcePageHeader`, and center-page custom layouts. | Console feels less unified, especially when switching from resource lists to Observability/KubeNova. | P1 | Standardize page title, subtitle, status summary, and primary action placement through shared header patterns. | Static only. |
 | Table toolbar/filter patterns are not yet fully normalized across modules. | Shared `ResourceTable`/toolbar exists, but pages still combine `ResourceClusterNamespaceFilters`, `NetworkResourcePageFilters`, page-local controls, and table global search. | Operators may lose muscle memory between resource families; URL/filter state may feel inconsistent. | P1 | Normalize cluster/namespace/keyword/facet/filter-row behavior by route family and document exceptions. | Static only. |
 | Drawer width and content structure vary by drawer family. | `ResourceDetailDrawer`, `ClusterDetailDrawer`, `BusinessDetailDrawer`, page-local Helm/AI drawers. | Similar "details" tasks feel different; mobile and dark-theme behavior can drift. | P1 | Define drawer classes: Kubernetes resource detail, business detail, workbench, settings. Align width, footer/action placement, and loading/error states. | Partial browser loop only. |
 | Light/dark theme relies on shared CSS variables plus many inline colors. | `globals.css` has token system; scans show route/component inline `rgba(...)`, hex colors, gradients. | Some pages can miss contrast or look off when theme toggles. | P1 | Replace high-use inline colors with semantic tokens on shared surfaces first: shell, tables, drawers, center cards, graph quick links. | Not theme-loop tested. |
@@ -107,7 +107,7 @@ rg -n "path:" frontend/src/config/navigation.ts
 ## Cross-Cutting Checklist For 12.2+
 
 - Run all navigation routes in dark and light theme.
-- Run desktop and mobile viewport smoke for shell, resource list, detail drawer, YAML drawer, topology, Observability, AIOps, AI assistant, terminal, and logs.
+- Run desktop and mobile viewport smoke for shell, resource list, detail drawer, YAML drawer, topology, Observability, KubeNova, AI assistant, terminal, and logs.
 - Capture console errors, page errors, failed requests, and unhandled promise rejections.
 - Exercise table flows: global search, filter row, column visibility, sort, pagination, row action menu, detail open, YAML open.
 - Exercise drawer flows: open, refresh, relationship navigation, back, error state, close, and narrow viewport.

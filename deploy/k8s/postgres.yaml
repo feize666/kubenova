@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres
-  namespace: aiops
+  namespace: kubenova
 spec:
   replicas: 1
   selector:
@@ -24,17 +24,17 @@ spec:
             - name: POSTGRES_DB
               valueFrom:
                 configMapKeyRef:
-                  name: aiops-platform-config
+                  name: kubenova-platform-config
                   key: POSTGRES_DB
             - name: POSTGRES_USER
               valueFrom:
                 configMapKeyRef:
-                  name: aiops-platform-config
+                  name: kubenova-platform-config
                   key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: aiops-platform-secret
+                  name: kubenova-platform-secret
                   key: POSTGRES_PASSWORD
           volumeMounts:
             - name: postgres-storage
@@ -58,7 +58,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres
-  namespace: aiops
+  namespace: kubenova
 spec:
   selector:
     app: postgres

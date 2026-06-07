@@ -1415,7 +1415,7 @@ export class ResourcesService {
       parsed,
       undefined,
       input.dryRun ? 'All' : undefined,
-      'k8s-aiops-manager',
+      'kubenova',
       true,
       k8s.PatchStrategy.ServerSideApply,
     );
@@ -1582,7 +1582,7 @@ export class ResourcesService {
       parsed,
       undefined,
       input.dryRun ? 'All' : undefined,
-      'k8s-aiops-manager',
+      'kubenova',
       true,
       k8s.PatchStrategy.ServerSideApply,
     );

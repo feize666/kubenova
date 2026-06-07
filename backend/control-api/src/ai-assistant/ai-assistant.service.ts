@@ -246,7 +246,7 @@ export class AiAssistantService {
       const reason =
         error instanceof Error ? error.message : '模型中转站调用失败';
       content = [
-        '⚠️ AIOps中台模型调用失败',
+        '⚠️ KubeNova 中台模型调用失败',
         '',
         reason,
         '',
@@ -399,12 +399,12 @@ export class AiAssistantService {
 
     if (!apiKey) {
       throw new BadRequestException(
-        'AI_MODEL_API_KEY 未配置，请在 AIOps中台模型设置中填写 API Key。',
+        'AI_MODEL_API_KEY 未配置，请在 KubeNova 中台模型设置中填写 API Key。',
       );
     }
 
     const systemPrompt = [
-      '你是一位专业的 Kubernetes AIOps 智能运维助手，运行于企业级 K8s 管理平台。',
+      '你是一位专业的 Kubernetes 智能运维助手，运行于企业级 K8s 管理平台。',
       '',
       '## 能力范围',
       '- **集群状态分析**：解读 Node/Pod/Deployment/StatefulSet 健康状态，识别异常模式',
@@ -780,7 +780,7 @@ export class AiAssistantService {
           '集群存在持续 CPU 限流热点，导致请求延迟抬升与批处理队列堆积。',
         severity: 'medium',
         impactedResources: [
-          'Namespace/aiops',
+          'Namespace/kubenova-system',
           'Deployment/metrics-collector',
           'StatefulSet/log-indexer',
         ],

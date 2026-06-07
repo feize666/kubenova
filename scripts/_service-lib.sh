@@ -49,7 +49,7 @@ service_health_url() {
 
 service_session_name() {
   local name="$1"
-  echo "aiops-${name}"
+  echo "kubenova-${name}"
 }
 
 service_pid_file() {
