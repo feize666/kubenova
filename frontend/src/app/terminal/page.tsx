@@ -12,7 +12,7 @@ import {
   LoadingOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { App, Button, Card, Select, Space, Tooltip, Typography, theme } from "antd";
+import { App, Button, Select, Space, Tooltip, Typography, theme } from "antd";
 import { ApiError } from "@/lib/api/client";
 import { getClusters } from "@/lib/api/clusters";
 import { createRuntimeSession, resolveSafeRuntimeReturnTo, type CreateRuntimeSessionResponse } from "@/lib/api/runtime";
@@ -31,7 +31,7 @@ import {
   type TerminalParsedMessage,
 } from "@/lib/ws/terminal";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsStatusTag, type OpsStatusTone } from "@/components/ops";
+import { OpsFilterChip, OpsFrameShell, OpsStatusTag, type OpsFrameShellState, type OpsStatusTone } from "@/components/ops";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -49,16 +49,33 @@ type SessionCache = RuntimeSessionView & {
   cacheKey: string;
 };
 
-const STATUS_LABEL: Record<TerminalConnectionStatus, string> = {
+type TerminalVisualState = TerminalConnectionStatus | "expired" | "non-reconnectable" | "error";
+
+const VISUAL_STATUS_LABEL: Record<TerminalVisualState, string> = {
   connecting: "连接中",
-  connected: "在线",
-  disconnected: "离线",
+  connected: "已连接",
+  disconnected: "已断开",
+  expired: "已过期",
+  "non-reconnectable": "不可重连",
+  error: "异常",
 };
 
-const STATUS_TONE: Record<TerminalConnectionStatus, OpsStatusTone> = {
+const VISUAL_STATUS_TONE: Record<TerminalVisualState, OpsStatusTone> = {
   connecting: "processing",
   connected: "success",
   disconnected: "neutral",
+  expired: "danger",
+  "non-reconnectable": "warning",
+  error: "danger",
+};
+
+const VISUAL_FRAME_STATE: Record<TerminalVisualState, OpsFrameShellState> = {
+  connecting: "connecting",
+  connected: "connected",
+  disconnected: "disconnected",
+  expired: "expired",
+  "non-reconnectable": "paused",
+  error: "error",
 };
 
 const MAX_RECONNECTS = 12;
@@ -92,6 +109,11 @@ function formatExpiry(expiresAtMs?: number): string {
   const minutes = Math.floor(diff / 60000);
   const seconds = Math.floor((diff % 60000) / 1000);
   return `${minutes}m ${seconds}s`;
+}
+
+function readCssVar(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
 function normalizeRuntimeError(code?: string, fallback?: string): { text: string; blockReconnect: boolean } {
@@ -678,6 +700,10 @@ export default function TerminalPage() {
   useEffect(() => {
     const host = terminalHostRef.current;
     if (!host || terminalRef.current) return;
+    const terminalBackground = readCssVar("--ops-terminal-bg", "#061120");
+    const terminalForeground = readCssVar("--ops-terminal-fg", "#eef6ff");
+    const terminalSelection = readCssVar("--ops-terminal-selection", "rgba(56, 189, 248, 0.45)");
+    const statusInfo = readCssVar("--ops-status-info-text", "#38bdf8");
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -687,11 +713,11 @@ export default function TerminalPage() {
       lineHeight: 1.35,
       scrollback: 5000,
       theme: {
-        background: "#08101a",
-        foreground: "#dbeafe",
-        cursor: "#60a5fa",
-        cursorAccent: "#08101a",
-        selectionBackground: "rgba(59,130,246,0.28)",
+        background: terminalBackground,
+        foreground: terminalForeground,
+        cursor: statusInfo,
+        cursorAccent: terminalBackground,
+        selectionBackground: terminalSelection,
         black: "#020617",
         red: "#ef4444",
         green: "#22c55e",
@@ -821,136 +847,270 @@ export default function TerminalPage() {
   const missingText = missingParams.length
     ? `缺少连接参数：${missingParams.join("、")}。请从资源页面点击“进入终端”，或补全 ?clusterId=&namespace=&pod=&container=`
     : "";
-  return (
-    <Card className="cyber-panel terminal-workspace-card" styles={{ body: { padding: 20 } }} style={{ borderRadius: 28, overflow: "hidden" }}>
-      <div style={{ display: "grid", gap: 16 }}>
-        <div
-          style={{
-            display: "grid",
-            gap: 14,
-            padding: 18,
-            borderRadius: 24,
-            border: `1px solid ${token.colorBorderSecondary}`,
-            background:
-              token.colorBgContainer === "#111827"
-                ? "linear-gradient(135deg, rgba(15,23,42,0.94), rgba(8,47,73,0.92))"
-                : "linear-gradient(135deg, rgba(255,255,255,0.98), rgba(239,246,255,0.98))",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-            <div style={{ display: "grid", gap: 8 }}>
-              <Space wrap size={10}>
-                <Typography.Title level={3} style={{ margin: 0 }}>
-                  Terminal Workspace
-                </Typography.Title>
-                <OpsStatusTag tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</OpsStatusTag>
-                {podPhase ? <OpsStatusTag tone={podPhase === "Running" ? "success" : "warning"}>Pod {podPhase}</OpsStatusTag> : null}
-              </Space>
-              <Typography.Text type="secondary">
-                {clusterDisplayName} / {targetBase.namespace || "-"} / {targetBase.pod || "-"} · 来源 {sourceLabel}
-              </Typography.Text>
-            </div>
-            <Space wrap>
-              <Select
-                value={selectedContainer || undefined}
-                style={{ minWidth: 180 }}
-                placeholder="选择容器"
-                options={availableContainers.map((container) => ({ label: container, value: container }))}
-                onChange={(value) => setSelectedContainer(value)}
-              />
-              <Tooltip title="新建会话">
-                <Button icon={<ReloadOutlined />} onClick={() => void connectTerminal({ forceNewSession: true, userInitiated: true })} disabled={status === "connecting" || missingParams.length > 0}>
-                  新建会话
-                </Button>
-              </Tooltip>
-              <Tooltip title="断开终端连接">
-                <Button onClick={() => disconnectTerminal(true)}>
-                  断开
-                </Button>
-              </Tooltip>
-              <Tooltip title="退出终端">
-                <Button danger icon={<ArrowLeftOutlined />} onClick={() => handleDisconnectAndReturn()}>
-                  退出
-                </Button>
-              </Tooltip>
-              <Tooltip title="清屏">
-                <Button icon={<ColumnWidthOutlined />} onClick={clearTerminal}>
-                  清屏
-                </Button>
-              </Tooltip>
-              <Tooltip title="复制终端内容">
-                <Button icon={<CopyOutlined />} onClick={copyTerminal}>
-                  复制
-                </Button>
-              </Tooltip>
-            </Space>
-          </div>
+  const isExpiredVisual =
+    sessionInfo?.sessionState === "expired" ||
+    (sessionInfo?.expiresAtMs ? sessionInfo.expiresAtMs <= Date.now() : false) ||
+    lastWarning.includes("已过期");
+  const isNonReconnectableVisual = sessionInfo?.reconnectable === false;
+  const visualState: TerminalVisualState = isExpiredVisual
+    ? "expired"
+    : lastWarning
+      ? "error"
+      : isNonReconnectableVisual
+        ? "non-reconnectable"
+        : status;
+  const visualTone = VISUAL_STATUS_TONE[visualState];
+  const visualToneClass =
+    visualTone === "success"
+      ? "success"
+      : visualTone === "warning"
+        ? "warning"
+        : visualTone === "danger"
+          ? "danger"
+          : visualTone === "processing"
+            ? "processing"
+            : "neutral";
+  const gatewayLabel = sessionInfo?.gatewayWsUrl ? "已绑定" : "未创建";
+  const reconnectLocked = blockReconnectRef.current || isNonReconnectableVisual || isExpiredVisual;
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+  return (
+    <>
+      <OpsFrameShell
+        className="terminal-workbench-shell"
+        bodyClassName="terminal-workbench-body"
+        state={VISUAL_FRAME_STATE[visualState]}
+        title="Terminal Workbench"
+        subtitle={`${clusterDisplayName} / ${targetBase.namespace || "-"} / ${targetBase.pod || "-"} · 来源 ${sourceLabel}`}
+        status={<OpsStatusTag tone={visualTone}>{VISUAL_STATUS_LABEL[visualState]}</OpsStatusTag>}
+        toolbar={(
+          <Space wrap size={8} className="terminal-workbench-toolbar">
+            <Select
+              value={selectedContainer || undefined}
+              className="terminal-workbench-container-select"
+              placeholder="选择容器"
+              options={availableContainers.map((container) => ({ label: container, value: container }))}
+              onChange={(value) => setSelectedContainer(value)}
+            />
+            <Tooltip title="新建会话">
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => void connectTerminal({ forceNewSession: true, userInitiated: true })}
+                disabled={status === "connecting" || missingParams.length > 0}
+              >
+                新建会话
+              </Button>
+            </Tooltip>
+            <Tooltip title="断开终端连接">
+              <Button onClick={() => disconnectTerminal(true)}>断开</Button>
+            </Tooltip>
+            <Tooltip title="退出终端">
+              <Button danger icon={<ArrowLeftOutlined />} onClick={() => handleDisconnectAndReturn()}>
+                退出
+              </Button>
+            </Tooltip>
+            <Tooltip title="清屏">
+              <Button icon={<ColumnWidthOutlined />} onClick={clearTerminal}>
+                清屏
+              </Button>
+            </Tooltip>
+            <Tooltip title="复制终端内容">
+              <Button icon={<CopyOutlined />} onClick={copyTerminal}>
+                复制
+              </Button>
+            </Tooltip>
+          </Space>
+        )}
+        chips={(
+          <>
+            <OpsFilterChip tone={visualTone === "danger" ? "danger" : visualTone === "warning" ? "warning" : visualTone === "success" ? "success" : "info"}>
+              连接 {VISUAL_STATUS_LABEL[visualState]}
+            </OpsFilterChip>
             <OpsFilterChip tone="neutral">Cluster {clusterDisplayName}</OpsFilterChip>
+            <OpsFilterChip tone="neutral">Namespace {targetBase.namespace || "-"}</OpsFilterChip>
+            <OpsFilterChip tone="neutral">Pod {targetBase.pod || "-"}</OpsFilterChip>
             <OpsFilterChip tone="neutral">Container {selectedContainer || "-"}</OpsFilterChip>
             <Tooltip title={sessionInfo?.gatewayWsUrl ? sanitizeWsUrlForDisplay(sessionInfo.gatewayWsUrl) : "未创建"}>
-              <OpsFilterChip tone="info">Gateway {sessionInfo?.sessionId ? "已绑定" : "未创建"}</OpsFilterChip>
+              <OpsFilterChip tone={sessionInfo?.gatewayWsUrl ? "success" : "info"}>Gateway {gatewayLabel}</OpsFilterChip>
             </Tooltip>
-            <OpsFilterChip tone="neutral">TTL {formatExpiry(sessionInfo?.expiresAtMs)}</OpsFilterChip>
-            {sessionInfo?.sessionId ? <OpsFilterChip tone="neutral">Session {sessionInfo.sessionId.slice(0, 8)}</OpsFilterChip> : null}
-            {sessionInfo?.reconnectable === false ? <OpsFilterChip tone="warning">不可重连</OpsFilterChip> : null}
-          </div>
-        </div>
-
-        {missingParams.length > 0 ? (
-          <Card style={{ borderRadius: 20, borderColor: "rgba(245,158,11,0.28)", background: "rgba(245,158,11,0.08)" }}>
-            <Typography.Text>{missingText}</Typography.Text>
-          </Card>
-        ) : null}
-
-        {lastWarning ? (
-          <Card style={{ borderRadius: 20, borderColor: "rgba(248,113,113,0.28)", background: "rgba(248,113,113,0.08)" }}>
-            <Typography.Text>{lastWarning}</Typography.Text>
-          </Card>
-        ) : null}
-
-        <div
-          style={{
-            position: "relative",
-            borderRadius: 28,
-            overflow: "hidden",
-            border: "1px solid rgba(148,163,184,0.2)",
-            background: "radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 24%), linear-gradient(180deg, #07111f 0%, #08101a 100%)",
-            minHeight: "72vh",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "14px 18px",
-              borderBottom: "1px solid rgba(148,163,184,0.15)",
-              background: "rgba(2,6,23,0.65)",
-            }}
-          >
-            <Space size={8}>
-              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#f97316", display: "inline-block" }} />
-              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
-              <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#38bdf8", display: "inline-block" }} />
-              <Typography.Text style={{ color: "#e2e8f0", fontWeight: 600 }}>
+            <OpsFilterChip tone={isExpiredVisual ? "danger" : "neutral"}>TTL {formatExpiry(sessionInfo?.expiresAtMs)}</OpsFilterChip>
+            <OpsFilterChip tone={sessionInfo?.sessionId ? "neutral" : "info"}>
+              Session {sessionInfo?.sessionId ? sessionInfo.sessionId.slice(0, 8) : "未创建"}
+            </OpsFilterChip>
+            {reconnectLocked ? <OpsFilterChip tone="warning">不可重连</OpsFilterChip> : null}
+            {podPhase ? <OpsFilterChip tone={podPhase === "Running" ? "success" : "warning"}>Pod {podPhase}</OpsFilterChip> : null}
+          </>
+        )}
+        warning={missingParams.length > 0 ? <Typography.Text>{missingText}</Typography.Text> : null}
+        error={lastWarning ? <Typography.Text>{lastWarning}</Typography.Text> : null}
+      >
+        <div className={`terminal-workbench-stage terminal-workbench-stage--${visualState}`}>
+          <div className="terminal-workbench-titlebar">
+            <div className="terminal-workbench-title-group">
+              <span className="terminal-workbench-dot terminal-workbench-dot--warn" />
+              <span className="terminal-workbench-dot terminal-workbench-dot--success" />
+              <span className="terminal-workbench-dot terminal-workbench-dot--info" />
+              <Typography.Text className="terminal-workbench-title">
                 {clusterDisplayName} · {targetBase.pod || "terminal"}.{targetBase.namespace || "default"}
               </Typography.Text>
-            </Space>
-            <Space size={8}>
-              {status === "connecting" ? <LoadingOutlined style={{ color: "#38bdf8" }} /> : null}
-              {status === "connected" ? <CheckCircleOutlined style={{ color: "#22c55e" }} /> : null}
-              {status === "disconnected" ? <CloseCircleOutlined style={{ color: "#94a3b8" }} /> : null}
-              <Typography.Text style={{ color: "#cbd5e1" }}>{STATUS_LABEL[status]}</Typography.Text>
-            </Space>
+            </div>
+            <div className="terminal-workbench-live-state">
+              {visualState === "connecting" ? <LoadingOutlined className="terminal-workbench-status-icon terminal-workbench-status-icon--processing" /> : null}
+              {visualState === "connected" ? <CheckCircleOutlined className="terminal-workbench-status-icon terminal-workbench-status-icon--success" /> : null}
+              {visualState !== "connecting" && visualState !== "connected" ? (
+                <CloseCircleOutlined className={`terminal-workbench-status-icon terminal-workbench-status-icon--${visualToneClass}`} />
+              ) : null}
+              <OpsStatusTag tone={visualTone}>{VISUAL_STATUS_LABEL[visualState]}</OpsStatusTag>
+            </div>
           </div>
 
-          <div style={{ height: "72vh", maxHeight: "72vh", overflow: "hidden" }}>
+          <div className="terminal-workbench-terminal-area">
             <div ref={terminalHostRef} className="terminal-xterm-host" />
           </div>
         </div>
-      </div>
-    </Card>
+      </OpsFrameShell>
+      <style jsx global>{`
+        .terminal-workbench-shell.ops-frame-shell {
+          min-height: calc(100vh - 112px);
+        }
+
+        .terminal-workbench-shell .ops-frame-shell__header {
+          align-items: center;
+        }
+
+        .terminal-workbench-shell .ops-frame-shell__title {
+          font-size: 18px;
+        }
+
+        .terminal-workbench-body {
+          display: grid;
+          min-height: 0;
+          padding: 16px;
+        }
+
+        .terminal-workbench-toolbar.ant-space {
+          row-gap: 8px;
+        }
+
+        .terminal-workbench-container-select.ant-select {
+          min-width: 180px;
+        }
+
+        .terminal-workbench-stage {
+          position: relative;
+          display: grid;
+          grid-template-rows: auto minmax(0, 1fr);
+          min-height: 72vh;
+          overflow: hidden;
+          border: 1px solid var(--ops-frame-border);
+          border-radius: var(--ops-control-radius);
+          background: var(--ops-terminal-bg);
+          box-shadow: inset 0 1px 0 var(--ops-frame-divider);
+        }
+
+        .terminal-workbench-stage--connecting,
+        .terminal-workbench-stage--connected {
+          border-color: var(--ops-status-info-border);
+        }
+
+        .terminal-workbench-stage--expired,
+        .terminal-workbench-stage--error {
+          border-color: var(--ops-status-danger-border);
+        }
+
+        .terminal-workbench-stage--non-reconnectable {
+          border-color: var(--ops-status-warning-border);
+        }
+
+        .terminal-workbench-titlebar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 12px 14px;
+          border-bottom: 1px solid var(--ops-frame-divider);
+          background: var(--ops-frame-header-bg);
+        }
+
+        .terminal-workbench-title-group,
+        .terminal-workbench-live-state {
+          display: inline-flex;
+          align-items: center;
+          min-width: 0;
+          gap: 8px;
+        }
+
+        .terminal-workbench-title.ant-typography {
+          min-width: 0;
+          margin: 0;
+          overflow: hidden;
+          color: var(--ops-terminal-fg);
+          font-weight: 650;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .terminal-workbench-dot {
+          width: 9px;
+          height: 9px;
+          flex: 0 0 auto;
+          border-radius: 50%;
+          box-shadow: 0 0 0 1px var(--ops-frame-divider);
+        }
+
+        .terminal-workbench-dot--warn {
+          background: var(--ops-status-warning-text);
+        }
+
+        .terminal-workbench-dot--success {
+          background: var(--ops-status-success-text);
+        }
+
+        .terminal-workbench-dot--info {
+          background: var(--ops-status-info-text);
+        }
+
+        .terminal-workbench-status-icon {
+          color: var(--ops-status-neutral-text);
+        }
+
+        .terminal-workbench-status-icon--processing {
+          color: var(--ops-status-info-text);
+        }
+
+        .terminal-workbench-status-icon--success {
+          color: var(--ops-status-success-text);
+        }
+
+        .terminal-workbench-status-icon--warning {
+          color: var(--ops-status-warning-text);
+        }
+
+        .terminal-workbench-status-icon--danger {
+          color: var(--ops-status-danger-text);
+        }
+
+        .terminal-workbench-terminal-area {
+          height: 72vh;
+          max-height: 72vh;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        @media (max-width: 720px) {
+          .terminal-workbench-body {
+            padding: 12px;
+          }
+
+          .terminal-workbench-titlebar {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .terminal-workbench-container-select.ant-select {
+            width: 100%;
+          }
+        }
+      `}</style>
+    </>
   );
 }

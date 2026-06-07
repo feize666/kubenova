@@ -10,7 +10,6 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import process from "node:process";
 
@@ -54,6 +53,7 @@ const headless = process.env.PERF_HEADLESS !== "false";
 const sampleCount = readPositiveInt("PERF_SAMPLE_COUNT", 5);
 const warmupCount = readNonNegativeInt("PERF_WARMUP_COUNT", 1);
 const settleMs = readNonNegativeInt("PERF_SETTLE_MS", 150);
+const quietCleanupProbeMs = readNonNegativeInt("PERF_QUIET_CLEANUP_PROBE_MS", 750);
 const closedMenuLinkProbeMs = readPositiveInt("PERF_CLOSED_MENU_LINK_PROBE_MS", 80);
 const routes = readRoutes();
 const outputPath = resolveOutputPath();
@@ -63,6 +63,11 @@ const budgets = {
   maxRouteRequests: readOptionalNonNegativeInt("PERF_MAX_ROUTE_REQUESTS"),
   maxRouteApiRequests: readOptionalNonNegativeInt("PERF_MAX_ROUTE_API_REQUESTS"),
   maxSlowRequestMs: readOptionalPositiveInt("PERF_MAX_SLOW_REQUEST_MS"),
+  maxHeapDeltaBytes: readOptionalNonNegativeInt("PERF_MAX_HEAP_DELTA_BYTES"),
+  maxHeapUsedBytes: readOptionalNonNegativeInt("PERF_MAX_HEAP_USED_BYTES"),
+  maxHeapUsagePercent: readOptionalNonNegativeInt("PERF_MAX_HEAP_USAGE_PERCENT"),
+  requireRouteQuiet: readBoolean("PERF_REQUIRE_ROUTE_QUIET", false),
+  maxQuietLeaks: readOptionalNonNegativeInt("PERF_MAX_QUIET_LEAKS"),
   maxConsoleErrors: readOptionalNonNegativeInt("PERF_MAX_CONSOLE_ERRORS") ?? 0,
 };
 
@@ -143,6 +148,14 @@ function readOptionalNonNegativeInt(name) {
   return value;
 }
 
+function readBoolean(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  if (["1", "true", "yes", "on"].includes(raw.toLowerCase())) return true;
+  if (["0", "false", "no", "off"].includes(raw.toLowerCase())) return false;
+  fail(`${name} 必须是布尔值: true/false/1/0，当前值: ${raw}`);
+}
+
 function readRoutes() {
   const raw = process.env.PERF_ROUTES;
   if (!raw) return DEFAULT_ROUTES;
@@ -162,7 +175,7 @@ function resolveOutputPath() {
   if (explicitPath) return explicitPath;
 
   const outputDir =
-    process.env.PERF_OUTPUT_DIR?.trim() || join(tmpdir(), "k8s-aiops-manager", "performance-switching");
+    process.env.PERF_OUTPUT_DIR?.trim() || join(process.cwd(), "tmp", "performance-switching");
   return join(outputDir, `${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "")}.json`);
 }
 
@@ -188,6 +201,11 @@ function describeBudgets() {
     `maxRouteRequests=${formatBudgetValue(budgets.maxRouteRequests)}`,
     `maxRouteApiRequests=${formatBudgetValue(budgets.maxRouteApiRequests)}`,
     `maxSlowRequestMs=${formatBudgetValue(budgets.maxSlowRequestMs)}`,
+    `maxHeapDeltaBytes=${formatBudgetValue(budgets.maxHeapDeltaBytes)}`,
+    `maxHeapUsedBytes=${formatBudgetValue(budgets.maxHeapUsedBytes)}`,
+    `maxHeapUsagePercent=${formatBudgetValue(budgets.maxHeapUsagePercent)}`,
+    `requireRouteQuiet=${budgets.requireRouteQuiet}`,
+    `maxQuietLeaks=${formatBudgetValue(budgets.maxQuietLeaks)}`,
     `maxConsoleErrors=${budgets.maxConsoleErrors}`,
   ].join(" ");
 }
@@ -204,6 +222,7 @@ function formatTimingBrief(timings = {}) {
     `dcl=${timings.domContentLoadedWaitMs ?? "n/a"}ms`,
     `ready=${timings.routeReadyWaitMs ?? "n/a"}ms`,
     `settle=${timings.settleDelayMs ?? "n/a"}ms`,
+    `quietCleanupProbe=${timings.quietCleanupProbeMs ?? "n/a"}ms`,
   ].join(",");
 }
 
@@ -234,7 +253,8 @@ function classifySample(sample) {
 
 function formatSampleBrief(sample) {
   const topRequests = (sample.topRequests || []).slice(0, 3).map(formatRequestBrief).join(" | ");
-  const quietState = sample.routeQuiet?.state ?? "unknown";
+  const quietState = sample.routeQuiet?.during?.state ?? sample.routeQuiet?.after?.state ?? sample.routeQuiet?.state ?? "unknown";
+  const quietLeak = sample.routeQuiet?.leaked === true ? "leaked" : "ok";
   return [
     `${sample.route}:${sample.durationMs}ms`,
     `cause=${classifySample(sample)}`,
@@ -246,8 +266,8 @@ function formatSampleBrief(sample) {
     `failed=${sample.failedRequestCount ?? 0}`,
     `5xx=${sample.serverErrorRequestCount ?? 0}`,
     `longTasks=${sample.longTaskCount ?? "?"}/${sample.longTaskMaxMs ?? "?"}ms`,
-    `heap=${sample.jsHeap?.supported ? `${sample.jsHeap.deltaUsedBytes ?? "?"}B` : "unsupported"}`,
-    `quiet=${quietState}`,
+    `heap=${sample.jsHeap?.supported ? `${sample.jsHeap.deltaUsedBytes ?? "?"}B/${sample.jsHeap.afterUsedBytes ?? "?"}B` : "unsupported"}`,
+    `quiet=${quietState}/${quietLeak}`,
     topRequests ? `top=[${topRequests}]` : "",
   ]
     .filter(Boolean)
@@ -270,6 +290,47 @@ function summarizeSlowRequests(samples, limit = 12) {
     .sort((left, right) => right.durationMs - left.durationMs)
     .slice(0, limit)
     .map((request) => `${request.route} ${formatRequestBrief(request)}`);
+}
+
+function summarizeHeapSamples(samples) {
+  const supportedSamples = samples.filter((sample) => sample.jsHeap?.supported === true);
+  if (supportedSamples.length === 0) {
+    return { supported: false, sampleCount: 0 };
+  }
+  const deltas = supportedSamples.map((sample) => sample.jsHeap.deltaUsedBytes ?? 0);
+  const afterUsed = supportedSamples.map((sample) => sample.jsHeap.afterUsedBytes ?? 0);
+  const usagePercent = supportedSamples
+    .map((sample) => {
+      const limit = sample.jsHeap.jsHeapSizeLimit;
+      if (!limit) return null;
+      return Math.round(((sample.jsHeap.afterUsedBytes ?? 0) / limit) * 100);
+    })
+    .filter((value) => value !== null);
+  return {
+    supported: true,
+    sampleCount: supportedSamples.length,
+    maxDeltaUsedBytes: Math.max(...deltas),
+    minDeltaUsedBytes: Math.min(...deltas),
+    p95DeltaUsedBytes: percentile(deltas, 95),
+    maxAfterUsedBytes: Math.max(...afterUsed),
+    p95AfterUsedBytes: percentile(afterUsed, 95),
+    maxUsagePercent: usagePercent.length > 0 ? Math.max(...usagePercent) : null,
+  };
+}
+
+function summarizeQuietSamples(samples) {
+  const duringMissing = samples
+    .filter((sample) => sample.routeQuiet?.during?.state !== "present")
+    .map((sample) => `${sample.route}:${sample.routeQuiet?.during?.state ?? "unknown"}`);
+  const leaked = samples
+    .filter((sample) => sample.routeQuiet?.leaked === true)
+    .map((sample) => `${sample.route}:${sample.routeQuiet?.after?.state ?? "unknown"}`);
+  return {
+    duringMissingCount: duringMissing.length,
+    leakCount: leaked.length,
+    duringMissing: duringMissing.slice(0, 12),
+    leaked: leaked.slice(0, 12),
+  };
 }
 
 function assessPerformanceBudgets(summary) {
@@ -325,6 +386,49 @@ function assessPerformanceBudgets(summary) {
           .join("; ")}`,
       );
     }
+  }
+  if (budgets.maxHeapDeltaBytes !== null) {
+    const heavyHeapSamples = summary.samples
+      .filter((sample) => sample.jsHeap?.supported === true && (sample.jsHeap.deltaUsedBytes ?? 0) > budgets.maxHeapDeltaBytes)
+      .sort((left, right) => (right.jsHeap?.deltaUsedBytes ?? 0) - (left.jsHeap?.deltaUsedBytes ?? 0));
+    if (heavyHeapSamples.length > 0) {
+      failures.push(
+        `heap delta budget exceeded PERF_MAX_HEAP_DELTA_BYTES=${budgets.maxHeapDeltaBytes} count=${heavyHeapSamples.length} heaviest=${heavyHeapSamples
+          .slice(0, 5)
+          .map(formatSampleBrief)
+          .join("; ")}`,
+      );
+    }
+  }
+  if (budgets.maxHeapUsedBytes !== null) {
+    const highHeapSamples = summary.samples
+      .filter((sample) => sample.jsHeap?.supported === true && (sample.jsHeap.afterUsedBytes ?? 0) > budgets.maxHeapUsedBytes)
+      .sort((left, right) => (right.jsHeap?.afterUsedBytes ?? 0) - (left.jsHeap?.afterUsedBytes ?? 0));
+    if (highHeapSamples.length > 0) {
+      failures.push(
+        `heap used budget exceeded PERF_MAX_HEAP_USED_BYTES=${budgets.maxHeapUsedBytes} count=${highHeapSamples.length} highest=${highHeapSamples
+          .slice(0, 5)
+          .map(formatSampleBrief)
+          .join("; ")}`,
+      );
+    }
+  }
+  if (budgets.maxHeapUsagePercent !== null && summary.heap.supported && summary.heap.maxUsagePercent !== null) {
+    if (summary.heap.maxUsagePercent > budgets.maxHeapUsagePercent) {
+      failures.push(
+        `heap usage budget exceeded maxUsagePercent=${summary.heap.maxUsagePercent}% > PERF_MAX_HEAP_USAGE_PERCENT=${budgets.maxHeapUsagePercent}%`,
+      );
+    }
+  }
+  if (budgets.requireRouteQuiet && summary.quiet.duringMissingCount > 0) {
+    failures.push(
+      `route quiet marker missing count=${summary.quiet.duringMissingCount} examples=${summary.quiet.duringMissing.join("; ")}`,
+    );
+  }
+  if (budgets.maxQuietLeaks !== null && summary.quiet.leakCount > budgets.maxQuietLeaks) {
+    failures.push(
+      `route quiet marker leak count=${summary.quiet.leakCount} > PERF_MAX_QUIET_LEAKS=${budgets.maxQuietLeaks} examples=${summary.quiet.leaked.join("; ")}`,
+    );
   }
   if (summary.consoleErrorCount > budgets.maxConsoleErrors) {
     failures.push(
@@ -720,6 +824,7 @@ async function measureRoute(page, route) {
     domContentLoadedWaitMs: null,
     routeReadyWaitMs: null,
     settleDelayMs: null,
+    quietCleanupProbeMs: null,
     linkProbeMs: null,
     sectionOpenMs: null,
     gotoDomContentLoadedMs: null,
@@ -772,14 +877,28 @@ async function measureRoute(page, route) {
   }
   Object.assign(timings, stableTimings);
   timings.urlToSettleMs = Date.now() - urlSettledAt;
-  const probeAfter = await safeReadRouteProbeSnapshot(page);
-  const longTasks = summarizeLongTasks(probeBefore, probeAfter);
-  const jsHeap = summarizeHeap(probeBefore, probeAfter);
+  const measuredDurationMs = Date.now() - start;
+  const probeDuringSettle = await safeReadRouteProbeSnapshot(page);
   const routeRequests = page.__perfRequests.slice(requestStartIndex);
+  if (quietCleanupProbeMs > 0) {
+    const quietCleanupStart = Date.now();
+    await page.waitForTimeout(quietCleanupProbeMs);
+    timings.quietCleanupProbeMs = Date.now() - quietCleanupStart;
+  } else {
+    timings.quietCleanupProbeMs = 0;
+  }
+  const probeAfterCleanup = await safeReadRouteProbeSnapshot(page);
+  const longTasks = summarizeLongTasks(probeBefore, probeDuringSettle);
+  const jsHeap = summarizeHeap(probeBefore, probeDuringSettle);
   const failedRequestCount = routeRequests.filter((item) => item.failureText).length;
   const serverErrorRequestCount = routeRequests.filter((item) => typeof item.status === "number" && item.status >= 500).length;
+  const routeQuiet = {
+    during: probeDuringSettle.routeQuiet,
+    after: probeAfterCleanup.routeQuiet,
+    leaked: probeAfterCleanup.routeQuiet?.state === "present",
+  };
   return {
-    durationMs: Date.now() - start,
+    durationMs: measuredDurationMs,
     navMode,
     timings,
     requestCount: routeRequests.length,
@@ -792,7 +911,7 @@ async function measureRoute(page, route) {
     longTaskCount: longTasks.count,
     longTaskMaxMs: longTasks.maxDurationMs,
     jsHeap,
-    routeQuiet: probeAfter.routeQuiet,
+    routeQuiet,
   };
 }
 
@@ -920,9 +1039,9 @@ async function main() {
             result.timings,
           )}) requests=${result.requestCount} xhrFetch=${result.xhrFetchCount} failed=${result.failedRequestCount} 5xx=${
             result.serverErrorRequestCount
-          } longTasks=${result.longTaskCount}/${result.longTaskMaxMs}ms quiet=${
-            result.routeQuiet?.state ?? "unknown"
-          }`,
+          } longTasks=${result.longTaskCount}/${result.longTaskMaxMs}ms heap=${
+            result.jsHeap?.supported ? `${result.jsHeap.deltaUsedBytes}B/${result.jsHeap.afterUsedBytes}B` : "unsupported"
+          } quiet=${result.routeQuiet?.during?.state ?? "unknown"}/${result.routeQuiet?.leaked ? "leaked" : "ok"}`,
         );
       }
     }
@@ -938,6 +1057,8 @@ async function main() {
       consoleErrorCount: consoleErrors.length,
       pageErrorCount: pageErrors.length,
       requestCount: requests.length,
+      heap: summarizeHeapSamples(samples),
+      quiet: summarizeQuietSamples(samples),
       budgets,
       samples,
       slowestSamples: summarizeSlowSamples(samples),

@@ -3,11 +3,11 @@ import type { QueryClientConfig, Query } from "@tanstack/react-query";
 
 export const QUERY_CACHE_TIMINGS = {
   defaultStaleTimeMs: 2 * 60 * 1000,
-  defaultGcTimeMs: 10 * 60 * 1000,
+  defaultGcTimeMs: 4 * 60 * 1000,
   shellCapabilityStaleTimeMs: 10 * 60 * 1000,
   shellCapabilityGcTimeMs: 30 * 60 * 1000,
   listStaleTimeMs: 45 * 1000,
-  listGcTimeMs: 10 * 60 * 1000,
+  listGcTimeMs: 3 * 60 * 1000,
   focusRefreshAfterMs: 90 * 1000,
 } as const;
 

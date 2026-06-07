@@ -112,6 +112,7 @@ export function ResourceTableToolbar<T extends object>({ table, extra }: Resourc
         </Tooltip>
         <Popover
           content={columnPanel}
+          overlayClassName="resource-table-column-popover"
           placement="bottomRight"
           trigger="click"
         >

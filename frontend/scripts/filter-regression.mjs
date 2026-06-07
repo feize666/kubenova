@@ -12,11 +12,12 @@
  *   FILTER_PASS=****** \
  *   npm run e2e:filters
  */
+import { existsSync } from "node:fs";
 import process from "node:process";
 
 const baseUrl = process.env.FILTER_BASE_URL || "http://127.0.0.1:3000";
-const username = process.env.FILTER_USER || "";
-const password = process.env.FILTER_PASS || "";
+const username = process.env.FILTER_USER || "admin@local.dev";
+const password = process.env.FILTER_PASS || "admin123456";
 const timeout = Number(process.env.FILTER_TIMEOUT_MS || 15000);
 const headless = process.env.FILTER_HEADLESS !== "false";
 
@@ -28,7 +29,55 @@ function info(message) {
   console.log(`[filter-e2e] ${message}`);
 }
 
+function describeError(error) {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+  return String(error);
+}
+
+async function launchBrowser(chromium) {
+  try {
+    return await chromium.launch({ headless });
+  } catch (error) {
+    const executablePath = resolveChromiumExecutable();
+    if (!executablePath) {
+      fail(`无法启动 Chromium。请执行: npx playwright install chromium。原因: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    info(`Playwright 浏览器缺失，改用系统 Chrome: ${executablePath}`);
+    return chromium.launch({
+      headless,
+      executablePath,
+      args: ["--no-sandbox"],
+    });
+  }
+}
+
+function resolveChromiumExecutable() {
+  return [
+    process.env.CHROME_BIN,
+    process.env.CHROMIUM_BIN,
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/opt/google/chrome/chrome",
+    "/opt/google/chrome/chrome-real",
+  ].find((item) => item && existsSync(item));
+}
+
+async function waitForPageReady(page) {
+  await page.locator("main, .ant-layout-content").first().waitFor({ state: "visible", timeout });
+  await page.waitForTimeout(300);
+}
+
 async function ensureLoggedIn(page) {
+  try {
+    await authenticateViaApi(page);
+    return;
+  } catch (error) {
+    info(`API 登录不可用，回退 UI 登录: ${describeError(error)}`);
+  }
+
   await page.goto(`${baseUrl}/login`, { waitUntil: "domcontentloaded", timeout });
   if (page.url().includes("/dashboard")) {
     info("检测到已登录态，跳过登录。");
@@ -40,14 +89,68 @@ async function ensureLoggedIn(page) {
 
   await page.getByPlaceholder("输入邮箱账号").fill(username);
   await page.getByPlaceholder("输入登录密码").fill(password);
-  await page.getByRole("button", { name: "登录控制台" }).click();
+  const loginForm = page.locator("form").filter({ has: page.getByPlaceholder("输入登录密码") }).first();
+  await loginForm.locator('button[type="submit"]').first().click();
   await page.waitForURL(/\/dashboard/, { timeout });
   info("登录成功。");
 }
 
+function readAuthSnapshot(payload) {
+  const data = payload && typeof payload === "object" && "data" in payload ? payload.data : payload;
+  if (!data || typeof data !== "object") {
+    fail("登录接口响应缺少 data 对象");
+  }
+  if (typeof data.accessToken !== "string" || typeof data.refreshToken !== "string") {
+    fail("登录接口响应缺少 accessToken/refreshToken");
+  }
+  const user = data.user && typeof data.user === "object" ? data.user : {};
+  return {
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
+    expiresAt: typeof data.expiresAt === "string" ? data.expiresAt : "",
+    username: typeof user.username === "string" ? user.username : username,
+    role: typeof user.role === "string" ? user.role : "",
+  };
+}
+
+async function authenticateViaApi(page) {
+  const response = await fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    fail(`API 登录失败: status=${response.status} body=${JSON.stringify(payload).slice(0, 300)}`);
+  }
+  const snapshot = readAuthSnapshot(payload);
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout });
+  await page.evaluate((auth) => {
+    const entries = [
+      ["aiops_auth_access", auth.accessToken],
+      ["aiops_auth_refresh", auth.refreshToken],
+      ["aiops_auth_user", auth.username],
+      ["aiops_auth_role", auth.role],
+      ["access_token", auth.accessToken],
+      ["refresh_token", auth.refreshToken],
+      ["username", auth.username],
+      ["role", auth.role],
+    ];
+    for (const [key, value] of entries) {
+      window.localStorage.setItem(key, value);
+    }
+    if (auth.expiresAt) {
+      window.localStorage.setItem("aiops_auth_expires_at", auth.expiresAt);
+      window.localStorage.setItem("expires_at", auth.expiresAt);
+    }
+  }, snapshot);
+  await page.goto(`${baseUrl}/dashboard`, { waitUntil: "domcontentloaded", timeout });
+  info("API 登录已写入浏览器会话。");
+}
+
 async function resolveFirstClusterAndNamespace(page) {
   await page.goto(`${baseUrl}/workloads/pods`, { waitUntil: "domcontentloaded", timeout });
-  await page.waitForLoadState("networkidle", { timeout });
+  await waitForPageReady(page);
 
   const clusterSelect = page.locator(".resource-filter-select").first();
   await clusterSelect.click();
@@ -115,7 +218,7 @@ async function assertUrlRestore(page, clusterName, clusterValue, namespaceName, 
   url.searchParams.set("keyword", keyword);
 
   await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout });
-  await page.waitForLoadState("networkidle", { timeout });
+  await waitForPageReady(page);
 
   const clusterDisplay = (await page.locator(".resource-filter-select .ant-select-selection-item").first().innerText()).trim();
   if (clusterDisplay !== clusterName) {
@@ -136,7 +239,7 @@ async function assertUrlRestore(page, clusterName, clusterValue, namespaceName, 
 
 async function assertClusterNamespaceLinkage(page) {
   await page.goto(`${baseUrl}/workloads/pods`, { waitUntil: "domcontentloaded", timeout });
-  await page.waitForLoadState("networkidle", { timeout });
+  await waitForPageReady(page);
 
   const clusterSelect = page.locator(".resource-filter-select").first();
   await clusterSelect.click();
@@ -164,7 +267,7 @@ async function main() {
     fail("未安装 playwright。请先执行：npm i -D playwright && npx playwright install chromium");
   }
 
-  const browser = await chromium.launch({ headless });
+  const browser = await launchBrowser(chromium);
   const page = await browser.newPage();
   page.setDefaultTimeout(timeout);
 

@@ -10,6 +10,8 @@ import {
   CheckOutlined,
   ClusterOutlined,
   CompressOutlined,
+  CloseOutlined,
+  CopyOutlined,
   DatabaseOutlined,
   DeploymentUnitOutlined,
   ExpandOutlined,
@@ -17,6 +19,8 @@ import {
   FilterOutlined,
   GatewayOutlined,
   InfoCircleOutlined,
+  LinkOutlined,
+  NodeIndexOutlined,
   ReloadOutlined,
   SearchOutlined,
   WarningOutlined,
@@ -47,7 +51,9 @@ import { useAuth } from "@/components/auth-context";
 import { OpsIconActionButton } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { listAutoscalingPolicies, type AutoscalingPolicyItem } from "@/lib/api/autoscaling";
 import { getClusters } from "@/lib/api/clusters";
+import { getConfigs, type ConfigResourceItem } from "@/lib/api/configs";
 import type { Cluster } from "@/lib/api/types";
 import { getNetworkResources, type NetworkResource } from "@/lib/api/network";
 import {
@@ -56,6 +62,7 @@ import {
   type DynamicResourceItem,
   type ResourceIdentity,
 } from "@/lib/api/resources";
+import { getStorageResources, type StorageResource } from "@/lib/api/storage";
 import { getTopologyNamespaceSummaries, type TopologyNamespaceSummaryItem } from "@/lib/api/topology-summary";
 import { getWorkloadsByKind, type WorkloadListItem } from "@/lib/api/workloads";
 
@@ -109,9 +116,14 @@ const KIND_LABEL: Record<string, string> = {
   GatewayClass: "GatewayClass",
   Gateway: "Gateway",
   HTTPRoute: "HTTPRoute",
+  PersistentVolume: "PV",
   PersistentVolumeClaim: "PVC",
+  StorageClass: "StorageClass",
   ConfigMap: "ConfigMap",
   Secret: "Secret",
+  ServiceAccount: "ServiceAccount",
+  HorizontalPodAutoscaler: "HPA",
+  VerticalPodAutoscaler: "VPA",
   Group: "分组",
 };
 
@@ -139,12 +151,26 @@ type TopologyKind =
   | "GatewayClass"
   | "Gateway"
   | "HTTPRoute"
+  | "PersistentVolume"
   | "PersistentVolumeClaim"
+  | "StorageClass"
   | "ConfigMap"
   | "Secret"
+  | "ServiceAccount"
+  | "HorizontalPodAutoscaler"
+  | "VerticalPodAutoscaler"
   | "Group";
 
-type TopologyRaw = WorkloadListItem | NetworkResource | DynamicResourceItem | TopologyNamespaceSummaryItem | Cluster | Record<string, unknown>;
+type TopologyRaw =
+  | WorkloadListItem
+  | NetworkResource
+  | StorageResource
+  | ConfigResourceItem
+  | AutoscalingPolicyItem
+  | DynamicResourceItem
+  | TopologyNamespaceSummaryItem
+  | Cluster
+  | Record<string, unknown>;
 
 type TopologyNodeData = {
   label: string;
@@ -158,12 +184,11 @@ type TopologyNodeData = {
   instance?: string;
   count?: number;
   collapsedCount?: number;
-  raw?: TopologyRaw;
   detail?: TopologyDetailRequest | null;
   yaml?: TopologyYamlTarget | null;
-  children?: GraphEntity[];
+  children?: GraphNodeEntity[];
   onSelect?: (id: string | null) => void;
-  onOpenEntity?: (entity: GraphEntity) => void;
+  onOpenEntity?: (entity: GraphNodeEntity) => void;
 };
 
 type GraphEntity = {
@@ -187,6 +212,8 @@ type GraphEntity = {
   yaml: TopologyYamlTarget | null;
 };
 
+type GraphNodeEntity = Pick<GraphEntity, "id" | "label" | "kind" | "status" | "detail" | "yaml">;
+
 type GraphRelation = {
   id: string;
   source: string;
@@ -201,6 +228,16 @@ type GraphModel = {
   namespaces: string[];
   sourceCounts: Record<SourceKey, number>;
   statusCounts: Record<NodeStatus, number>;
+};
+
+type RelationSummaryItem = {
+  id: string;
+  label: string;
+  kind: string;
+  role: GraphRelation["role"];
+  direction: "in" | "out";
+  status: NodeStatus;
+  entity: GraphEntity;
 };
 
 type TopologyDetailRequest = {
@@ -226,7 +263,7 @@ type TopologyView = {
 
 type TopologyNodeActions = {
   onSelect: (id: string | null) => void;
-  onOpenEntity: (entity: GraphEntity) => void;
+  onOpenEntity: (entity: GraphNodeEntity) => void;
 };
 
 const TopologyNodeActionsContext = createContext<TopologyNodeActions>(NOOP_NODE_ACTIONS);
@@ -237,6 +274,22 @@ const SOURCE_META: Record<SourceKey, { label: string; icon: ReactNode; color: st
   storage: { label: "存储", icon: <DatabaseOutlined />, color: "#34d399", enabled: true },
   configuration: { label: "配置", icon: <AppstoreOutlined />, color: "#a78bfa", enabled: false },
   gateway: { label: "网关", icon: <GatewayOutlined />, color: "#f59e0b", enabled: false },
+};
+
+const STATUS_LABEL: Record<NodeStatus, string> = {
+  success: "正常",
+  warning: "告警",
+  error: "异常",
+};
+
+const RELATION_ROLE_LABEL: Record<GraphRelation["role"], string> = {
+  owner: "归属",
+  selector: "选择器",
+  network: "网络",
+  storage: "存储",
+  config: "配置",
+  gateway: "网关",
+  scope: "作用域",
 };
 
 const KIND_META: Record<string, { color: string; icon: ReactNode; source: SourceKey | "scope"; weight: number }> = {
@@ -258,18 +311,26 @@ const KIND_META: Record<string, { color: string; icon: ReactNode; source: Source
   GatewayClass: { color: "#f59e0b", icon: <GatewayOutlined />, source: "gateway", weight: 800 },
   Gateway: { color: "#f59e0b", icon: <GatewayOutlined />, source: "gateway", weight: 790 },
   HTTPRoute: { color: "#fbbf24", icon: <GatewayOutlined />, source: "gateway", weight: 780 },
+  PersistentVolume: { color: "#10b981", icon: <DatabaseOutlined />, source: "storage", weight: 780 },
   PersistentVolumeClaim: { color: "#34d399", icon: <DatabaseOutlined />, source: "storage", weight: 770 },
+  StorageClass: { color: "#059669", icon: <DatabaseOutlined />, source: "storage", weight: 760 },
   ConfigMap: { color: "#a78bfa", icon: <FileTextOutlined />, source: "configuration", weight: 760 },
   Secret: { color: "#c084fc", icon: <FileTextOutlined />, source: "configuration", weight: 760 },
+  ServiceAccount: { color: "#818cf8", icon: <FileTextOutlined />, source: "configuration", weight: 750 },
+  HorizontalPodAutoscaler: { color: "#f97316", icon: <ExpandOutlined />, source: "workloads", weight: 760 },
+  VerticalPodAutoscaler: { color: "#fb923c", icon: <ExpandOutlined />, source: "workloads", weight: 755 },
   Group: { color: "#94a3b8", icon: <AppstoreOutlined />, source: "scope", weight: 1000 },
 };
 
 const WORKLOAD_KINDS = ["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Pod", "Job", "CronJob"] as const;
 const NETWORK_KINDS = ["Service", "Ingress", "IngressRoute", "Endpoints", "EndpointSlice", "NetworkPolicy"] as const;
+const STORAGE_KINDS = ["PV", "PVC", "SC"] as const;
+const CONFIG_KINDS = ["configmaps", "secrets"] as const;
 const DYNAMIC_SOURCES = [
   { source: "gateway" as SourceKey, group: "gateway.networking.k8s.io", version: "v1", resource: "gatewayclasses", kind: "GatewayClass", namespaced: false },
   { source: "gateway" as SourceKey, group: "gateway.networking.k8s.io", version: "v1", resource: "gateways", kind: "Gateway", namespaced: true },
   { source: "gateway" as SourceKey, group: "gateway.networking.k8s.io", version: "v1", resource: "httproutes", kind: "HTTPRoute", namespaced: true },
+  { source: "configuration" as SourceKey, group: "", version: "v1", resource: "serviceaccounts", kind: "ServiceAccount", namespaced: true },
 ];
 
 function normalizeRecord(value: unknown): Record<string, unknown> | undefined {
@@ -336,8 +397,9 @@ function makeDetail(raw: { kind: string; id: string; name: string; spec?: Record
 }
 
 function makeYaml(clusterId: string, namespace: string, kind: string, name: string): TopologyYamlTarget | null {
-  if (!clusterId || !kind || !name || kind === "Pod") return null;
-  return { identity: { clusterId, namespace: namespace || "default", kind, name } };
+  if (!clusterId || !kind || !name) return null;
+  const clusterScoped = kind === "PersistentVolume" || kind === "StorageClass";
+  return { identity: { clusterId, namespace: clusterScoped ? "default" : namespace || "default", kind, name } };
 }
 
 function makeDynamicYaml(item: DynamicResourceItem, meta: (typeof DYNAMIC_SOURCES)[number]): TopologyYamlTarget {
@@ -357,6 +419,79 @@ function makeDynamicYaml(item: DynamicResourceItem, meta: (typeof DYNAMIC_SOURCE
       name: item.name,
     },
     dynamicIdentity,
+  };
+}
+
+function normalizeStorageKind(kind: StorageResource["kind"]) {
+  if (kind === "PV") return "PersistentVolume";
+  if (kind === "PVC") return "PersistentVolumeClaim";
+  return "StorageClass";
+}
+
+function storageToEntity(item: StorageResource): GraphEntity {
+  const kind = normalizeStorageKind(item.kind);
+  const labels = getLabels(item);
+  const spec = getSpec(item);
+  const namespace = item.namespace || "cluster";
+  const id = item.id || makeEntityId(kind, item.clusterId, namespace, item.name);
+  return {
+    id,
+    label: item.name,
+    subtitle: kind,
+    kind,
+    source: "storage",
+    namespace,
+    clusterId: item.clusterId,
+    status: resolveNodeStatus(item, kind),
+    weight: KIND_META[kind]?.weight ?? 500,
+    labels,
+    spec,
+    raw: item,
+    detail: makeDetail({ kind, id, name: item.name, spec, status: readResourceStatus(item), labels }),
+    yaml: makeYaml(item.clusterId, namespace, kind, item.name),
+  };
+}
+
+function configToEntity(item: ConfigResourceItem): GraphEntity {
+  const kind = item.kind;
+  const labels = getLabels(item);
+  const id = item.id || makeEntityId(kind, item.clusterId, item.namespace, item.name);
+  return {
+    id,
+    label: item.name,
+    subtitle: kind,
+    kind,
+    source: "configuration",
+    namespace: item.namespace || "default",
+    clusterId: item.clusterId,
+    status: resolveNodeStatus(item, kind),
+    weight: KIND_META[kind]?.weight ?? 500,
+    labels,
+    raw: item,
+    detail: makeDetail({ kind, id, name: item.name, labels }),
+    yaml: makeYaml(item.clusterId, item.namespace, kind, item.name),
+  };
+}
+
+function autoscalingToEntity(item: AutoscalingPolicyItem): GraphEntity {
+  const kind = item.type === "HPA" ? "HorizontalPodAutoscaler" : "VerticalPodAutoscaler";
+  const name = item.resourceName || `${item.workloadName}-${item.type.toLowerCase()}`;
+  const spec = { workloadKind: item.workloadKind, workloadName: item.workloadName, config: item.config };
+  const detailId = [item.clusterId, item.namespace, name].join("/");
+  return {
+    id: item.id || makeEntityId(kind, item.clusterId, item.namespace, name),
+    label: name,
+    subtitle: kind,
+    kind,
+    source: "workloads",
+    namespace: item.namespace || "default",
+    clusterId: item.clusterId,
+    status: resolveNodeStatus(item, kind),
+    weight: KIND_META[kind]?.weight ?? 500,
+    spec,
+    raw: item,
+    detail: makeDetail({ kind, id: detailId, name, spec }),
+    yaml: makeYaml(item.clusterId, item.namespace, kind, name),
   };
 }
 
@@ -454,8 +589,23 @@ function sameScope(left: GraphEntity, right: GraphEntity) {
   return left.namespace === right.namespace;
 }
 
-function ownerMatches(child: GraphEntity, owner: GraphEntity) {
-  return child.ownerRefs?.some((ref) => readString(ref.uid) === owner.id || (readString(ref.kind) === owner.kind && readString(ref.name) === owner.label));
+function getResourceUid(entity: GraphEntity) {
+  return readString((entity.raw as { uid?: unknown })?.uid) ?? readString(normalizeRecord((entity.raw as { metadata?: unknown })?.metadata)?.uid);
+}
+
+function makeKindNameKey(clusterId: string, kind: string, name: string) {
+  return `${clusterId}:${kind}:${name}`;
+}
+
+function toGraphNodeEntity(entity: GraphEntity): GraphNodeEntity {
+  return {
+    id: entity.id,
+    label: entity.label,
+    kind: entity.kind,
+    status: entity.status,
+    detail: entity.detail,
+    yaml: entity.yaml,
+  };
 }
 
 function specServiceName(entity: GraphEntity): string | undefined {
@@ -474,14 +624,61 @@ function specServiceName(entity: GraphEntity): string | undefined {
   return readString(normalizeRecord(spec?.backendRef)?.name);
 }
 
+function podSpecOf(entity: GraphEntity): Record<string, unknown> | undefined {
+  if (entity.kind === "Pod") return entity.spec;
+  return normalizeRecord(normalizeRecord(entity.spec?.template)?.spec);
+}
+
+function extractVolumeRefs(entity: GraphEntity) {
+  const podSpec = podSpecOf(entity);
+  const refs: Array<{ kind: "PersistentVolumeClaim" | "ConfigMap" | "Secret"; name: string }> = [];
+  const volumes = Array.isArray(podSpec?.volumes) ? podSpec.volumes : [];
+  volumes.forEach((volume) => {
+    const record = normalizeRecord(volume);
+    const pvc = readString(normalizeRecord(record?.persistentVolumeClaim)?.claimName);
+    const configMap = readString(normalizeRecord(record?.configMap)?.name);
+    const secret = readString(normalizeRecord(record?.secret)?.secretName);
+    if (pvc) refs.push({ kind: "PersistentVolumeClaim", name: pvc });
+    if (configMap) refs.push({ kind: "ConfigMap", name: configMap });
+    if (secret) refs.push({ kind: "Secret", name: secret });
+  });
+  return refs;
+}
+
+function extractServiceAccountName(entity: GraphEntity) {
+  return readString(podSpecOf(entity)?.serviceAccountName);
+}
+
+function storageClassName(entity: GraphEntity) {
+  return readString(entity.spec?.storageClassName) ?? readString((entity.raw as { storageClass?: unknown })?.storageClass);
+}
+
+function claimVolumeName(entity: GraphEntity) {
+  return readString(entity.spec?.volumeName);
+}
+
+function autoscalingTarget(entity: GraphEntity) {
+  const raw = entity.raw as AutoscalingPolicyItem;
+  return { kind: raw.workloadKind, name: raw.workloadName };
+}
+
 function buildRelations(entities: GraphEntity[]): GraphRelation[] {
   const relations: GraphRelation[] = [];
   const relationIds = new Set<string>();
   const byKind = new Map<string, GraphEntity[]>();
+  const byUid = new Map<string, GraphEntity>();
+  const byKindName = new Map<string, GraphEntity[]>();
   entities.forEach((entity) => {
     const items = byKind.get(entity.kind);
     if (items) items.push(entity);
     else byKind.set(entity.kind, [entity]);
+    const uid = getResourceUid(entity);
+    if (uid) byUid.set(uid, entity);
+    byUid.set(entity.id, entity);
+    const kindNameKey = makeKindNameKey(entity.clusterId, entity.kind, entity.label);
+    const kindNameItems = byKindName.get(kindNameKey);
+    if (kindNameItems) kindNameItems.push(entity);
+    else byKindName.set(kindNameKey, [entity]);
   });
   const push = (source: GraphEntity, target: GraphEntity, label: string, role: GraphRelation["role"]) => {
     if (source.id === target.id) return;
@@ -492,9 +689,15 @@ function buildRelations(entities: GraphEntity[]): GraphRelation[] {
   };
 
   entities.forEach((entity) => {
-    entities.forEach((target) => {
-      if (!sameScope(entity, target)) return;
-      if (ownerMatches(entity, target)) push(target, entity, "owns", "owner");
+    entity.ownerRefs?.forEach((ref) => {
+      const uidTarget = readString(ref.uid) ? byUid.get(readString(ref.uid)!) : undefined;
+      if (uidTarget && sameScope(entity, uidTarget)) push(uidTarget, entity, "owns", "owner");
+      const kind = readString(ref.kind);
+      const name = readString(ref.name);
+      if (!kind || !name) return;
+      (byKindName.get(makeKindNameKey(entity.clusterId, kind, name)) ?? []).forEach((target) => {
+        if (target.id !== uidTarget?.id && sameScope(entity, target)) push(target, entity, "owns", "owner");
+      });
     });
   });
 
@@ -541,13 +744,66 @@ function buildRelations(entities: GraphEntity[]): GraphRelation[] {
       if (sameScope(policy, pod) && labelsMatch(selector, pod.labels)) push(policy, pod, "policy", "network");
     });
   });
+  [...(byKind.get("HorizontalPodAutoscaler") ?? []), ...(byKind.get("VerticalPodAutoscaler") ?? [])].forEach((policy) => {
+    const target = autoscalingTarget(policy);
+    (byKind.get(target.kind) ?? []).forEach((entity) => {
+      if (sameScope(policy, entity) && entity.kind === target.kind && entity.label === target.name) push(policy, entity, "scales", "owner");
+    });
+  });
+  entities.filter((entity) => entity.source === "workloads").forEach((workload) => {
+    const refs = extractVolumeRefs(workload);
+    refs.forEach((ref) => {
+      (byKind.get(ref.kind) ?? []).forEach((target) => {
+        if (sameScope(workload, target) && target.label === ref.name) push(workload, target, ref.kind === "PersistentVolumeClaim" ? "mounts" : "uses", ref.kind === "PersistentVolumeClaim" ? "storage" : "config");
+      });
+    });
+    const serviceAccount = extractServiceAccountName(workload);
+    if (serviceAccount) {
+      (byKind.get("ServiceAccount") ?? []).forEach((target) => {
+        if (sameScope(workload, target) && target.label === serviceAccount) push(workload, target, "runs-as", "config");
+      });
+    }
+  });
+  (byKind.get("PersistentVolumeClaim") ?? []).forEach((pvc) => {
+    const volumeName = claimVolumeName(pvc);
+    (byKind.get("PersistentVolume") ?? []).forEach((pv) => {
+      if (pvc.clusterId === pv.clusterId && volumeName && pv.label === volumeName) push(pvc, pv, "binds", "storage");
+    });
+    const scName = storageClassName(pvc);
+    (byKind.get("StorageClass") ?? []).forEach((sc) => {
+      if (pvc.clusterId === sc.clusterId && scName && sc.label === scName) push(pvc, sc, "class", "storage");
+    });
+  });
+  (byKind.get("PersistentVolume") ?? []).forEach((pv) => {
+    const scName = storageClassName(pv);
+    (byKind.get("StorageClass") ?? []).forEach((sc) => {
+      if (pv.clusterId === sc.clusterId && scName && sc.label === scName) push(pv, sc, "class", "storage");
+    });
+  });
   return relations;
 }
 
-function buildGraphModel({ workloads, network, dynamic }: { workloads: WorkloadListItem[]; network: NetworkResource[]; dynamic: Array<{ item: DynamicResourceItem; meta: (typeof DYNAMIC_SOURCES)[number] }> }): GraphModel {
+function buildGraphModel({
+  workloads,
+  network,
+  storage,
+  configs,
+  autoscaling,
+  dynamic,
+}: {
+  workloads: WorkloadListItem[];
+  network: NetworkResource[];
+  storage: StorageResource[];
+  configs: ConfigResourceItem[];
+  autoscaling: AutoscalingPolicyItem[];
+  dynamic: Array<{ item: DynamicResourceItem; meta: (typeof DYNAMIC_SOURCES)[number] }>;
+}): GraphModel {
   const entities = [
     ...workloads.map(workloadToEntity),
     ...network.map(networkToEntity),
+    ...storage.map(storageToEntity),
+    ...configs.map(configToEntity),
+    ...autoscaling.map(autoscalingToEntity),
     ...dynamic.map(({ item, meta }) => dynamicToEntity(item, meta)),
   ];
   const unique = Array.from(new Map(entities.map((entity) => [entity.id, entity])).values());
@@ -633,6 +889,14 @@ function getResourcePagePath(kind: string): string | null {
     GatewayClass: "/network/gateway-api",
     Gateway: "/network/gateway-api",
     HTTPRoute: "/network/gateway-api",
+    PersistentVolume: "/storage/pv",
+    PersistentVolumeClaim: "/storage/pvc",
+    StorageClass: "/storage/sc",
+    ConfigMap: "/configs/configmaps",
+    Secret: "/configs/secrets",
+    ServiceAccount: "/configs/serviceaccounts",
+    HorizontalPodAutoscaler: "/workloads/autoscaling/hpa",
+    VerticalPodAutoscaler: "/workloads/autoscaling/vpa",
   };
   return map[kind] ?? null;
 }
@@ -655,6 +919,56 @@ function buildResourcePageUrl(data: Pick<TopologyNodeData, "kind" | "clusterId" 
   if (gatewayKind) params.set("kind", gatewayKind);
   const query = params.toString();
   return query ? `${path}?${query}` : path;
+}
+
+function countByStatus(items: Array<{ status: NodeStatus }>) {
+  return items.reduce(
+    (counts, item) => {
+      counts[item.status] += 1;
+      return counts;
+    },
+    { success: 0, warning: 0, error: 0 } as Record<NodeStatus, number>,
+  );
+}
+
+function getTopKindCounts(items: GraphNodeEntity[]) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1));
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 5);
+}
+
+function getRelationSummaries(node: Node<TopologyNodeData> | null, model: GraphModel): RelationSummaryItem[] {
+  if (!node || node.data.kind === "Group") return [];
+  const entityById = new Map(model.entities.map((entity) => [entity.id, entity]));
+  return model.relations.flatMap((relation) => {
+    if (relation.source !== node.id && relation.target !== node.id) return [];
+    const direction = relation.source === node.id ? "out" : "in";
+    const relatedId = direction === "out" ? relation.target : relation.source;
+    const entity = entityById.get(relatedId);
+    if (!entity) return [];
+    return [{
+      id: `${relation.id}:${direction}`,
+      label: entity.label,
+      kind: entity.kind,
+      role: relation.role,
+      direction,
+      status: entity.status,
+      entity,
+    }];
+  });
+}
+
+function getCopyValue(node: Node<TopologyNodeData>) {
+  if (node.data.kind === "Group") return node.data.label;
+  return [node.data.namespace, node.data.label].filter(Boolean).join("/");
+}
+
+function getYamlDisabledReason(node: Node<TopologyNodeData>) {
+  if (node.data.yaml) return null;
+  if (node.data.kind === "Group") return "分组没有单一 YAML";
+  return "当前节点缺少可解析资源身份";
 }
 
 function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<SourceKey>; namespace: string; query: string; errorsOnly: boolean; groupBy: GroupBy; selectedId?: string | null; expandAll: boolean; }) {
@@ -728,7 +1042,7 @@ function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<So
         status: orderedChildren.some((item) => item.status === "error") ? "error" : orderedChildren.some((item) => item.status === "warning") ? "warning" : "success",
         count: orderedChildren.length,
         collapsedCount: expanded ? undefined : orderedChildren.length,
-        children: expanded ? visibleChildren : previewChildren,
+        children: (expanded ? visibleChildren : previewChildren).map(toGraphNodeEntity),
       },
     });
     if (!expanded) return;
@@ -756,7 +1070,6 @@ function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<So
           clusterId: entity.clusterId,
           nodeName: entity.nodeName,
           instance: entity.instance,
-          raw: entity.raw,
           detail: entity.detail,
           yaml: entity.yaml,
         },
@@ -944,6 +1257,7 @@ function FlowCanvas({
   selectedNodeId,
   setSelectedNodeId,
   onOpenEntity,
+  onOpenNodeDetail,
   onMoveState,
   motionEnabled,
   fitVersion,
@@ -951,7 +1265,8 @@ function FlowCanvas({
   view: TopologyView;
   selectedNodeId: string | null;
   setSelectedNodeId: (id: string | null) => void;
-  onOpenEntity: (entity: GraphEntity) => void;
+  onOpenEntity: (entity: GraphNodeEntity) => void;
+  onOpenNodeDetail: (node: Node<TopologyNodeData>) => void;
   onMoveState: (moving: boolean) => void;
   motionEnabled: boolean;
   fitVersion: string;
@@ -1019,6 +1334,7 @@ function FlowCanvas({
           nodesConnectable={false}
           elementsSelectable
           onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+          onNodeDoubleClick={(_, node) => onOpenNodeDetail(node)}
           onPaneClick={() => {
             if (movedRef.current) return;
             setSelectedNodeId(null);
@@ -1061,57 +1377,118 @@ function FlowCanvas({
 
 function DetailRail({
   node,
+  model,
   onClose,
   onOpenDetail,
   onOpenYaml,
   onJump,
   onOpenEntity,
+  onCopy,
 }: {
   node: Node<TopologyNodeData> | null;
+  model: GraphModel;
   onClose: () => void;
   onOpenDetail: () => void;
   onOpenYaml: () => void;
   onJump: () => void;
-  onOpenEntity: (entity: GraphEntity) => void;
+  onOpenEntity: (entity: GraphNodeEntity) => void;
+  onCopy: (value: string) => void;
 }) {
   const children = node?.data.children ?? [];
   const jumpUrl = node ? buildResourcePageUrl(node.data) : null;
+  const childStatusCounts = countByStatus(children);
+  const topKindCounts = getTopKindCounts(children);
+  const relationSummaries = getRelationSummaries(node, model);
+  const yamlDisabledReason = node ? getYamlDisabledReason(node) : null;
   return (
     <aside className={`resource-map-rail ${node ? "is-open" : ""}`}>
       {node ? (
         <>
           <div className="resource-map-rail__head">
-            <div>
+            <div className="resource-map-rail__title">
               <span>{node.data.subtitle}</span>
               <strong>{node.data.label}</strong>
             </div>
-            <button type="button" aria-label="关闭" onClick={onClose}>x</button>
+            <button type="button" aria-label="关闭" onClick={onClose}><CloseOutlined /></button>
           </div>
           <div className="resource-map-rail__body">
+            <div className={`resource-map-health is-${node.data.status}`}>
+              <span>{STATUS_LABEL[node.data.status]}</span>
+              <strong>{node.data.kind === "Group" ? `${children.length} 个资源` : KIND_LABEL[String(node.data.kind)] ?? node.data.kind}</strong>
+            </div>
             <div className="resource-map-facts">
               <div><span>类型</span><strong>{KIND_LABEL[String(node.data.kind)] ?? node.data.kind}</strong></div>
-              <div><span>状态</span><strong>{node.data.status === "success" ? "正常" : node.data.status === "warning" ? "告警" : "异常"}</strong></div>
+              <div><span>状态</span><strong>{STATUS_LABEL[node.data.status]}</strong></div>
               <div><span>名称空间</span><strong>{node.data.namespace ?? "-"}</strong></div>
               <div><span>集群</span><strong>{node.data.clusterId ?? "-"}</strong></div>
+              {node.data.instance ? <div><span>实例</span><strong>{node.data.instance}</strong></div> : null}
+              {node.data.nodeName ? <div><span>节点</span><strong>{node.data.nodeName}</strong></div> : null}
             </div>
+            <div className="resource-map-actions">
+              <OpsIconActionButton icon={<InfoCircleOutlined />} onClick={onOpenDetail} disabled={!node.data.detail || Boolean(children.length)}>
+                详情
+              </OpsIconActionButton>
+              <Tooltip title={yamlDisabledReason ?? "查看 YAML"}>
+                <OpsIconActionButton icon={<FileTextOutlined />} onClick={onOpenYaml} disabled={!node.data.yaml || Boolean(children.length)}>
+                  YAML
+                </OpsIconActionButton>
+              </Tooltip>
+              <OpsIconActionButton icon={<LinkOutlined />} onClick={onJump} disabled={!jumpUrl || Boolean(children.length)}>
+                资源页
+              </OpsIconActionButton>
+              <OpsIconActionButton icon={<CopyOutlined />} onClick={() => onCopy(getCopyValue(node))}>
+                复制
+              </OpsIconActionButton>
+            </div>
+            {children.length ? (
+              <div className="resource-map-section">
+                <div className="resource-map-section-title">分组健康</div>
+                <div className="resource-map-health-grid">
+                  <span className="is-success">正常 <strong>{childStatusCounts.success}</strong></span>
+                  <span className="is-warning">告警 <strong>{childStatusCounts.warning}</strong></span>
+                  <span className="is-error">异常 <strong>{childStatusCounts.error}</strong></span>
+                </div>
+                {topKindCounts.length ? (
+                  <div className="resource-map-kind-strip">
+                    {topKindCounts.map(([kind, count]) => (
+                      <span key={kind}>{KIND_LABEL[kind] ?? kind}<strong>{count}</strong></span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {children.length ? (
               <div className="resource-map-list">
                 <div className="resource-map-section-title">组内资源</div>
-                {children.slice(0, 18).map((child) => (
-                  <button key={child.id} type="button" className={`resource-map-list__item is-${child.status}`} onClick={() => onOpenEntity(child)}>
-                    <span>{KIND_META[child.kind]?.icon ?? <ApiOutlined />}</span>
-                    <div><strong>{child.label}</strong><small>{KIND_LABEL[child.kind] ?? child.kind}</small></div>
+                {children
+                  .slice()
+                  .sort((left, right) => (right.status === "error" ? 1 : 0) - (left.status === "error" ? 1 : 0) || left.label.localeCompare(right.label))
+                  .slice(0, 24)
+                  .map((child) => (
+                    <button key={child.id} type="button" className={`resource-map-list__item is-${child.status}`} onClick={() => onOpenEntity(child)}>
+                      <span>{KIND_META[child.kind]?.icon ?? <ApiOutlined />}</span>
+                      <div><strong>{child.label}</strong><small>{KIND_LABEL[child.kind] ?? child.kind}</small></div>
+                      <em>{STATUS_LABEL[child.status]}</em>
+                    </button>
+                  ))}
+              </div>
+            ) : relationSummaries.length ? (
+              <div className="resource-map-list">
+                <div className="resource-map-section-title">关联资源</div>
+                {relationSummaries.slice(0, 16).map((relation) => (
+                  <button key={relation.id} type="button" className={`resource-map-list__item is-${relation.status}`} onClick={() => onOpenEntity(relation.entity)}>
+                    <span>{KIND_META[relation.kind]?.icon ?? <NodeIndexOutlined />}</span>
+                    <div>
+                      <strong>{relation.label}</strong>
+                      <small>{RELATION_ROLE_LABEL[relation.role]} / {relation.direction === "out" ? "下游" : "上游"} / {KIND_LABEL[relation.kind] ?? relation.kind}</small>
+                    </div>
+                    <em>{STATUS_LABEL[relation.status]}</em>
                   </button>
                 ))}
               </div>
-            ) : null}
-            {!children.length ? (
-              <div className="resource-map-actions">
-                <OpsIconActionButton onClick={onOpenDetail}>资源详情</OpsIconActionButton>
-                <OpsIconActionButton onClick={onOpenYaml} disabled={!node.data.yaml}>查看 YAML</OpsIconActionButton>
-                <OpsIconActionButton onClick={onJump} disabled={!jumpUrl}>跳转资源页</OpsIconActionButton>
-              </div>
-            ) : null}
+            ) : (
+              <Alert type="info" showIcon title="暂无已识别关联" description="可继续用详情或 YAML 查看资源原始引用。" />
+            )}
           </div>
         </>
       ) : <Empty description="选择节点查看资源详情" />}
@@ -1185,6 +1562,33 @@ export default function NetworkTopologyPage() {
     staleTime: QUERY_STALE_MS,
   });
 
+  const storageQuery = useQuery({
+    queryKey: ["topology-map", "storage", selectedCluster?.id, selectedNamespace, token],
+    queryFn: async () => {
+      const results = await Promise.all(STORAGE_KINDS.map((kind) => getStorageResources({ kind, clusterId: selectedCluster?.id, namespace: kind === "PVC" && selectedNamespace !== ALL_NAMESPACE ? selectedNamespace : undefined, pageSize: 500 }, token).catch(() => ({ items: [] }))));
+      return results.flatMap((result) => result.items ?? []);
+    },
+    enabled: Boolean(token && selectedCluster?.id && selectedSources.has("storage")),
+    staleTime: QUERY_STALE_MS,
+  });
+
+  const configQuery = useQuery({
+    queryKey: ["topology-map", "configs", selectedCluster?.id, selectedNamespace, token],
+    queryFn: async () => {
+      const results = await Promise.all(CONFIG_KINDS.map((kind) => getConfigs(kind, { clusterId: selectedCluster?.id, namespace: selectedNamespace === ALL_NAMESPACE ? undefined : selectedNamespace, pageSize: 500 }, token!).catch(() => ({ items: [] }))));
+      return results.flatMap((result) => result.items ?? []);
+    },
+    enabled: Boolean(token && selectedCluster?.id && selectedSources.has("configuration")),
+    staleTime: QUERY_STALE_MS,
+  });
+
+  const autoscalingQuery = useQuery({
+    queryKey: ["topology-map", "autoscaling", selectedCluster?.id, selectedNamespace, token],
+    queryFn: () => listAutoscalingPolicies({ clusterId: selectedCluster?.id, namespace: selectedNamespace === ALL_NAMESPACE ? undefined : selectedNamespace, pageSize: 500 }, token).catch(() => ({ items: [], total: 0, overview: { totalPolicies: 0, hpaPolicies: 0, vpaPolicies: 0, coveredWorkloads: 0, uncoveredWorkloads: 0 } })),
+    enabled: Boolean(token && selectedCluster?.id && selectedSources.has("workloads")),
+    staleTime: QUERY_STALE_MS,
+  });
+
   const dynamicQuery = useQuery({
     queryKey: ["topology-map", "dynamic", selectedCluster?.id, selectedNamespace, token, selectedSourceKey],
     queryFn: async ({ signal }) => {
@@ -1192,7 +1596,7 @@ export default function NetworkTopologyPage() {
       const results = await Promise.all(active.map((meta) => getDynamicResources({ clusterId: selectedCluster!.id, group: meta.group, version: meta.version, resource: meta.resource, namespace: meta.namespaced && selectedNamespace !== ALL_NAMESPACE ? selectedNamespace : undefined, pageSize: 500, missingAsEmpty: true }, token, { signal }).then((response) => response.items.map((item) => ({ item, meta }))).catch(() => [])));
       return results.flat();
     },
-    enabled: Boolean(token && selectedCluster?.id && selectedSources.has("gateway")),
+    enabled: Boolean(token && selectedCluster?.id && (selectedSources.has("gateway") || selectedSources.has("configuration"))),
     staleTime: QUERY_STALE_MS,
   });
 
@@ -1215,10 +1619,20 @@ export default function NetworkTopologyPage() {
     ],
     [cronJobItems, daemonSetItems, deploymentItems, jobItems, podItems, replicaSetItems, statefulSetItems],
   );
-  const isLoading = clusterQuery.isLoading || namespaceSummaryQuery.isLoading || workloadQueries.some((query) => query.isLoading) || networkQuery.isLoading || dynamicQuery.isLoading;
-  const error = clusterQuery.error ?? namespaceSummaryQuery.error ?? workloadQueries.find((query) => query.error)?.error ?? networkQuery.error ?? dynamicQuery.error;
+  const isLoading = clusterQuery.isLoading || namespaceSummaryQuery.isLoading || workloadQueries.some((query) => query.isLoading) || networkQuery.isLoading || storageQuery.isLoading || configQuery.isLoading || autoscalingQuery.isLoading || dynamicQuery.isLoading;
+  const error = clusterQuery.error ?? namespaceSummaryQuery.error ?? workloadQueries.find((query) => query.error)?.error ?? networkQuery.error ?? storageQuery.error ?? configQuery.error ?? autoscalingQuery.error ?? dynamicQuery.error;
 
-  const model = useMemo(() => buildGraphModel({ workloads, network: networkQuery.data ?? [], dynamic: dynamicQuery.data ?? [] }), [dynamicQuery.data, networkQuery.data, workloads]);
+  const model = useMemo(
+    () => buildGraphModel({
+      workloads,
+      network: networkQuery.data ?? [],
+      storage: storageQuery.data ?? [],
+      configs: configQuery.data ?? [],
+      autoscaling: autoscalingQuery.data?.items ?? [],
+      dynamic: dynamicQuery.data ?? [],
+    }),
+    [autoscalingQuery.data?.items, configQuery.data, dynamicQuery.data, networkQuery.data, storageQuery.data, workloads],
+  );
   const namespaceOptions = useMemo(() => {
     const summaryNamespaces = (namespaceSummaryQuery.data?.items ?? []).map((item) => item.namespace).filter((item): item is string => Boolean(item));
     return Array.from(new Set([...summaryNamespaces, ...model.namespaces])).sort();
@@ -1232,10 +1646,6 @@ export default function NetworkTopologyPage() {
   const visible = useMemo(() => buildVisibleGraph(model, { selectedSources, namespace: effectiveNamespace, query: queryText, errorsOnly, groupBy, selectedId: selectedNodeId, expandAll }), [effectiveNamespace, errorsOnly, expandAll, groupBy, model, queryText, selectedNodeId, selectedSources]);
   const view = useMemo(() => layoutView({ nodes: visible.nodes, edges: visible.edges }), [visible.edges, visible.nodes]);
   const selectedNode = useMemo(() => view.nodes.find((node) => node.id === selectedNodeId) ?? null, [selectedNodeId, view.nodes]);
-  const viewNodesRef = useRef(view.nodes);
-  useEffect(() => {
-    viewNodesRef.current = view.nodes;
-  }, [view.nodes]);
   const motionEnabled = !isMoving && view.nodes.length <= LARGE_GRAPH_NODE_LIMIT && view.edges.length <= LARGE_GRAPH_EDGE_LIMIT;
   const canExpandAll = visible.filteredCount <= 50;
 
@@ -1255,9 +1665,12 @@ export default function NetworkTopologyPage() {
     namespaceSummaryQuery.refetch();
     workloadQueries.forEach((query) => query.refetch());
     networkQuery.refetch();
+    storageQuery.refetch();
+    configQuery.refetch();
+    autoscalingQuery.refetch();
     dynamicQuery.refetch();
     setFitVersion(String(Date.now()));
-  }, [clusterQuery, dynamicQuery, namespaceSummaryQuery, networkQuery, workloadQueries]);
+  }, [autoscalingQuery, clusterQuery, configQuery, dynamicQuery, namespaceSummaryQuery, networkQuery, storageQuery, workloadQueries]);
 
   const openDetail = useCallback(() => {
     if (selectedNode?.data.detail) setDetailRequest(selectedNode.data.detail);
@@ -1267,16 +1680,17 @@ export default function NetworkTopologyPage() {
     if (selectedNode?.data.yaml) setYamlTarget(selectedNode.data.yaml);
   }, [selectedNode]);
 
-  const openEntity = useCallback((entity: GraphEntity) => {
+  const openEntity = useCallback((entity: GraphNodeEntity) => {
     setSelectedNodeId(entity.id);
-    setDetailRequest(entity.detail);
   }, []);
 
   const selectNode = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
-    if (!nodeId) return;
-    const node = viewNodesRef.current.find((item) => item.id === nodeId);
-    if (node?.data.detail) setDetailRequest(node.data.detail);
+  }, []);
+
+  const openNodeDetail = useCallback((node: Node<TopologyNodeData>) => {
+    setSelectedNodeId(node.id);
+    if (node.data.detail) setDetailRequest(node.data.detail);
   }, []);
 
   const jumpToResource = useCallback(() => {
@@ -1284,6 +1698,11 @@ export default function NetworkTopologyPage() {
     const url = buildResourcePageUrl(selectedNode.data);
     if (url) router.push(url);
   }, [router, selectedNode]);
+
+  const copyText = useCallback((value: string) => {
+    if (!value || typeof navigator === "undefined" || !navigator.clipboard) return;
+    void navigator.clipboard.writeText(value).catch(() => undefined);
+  }, []);
 
   return (
     <section className="resource-map-shell">
@@ -1300,50 +1719,47 @@ export default function NetworkTopologyPage() {
       </div>
 
       <div className="resource-map-toolbar">
-        <select value={selectedCluster?.id ?? ""} onChange={(event) => { setSelectedClusterId(event.target.value); setSelectedNodeId(null); }}>
-          {clusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name}</option>)}
-        </select>
-        <select value={selectedNamespace} onChange={(event) => { setSelectedNamespace(event.target.value); setSelectedNodeId(null); }}>
-          <option value={ALL_NAMESPACE}>全部名称空间</option>
-          {namespaceOptions.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
-        </select>
-        <div className="resource-map-source-chips">
-          {SOURCE_KEYS.map((source) => (
-            <button key={source} type="button" className={selectedSources.has(source) ? "is-active" : ""} onClick={() => toggleSource(source)} style={{ "--source-color": SOURCE_META[source].color } as React.CSSProperties}>
-              {SOURCE_META[source].icon}<span>{SOURCE_META[source].label}</span><strong>{model.sourceCounts[source]}</strong>
-            </button>
-          ))}
+        <div className="resource-map-toolbar__scope">
+          <select value={selectedCluster?.id ?? ""} onChange={(event) => { setSelectedClusterId(event.target.value); setSelectedNodeId(null); }}>
+            {clusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name}</option>)}
+          </select>
+          <select value={selectedNamespace} onChange={(event) => { setSelectedNamespace(event.target.value); setSelectedNodeId(null); }}>
+            <option value={ALL_NAMESPACE}>全部名称空间</option>
+            {namespaceOptions.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
+          </select>
         </div>
-        <div className="resource-map-segments">
-          {(["namespace", "instance", "node"] as GroupBy[]).map((item) => <button key={item} type="button" className={groupBy === item ? "is-active" : ""} onClick={() => { setGroupBy(item); setSelectedNodeId(null); }}>{GROUP_BY_LABEL[item]}</button>)}
+        <div className="resource-map-toolbar__filters">
+          <div className="resource-map-source-chips">
+            {SOURCE_KEYS.map((source) => (
+              <button key={source} type="button" className={selectedSources.has(source) ? "is-active" : ""} onClick={() => toggleSource(source)} style={{ "--source-color": SOURCE_META[source].color } as React.CSSProperties}>
+                {SOURCE_META[source].icon}<span>{SOURCE_META[source].label}</span><strong>{model.sourceCounts[source]}</strong>
+              </button>
+            ))}
+          </div>
+          <div className="resource-map-segments">
+            {(["namespace", "instance", "node"] as GroupBy[]).map((item) => <button key={item} type="button" className={groupBy === item ? "is-active" : ""} onClick={() => { setGroupBy(item); setSelectedNodeId(null); }}>{GROUP_BY_LABEL[item]}</button>)}
+          </div>
         </div>
-        <button type="button" className={errorsOnly ? "is-active" : ""} onClick={() => setErrorsOnly((value) => !value)}><WarningOutlined /> 状态：异常或告警</button>
-        <button type="button" className={expandAll && canExpandAll ? "is-active" : ""} disabled={!canExpandAll} onClick={() => setExpandAll((value) => !value)}>{expandAll && canExpandAll ? <CompressOutlined /> : <ExpandOutlined />} {expandAll && canExpandAll ? "收起" : "展开全部"}</button>
-        <Input allowClear prefix={<SearchOutlined />} placeholder="搜索资源" value={queryText} onChange={(event) => setQueryText(event.target.value)} />
-        <Tooltip title="刷新"><OpsIconActionButton size="small" onClick={refresh}><ReloadOutlined /></OpsIconActionButton></Tooltip>
-        <Tooltip title="适配视图"><OpsIconActionButton size="small" onClick={() => setFitVersion(String(Date.now()))}><AimOutlined /></OpsIconActionButton></Tooltip>
+        <div className="resource-map-toolbar__actions">
+          <button type="button" className={errorsOnly ? "is-active" : ""} onClick={() => setErrorsOnly((value) => !value)}><WarningOutlined /> 异常</button>
+          <button type="button" className={expandAll && canExpandAll ? "is-active" : ""} disabled={!canExpandAll} onClick={() => setExpandAll((value) => !value)}>{expandAll && canExpandAll ? <CompressOutlined /> : <ExpandOutlined />} {expandAll && canExpandAll ? "收起" : "展开"}</button>
+          <Input allowClear prefix={<SearchOutlined />} placeholder="搜索资源" value={queryText} onChange={(event) => setQueryText(event.target.value)} />
+          <Tooltip title="刷新"><OpsIconActionButton size="small" onClick={refresh}><ReloadOutlined /></OpsIconActionButton></Tooltip>
+          <Tooltip title="适配视图"><OpsIconActionButton size="small" onClick={() => setFitVersion(String(Date.now()))}><AimOutlined /></OpsIconActionButton></Tooltip>
+        </div>
       </div>
 
-      {error ? <Alert type="warning" showIcon message="拓扑数据加载不完整" description={error instanceof Error ? error.message : "部分资源暂不可用"} /> : null}
+      {error ? <Alert type="warning" showIcon title="拓扑数据加载不完整" description={error instanceof Error ? error.message : "部分资源暂不可用"} /> : null}
 
       <div className="resource-map-workbench">
-        <div
-          className="resource-map-canvas"
-          onClickCapture={(event) => {
-            const nodeElement = (event.target as HTMLElement).closest(".react-flow__node[data-id]");
-            const nodeId = nodeElement?.getAttribute("data-id");
-            if (nodeId) {
-              selectNode(nodeId);
-            }
-          }}
-        >
+        <div className="resource-map-canvas">
           {isLoading ? (
             <div className="resource-map-loading"><Skeleton active paragraph={{ rows: 8 }} /></div>
           ) : view.nodes.length === 0 ? (
             <Empty description="暂无可展示数据，请调整筛选条件或切换名称空间" />
           ) : (
             <ReactFlowProvider>
-              <FlowCanvas view={view} selectedNodeId={selectedNodeId} setSelectedNodeId={selectNode} onOpenEntity={openEntity} onMoveState={setIsMoving} motionEnabled={motionEnabled} fitVersion={fitVersion} />
+              <FlowCanvas view={view} selectedNodeId={selectedNodeId} setSelectedNodeId={selectNode} onOpenEntity={openEntity} onOpenNodeDetail={openNodeDetail} onMoveState={setIsMoving} motionEnabled={motionEnabled} fitVersion={fitVersion} />
             </ReactFlowProvider>
           )}
           <div className="resource-map-motion-state">
@@ -1351,7 +1767,7 @@ export default function NetworkTopologyPage() {
             {motionEnabled ? "流动连线" : "性能降级"}
           </div>
         </div>
-        <DetailRail node={selectedNode} onClose={() => setSelectedNodeId(null)} onOpenDetail={openDetail} onOpenYaml={openYaml} onJump={jumpToResource} onOpenEntity={openEntity} />
+        <DetailRail node={selectedNode} model={model} onClose={() => setSelectedNodeId(null)} onOpenDetail={openDetail} onOpenYaml={openYaml} onJump={jumpToResource} onOpenEntity={openEntity} onCopy={copyText} />
       </div>
 
       <ResourceDetailDrawer open={Boolean(detailRequest)} onClose={() => setDetailRequest(null)} token={token} request={detailRequest} onNavigateRequest={(request) => setDetailRequest(request)} />
@@ -1360,33 +1776,33 @@ export default function NetworkTopologyPage() {
       <style jsx global>{`
         body.topology-overview-active { overflow: hidden; }
         .resource-map-shell {
-          --map-page-bg: #f8fafc;
-          --map-panel-bg: rgba(255,255,255,.92);
-          --map-canvas-bg: #ffffff;
+          --map-page-bg: linear-gradient(180deg, #f7f9fc 0%, #eef3f8 100%);
+          --map-panel-bg: rgba(255,255,255,.9);
+          --map-canvas-bg: linear-gradient(180deg, #ffffff 0%, #f9fbfd 100%);
           --map-card-bg: #ffffff;
-          --map-card-bg-soft: rgba(248,250,252,.92);
+          --map-card-bg-soft: rgba(246,249,252,.92);
           --map-text: #1f2937;
-          --map-heading: #111827;
+          --map-heading: #0f172a;
           --map-muted: #6b7280;
-          --map-border: rgba(17,24,39,.12);
-          --map-border-strong: rgba(17,24,39,.2);
-          --map-shadow: 0 12px 28px rgba(15,23,42,.08);
-          --map-dot: rgba(148,163,184,.22);
-          --map-grid: rgba(148,163,184,.1);
-          --map-edge: #111827;
-          --map-edge-owner: #111827;
-          --map-edge-network: #111827;
-          --map-edge-config: #111827;
-          --map-edge-storage: #111827;
+          --map-border: rgba(15,23,42,.1);
+          --map-border-strong: rgba(15,23,42,.18);
+          --map-shadow: 0 14px 34px rgba(15,23,42,.08), 0 1px 2px rgba(15,23,42,.06);
+          --map-dot: rgba(100,116,139,.2);
+          --map-grid: rgba(100,116,139,.08);
+          --map-edge: #64748b;
+          --map-edge-owner: #475569;
+          --map-edge-network: #0891b2;
+          --map-edge-config: #7c3aed;
+          --map-edge-storage: #059669;
           --map-edge-filter: none;
-          height: calc(100dvh - 104px); min-height: 640px; display: flex; flex-direction: column; gap: 10px; padding: 12px; color: var(--map-text); background: var(--map-page-bg);
+          height: calc(100dvh - 104px); min-height: 640px; display: flex; flex-direction: column; gap: 12px; padding: 14px; color: var(--map-text); background: var(--map-page-bg);
         }
         [data-theme="dark"] .resource-map-shell {
-          --map-page-bg: radial-gradient(circle at 18% 8%, rgba(14,165,233,.16), transparent 30%), linear-gradient(180deg, #07111f 0%, #08121c 100%);
-          --map-panel-bg: rgba(7,15,27,.88);
-          --map-canvas-bg: linear-gradient(135deg, rgba(15,23,42,.88), rgba(2,6,23,.96));
-          --map-card-bg: linear-gradient(180deg, rgba(15,23,42,.98), rgba(15,23,42,.9));
-          --map-card-bg-soft: rgba(15,23,42,.58);
+          --map-page-bg: linear-gradient(180deg, #0a0f17 0%, #101722 100%);
+          --map-panel-bg: rgba(17,24,39,.9);
+          --map-canvas-bg: linear-gradient(180deg, rgba(15,23,42,.96), rgba(17,24,39,.92));
+          --map-card-bg: linear-gradient(180deg, rgba(30,41,59,.98), rgba(17,24,39,.96));
+          --map-card-bg-soft: rgba(30,41,59,.66);
           --map-text: #dbeafe;
           --map-heading: #f8fafc;
           --map-muted: #93a4b8;
@@ -1402,53 +1818,63 @@ export default function NetworkTopologyPage() {
           --map-edge-storage: #34d399;
           --map-edge-filter: drop-shadow(0 0 5px rgba(34,211,238,.38));
         }
-        .resource-map-header { display: flex; align-items: center; justify-content: space-between; min-height: 48px; }
+        .resource-map-header { display: flex; align-items: center; justify-content: space-between; min-height: 52px; }
         .resource-map-header span { color: var(--map-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
-        .resource-map-header h1 { margin: 0; font-size: 24px; line-height: 1.1; font-weight: 760; color: var(--map-heading); }
+        .resource-map-header h1 { margin: 0; font-size: 26px; line-height: 1.1; font-weight: 780; color: var(--map-heading); }
         .resource-map-header__stats { display: flex; gap: 8px; }
-        .resource-map-header__stats span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); background: var(--map-panel-bg); border-radius: 8px; padding: 7px 10px; color: var(--map-muted); text-transform: none; }
+        .resource-map-header__stats span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); background: var(--map-panel-bg); border-radius: 10px; padding: 8px 11px; color: var(--map-muted); text-transform: none; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
         .resource-map-header__stats strong { color: var(--map-heading); }
-        .resource-map-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border: 1px solid var(--map-border); background: var(--map-panel-bg); box-shadow: var(--map-shadow); border-radius: 8px; padding: 8px; }
-        .resource-map-toolbar select, .resource-map-toolbar button { height: 34px; border-radius: 8px; border: 1px solid var(--map-border-strong); background: var(--map-card-bg-soft); color: var(--map-text); padding: 0 10px; font-size: 13px; }
+        .resource-map-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid var(--map-border); background: var(--map-panel-bg); box-shadow: var(--map-shadow); border-radius: 10px; padding: 9px; backdrop-filter: blur(10px); }
+        .resource-map-toolbar__scope,
+        .resource-map-toolbar__filters,
+        .resource-map-toolbar__actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+        .resource-map-toolbar__filters { overflow: hidden; }
+        .resource-map-toolbar__actions { justify-content: flex-end; }
+        .resource-map-toolbar select, .resource-map-toolbar button { height: 34px; border-radius: 8px; border: 1px solid var(--map-border-strong); background: var(--map-card-bg-soft); color: var(--map-text); padding: 0 10px; font-size: 13px; box-shadow: inset 0 1px 0 rgba(255,255,255,.5); }
         .resource-map-toolbar button { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
-        .resource-map-toolbar button.is-active { background: color-mix(in srgb, var(--source-color, #0ea5e9) 12%, transparent); border-color: color-mix(in srgb, var(--source-color, #0ea5e9) 56%, var(--map-border)); color: var(--map-heading); }
+        .resource-map-toolbar button:hover { border-color: color-mix(in srgb, #2563eb 34%, var(--map-border)); background: color-mix(in srgb, var(--map-card-bg-soft) 78%, #ffffff); }
+        .resource-map-toolbar button.is-active { background: color-mix(in srgb, var(--source-color, #0ea5e9) 14%, #ffffff); border-color: color-mix(in srgb, var(--source-color, #0ea5e9) 58%, var(--map-border)); color: var(--map-heading); }
         .resource-map-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
         .resource-map-toolbar .ant-input-affix-wrapper { width: 220px; height: 34px; border-radius: 8px; background: var(--map-card-bg-soft); border-color: var(--map-border-strong); color: var(--map-text); }
         .resource-map-toolbar .ant-input { background: transparent; color: var(--map-text); }
         .resource-map-source-chips, .resource-map-segments { display: inline-flex; align-items: center; gap: 0; }
+        .resource-map-source-chips { min-width: 0; overflow: auto hidden; scrollbar-width: none; }
+        .resource-map-source-chips::-webkit-scrollbar { display: none; }
         .resource-map-source-chips button, .resource-map-segments button { border-radius: 0; margin-left: -1px; }
         .resource-map-source-chips button:first-child, .resource-map-segments button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
         .resource-map-source-chips button:last-child, .resource-map-segments button:last-child { border-radius: 0 8px 8px 0; }
         .resource-map-source-chips button.is-active { box-shadow: inset 0 -2px 0 var(--source-color); }
         .resource-map-source-chips strong { color: var(--source-color); }
-        .resource-map-workbench { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 10px; }
-        .resource-map-canvas { position: relative; overflow: hidden; border-radius: 8px; border: 1px solid var(--map-border); background: var(--map-canvas-bg); }
-        .resource-map-canvas::before { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(var(--map-grid) 1px, transparent 1px), linear-gradient(90deg, var(--map-grid) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(circle at center, #000 0 65%, transparent 100%); }
+        .resource-map-workbench { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 12px; }
+        .resource-map-canvas { position: relative; overflow: hidden; border-radius: 12px; border: 1px solid var(--map-border); background: var(--map-canvas-bg); box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 20px 46px rgba(15,23,42,.07); }
+        .resource-map-canvas::before { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(var(--map-grid) 1px, transparent 1px), linear-gradient(90deg, var(--map-grid) 1px, transparent 1px); background-size: 40px 40px; mask-image: linear-gradient(180deg, #000 0 72%, transparent 100%); }
         .resource-map-flow-host { position: relative; width: 100%; height: 100%; min-height: 420px; }
         .resource-map-canvas .react-flow { width: 100%; height: 100%; background: transparent; }
         .resource-map-canvas .react-flow__pane { cursor: grab; }
         .resource-map-canvas .react-flow__pane:active { cursor: grabbing; }
         .resource-map-loading { max-width: 760px; margin: 80px auto; padding: 32px; }
-        .resource-map-node { width: 100%; height: 100%; position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: var(--map-text); background: var(--map-card-bg); border: 1px solid var(--map-border); box-shadow: var(--map-shadow); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
-        .resource-map-node::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(90deg, var(--node-accent), transparent 38%); opacity: .12; }
-        .resource-map-node:hover, .resource-map-node.is-selected { border-color: var(--node-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--node-accent) 48%, transparent), var(--map-shadow); }
+        .resource-map-node { width: 100%; height: 100%; position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 10px; color: var(--map-text); background: var(--map-card-bg); border: 1px solid var(--map-border); box-shadow: 0 12px 26px rgba(15,23,42,.08), 0 1px 2px rgba(15,23,42,.08); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+        .resource-map-node::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(90deg, var(--node-accent), transparent 34%); opacity: .1; }
+        .resource-map-node::after { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 0 999px 999px 0; background: var(--node-accent); opacity: .8; }
+        .resource-map-node:hover, .resource-map-node.is-selected { border-color: var(--node-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--node-accent) 42%, transparent), 0 18px 38px rgba(15,23,42,.12); transform: translateY(-1px); }
         .resource-map-node__handle { opacity: 0; }
-        .resource-map-node__icon { width: 46px; height: 46px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 14%, #ffffff); border: 1px solid color-mix(in srgb, var(--node-accent) 18%, transparent); }
+        .resource-map-node__icon { width: 40px; height: 40px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 13%, #ffffff); border: 1px solid color-mix(in srgb, var(--node-accent) 22%, transparent); }
         .resource-map-node__text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-        .resource-map-node__text span { color: var(--map-muted); font-size: 13px; }
-        .resource-map-node__text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-heading); font-size: 16px; }
-        .resource-map-node__status { margin-left: auto; width: 24px; height: 24px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: var(--map-card-bg-soft); }
+        .resource-map-node__text span { color: var(--map-muted); font-size: 12px; }
+        .resource-map-node__text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-heading); font-size: 15px; }
+        .resource-map-node__status { margin-left: auto; width: 24px; height: 24px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: var(--map-card-bg-soft); border: 1px solid var(--map-border); }
         .resource-map-node.is-error .resource-map-node__status { color: #fb7185; }
         .resource-map-node.is-warning .resource-map-node__status { color: #fbbf24; }
         .resource-map-node.is-success .resource-map-node__status { color: #34d399; }
-        .resource-map-node--group { display: block; padding: 0; background: color-mix(in srgb, var(--map-card-bg-soft) 78%, transparent); border-style: solid; }
-        .resource-map-node__group-head { height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--map-border); }
+        .resource-map-node--group { display: block; padding: 0; background: color-mix(in srgb, var(--map-card-bg-soft) 84%, transparent); border-style: solid; box-shadow: inset 0 1px 0 rgba(255,255,255,.65), 0 14px 34px rgba(15,23,42,.08); }
+        .resource-map-node--group::after { display: none; }
+        .resource-map-node__group-head { height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--map-border); background: color-mix(in srgb, var(--node-accent) 6%, transparent); }
         .resource-map-node__group-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; color: var(--map-heading); }
         .resource-map-node__badge { min-width: 28px; height: 24px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--node-accent) 14%, transparent); color: var(--node-accent); font-size: 12px; }
         .resource-map-node__collapse { height: 26px; border-radius: 999px; border: 1px solid var(--map-border); background: var(--map-panel-bg); color: var(--map-muted); padding: 0 9px; font-size: 12px; cursor: pointer; }
         .resource-map-node__collapse:hover { border-color: var(--node-accent); color: var(--map-heading); }
         .resource-map-node__stack-grid { position: absolute; inset: 56px 24px 22px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-        .resource-map-stack-card { position: relative; min-width: 0; height: 86px; display: flex; align-items: center; gap: 14px; border: 1px solid var(--map-border); border-radius: 8px; background: var(--map-card-bg); color: var(--map-text); padding: 12px 14px; text-align: left; cursor: pointer; box-shadow: 10px 10px 0 color-mix(in srgb, var(--map-card-bg-soft) 78%, transparent), 18px 18px 0 color-mix(in srgb, var(--map-card-bg-soft) 45%, transparent); transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
+        .resource-map-stack-card { position: relative; min-width: 0; height: 86px; display: flex; align-items: center; gap: 14px; border: 1px solid var(--map-border); border-radius: 10px; background: var(--map-card-bg); color: var(--map-text); padding: 12px 14px; text-align: left; cursor: pointer; box-shadow: 8px 8px 0 color-mix(in srgb, var(--map-card-bg-soft) 78%, transparent), 15px 15px 0 color-mix(in srgb, var(--map-card-bg-soft) 45%, transparent); transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
         .resource-map-stack-card:hover { border-color: var(--node-accent); transform: translateY(-1px); }
         .resource-map-stack-card__icon { width: 46px; height: 46px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 14%, #ffffff); }
         .resource-map-stack-card__copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -1473,32 +1899,53 @@ export default function NetworkTopologyPage() {
         .resource-map-motion-state { position: absolute; right: 12px; bottom: 12px; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 6px 10px; background: var(--map-panel-bg); border: 1px solid var(--map-border); color: var(--map-muted); font-size: 12px; pointer-events: none; }
         .resource-map-motion-state span { width: 7px; height: 7px; border-radius: 999px; background: #64748b; }
         .resource-map-motion-state span.is-on { background: #22c55e; box-shadow: 0 0 10px rgba(34,197,94,.8); }
-        .resource-map-rail { min-width: 0; overflow: hidden; border-radius: 8px; border: 1px solid var(--map-border); background: var(--map-panel-bg); display: flex; flex-direction: column; }
+        .resource-map-rail { min-width: 0; overflow: hidden; border-radius: 12px; border: 1px solid var(--map-border); background: var(--map-panel-bg); display: flex; flex-direction: column; box-shadow: var(--map-shadow); backdrop-filter: blur(10px); }
         .resource-map-rail > .ant-empty { margin: auto; color: var(--map-muted); }
-        .resource-map-rail__head { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 1px solid var(--map-border); }
-        .resource-map-rail__head div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+        .resource-map-rail__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px; border-bottom: 1px solid var(--map-border); }
+        .resource-map-rail__title { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
         .resource-map-rail__head span { color: var(--map-muted); font-size: 12px; }
         .resource-map-rail__head strong { color: var(--map-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .resource-map-rail__head button { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--map-border); background: var(--map-card-bg-soft); color: var(--map-text); cursor: pointer; }
         .resource-map-rail__body { overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+        .resource-map-health { border: 1px solid var(--map-border); border-radius: 8px; padding: 12px; background: var(--map-card-bg-soft); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .resource-map-health span { font-size: 12px; color: var(--map-muted); }
+        .resource-map-health strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-heading); }
+        .resource-map-health.is-success { border-color: color-mix(in srgb, #22c55e 38%, var(--map-border)); }
+        .resource-map-health.is-warning { border-color: color-mix(in srgb, #f59e0b 48%, var(--map-border)); }
+        .resource-map-health.is-error { border-color: color-mix(in srgb, #fb7185 52%, var(--map-border)); }
         .resource-map-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .resource-map-facts div { min-width: 0; border: 1px solid var(--map-border); border-radius: 8px; padding: 10px; background: var(--map-card-bg-soft); }
         .resource-map-facts span { display: block; color: var(--map-muted); font-size: 11px; }
         .resource-map-facts strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-heading); font-size: 13px; }
+        .resource-map-section { border: 1px solid var(--map-border); border-radius: 8px; background: var(--map-card-bg-soft); padding: 10px; }
         .resource-map-section-title { color: var(--map-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; margin-bottom: 8px; }
+        .resource-map-health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+        .resource-map-health-grid span { min-width: 0; border: 1px solid var(--map-border); border-radius: 8px; padding: 8px; color: var(--map-muted); font-size: 12px; }
+        .resource-map-health-grid strong { display: block; margin-top: 4px; color: var(--map-heading); font-size: 16px; }
+        .resource-map-health-grid .is-success strong { color: #22c55e; }
+        .resource-map-health-grid .is-warning strong { color: #f59e0b; }
+        .resource-map-health-grid .is-error strong { color: #fb7185; }
+        .resource-map-kind-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        .resource-map-kind-strip span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); border-radius: 999px; padding: 4px 8px; color: var(--map-muted); font-size: 12px; }
+        .resource-map-kind-strip strong { color: var(--map-heading); }
         .resource-map-list { display: flex; flex-direction: column; gap: 7px; }
         .resource-map-list__item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--map-border); border-radius: 8px; padding: 9px; background: var(--map-card-bg-soft); color: var(--map-text); text-align: left; cursor: pointer; }
         .resource-map-list__item > span { color: #0ea5e9; }
-        .resource-map-list__item div { min-width: 0; }
+        .resource-map-list__item div { min-width: 0; flex: 1; }
         .resource-map-list__item strong, .resource-map-list__item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .resource-map-list__item strong { color: var(--map-heading); }
         .resource-map-list__item small { color: var(--map-muted); }
+        .resource-map-list__item em { flex: 0 0 auto; color: var(--map-muted); font-style: normal; font-size: 12px; }
+        .resource-map-list__item.is-error { border-color: color-mix(in srgb, #fb7185 42%, var(--map-border)); }
+        .resource-map-list__item.is-warning { border-color: color-mix(in srgb, #f59e0b 38%, var(--map-border)); }
         .resource-map-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .resource-map-canvas .react-flow__controls { box-shadow: var(--map-shadow); }
         .resource-map-canvas .react-flow__controls-button { background: var(--map-panel-bg); border-color: var(--map-border); color: var(--map-text); }
         .resource-map-canvas .react-flow__background { color: var(--map-dot); }
         .resource-map-zoom-percent { margin-bottom: -54px; min-width: 44px; height: 36px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: var(--map-panel-bg); border: 1px solid var(--map-border); box-shadow: var(--map-shadow); color: var(--map-text); font-size: 12px; font-weight: 740; pointer-events: none; }
+        @media (max-width: 1280px) { .resource-map-toolbar { grid-template-columns: 1fr; } .resource-map-toolbar__actions { justify-content: flex-start; flex-wrap: wrap; } }
         @media (max-width: 1100px) { .resource-map-shell { height: auto; min-height: 100vh; } .resource-map-workbench { grid-template-columns: 1fr; } .resource-map-rail { min-height: 280px; } .resource-map-canvas { min-height: 640px; } }
+        @media (max-width: 720px) { .resource-map-header { align-items: flex-start; flex-direction: column; } .resource-map-header__stats, .resource-map-toolbar__scope, .resource-map-toolbar__filters { flex-wrap: wrap; } .resource-map-toolbar select, .resource-map-toolbar .ant-input-affix-wrapper { width: 100%; } .resource-map-facts { grid-template-columns: 1fr; } }
       `}</style>
     </section>
   );

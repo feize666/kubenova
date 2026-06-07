@@ -67,7 +67,7 @@ flowchart LR
 | 运行时网关 | `backend/runtime-gateway` | Go 1.25.0、go-chi、gorilla/websocket、Kubernetes client-go | WebSocket 网关、终端/日志流、健康检查、静态资源回退 |
 | AI 能力 | `backend/control-api` | OpenAI `chat/completions` 兼容接口、自定义模型配置 | AI 助手、ChatOps 会话、智能诊断和可执行建议 |
 | 测试与质量 | `frontend`、`backend/control-api`、`backend/runtime-gateway` | ESLint、Jest、ts-jest、Go test、Playwright 脚本 | 静态检查、单元测试、接口/页面回归验证 |
-| 部署与交付 | `deploy`、`k8s`、`scripts` | Docker、Docker Compose、Kustomize、systemd、nfpm、Shell | 本地开发、二进制发布、容器化部署、Kubernetes 部署和 Deb/RPM 打包 |
+| 部署与交付 | `deploy`、`scripts` | Ubuntu、systemd、Shell | 本地开发、Ubuntu 二进制发布、生产启动、回滚和卸载 |
 
 运行时基础依赖：
 
@@ -77,277 +77,126 @@ flowchart LR
 - Redis 7：缓存、队列和运行时协作
 - Kubernetes 集群：被纳管的业务集群
 
-## 直接部署
+## Ubuntu 部署
 
-推荐 Linux 机器用 `Binary + systemd` 方式部署。按下面顺序执行：
+README 只保留 Ubuntu 二进制部署方式。生产环境建议一台 Ubuntu 22.04/24.04 主机运行前端、控制面 API、实时网关、PostgreSQL 和 Redis。
 
-### 1. 准备环境
-
-- 安装基础工具
-- 安装 Node.js / npm
-- 安装 Go
-- 安装 PostgreSQL
-- 安装 Redis
-- 安装发布所需文件
-
-#### 1.1 安装基础工具
+### 1. 安装依赖
 
 ```bash
-# RHEL / Rocky / Alma / CentOS / Kylin
-sudo yum install -y bash curl tar gzip fuser
-
-# Debian / Ubuntu
 sudo apt-get update
-sudo apt-get install -y bash curl tar gzip psmisc
-```
-
-#### 1.2 安装 Node.js / npm
-
-适用系统：`RHEL / Rocky / Alma / CentOS / Kylin`
-
-##### yum 安装
-```bash
-curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
-sudo yum install -y nodejs
-```
-
-##### 验证
-```bash
-node -v
-npm -v
-```
-
-适用系统：`Debian / Ubuntu`
-
-```bash
+sudo apt-get install -y bash curl tar gzip psmisc postgresql postgresql-client redis-server redis-tools
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
-```
 
-验证：
-```bash
-node -v
-npm -v
-```
-
-##### 二进制安装
-```bash
-NODE_VERSION=20.17.0
-curl -fsSLO https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz
-sudo mkdir -p /usr/local/lib/nodejs
-sudo tar -xJf node-v${NODE_VERSION}-linux-x64.tar.xz -C /usr/local/lib/nodejs
-export PATH=/usr/local/lib/nodejs/node-v${NODE_VERSION}-linux-x64/bin:$PATH
-```
-
-##### 验证
-```bash
-node -v
-npm -v
-```
-
-#### 1.3 安装 Go
-
-适用系统：`RHEL / Rocky / Alma / CentOS / Kylin`
-
-##### yum 安装
-```bash
-sudo yum install -y golang
-```
-
-##### 验证
-```bash
-go version
-```
-
-适用系统：`Debian / Ubuntu`
-
-```bash
 GO_VERSION=1.25.0
 curl -fsSLO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
+echo 'export PATH=/usr/local/go/bin:$PATH' | sudo tee /etc/profile.d/go.sh
 export PATH=/usr/local/go/bin:$PATH
-```
 
-验证：
-```bash
+sudo systemctl enable --now postgresql redis-server
+node -v
+npm -v
 go version
-```
-
-##### 二进制安装
-```bash
-GO_VERSION=1.25.0
-curl -fsSLO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
-export PATH=/usr/local/go/bin:$PATH
-```
-
-##### 验证
-```bash
-go version
-```
-
-#### 1.4 安装 PostgreSQL
-
-适用系统：`RHEL / Rocky / Alma / CentOS / Kylin`
-
-##### yum 安装
-```bash
-sudo yum install -y postgresql-server postgresql
-sudo postgresql-setup --initdb
-sudo systemctl enable --now postgresql
-```
-
-##### 验证
-```bash
 psql --version
-```
-
-适用系统：`Debian / Ubuntu`
-
-```bash
-sudo apt-get install -y postgresql postgresql-client
-sudo systemctl enable --now postgresql
-```
-
-验证：
-```bash
-psql --version
-```
-
-##### 二进制安装（官方源码编译到固定前缀）
-```bash
-PG_VERSION=16.4
-sudo yum install -y gcc make readline-devel zlib-devel openssl-devel
-curl -fsSLO https://ftp.postgresql.org/pub/source/v${PG_VERSION}/postgresql-${PG_VERSION}.tar.gz
-tar -xzf postgresql-${PG_VERSION}.tar.gz
-cd postgresql-${PG_VERSION}
-./configure --prefix=/usr/local/pgsql
-make -j"$(nproc)"
-sudo make install
-```
-
-##### 验证
-```bash
-/usr/local/pgsql/bin/postgres --version
-```
-
-#### 1.5 安装 Redis
-
-适用系统：`RHEL / Rocky / Alma / CentOS / Kylin`
-
-##### yum 安装
-```bash
-sudo yum install -y redis
-sudo systemctl enable --now redis
-```
-
-##### 验证
-```bash
 redis-cli --version
 ```
 
-适用系统：`Debian / Ubuntu`
+### 2. 初始化数据库
+
+按需调整密码，必须和 `/etc/k8s-aiops-manager/control-api.env` 中的 `DATABASE_URL` 保持一致。
 
 ```bash
-sudo apt-get install -y redis-server redis-tools
-sudo systemctl enable --now redis-server
+sudo -u postgres psql <<'SQL'
+CREATE USER aiops WITH PASSWORD 'change-me';
+CREATE DATABASE aiops OWNER aiops;
+SQL
 ```
 
-验证：
+### 3. 编译打包
+
+在项目根目录执行：
+
 ```bash
-redis-cli --version
+bash scripts/package-release.sh
 ```
 
-##### 二进制安装
-```bash
-REDIS_VERSION=7.2.5
-curl -fsSLO https://download.redis.io/releases/redis-${REDIS_VERSION}.tar.gz
-tar -xzf redis-${REDIS_VERSION}.tar.gz
-cd redis-${REDIS_VERSION}
-make
-sudo make install
+产物位置：
+
+```text
+tmp/release/k8s-aiops-manager-ubuntu.tar.gz
 ```
 
-##### 验证
-```bash
-redis-server --version
-```
-
-#### 1.6 准备发布目录
+### 4. 安装发布包
 
 ```bash
-sudo mkdir -p /opt/k8s-aiops-manager/releases/<version>
-sudo ln -sfn /opt/k8s-aiops-manager/releases/<version> /opt/k8s-aiops-manager/current
+sudo mkdir -p /opt/k8s-aiops-manager/current
+sudo tar -xzf tmp/release/k8s-aiops-manager-ubuntu.tar.gz \
+  -C /opt/k8s-aiops-manager/current \
+  --strip-components=1
 sudo mkdir -p /etc/k8s-aiops-manager
+sudo bash scripts/service.sh prod install
 ```
 
-#### 1.7 准备环境文件
+### 5. 配置环境
+
+编辑：
 
 ```bash
-sudo cp backend/control-api/.env.example /etc/k8s-aiops-manager/control-api.env
-sudo cp deploy/systemd/env/*.env.example /etc/k8s-aiops-manager/
+sudo vi /etc/k8s-aiops-manager/control-api.env
+sudo vi /etc/k8s-aiops-manager/runtime-gateway.env
 ```
 
-### 2. 安装 systemd
+最少需要确认这些值：
 
 ```bash
-bash scripts/prod-install.sh
+DATABASE_URL=postgresql://aiops:change-me@127.0.0.1:5432/aiops
+REDIS_URL=redis://127.0.0.1:6379/0
+JWT_SECRET=replace-with-long-random-jwt-secret
+RUNTIME_TOKEN_SECRET=replace-with-runtime-token-secret
+RUNTIME_GATEWAY_INTERNAL_SECRET=replace-with-internal-shared-secret
+DEFAULT_ADMIN_EMAIL=admin@local.dev
+DEFAULT_ADMIN_PASSWORD=change-me-now
 ```
 
-### 3. 启动服务
+### 6. 启动
 
 ```bash
-bash scripts/prod-up.sh
+sudo bash scripts/service.sh prod up
 ```
 
-### 4. 查看状态
+### 7. 验证
 
 ```bash
-bash scripts/prod-status.sh
-```
-
-### 5. 部署后验证
-
-```bash
+sudo bash scripts/service.sh prod status
 curl -fsS http://127.0.0.1:3000/ >/dev/null
 curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null
 curl -fsS http://127.0.0.1:4100/healthz
 ```
 
-### 6. 切换和回滚
+浏览器访问：
 
-```bash
-bash scripts/prod-switch.sh <version>
-bash scripts/prod-rollback.sh <version>
+```text
+http://<服务器IP>:3000
 ```
 
-### 7. 停止和卸载
+### 8. 停止和卸载
 
 ```bash
-bash scripts/prod-down.sh
-bash scripts/prod-uninstall.sh
+sudo bash scripts/service.sh prod down
+sudo bash scripts/service.sh prod uninstall
 ```
 
-## 发布目录
+## Ubuntu 发布目录
 
 ```text
 /opt/k8s-aiops-manager/current
-/opt/k8s-aiops-manager/releases/<version>
-/etc/k8s-aiops-manager/*.env
+/etc/k8s-aiops-manager/control-api.env
+/etc/k8s-aiops-manager/runtime-gateway.env
 ```
 
-## 文档
+## 更多说明
 
-- [Linux 首次部署 Checklist](deploy/docs/linux-first-deploy-checklist.md)
-- [Linux 使用说明](deploy/docs/linux-usage.md)
-- [Linux 速查卡](deploy/docs/linux-quick-start.md)
-- [部署文档总目录](deploy/docs/README.md)
-
-## 其他部署方式
-
-- [Binary + systemd](deploy/docs/binary-systemd.md)
-- [Docker Compose](deploy/docs/docker-compose.md)
-- [Kubernetes Kustomize](deploy/docs/k8s-kustomize.md)
-- [DEB/RPM](deploy/docs/deb-rpm.md)
+- [Ubuntu 部署与打包设计](docs/deployment-build-redesign.md)

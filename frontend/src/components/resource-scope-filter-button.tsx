@@ -86,7 +86,7 @@ export function ResourceScopeFilterButton({
       onApply={applyDraft}
       className="resource-scope-filter-panel"
     >
-      <Space direction="vertical" size={10} style={{ width: "100%" }}>
+      <Space orientation="vertical" size={10} style={{ width: "100%" }}>
         <div>
           <Typography.Text className="resource-scope-filter-label">集群</Typography.Text>
           <ClusterSelect

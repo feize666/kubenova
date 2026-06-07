@@ -4,6 +4,28 @@ Command failures and integration errors.
 
 ---
 
+## [ERR-20260606-001] Playwright ReactFlow Click Target Outside Viewport
+
+**Logged**: 2026-06-06T14:44:00+08:00
+**Area**: frontend tests
+
+### Summary
+Topology smoke script found `.resource-map-stack-card`, but normal Playwright click timed out because ReactFlow transform placed the element outside the viewport.
+
+### Action
+For ReactFlow canvas interaction smoke checks, use fit-view/pan setup or DOM `element.click()` after confirming the element exists; do not treat this click timeout alone as product failure.
+
+## [ERR-20260606-002] Dev Cold RSC Route Sample Exceeded Budget
+
+**Logged**: 2026-06-06T15:11:00+08:00
+**Area**: frontend performance tests
+
+### Summary
+Full route smoke failed once because `/inspection?_rsc=...` took 2664ms on a cold dev route sample, pushing route duration to 3251ms.
+
+### Action
+Separate cold dev compilation samples from hot route-switch budgets. Use warmup samples for steady-state route performance evidence, then investigate only if warm samples remain slow.
+
 ## [ERR-20260531-001] command
 
 **Logged**: 2026-05-31T23:17:19+08:00
@@ -69,5 +91,18 @@ For performance probes, prefer API login plus writing the app auth storage keys.
 
 ### Action
 Use positional paths instead, for example `npm run lint -- src/app/clusters/page.tsx`.
+
+---
+
+## ERR-20260607-dashboard-smoke-assumptions
+
+**Logged**: 2026-06-07T15:08:00+08:00
+**Area**: frontend-tests
+
+### Summary
+Manual dashboard smoke misread API/page state twice: first assumed `/api/dashboard/stats` returned stats at top level instead of `{ data, requestId }`, then waited for `networkidle` on a page with long-running requests.
+
+### Action
+For dashboard probes, unwrap API envelopes before field checks. In browser tests, use `domcontentloaded` plus visible shell/data selectors, not `networkidle`.
 
 ---

@@ -15,7 +15,6 @@ import {
   Switch,
   Tooltip,
   Typography,
-  theme,
 } from "antd";
 import {
   DownOutlined,
@@ -31,7 +30,13 @@ import { SearchAddon } from "@xterm/addon-search";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsStatusTag, type OpsStatusTone } from "@/components/ops";
+import {
+  OpsFilterChip,
+  OpsFrameShell,
+  OpsStatusTag,
+  type OpsFrameShellState,
+  type OpsStatusTone,
+} from "@/components/ops";
 import {
   createLogsStreamSession,
   getLogs,
@@ -423,6 +428,22 @@ function formatConnectionTag(status: LogsConnectionStatus): { tone: OpsStatusTon
   return { tone: "neutral", text: "未连接" };
 }
 
+function mapLogsFrameState(args: {
+  effectivePrevious: boolean;
+  follow: boolean;
+  isConnecting: boolean;
+  reconnectState: LogsReconnectState | null;
+  streamError: string;
+  streamStatus: LogsConnectionStatus;
+}): OpsFrameShellState {
+  if (args.streamStatus === "连接异常" || args.streamError) return "error";
+  if (args.reconnectState || args.streamStatus === "重连中") return "reconnecting";
+  if (args.isConnecting || args.streamStatus === "连接中") return "connecting";
+  if (args.streamStatus === "已连接" && args.follow && !args.effectivePrevious) return "streaming";
+  if (args.streamStatus === "已连接") return "paused";
+  return "disconnected";
+}
+
 function formatRelativeTimeLabel(seconds: number): string {
   const input = secondsToRelativeInput(seconds);
   const unitLabels: Record<TimeUnit, string> = {
@@ -438,7 +459,6 @@ export default function LogsPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { token } = theme.useToken();
   const { accessToken, isInitializing } = useAuth();
 
   const clusterId = searchParams.get("clusterId")?.trim() || "";
@@ -1261,44 +1281,78 @@ export default function LogsPage() {
   };
 
   const connectionMeta = formatConnectionTag(streamStatus);
+  const logsFrameState = mapLogsFrameState({
+    effectivePrevious,
+    follow,
+    isConnecting,
+    reconnectState,
+    streamError,
+    streamStatus,
+  });
+  const scopeSubtitle = `${clusterDisplayName} / ${namespace || "-"} / ${resourceName || pod || "-"} / ${
+    container || "-"
+  }`;
 
   return (
-    <Card className="cyber-panel logs-workspace-card" styles={{ body: { padding: 20 } }} style={{ borderRadius: 24 }}>
+    <OpsFrameShell
+      className="logs-workbench-shell"
+      bodyClassName="logs-workbench-body"
+      title="Pod 日志工作区"
+      subtitle={scopeSubtitle}
+      state={logsFrameState}
+      status={<OpsStatusTag tone={connectionMeta.tone}>{connectionMeta.text}</OpsStatusTag>}
+      toolbar={
+        <Space wrap>
+          <Tooltip title="重新加载日志">
+            <Button icon={<ReloadOutlined />} onClick={hardRefresh} loading={isConnecting}>
+              刷新
+            </Button>
+          </Tooltip>
+          <Button icon={<ArrowLeftOutlined />} danger onClick={exitBack}>
+            退出
+          </Button>
+        </Space>
+      }
+      chips={
+        <Space wrap size={8}>
+          <OpsFilterChip tone={effectivePrevious ? "neutral" : "info"}>
+            {effectivePrevious ? "上一个实例" : follow ? "实时跟随" : "跟随已暂停"}
+          </OpsFilterChip>
+          <OpsFilterChip tone={isFollowingNow ? "success" : "warning"}>
+            {isFollowingNow ? "结束时间=现在，跟随当前时间" : "固定结束时间"}
+          </OpsFilterChip>
+          <OpsFilterChip tone="neutral">{selectedTimeLabel}</OpsFilterChip>
+          <OpsFilterChip tone="info">{tailLines === -1 ? "全部行" : `${tailLines} 行`}</OpsFilterChip>
+          {severity.length > 0 ? (
+            <OpsFilterChip tone="warning">{severity.join(" / ")}</OpsFilterChip>
+          ) : null}
+          {previousUnavailable ? (
+            <OpsFilterChip tone="warning">上一个实例不存在，已回退到当前实例</OpsFilterChip>
+          ) : null}
+          {reconnectState ? (
+            <OpsFilterChip tone="warning">
+              重连 {reconnectState.attempt}/{reconnectState.maxAttempts}
+            </OpsFilterChip>
+          ) : null}
+        </Space>
+      }
+      error={
+        streamError ? (
+          <Alert
+            type={streamStatus === "连接异常" ? "error" : "warning"}
+            showIcon
+            title="实时流提示"
+            description={streamError}
+          />
+        ) : undefined
+      }
+    >
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <Card
           className="logs-toolbar-card"
           styles={{ body: { padding: 16 } }}
-          style={{
-            borderRadius: 18,
-            borderColor: token.colorBorderSecondary,
-            background: token.colorBgContainer,
-          }}
         >
           <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <div>
-                <Space size={10} wrap>
-                  <Typography.Title level={3} style={{ margin: 0 }}>
-                    Pod 日志工作区
-                  </Typography.Title>
-                  <OpsStatusTag tone={connectionMeta.tone}>{connectionMeta.text}</OpsStatusTag>
-                </Space>
-                <Typography.Text type="secondary">
-                  {clusterDisplayName} / {namespace || "-"} / {resourceName || pod} / {container || "-"}
-                </Typography.Text>
-              </div>
-              <Space wrap>
-                <Tooltip title="重新加载日志">
-                  <Button icon={<ReloadOutlined />} onClick={hardRefresh} loading={isConnecting}>
-                    刷新
-                  </Button>
-                </Tooltip>
-                <Button icon={<ArrowLeftOutlined />} danger onClick={exitBack}>
-                  退出
-                </Button>
-              </Space>
-            </div>
-
             <div className="headlamp-log-toolbar">
               <div className="headlamp-log-group headlamp-log-group-main">
                 <div className="headlamp-log-control">
@@ -1596,42 +1650,12 @@ export default function LogsPage() {
               </div>
               </div>
             </div>
-
-            <Space wrap size={8}>
-              <OpsFilterChip tone={effectivePrevious ? "neutral" : "info"}>
-                {effectivePrevious ? "上一个实例" : follow ? "实时跟随" : "跟随已暂停"}
-              </OpsFilterChip>
-              <OpsFilterChip tone={isFollowingNow ? "success" : "warning"}>
-                {isFollowingNow ? "结束时间=现在，跟随当前时间" : "固定结束时间"}
-              </OpsFilterChip>
-              {previousUnavailable ? (
-                <OpsFilterChip tone="warning">上一个实例不存在，已回退到当前实例</OpsFilterChip>
-              ) : null}
-              {reconnectState ? (
-                <OpsFilterChip tone="warning">
-                  重连 {reconnectState.attempt}/{reconnectState.maxAttempts}
-                </OpsFilterChip>
-              ) : null}
-            </Space>
-
-            {streamError ? (
-              <Alert
-                type={streamStatus === "连接异常" ? "error" : "warning"}
-                showIcon
-                title="实时流提示"
-                description={streamError}
-              />
-            ) : null}
           </Space>
         </Card>
 
         <Card
+          className="logs-terminal-card"
           styles={{ body: { padding: 0 } }}
-          style={{
-            borderRadius: 18,
-            borderColor: token.colorBorderSecondary,
-            background: token.colorBgContainer,
-          }}
         >
           <div className="logs-terminal-frame">
             <div className="logs-terminal-titlebar">
@@ -1671,12 +1695,17 @@ export default function LogsPage() {
 	          position: relative;
 	          border-radius: 16px 16px 0 0;
           overflow: hidden;
-          border: 1px solid rgba(148, 163, 184, 0.22);
-          background: radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 28%),
-            linear-gradient(180deg, #07111f 0%, #08101a 100%);
+          border: 1px solid var(--ops-frame-border);
+          background:
+            linear-gradient(90deg, transparent 0 18px, color-mix(in srgb, var(--ops-log-info) 10%, transparent) 18px 19px, transparent 19px 38px),
+            linear-gradient(180deg, #07111f 0%, var(--ops-terminal-bg) 100%);
         }
 
-        .logs-toolbar-card {
+        :global(.logs-toolbar-card.ant-card),
+        :global(.logs-terminal-card.ant-card) {
+          border-radius: var(--ops-control-radius);
+          border-color: var(--ops-frame-border);
+          background: var(--ops-frame-header-bg);
           overflow: hidden;
         }
 
@@ -1699,9 +1728,9 @@ export default function LogsPage() {
           min-width: 0;
           min-height: 64px;
           padding: 10px;
-          border: 1px solid ${token.colorBorderSecondary};
+          border: 1px solid var(--ops-border-subtle);
           border-radius: 14px;
-          background: linear-gradient(180deg, ${token.colorFillQuaternary}, ${token.colorFillTertiary});
+          background: var(--ops-subtle-bg);
         }
 
         .headlamp-log-group-main {
@@ -1745,7 +1774,7 @@ export default function LogsPage() {
           height: 32px;
           flex: 0 0 auto;
           white-space: nowrap;
-          color: ${token.colorTextSecondary};
+          color: var(--surface-subtle);
         }
 
         .headlamp-log-actions {
@@ -1795,11 +1824,11 @@ export default function LogsPage() {
           align-items: center;
           gap: 8px;
           min-width: 520px;
-          color: #111827;
+          color: var(--surface-text);
         }
 
         .headlamp-search-status {
-          color: #111827;
+          color: var(--surface-text);
           font-size: 13px;
           white-space: nowrap;
           margin-left: 8px;
@@ -1809,7 +1838,7 @@ export default function LogsPage() {
         .headlamp-search-icon {
           border: 0;
           background: transparent;
-          color: #111827;
+          color: var(--surface-text);
           cursor: pointer;
           font: inherit;
           padding: 0 4px;
@@ -1821,11 +1850,11 @@ export default function LogsPage() {
         .headlamp-search-icon:hover,
         .headlamp-search-icon:focus,
         .headlamp-search-icon:active {
-          color: #2563eb;
+          color: var(--ant-color-primary);
         }
 
         .headlamp-search-popover :global(.headlamp-log-search-input .ant-input) {
-          color: #111827;
+          color: var(--surface-text);
         }
 
         .headlamp-search-popover :global(.headlamp-log-search-input .ant-input::placeholder) {
@@ -1843,9 +1872,9 @@ export default function LogsPage() {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          background: rgba(2, 6, 23, 0.88);
-          border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-          color: #dbeafe;
+          background: var(--ops-frame-header-bg);
+          border-bottom: 1px solid var(--ops-frame-divider);
+          color: var(--ops-terminal-fg);
           font-size: 12px;
         }
 
@@ -1863,18 +1892,18 @@ export default function LogsPage() {
         }
 
         .logs-terminal-dots span:nth-child(1) {
-          background: #f97316;
+          background: var(--ops-log-warning);
         }
         .logs-terminal-dots span:nth-child(2) {
-          background: #22c55e;
+          background: var(--ops-status-success-text);
         }
         .logs-terminal-dots span:nth-child(3) {
-          background: #38bdf8;
+          background: var(--ops-log-info);
         }
 
         .logs-terminal-title {
           font-weight: 600;
-          color: #f8fbff;
+          color: var(--ops-terminal-fg);
           text-align: center;
           flex: 1;
           margin: 0 12px;
@@ -1884,14 +1913,14 @@ export default function LogsPage() {
         }
 
         .logs-terminal-state {
-          color: #bfdbfe;
+          color: var(--ops-log-info);
         }
 
 	        .logs-terminal-host {
 	          width: 100%;
 	          min-height: 58vh;
 	          max-height: 72vh;
-	          background: #061120;
+	          background: var(--ops-terminal-bg);
 	          overflow: hidden;
 	          padding: 12px;
 	        }
@@ -1905,10 +1934,10 @@ export default function LogsPage() {
 	          gap: 6px;
 	          min-width: min(360px, calc(100% - 32px));
 	          padding: 18px 20px;
-	          border: 1px solid rgba(125, 211, 252, 0.38);
+	          border: 1px solid var(--ops-frame-border);
 	          border-radius: 14px;
-	          background: rgba(15, 23, 42, 0.92);
-	          box-shadow: 0 16px 50px rgba(0, 0, 0, 0.28);
+	          background: var(--ops-frame-header-bg);
+	          box-shadow: var(--ops-shadow-overlay);
 	          text-align: center;
 	          pointer-events: none;
 	        }
@@ -1921,16 +1950,16 @@ export default function LogsPage() {
           color: #bfd7ef !important;
         }
 
-        .logs-workspace-card :global(.xterm) {
+        :global(.logs-workbench-body) :global(.xterm) {
           height: 100%;
         }
 
-        .logs-workspace-card :global(.xterm-viewport) {
+        :global(.logs-workbench-body) :global(.xterm-viewport) {
           scrollbar-width: thin;
         }
 
-        .logs-workspace-card :global(.xterm-rows) {
-          color: #eef6ff;
+        :global(.logs-workbench-body) :global(.xterm-rows) {
+          color: var(--ops-terminal-fg);
           text-shadow: 0 0 1px rgba(255, 255, 255, 0.18);
         }
 
@@ -1953,11 +1982,32 @@ export default function LogsPage() {
         @media (max-width: 768px) {
           .headlamp-log-group,
           .headlamp-log-group-actions {
+            width: 100%;
+            flex-wrap: wrap;
             justify-content: flex-start;
           }
 
+          .headlamp-log-actions {
+            width: 100%;
+            height: auto;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+          }
+
+          .headlamp-log-control {
+            width: 100%;
+          }
+
+          .headlamp-log-control :global(.ant-select),
+          .headlamp-log-control :global(.ant-picker),
+          .headlamp-log-control :global(.ant-input) {
+            width: 100% !important;
+            max-width: 100%;
+          }
+
           .headlamp-time-trigger {
-            width: min(280px, calc(100vw - 72px));
+            width: 100%;
+            max-width: calc(100vw - 72px);
           }
 
           .headlamp-time-popover :global(.ant-picker-range) {
@@ -1985,6 +2035,6 @@ export default function LogsPage() {
           }
         }
       `}</style>
-    </Card>
+    </OpsFrameShell>
   );
 }

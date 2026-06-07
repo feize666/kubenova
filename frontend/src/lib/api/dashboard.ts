@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import type { QueryParams } from "./types";
 
 export interface DashboardStats {
   clusters: {
@@ -65,6 +66,42 @@ export interface DashboardStats {
     pods: number;
     edges: number;
   };
+  serviceImpact?: {
+    nodes: Array<{
+      id: string;
+      label: string;
+      kind: "internet" | "ingress" | "service" | "workload" | "database";
+      status: "healthy" | "warning" | "critical" | "unknown";
+    }>;
+    edges: Array<{
+      id: string;
+      source: string;
+      target: string;
+      status: "healthy" | "warning" | "critical" | "unknown";
+    }>;
+    impactedServices: Array<{
+      name: string;
+      namespace?: string;
+      clusterId?: string;
+      severity: "critical" | "warning" | "info" | "healthy";
+      impactScore: number;
+      alertCount: number;
+      workloadCount: number;
+    }>;
+    generatedAt: string;
+    degraded: boolean;
+    note?: string;
+  };
+  recentOperations?: Array<{
+    id: string;
+    action: string;
+    resourceType: string;
+    resourceId?: string;
+    actor: string;
+    result: "success" | "failure";
+    timestamp: string;
+    reason?: string;
+  }>;
   recentEvents?: Array<{
     id: string;
     level: "critical" | "warning" | "info";
@@ -74,6 +111,25 @@ export interface DashboardStats {
   }>;
 }
 
-export async function getDashboardStats(token?: string): Promise<DashboardStats> {
-  return apiRequest<DashboardStats>("/api/dashboard/stats", { token });
+export interface DashboardStatsParams {
+  clusterId?: string;
+}
+
+function isDashboardStatsParams(value: unknown): value is DashboardStatsParams {
+  return typeof value === "object" && value !== null;
+}
+
+export async function getDashboardStats(token?: string): Promise<DashboardStats>;
+export async function getDashboardStats(params?: DashboardStatsParams, token?: string): Promise<DashboardStats>;
+export async function getDashboardStats(
+  paramsOrToken?: DashboardStatsParams | string,
+  token?: string,
+): Promise<DashboardStats> {
+  const params = isDashboardStatsParams(paramsOrToken) ? paramsOrToken : {};
+  const resolvedToken = typeof paramsOrToken === "string" ? paramsOrToken : token;
+  const query: QueryParams = {
+    clusterId: params.clusterId || undefined,
+  };
+
+  return apiRequest<DashboardStats>("/api/dashboard/stats", { token: resolvedToken, query });
 }
