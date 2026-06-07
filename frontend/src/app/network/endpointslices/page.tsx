@@ -12,7 +12,6 @@ import {
   Typography,
   message,
 } from "antd";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -25,9 +24,9 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
-import { OpsStatusTag } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { NetworkKindChip } from "@/components/network/network-table-cells";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -124,45 +123,6 @@ function parsePorts(input?: string): EndpointSlicePort[] {
     });
     return result;
   }, []);
-}
-
-function getEndpoints(resource: EndpointSliceResource) {
-  return Array.isArray(resource.spec?.endpoints) ? resource.spec.endpoints : [];
-}
-
-function getPorts(resource: EndpointSliceResource) {
-  return Array.isArray(resource.spec?.ports) ? resource.spec.ports : [];
-}
-
-function summarizeReadiness(resource: EndpointSliceResource) {
-  const endpoints = getEndpoints(resource);
-  const total = endpoints.length;
-  const ready = endpoints.filter((endpoint) => endpoint.conditions?.ready !== false).length;
-  const terminating = endpoints.filter((endpoint) => endpoint.conditions?.terminating === true).length;
-  return { total, ready, terminating };
-}
-
-function listAddressPreview(resource: EndpointSliceResource) {
-  const values = getEndpoints(resource)
-    .flatMap((endpoint) => endpoint.addresses ?? [])
-    .filter(Boolean);
-  return Array.from(new Set(values));
-}
-
-function listPortPreview(resource: EndpointSliceResource) {
-  const values = getPorts(resource)
-    .map((port) => {
-      if (!port.port) return null;
-      const prefix = port.name ? `${port.name}:` : "";
-      const protocol = port.protocol ? `/${port.protocol}` : "";
-      return `${prefix}${port.port}${protocol}`;
-    })
-    .filter((item): item is string => Boolean(item));
-  return Array.from(new Set(values));
-}
-
-function resolveServiceName(resource: EndpointSliceResource) {
-  return resource.labels?.["kubernetes.io/service-name"] ?? resource.labels?.["service-name"] ?? "-";
 }
 
 export default function EndpointSlicesPage() {
@@ -290,10 +250,7 @@ export default function EndpointSlicesPage() {
           textMatches(item.name, getTextFilter(tableFilters, "name")) &&
           textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
           textMatches(item.namespace, getTextFilter(tableFilters, "namespace")) &&
-          textMatches(resolveServiceName(item), getTextFilter(tableFilters, "serviceName")) &&
-          textMatches(item.spec?.addressType, getTextFilter(tableFilters, "addressType")) &&
-          textMatches(listPortPreview(item).join(", "), getTextFilter(tableFilters, "ports")) &&
-          textMatches(listAddressPreview(item).join(", "), getTextFilter(tableFilters, "addresses")),
+          textMatches(item.spec?.addressType, getTextFilter(tableFilters, "addressType")),
       ),
     [clusterMap, data?.items, mergedFilters, tableFilters],
   );
@@ -394,60 +351,13 @@ export default function EndpointSlicesPage() {
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
     {
-      title: "关联 Service",
-      key: "serviceName",
-      filter: { type: "text", placeholder: "服务" },
-      width: TABLE_COL_WIDTH.release,
-      render: (_: unknown, row: EndpointSliceResource) => {
-        const serviceName = resolveServiceName(row);
-        if (serviceName === "-") return "-";
-        return (
-          <Link href={`/network/services?namespace=${encodeURIComponent(row.namespace)}&keyword=${encodeURIComponent(serviceName)}`}>
-            <Typography.Text style={{ color: "var(--ant-color-link)", cursor: "pointer" }}>{serviceName}</Typography.Text>
-          </Link>
-        );
-      },
-    },
-    {
-      title: "地址类型",
+      title: "类型",
       key: "addressType",
-      filter: { type: "text", placeholder: "地址类型" },
+      filter: { type: "text", placeholder: "类型" },
       width: TABLE_COL_WIDTH.type,
-      render: (_: unknown, row: EndpointSliceResource) => row.spec?.addressType ?? "-",
-    },
-    {
-      title: "端点状态",
-      key: "readiness",
-      width: TABLE_COL_WIDTH.status,
-      render: (_: unknown, row: EndpointSliceResource) => {
-        const readiness = summarizeReadiness(row);
-        return (
-          <Space size={4} wrap>
-            <OpsStatusTag tone="success">就绪 {readiness.ready}/{readiness.total}</OpsStatusTag>
-            <OpsStatusTag tone={readiness.terminating > 0 ? "warning" : "neutral"}>终止中 {readiness.terminating}</OpsStatusTag>
-          </Space>
-        );
-      },
-    },
-    {
-      title: "端口",
-      key: "ports",
-      width: TABLE_COL_WIDTH.ports,
-      render: (_: unknown, row: EndpointSliceResource) => {
-        const ports = listPortPreview(row);
-        return ports.length > 0 ? ports.slice(0, 3).join(", ") : "-";
-      },
-    },
-    {
-      title: "地址预览",
-      key: "addresses",
-      width: TABLE_COL_WIDTH.address,
-      render: (_: unknown, row: EndpointSliceResource) => {
-        const addresses = listAddressPreview(row);
-        if (addresses.length === 0) return "-";
-        const preview = addresses.slice(0, 3).join(", ");
-        return addresses.length > 3 ? `${preview} ...` : preview;
-      },
+      render: (_: unknown, row: EndpointSliceResource) => (
+        <NetworkKindChip kind={row.spec?.addressType ?? "-"} />
+      ),
     },
     {
       title: "创建时间",

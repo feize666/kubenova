@@ -18,7 +18,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
-import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
+import { StorageCapacityCell, StorageModeListCell, StorageStateCell } from "@/components/storage/storage-table-cells";
 import {
   buildResourceActionMenuItems,
   matchLabelExpressions,
@@ -74,13 +74,13 @@ function readPhase(resource: StorageResource) {
 
 function pvStatusTag(resource: StorageResource) {
   const phase = normalizePhase(readPhase(resource));
-  if (phase === "bound") return <OpsStatusTag tone="success">Bound</OpsStatusTag>;
-  if (phase === "available") return <OpsStatusTag tone="info">Available</OpsStatusTag>;
-  if (phase === "released") return <OpsStatusTag tone="warning">Released</OpsStatusTag>;
-  if (phase === "failed") return <OpsStatusTag tone="danger">Failed</OpsStatusTag>;
-  if (phase === "pending") return <OpsStatusTag tone="warning">Pending</OpsStatusTag>;
-  if (phase === "terminating") return <OpsStatusTag tone="neutral">Terminating</OpsStatusTag>;
-  return <OpsStatusTag tone="neutral">{readPhase(resource) || "-"}</OpsStatusTag>;
+  if (phase === "bound") return <StorageStateCell tone="success" label="Bound" />;
+  if (phase === "available") return <StorageStateCell tone="info" label="Available" />;
+  if (phase === "released") return <StorageStateCell tone="warning" label="Released" />;
+  if (phase === "failed") return <StorageStateCell tone="danger" label="Failed" />;
+  if (phase === "pending") return <StorageStateCell tone="warning" label="Pending" />;
+  if (phase === "terminating") return <StorageStateCell tone="neutral" label="Terminating" />;
+  return <StorageStateCell tone="neutral" label={readPhase(resource) || "-"} />;
 }
 
 function getTextFilter(filters: HeadlampTableFilters, key: string) {
@@ -375,7 +375,7 @@ export default function PvPage() {
       filter: { type: "text", placeholder: "容量" },
       width: TABLE_COL_WIDTH.capacity,
       ...getSortableColumnProps("capacity", isLoading && !data),
-      render: (v: string | undefined) => v ?? "-",
+      render: (v: string | undefined) => <StorageCapacityCell value={v} />,
     },
     {
       title: "访问模式",
@@ -383,14 +383,7 @@ export default function PvPage() {
       key: "accessModes",
       filter: { type: "text", placeholder: "访问模式" },
       width: TABLE_COL_WIDTH.type,
-      render: (value: string[] | undefined) =>
-        value && value.length > 0
-          ? value.map((m) => (
-              <OpsFilterChip key={m} tone="info">
-                {m}
-              </OpsFilterChip>
-            ))
-          : "-",
+      render: (value: string[] | undefined) => <StorageModeListCell values={value} />,
     },
     {
       title: "存储类",

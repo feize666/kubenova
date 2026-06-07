@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
-import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
+import { NetworkPreviewListCell } from "@/components/network/network-table-cells";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
@@ -411,17 +411,7 @@ export default function NetworkPolicyPage() {
       width: TABLE_COL_WIDTH.type,
       render: (_: unknown, row: NetworkPolicyResource) => {
         const policyTypes = Array.isArray(row.spec?.policyTypes) ? row.spec?.policyTypes : [];
-        return policyTypes.length > 0 ? <OpsFilterChip tone="info">{policyTypes.join(", ")}</OpsFilterChip> : "-";
-      },
-    },
-    {
-      title: "Pod 选择器",
-      key: "podSelector",
-      filter: { type: "text", placeholder: "Pod 选择器" },
-      width: TABLE_COL_WIDTH.url,
-      render: (_: unknown, row: NetworkPolicyResource) => {
-        const selector = row.spec?.podSelector && typeof row.spec.podSelector === "object" ? Object.keys(row.spec.podSelector as Record<string, unknown>).length : 0;
-        return selector > 0 ? <OpsStatusTag tone="info">已配置</OpsStatusTag> : "-";
+        return <NetworkPreviewListCell values={policyTypes} limit={2} />;
       },
     },
     {

@@ -20,12 +20,12 @@ import {
   parseResourceSearchInput,
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
-import { OpsFilterChip } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
+import { NetworkKindChip } from "@/components/network/network-table-cells";
 import {
   applyNetworkResourceYaml,
   createNetworkResource,
@@ -60,8 +60,6 @@ type IngressResource = NetworkResource & {
     tls?: unknown[];
   };
 };
-
-type IngressBackend = { serviceName: string; path: string; host: string };
 
 interface IngressFormValues {
   name: string;
@@ -380,22 +378,6 @@ export default function IngressPage() {
     setKeyword(parsed.keyword);
   };
 
-  const getIngressBackends = (resource: IngressResource): IngressBackend[] => {
-    const rows: IngressBackend[] = [];
-    for (const rule of resource.spec?.rules ?? []) {
-      for (const pathRow of rule.http?.paths ?? []) {
-        const serviceName = pathRow.backend?.service?.name;
-        if (!serviceName) continue;
-        rows.push({
-          serviceName,
-          path: pathRow.path ?? "/",
-          host: rule.host ?? "*",
-        });
-      }
-    }
-    return rows;
-  };
-
   const columns: HeadlampResourceTableColumn<IngressResource>[] = [
     {
       title: "入口名称",
@@ -432,58 +414,11 @@ export default function IngressPage() {
       ...getSortableColumnProps("namespace", isLoading && !data),
     },
     {
-      title: "域名",
-      key: "host",
-      filter: { type: "text", placeholder: "域名" },
-      width: TABLE_COL_WIDTH.url,
-      render: (_: unknown, record: IngressResource) => {
-        const hosts = Array.from(
-          new Set((record.spec?.rules ?? []).map((rule) => rule.host).filter(Boolean)),
-        );
-        if (hosts.length === 0) return "-";
-        return (
-          <Space size={[4, 4]} wrap>
-            <Typography.Text ellipsis={{ tooltip: hosts[0] }}>{hosts[0]}</Typography.Text>
-            {hosts.length > 1 ? <OpsFilterChip tone="info">+{hosts.length - 1}</OpsFilterChip> : null}
-          </Space>
-        );
-      },
-    },
-    {
-      title: "路径",
-      key: "path",
-      filter: { type: "text", placeholder: "路径" },
-      width: TABLE_COL_WIDTH.ports,
-      render: (_: unknown, record: IngressResource) => {
-        const paths = getIngressBackends(record).map((item) => item.path);
-        if (paths.length === 0) return "-";
-        return (
-          <Space size={[4, 4]} wrap>
-            <Typography.Text ellipsis={{ tooltip: paths[0] }}>{paths[0]}</Typography.Text>
-            {paths.length > 1 ? <OpsFilterChip tone="info">+{paths.length - 1}</OpsFilterChip> : null}
-          </Space>
-        );
-      },
-    },
-    {
-      title: "后端服务",
-      key: "serviceName",
-      filter: { type: "text", placeholder: "服务" },
-      width: TABLE_COL_WIDTH.image,
-      render: (_: unknown, record: IngressResource) => {
-        const backends = getIngressBackends(record);
-        const primary = backends[0];
-        if (!primary) return "-";
-        const serviceId = `live:${record.clusterId}:Service:${record.namespace}:${primary.serviceName}`;
-        return (
-          <Space size={[4, 4]} wrap>
-            <Typography.Link onClick={() => setDetailTarget({ kind: "Service", id: serviceId })}>
-              {primary.serviceName}
-            </Typography.Link>
-            {backends.length > 1 ? <OpsFilterChip tone="info">+{backends.length - 1}</OpsFilterChip> : null}
-          </Space>
-        );
-      },
+      title: "类型",
+      key: "kind",
+      filter: { type: "text", placeholder: "类型" },
+      width: TABLE_COL_WIDTH.type,
+      render: () => <NetworkKindChip kind="Ingress" />,
     },
     {
       title: "创建时间",
