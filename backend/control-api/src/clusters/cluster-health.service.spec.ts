@@ -154,10 +154,12 @@ describe('ClusterHealthService', () => {
       total: 3,
       timestamp: new Date().toISOString(),
     });
-    service.prisma.clusterHealthSnapshot.findMany = jest.fn().mockResolvedValue([
-      { clusterId: 'running-1', ok: true, checkedAt: new Date() },
-      { clusterId: 'offline-1', ok: false, checkedAt: new Date() },
-    ]);
+    service.prisma.clusterHealthSnapshot.findMany = jest
+      .fn()
+      .mockResolvedValue([
+        { clusterId: 'running-1', ok: true, checkedAt: new Date() },
+        { clusterId: 'offline-1', ok: false, checkedAt: new Date() },
+      ]);
 
     const result = await service.listSelectableClusterIdsForResourceRead();
 

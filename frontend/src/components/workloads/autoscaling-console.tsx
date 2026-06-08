@@ -1,8 +1,9 @@
 "use client";
 
-import { DeleteOutlined, EyeOutlined, FileTextOutlined, MinusCircleOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EyeOutlined, FileTextOutlined, MinusCircleOutlined, UploadOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -11,13 +12,15 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Row,
   Select,
   Space,
   Statistic,
+  Tabs,
   Typography,
+  Upload,
 } from "antd";
+import type { UploadProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -42,6 +45,7 @@ import {
   type HpaPolicyConfig,
   type VpaPolicyConfig,
 } from "@/lib/api/autoscaling";
+import { applyResourceYaml } from "@/lib/api/resources";
 import { ApiError } from "@/lib/api/client";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import type { HpaMetricSpec, HpaMetricTargetType } from "@/lib/contracts";
@@ -63,6 +67,9 @@ import {
   type ResourceMenuItem,
 } from "@/components/resource-action-bar";
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
+import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsModalShell } from "@/components/ops/ops-modal-shell";
+import { OpsSurface } from "@/components/ops/ops-surface";
 import { OpsStatusTag } from "@/components/ops/ops-status";
 
 type AutoscalingConsoleProps = {
@@ -340,6 +347,11 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [detailRequest, setDetailRequest] = useState<{ kind: string; id: string } | null>(null);
   const [yamlTarget, setYamlTarget] = useState<AutoscalingPolicyItem | null>(null);
+  const [createMode, setCreateMode] = useState<"form" | "yaml">("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
+  const [yamlSubmitting, setYamlSubmitting] = useState(false);
   const pageDescription =
     defaultType === "HPA"
       ? "聚焦管理 HPA 资源与事件。"
@@ -397,6 +409,21 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
     [clustersQuery.data?.items],
   );
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
+  const yamlUploadProps: UploadProps = {
+    accept: ".yaml,.yml,text/yaml,text/x-yaml,application/x-yaml",
+    maxCount: 1,
+    showUploadList: false,
+    beforeUpload: async (file) => {
+      try {
+        setCreateYaml(await file.text());
+        message.success(`已读取 ${file.name}`);
+      } catch {
+        message.error("YAML 文件读取失败");
+      }
+      return false;
+    },
+  };
   const clusterMap = useMemo(
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
     [clustersQuery.data?.items],
@@ -462,8 +489,16 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     setSelectedRowId(null);
     setModalOpen(true);
     form.resetFields();
+    const defaultClusterId = clusterId || clusterOptions[0]?.value || "";
+    const defaultNamespace = namespace || "default";
+    setCreateMode("form");
+    setCreateYaml("");
+    setCreateYamlClusterId(defaultClusterId);
+    setCreateYamlNamespace(defaultNamespace);
     form.setFieldsValue({
       type: defaultType ?? "HPA",
+      clusterId: defaultClusterId,
+      namespace: defaultNamespace,
       kind: "Deployment",
       hpaMinReplicas: 1,
       hpaMaxReplicas: 3,
@@ -798,13 +833,16 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                   return;
                 }
                 if (key === "delete") {
-                  Modal.confirm({
+                  openOpsConfirm({
                     title: `删除 ${row.type} 策略`,
-                    content: `确认删除 ${getAutoscalingResourceName(row)} 的 ${row.type} 策略？`,
+                    description: `确认删除 ${getAutoscalingResourceName(row)} 的 ${row.type} 策略？`,
+                    impact: "删除后该伸缩策略不再调节目标工作负载。",
                     okText: "删除",
-                    okButtonProps: { danger: true },
+                    danger: true,
                     cancelText: "取消",
-                    onOk: () => deleteMutation.mutateAsync(row),
+                    onOk: async () => {
+                      await deleteMutation.mutateAsync(row);
+                    },
                   });
                   return;
                 }
@@ -851,7 +889,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         description={pageDescription}
       />
 
-      <Card>
+      <OpsSurface variant="toolbar" padding="sm">
         <ResourceFilterToolbar>
           <ResourceFilterToolbarItem width="auto">
             <ResourceScopeFilterButton
@@ -900,7 +938,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           ) : null}
         </ResourceFilterToolbar>
         
-      </Card>
+      </OpsSurface>
 
       <Row gutter={[12, 12]}>
         <Col xs={12} md={6}>
@@ -936,7 +974,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         </Col>
       </Row>
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<AutoscalingPolicyItem>
           tableKey="workloads.autoscaling.policies"
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
@@ -948,6 +986,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           sort={{ sortBy, sortOrder }}
           rowKey="id"
           columns={columns}
+          onResourceNavigate={(request) => setDetailRequest(request)}
           dataSource={visiblePolicies}
           onChange={(nextPagination, filters, sorter, extra) =>
             handleTableChange(nextPagination, filters, sorter, extra, queryEnabled && !policiesQuery.data && policiesQuery.isLoading)
@@ -963,9 +1002,9 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           locale={{ emptyText: policiesEmptyText }}
           scroll={{ x: getTableScrollX(columns) }}
         />
-      </Card>
+      </OpsSurface>
 
-      <Card title="选中资源摘要">
+      <OpsSurface variant="panel" padding="sm" title="选中资源摘要">
         <Space orientation="vertical" size={8} style={{ width: "100%" }}>
           {selectedItem ? (
             <>
@@ -983,9 +1022,9 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             <Typography.Text type="secondary">选择一条策略后显示资源摘要与最近 24 小时事件。</Typography.Text>
           )}
         </Space>
-      </Card>
+      </OpsSurface>
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <Space orientation="vertical" size={8} style={{ width: "100%" }}>
           <Typography.Title level={5} style={{ margin: 0 }}>
             策略事件（最近 24 小时）
@@ -1000,6 +1039,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             tableKey="workloads.autoscaling.events"
             preferencesClient={createTablePreferencesClient(accessToken || undefined)}
             columns={eventColumns}
+            onResourceNavigate={(request) => setDetailRequest(request)}
             dataSource={selectedItem ? eventsQuery.data?.items ?? [] : []}
             loading={queryEnabled && Boolean(selectedItem) && !eventsQuery.data && eventsQuery.isLoading}
             pagination={false}
@@ -1007,17 +1047,51 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             scroll={{ x: 1000 }}
           />
         </Space>
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title={editing ? `编辑 ${editing.type} 策略` : `新建 ${defaultType ?? "HPA/VPA"} 策略`}
+        description="配置 HPA/VPA 目标、阈值、行为策略和资源限制。"
+        identity={editing ? getAutoscalingResourceName(editing) : (defaultType ?? "Autoscaling")}
         open={modalOpen}
         onCancel={() => {
           setModalOpen(false);
           setEditing(null);
+          setCreateYaml("");
           form.resetFields();
         }}
         onOk={async () => {
+          if (!editing && createMode === "yaml") {
+            if (!createYamlClusterId.trim()) {
+              message.warning("请选择集群");
+              return;
+            }
+            if (!createYaml.trim()) {
+              message.warning("请输入或上传 YAML");
+              return;
+            }
+            setYamlSubmitting(true);
+            try {
+              await applyResourceYaml(
+                {
+                  clusterId: createYamlClusterId.trim(),
+                  namespace: createYamlNamespace.trim() || undefined,
+                  yaml: createYaml.trim(),
+                },
+                accessToken ?? undefined,
+              );
+              message.success("HPA/VPA YAML 已提交");
+              setModalOpen(false);
+              setCreateYaml("");
+              await queryClient.invalidateQueries({ queryKey: ["autoscaling"] });
+              await queryClient.invalidateQueries({ queryKey: ["inspection", "autoscaling-hints"] });
+            } catch (error) {
+              message.error(error instanceof Error ? error.message : "YAML 提交失败");
+            } finally {
+              setYamlSubmitting(false);
+            }
+            return;
+          }
           const values = await form.validateFields();
           if (editing) {
             updateMutation.mutate(values);
@@ -1025,9 +1099,76 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             createMutation.mutate(values);
           }
         }}
-        confirmLoading={createMutation.isPending || updateMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || yamlSubmitting}
         width={760}
       >
+        {!editing ? (
+          <Tabs
+            activeKey={createMode}
+            onChange={(key) => setCreateMode(key === "yaml" ? "yaml" : "form")}
+            items={[
+              { key: "form", label: "表单", children: null },
+              { key: "yaml", label: "YAML / 上传", children: null },
+            ]}
+          />
+        ) : null}
+        {!editing && createMode === "yaml" ? (
+          <Space direction="vertical" size={12} style={{ width: "100%" }}>
+            <Alert
+              type="info"
+              showIcon
+              message="支持创建 HorizontalPodAutoscaler / VerticalPodAutoscaler 原生资源"
+              description="按 Kubernetes 原生 apiVersion、kind、metadata.name 识别资源；表单未覆盖的 metrics、behavior、resourcePolicy 等字段请写入 YAML。"
+            />
+            <Form layout="vertical">
+              <Form.Item label="集群" required>
+                <Select
+                  value={createYamlClusterId}
+                  onChange={setCreateYamlClusterId}
+                  options={clusterOptions}
+                  loading={clustersQuery.isLoading}
+                  placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                  disabled={clusterUnavailable}
+                  notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item label="默认名称空间">
+                <Input
+                  value={createYamlNamespace}
+                  onChange={(event) => setCreateYamlNamespace(event.target.value)}
+                  placeholder="YAML 未写 namespace 时使用"
+                />
+              </Form.Item>
+              <Form.Item
+                label={(
+                  <Space size={8}>
+                    <span>YAML</span>
+                    <Upload {...yamlUploadProps} disabled={yamlSubmitting}>
+                      <Button size="small" icon={<UploadOutlined />} disabled={yamlSubmitting}>
+                        上传
+                      </Button>
+                    </Upload>
+                  </Space>
+                )}
+                required
+              >
+                <Input.TextArea
+                  value={createYaml}
+                  onChange={(event) => setCreateYaml(event.target.value)}
+                  autoSize={{ minRows: 14, maxRows: 24 }}
+                  placeholder="apiVersion: autoscaling/v2&#10;kind: HorizontalPodAutoscaler&#10;metadata:&#10;  name: web-hpa&#10;  namespace: default"
+                  style={{ fontFamily: "\"JetBrains Mono\", \"IBM Plex Mono\", SFMono-Regular, monospace", fontSize: 12 }}
+                  disabled={yamlSubmitting}
+                />
+              </Form.Item>
+            </Form>
+            <Typography.Text type="secondary">
+              上传仅读取本地文件内容，不会自动提交；点击创建后才应用。
+            </Typography.Text>
+          </Space>
+        ) : (
         <Form form={form} layout="vertical" initialValues={{ type: defaultType ?? "HPA", kind: "Deployment" }}>
           <Row gutter={12}>
             <Col span={8}>
@@ -1049,8 +1190,11 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             <Col span={8}>
               <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
                 <Select
-                  options={(clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id }))}
-                  disabled={Boolean(editing)}
+                  options={clusterOptions}
+                  loading={clustersQuery.isLoading}
+                  placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                  disabled={Boolean(editing) || clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+                  notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
                 />
               </Form.Item>
             </Col>
@@ -1407,7 +1551,8 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             </>
           )}
         </Form>
-      </Modal>
+        )}
+      </OpsModalShell>
 
       <ResourceYamlDrawer
         open={Boolean(yamlTarget)}
@@ -1432,6 +1577,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         onClose={() => setDetailRequest(null)}
         token={accessToken ?? undefined}
         request={detailRequest}
+        onNavigateRequest={(request) => setDetailRequest(request)}
       />
       {renderPodLikeResourceActionStyles({
         triggerClassName: POD_ACTION_TRIGGER_CLASS,

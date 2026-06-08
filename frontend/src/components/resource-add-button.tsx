@@ -1,9 +1,10 @@
 "use client";
 
 import { PlusOutlined } from "@ant-design/icons";
-import { Button, Tooltip } from "antd";
+import { Tooltip } from "antd";
 import type { ButtonProps } from "antd";
 import type { ReactNode } from "react";
+import { OpsIconActionButton } from "@/components/ops";
 
 type ResourceAddButtonProps = Omit<ButtonProps, "children" | "type" | "icon"> & {
   label?: ReactNode;
@@ -34,9 +35,10 @@ export function ResourceAddButton({
   const tooltipTitle = normalizeAddTooltip(rawTooltipTitle);
 
   const button = (
-    <Button
+    <OpsIconActionButton
       {...props}
-      type="default"
+      opsVariant="primary"
+      opsTone="primary"
       icon={<PlusOutlined />}
       style={style}
       className={["resource-add-button", compact ? "resource-add-button--compact" : "", props.className]
@@ -44,7 +46,7 @@ export function ResourceAddButton({
         .join(" ") || undefined}
     >
       {compact ? null : label}
-    </Button>
+    </OpsIconActionButton>
   );
 
   return <Tooltip title={tooltipTitle}>{button}</Tooltip>;

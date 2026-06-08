@@ -32,7 +32,7 @@ export async function getClusters(
     return true;
   });
   if (!params.selectableOnly) {
-    return { ...result, items: visibleItems, total: visibleItems.length };
+    return { ...result, items: visibleItems, total: visibleItems.length, selectableUnavailable: false };
   }
   try {
     const health = await getClusterHealthList(
@@ -52,19 +52,18 @@ export async function getClusters(
         item.hasKubeconfig !== false &&
         onlineIds.has(item.id),
     );
-    if (onlineSelectable.length === 0) {
-      return { ...result, items: visibleItems, total: visibleItems.length };
-    }
     return {
       ...result,
       items: onlineSelectable,
       total: onlineSelectable.length,
+      selectableUnavailable: false,
     };
   } catch {
     return {
       ...result,
-      items: visibleItems,
-      total: visibleItems.length,
+      items: [],
+      total: 0,
+      selectableUnavailable: true,
     };
   }
 }

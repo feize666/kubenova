@@ -42,7 +42,17 @@ function buildService() {
     getCoreApi: jest.fn(),
   } as unknown as K8sClientService;
   const service = new ClustersService(prismaMock, k8sClientService);
-  (service as unknown as { repository: { findById: jest.Mock } }).repository = {
+  (
+    service as unknown as {
+      repository: {
+        findById: jest.Mock;
+        findByName: jest.Mock;
+        list: jest.Mock;
+        create: jest.Mock;
+        update: jest.Mock;
+      };
+    }
+  ).repository = {
     findById: jest.fn(),
     findByName: jest.fn(),
     list: jest.fn(),

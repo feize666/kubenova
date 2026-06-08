@@ -4,11 +4,9 @@ import { DeleteOutlined, FileTextOutlined, LinkOutlined, ArrowsAltOutlined } fro
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Card,
   Dropdown,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Typography,
@@ -31,6 +29,8 @@ import {
   type ResourceMenuItem,
 } from "@/components/resource-action-bar";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
@@ -43,7 +43,7 @@ import {
   type CreateStorageResourcePayload,
   type StorageResource,
 } from "@/lib/api/storage";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
@@ -153,6 +153,9 @@ export default function PvPage() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
   const [bindTarget, setBindTarget] = useState<StorageResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
@@ -216,6 +219,27 @@ export default function PvPage() {
     },
   });
 
+  const applyYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          yaml: createYaml.trim(),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setModalOpen(false);
+      setCreateYaml("");
+      await queryClient.invalidateQueries({ queryKey: ["storage", "PV"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "YAML 创建失败");
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteStorageResource(id, accessToken || undefined),
     onSuccess: async () => {
@@ -257,6 +281,18 @@ export default function PvPage() {
   });
 
   const handleModalSubmit = async () => {
+    if (createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyYamlMutation.mutate();
+      return;
+    }
     let values: PvFormValues;
     try {
       values = await form.validateFields();
@@ -296,6 +332,7 @@ export default function PvPage() {
     label: c.name,
     value: c.id,
   }));
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
 
   const clusterMap = Object.fromEntries(
     (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
@@ -482,10 +519,21 @@ export default function PvPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/storage/pv"
-        titleSuffix={<ResourceAddButton title="创建PV" onClick={() => { form.resetFields(); setModalOpen(true); }} />}
+        titleSuffix={<ResourceAddButton title="创建PV" onClick={() => {
+          const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+          form.resetFields();
+          form.setFieldsValue({
+            clusterId: nextClusterId,
+            accessModes: ["ReadWriteOnce"],
+          });
+          setCreateMode("form");
+          setCreateYaml("");
+          setCreateYamlClusterId(nextClusterId);
+          setModalOpen(true);
+        }} />}
       />
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <ResourceClusterNamespaceFilters
           clusterId={clusterId}
           keywordInput={keywordInput}
@@ -523,6 +571,7 @@ export default function PvPage() {
         <ResourceTable<StorageResource>
           rowKey="id"
           columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           tableKey="storage.pv"
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -544,72 +593,99 @@ export default function PvPage() {
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
         />
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title="添加 PV"
+        description="创建 PersistentVolume，声明容量、访问模式和所属集群。"
+        identity="PV"
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setCreateYaml("");
           form.resetFields();
         }}
         okText="创建"
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || applyYamlMutation.isPending}
         destroyOnHidden
+        width={720}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="卷名称"
-            name="name"
-            rules={[{ required: true, message: "请输入 PV 名称" }]}
-          >
-            <Input placeholder="例如：my-pv-001" />
-          </Form.Item>
-          <Form.Item
-            label="所属集群"
-            name="clusterId"
-            rules={[{ required: true, message: "请选择集群" }]}
-          >
-            <Select
-              placeholder="请选择集群"
-              options={clusterOptions}
-              loading={clustersQuery.isLoading}
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-              }
-            />
-          </Form.Item>
-          <Form.Item
-            label="容量"
-            name="capacity"
-            rules={[{ required: true, message: "请输入容量，例如 10Gi" }]}
-          >
-            <Input placeholder="例如：10Gi" />
-          </Form.Item>
-          <Form.Item
-            label="访问模式"
-            name="accessModes"
-            rules={[{ required: true, message: "请至少选择一种访问模式" }]}
-          >
-            <Select
-              mode="multiple"
-              placeholder="请选择访问模式"
-              options={ACCESS_MODE_OPTIONS}
-            />
-          </Form.Item>
-          <Form.Item
-            label="存储类（StorageClass）"
-            name="storageClass"
-          >
-            <Input placeholder="例如：standard" />
-          </Form.Item>
-        </Form>
-      </Modal>
-      <Modal
+        <ResourceCreateMethodTabs
+          mode={createMode}
+          onModeChange={setCreateMode}
+          yaml={createYaml}
+          onYamlChange={setCreateYaml}
+          clusterId={createYamlClusterId}
+          onClusterIdChange={setCreateYamlClusterId}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          clusterUnavailable={clusterUnavailable}
+          kindHint="PersistentVolume"
+          disabled={createMutation.isPending || applyYamlMutation.isPending}
+          formContent={(
+            <Form form={form} layout="vertical">
+              <OpsFormSection title="卷身份" description="PV 名称和所属集群决定资源定位。">
+                <Form.Item
+                  label="卷名称"
+                  name="name"
+                  rules={[{ required: true, message: "请输入 PV 名称" }]}
+                >
+                  <Input placeholder="例如：my-pv-001" />
+                </Form.Item>
+                <Form.Item
+                  label="所属集群"
+                  name="clusterId"
+                  rules={[{ required: true, message: "请选择集群" }]}
+                >
+                  <Select
+                    placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                    options={clusterOptions}
+                    loading={clustersQuery.isLoading}
+                    disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+                    notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                    showSearch
+                    filterOption={(input, option) =>
+                      (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
+                </Form.Item>
+              </OpsFormSection>
+              <OpsFormSection title="容量与访问" description="表单创建使用 hostPath 默认源；NFS、CSI、local、nodeAffinity 等高级字段请用 YAML。">
+                <Form.Item
+                  label="容量"
+                  name="capacity"
+                  rules={[{ required: true, message: "请输入容量，例如 10Gi" }]}
+                >
+                  <Input placeholder="例如：10Gi" />
+                </Form.Item>
+                <Form.Item
+                  label="访问模式"
+                  name="accessModes"
+                  rules={[{ required: true, message: "请至少选择一种访问模式" }]}
+                >
+                  <Select
+                    mode="multiple"
+                    placeholder="请选择访问模式"
+                    options={ACCESS_MODE_OPTIONS}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="存储类（StorageClass）"
+                  name="storageClass"
+                >
+                  <Input placeholder="例如：standard" />
+                </Form.Item>
+              </OpsFormSection>
+            </Form>
+          )}
+        />
+      </OpsModalShell>
+      <OpsModalShell
         title={`绑定 PV · ${bindTarget?.name ?? ""}`}
+        description="把 PV 绑定到指定 PVC 引用。"
+        identity={bindTarget?.name ?? "PV"}
         open={Boolean(bindTarget)}
         onOk={() => void handleBindSubmit()}
         onCancel={() => {
@@ -620,24 +696,27 @@ export default function PvPage() {
         cancelText="取消"
         confirmLoading={bindMutation.isPending}
         destroyOnHidden
+        width={520}
       >
-        <Form form={bindForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="PVC 名称空间"
-            name="claimNamespace"
-            rules={[{ required: true, message: "请输入 PVC 名称空间" }]}
-          >
-            <Input placeholder="例如：default" />
-          </Form.Item>
-          <Form.Item
-            label="PVC 名称"
-            name="claimName"
-            rules={[{ required: true, message: "请输入 PVC 名称" }]}
-          >
-            <Input placeholder="例如：my-pvc" />
-          </Form.Item>
+        <Form form={bindForm} layout="vertical">
+          <OpsFormSection title="PVC 引用" description="指定目标 PVC 的名称空间和名称。">
+            <Form.Item
+              label="PVC 名称空间"
+              name="claimNamespace"
+              rules={[{ required: true, message: "请输入 PVC 名称空间" }]}
+            >
+              <Input placeholder="例如：default" />
+            </Form.Item>
+            <Form.Item
+              label="PVC 名称"
+              name="claimName"
+              rules={[{ required: true, message: "请输入 PVC 名称" }]}
+            >
+              <Input placeholder="例如：my-pvc" />
+            </Form.Item>
+          </OpsFormSection>
         </Form>
-      </Modal>
+      </OpsModalShell>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}

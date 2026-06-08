@@ -18,6 +18,32 @@ export interface ResourceYamlUpdatePayload extends ResourceIdentity {
   yaml: string;
 }
 
+export interface ResourceYamlApplyPayload {
+  clusterId: string;
+  namespace?: string;
+  yaml: string;
+  dryRun?: boolean;
+}
+
+export interface ResourceYamlApplyItem {
+  apiVersion: string;
+  kind: string;
+  namespace: string;
+  name: string;
+  dryRun: boolean;
+  message: string;
+  resourceVersion?: string;
+}
+
+export interface ResourceYamlApplyResponse {
+  clusterId: string;
+  items: ResourceYamlApplyItem[];
+  total: number;
+  dryRun: boolean;
+  message: string;
+  timestamp: string;
+}
+
 export interface ResourceImageUpdatePayload extends ResourceIdentity {
   image: string;
   container?: string;
@@ -386,6 +412,16 @@ export interface ResourceDetailResponse {
 export interface ResourceDetailRequest {
   kind: string;
   id: string;
+  kindLabel?: string;
+  apiVersion?: string;
+  namespace?: string;
+  name?: string;
+  label?: string;
+  snapshot?: {
+    spec?: Record<string, unknown>;
+    status?: Record<string, unknown>;
+    labels?: Record<string, string>;
+  };
 }
 
 const YAML_GET_PATHS = [
@@ -550,6 +586,9 @@ function normalizeRelationshipGroups(
 function normalizeResourceKind(kind: string): string {
   const value = kind.trim().toLowerCase().replace(/[\s_-]+/g, "");
   switch (value) {
+    case "cluster":
+    case "clusters":
+      return "cluster";
     case "serviceaccount":
     case "serviceaccounts":
       return "serviceaccount";
@@ -632,6 +671,17 @@ export async function getResourceYaml(
 
 export async function updateResourceYaml(payload: ResourceYamlUpdatePayload, token?: string) {
   return tryWriteWithFallback<ResourceYamlUpdatePayload, unknown>(YAML_UPDATE_PATHS, payload, token);
+}
+
+export async function applyResourceYaml(
+  payload: ResourceYamlApplyPayload,
+  token?: string,
+): Promise<ResourceYamlApplyResponse> {
+  return apiRequest<ResourceYamlApplyResponse, ResourceYamlApplyPayload>("/api/resources/yaml/apply", {
+    method: "POST",
+    body: payload,
+    token,
+  });
 }
 
 export async function updateResourceImage(payload: ResourceImageUpdatePayload, token?: string) {

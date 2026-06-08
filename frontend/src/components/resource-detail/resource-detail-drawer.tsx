@@ -1,14 +1,14 @@
 "use client";
 
 import { ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
-import { Alert, Empty, Skeleton, Space, Typography } from "antd";
+import { Space, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
 import type { DynamicResourceIdentity, ResourceIdentity, ResourceDetailResponse } from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { OpsDrawerShell, OpsIconActionButton } from "@/components/ops";
+import { OpsDegradedState, OpsDrawerShell, OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState } from "@/components/ops";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceDetailContent } from "./renderers";
 import type { ResourceDetailDrawerProps } from "./types";
@@ -127,7 +127,7 @@ function buildDetailYamlTarget(
     return parseDynamicYamlTarget(activeRequest.id);
   }
   const detailKind = normalizeKind(detail.overview.kind || detail.descriptor.resourceKind || activeRequest.kind);
-  if (["node", "helmrelease", "helmrepository"].includes(detailKind)) {
+  if (["cluster", "node", "helmrelease", "helmrepository"].includes(detailKind)) {
     return null;
   }
   if (!detail.overview.clusterId || !detail.overview.kind || !detail.overview.name) {
@@ -254,7 +254,7 @@ export function ResourceDetailDrawer({
       open={open}
       destroyOnHidden
       onClose={handleClose}
-      variant="detail"
+      variant="resource"
       widthPx={width}
       classNames={{
         wrapper: "resource-detail-drawer-wrapper",
@@ -296,17 +296,23 @@ export function ResourceDetailDrawer({
         }}
       >
         {!activeRequest ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未选择资源" />
+          <OpsEmptyState title="未选择资源" description="从资源列表选择一条记录后查看详情。" />
         ) : query.isLoading && !hasDetailData ? (
-          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <Skeleton active paragraph={{ rows: 4 }} />
-            <Skeleton active paragraph={{ rows: 6 }} />
-          </Space>
+          <OpsLoadingState title="正在加载资源详情" description="正在读取资源概览、状态与关联信息。" />
         ) : query.error instanceof Error ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <Alert
-              type={canShowSnapshotFallback ? "warning" : "error"}
-              showIcon
+            {canShowSnapshotFallback ? (
+              <OpsDegradedState
+                title="资源详情加载失败，显示拓扑快照"
+                description={query.error.message}
+                action={
+                  <OpsIconActionButton size="small" onClick={() => void query.refetch()}>
+                    重试
+                  </OpsIconActionButton>
+                }
+              />
+            ) : (
+              <OpsErrorState
               title={canShowSnapshotFallback ? "资源详情加载失败，显示拓扑快照" : "资源详情加载失败"}
               description={query.error.message}
               action={
@@ -314,7 +320,8 @@ export function ResourceDetailDrawer({
                   重试
                 </OpsIconActionButton>
               }
-            />
+              />
+            )}
             {canShowSnapshotFallback ? (
               <Space orientation="vertical" size={12} style={{ width: "100%" }}>
                 <Typography.Text type="secondary">
@@ -343,7 +350,7 @@ export function ResourceDetailDrawer({
             {children}
           </Space>
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无详情数据" />
+          <OpsEmptyState title="暂无详情数据" description="当前 API 未返回可展示的资源详情。" />
         )}
       </div>
       <ResourceYamlDrawer

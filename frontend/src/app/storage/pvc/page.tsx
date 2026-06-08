@@ -9,11 +9,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Card,
   Dropdown,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Typography,
@@ -30,6 +28,8 @@ import {
   parseResourceSearchInput,
 } from "@/components/resource-action-bar";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { OpsFormSection, OpsModalShell, OpsSurface, openOpsConfirm } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
@@ -50,7 +50,7 @@ import {
   type CreateStorageResourcePayload,
   type StorageResource,
 } from "@/lib/api/storage";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
@@ -112,6 +112,7 @@ interface PvcFormValues {
   clusterId: string;
   capacity: string;
   storageClass: string;
+  accessModes: string[];
 }
 
 interface PvcResizeFormValues {
@@ -121,6 +122,12 @@ interface PvcResizeFormValues {
 interface PvcBindFormValues {
   volumeName: string;
 }
+
+const ACCESS_MODE_OPTIONS = [
+  { label: "ReadWriteOnce (RWO)", value: "ReadWriteOnce" },
+  { label: "ReadOnlyMany (ROX)", value: "ReadOnlyMany" },
+  { label: "ReadWriteMany (RWX)", value: "ReadWriteMany" },
+];
 
 export default function PvcPage() {
   const searchParams = useSearchParams();
@@ -150,6 +157,10 @@ export default function PvcPage() {
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [resizeTarget, setResizeTarget] = useState<StorageResource | null>(null);
   const [bindTarget, setBindTarget] = useState<StorageResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
@@ -225,6 +236,28 @@ export default function PvcPage() {
     },
   });
 
+  const applyYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setModalOpen(false);
+      setCreateYaml("");
+      await queryClient.invalidateQueries({ queryKey: ["storage", "PVC"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "YAML 创建失败");
+    },
+  });
+
   const resizeMutation = useMutation({
     mutationFn: (values: PvcResizeFormValues) => {
       if (!resizeTarget) {
@@ -280,6 +313,18 @@ export default function PvcPage() {
   });
 
   const handleModalSubmit = async () => {
+    if (createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyYamlMutation.mutate();
+      return;
+    }
     let values: PvcFormValues;
     try {
       values = await form.validateFields();
@@ -292,6 +337,7 @@ export default function PvcPage() {
       kind: "PVC",
       name: values.name,
       capacity: values.capacity,
+      accessModes: values.accessModes,
       storageClass: values.storageClass,
     });
   };
@@ -330,6 +376,7 @@ export default function PvcPage() {
     label: c.name,
     value: c.id,
   }));
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
 
   const tableData = useMemo(
     () =>
@@ -371,7 +418,18 @@ export default function PvcPage() {
   });
 
   const handleOpenCreate = () => {
+    const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+    const nextNamespace = namespace || "default";
     form.resetFields();
+    form.setFieldsValue({
+      clusterId: nextClusterId,
+      namespace: nextNamespace,
+      accessModes: ["ReadWriteOnce"],
+    });
+    setCreateMode("form");
+    setCreateYaml("");
+    setCreateYamlClusterId(nextClusterId);
+    setCreateYamlNamespace(nextNamespace);
     setModalOpen(true);
   };
 
@@ -483,12 +541,13 @@ export default function PvcPage() {
                   setYamlTarget(identity);
                   return;
                 }
-                Modal.confirm({
+                openOpsConfirm({
                   title: "删除 PVC",
-                  content: `确认删除 PVC「${row.name}」吗？此操作不可恢复。`,
+                  description: `确认删除 PVC「${row.name}」吗？此操作不可恢复。`,
+                  impact: "删除 PVC 可能影响已绑定工作负载的数据挂载状态。",
                   okText: "确认删除",
                   cancelText: "取消",
-                  okButtonProps: { danger: true },
+                  danger: true,
                   onOk: async () => {
                     await deleteStorageResource(row.id, accessToken || undefined);
                     void message.success("PVC 删除成功");
@@ -515,7 +574,7 @@ export default function PvcPage() {
         titleSuffix={<ResourceAddButton title="创建PVC" onClick={handleOpenCreate} />}
       />
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <ResourceClusterNamespaceFilters
           clusterId={clusterId}
           namespace={namespace}
@@ -555,6 +614,7 @@ export default function PvcPage() {
         <ResourceTable<StorageResource>
           rowKey="id"
           columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           tableKey="storage.pvc"
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -576,69 +636,109 @@ export default function PvcPage() {
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
         />
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title="添加 PVC"
+        description="创建 PersistentVolumeClaim，声明名称空间、容量和 StorageClass。"
+        identity="PVC"
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setCreateYaml("");
           form.resetFields();
         }}
         okText="创建"
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || applyYamlMutation.isPending}
         destroyOnHidden
+        width={720}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="声明名称"
-            name="name"
-            rules={[{ required: true, message: "请输入 PVC 名称" }]}
-          >
-            <Input placeholder="例如：my-pvc" />
-          </Form.Item>
-          <Form.Item
-            label="名称空间"
-            name="namespace"
-            rules={[{ required: true, message: "请输入名称空间" }]}
-          >
-            <Input placeholder="例如：default" />
-          </Form.Item>
-          <Form.Item
-            label="所属集群"
-            name="clusterId"
-            rules={[{ required: true, message: "请选择集群" }]}
-          >
-            <Select
-              placeholder="请选择集群"
-              options={clusterOptions}
-              loading={clustersQuery.isLoading}
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-              }
-            />
-          </Form.Item>
-          <Form.Item
-            label="申请容量"
-            name="capacity"
-            rules={[{ required: true, message: "请输入申请容量" }]}
-          >
-            <Input placeholder="例如：10Gi" />
-          </Form.Item>
-          <Form.Item
-            label="存储类"
-            name="storageClass"
-            rules={[{ required: true, message: "请输入存储类" }]}
-          >
-            <Input placeholder="例如：standard" />
-          </Form.Item>
-        </Form>
-      </Modal>
-      <Modal
+        <ResourceCreateMethodTabs
+          mode={createMode}
+          onModeChange={setCreateMode}
+          yaml={createYaml}
+          onYamlChange={setCreateYaml}
+          clusterId={createYamlClusterId}
+          onClusterIdChange={setCreateYamlClusterId}
+          namespace={createYamlNamespace}
+          onNamespaceChange={setCreateYamlNamespace}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          clusterUnavailable={clusterUnavailable}
+          kindHint="PersistentVolumeClaim"
+          disabled={createMutation.isPending || applyYamlMutation.isPending}
+          formContent={(
+            <Form form={form} layout="vertical">
+              <OpsFormSection title="声明身份" description="PVC 名称、名称空间和集群共同定位资源。">
+                <Form.Item
+                  label="声明名称"
+                  name="name"
+                  rules={[{ required: true, message: "请输入 PVC 名称" }]}
+                >
+                  <Input placeholder="例如：my-pvc" />
+                </Form.Item>
+                <Form.Item
+                  label="名称空间"
+                  name="namespace"
+                  rules={[{ required: true, message: "请输入名称空间" }]}
+                >
+                  <Input placeholder="例如：default" />
+                </Form.Item>
+                <Form.Item
+                  label="所属集群"
+                  name="clusterId"
+                  rules={[{ required: true, message: "请选择集群" }]}
+                >
+                  <Select
+                    placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                    options={clusterOptions}
+                    loading={clustersQuery.isLoading}
+                    disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+                    notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                    showSearch
+                    filterOption={(input, option) =>
+                      (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
+                </Form.Item>
+              </OpsFormSection>
+              <OpsFormSection title="容量与存储类" description="selector、volumeName、dataSource、volumeMode 等高级字段请用 YAML。">
+                <Form.Item
+                  label="申请容量"
+                  name="capacity"
+                  rules={[{ required: true, message: "请输入申请容量" }]}
+                >
+                  <Input placeholder="例如：10Gi" />
+                </Form.Item>
+                <Form.Item
+                  label="访问模式"
+                  name="accessModes"
+                  rules={[{ required: true, message: "请至少选择一种访问模式" }]}
+                >
+                  <Select
+                    mode="multiple"
+                    placeholder="请选择访问模式"
+                    options={ACCESS_MODE_OPTIONS}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="存储类"
+                  name="storageClass"
+                  rules={[{ required: true, message: "请输入存储类" }]}
+                >
+                  <Input placeholder="例如：standard" />
+                </Form.Item>
+              </OpsFormSection>
+            </Form>
+          )}
+        />
+      </OpsModalShell>
+      <OpsModalShell
         title={`扩容 PVC · ${resizeTarget?.name ?? ""}`}
+        description="提交新的 PVC 目标容量。"
+        identity={resizeTarget?.name ?? "PVC"}
         open={Boolean(resizeTarget)}
         onOk={() => void handleResizeSubmit()}
         onCancel={() => {
@@ -649,19 +749,24 @@ export default function PvcPage() {
         cancelText="取消"
         confirmLoading={resizeMutation.isPending}
         destroyOnHidden
+        width={500}
       >
-        <Form form={resizeForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="目标容量"
-            name="capacity"
-            rules={[{ required: true, message: "请输入目标容量" }]}
-          >
-            <Input placeholder="例如：20Gi" />
-          </Form.Item>
+        <Form form={resizeForm} layout="vertical">
+          <OpsFormSection title="扩容目标" description="目标容量必须大于当前容量，具体限制由集群存储类决定。">
+            <Form.Item
+              label="目标容量"
+              name="capacity"
+              rules={[{ required: true, message: "请输入目标容量" }]}
+            >
+              <Input placeholder="例如：20Gi" />
+            </Form.Item>
+          </OpsFormSection>
         </Form>
-      </Modal>
-      <Modal
+      </OpsModalShell>
+      <OpsModalShell
         title={`绑定 PVC · ${bindTarget?.name ?? ""}`}
+        description="把 PVC 绑定到指定 PV。"
+        identity={bindTarget?.name ?? "PVC"}
         open={Boolean(bindTarget)}
         onOk={() => void handleBindSubmit()}
         onCancel={() => {
@@ -672,17 +777,20 @@ export default function PvcPage() {
         cancelText="取消"
         confirmLoading={bindMutation.isPending}
         destroyOnHidden
+        width={500}
       >
-        <Form form={bindForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="PV 名称"
-            name="volumeName"
-            rules={[{ required: true, message: "请输入 PV 名称" }]}
-          >
-            <Input placeholder="例如：my-pv-001" />
-          </Form.Item>
+        <Form form={bindForm} layout="vertical">
+          <OpsFormSection title="PV 引用" description="指定目标 PersistentVolume 名称。">
+            <Form.Item
+              label="PV 名称"
+              name="volumeName"
+              rules={[{ required: true, message: "请输入 PV 名称" }]}
+            >
+              <Input placeholder="例如：my-pv-001" />
+            </Form.Item>
+          </OpsFormSection>
         </Form>
-      </Modal>
+      </OpsModalShell>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}

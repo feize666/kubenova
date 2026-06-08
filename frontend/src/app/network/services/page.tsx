@@ -3,10 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Card,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Typography,
@@ -22,10 +20,12 @@ import {
   parseResourceSearchInput,
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceRowActions } from "@/components/resource-row-actions";
+import { OpsModalShell, OpsSurface } from "@/components/ops";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
 import {
   applyNetworkResourceYaml,
@@ -35,7 +35,7 @@ import {
   type CreateNetworkResourcePayload,
   type NetworkResource,
 } from "@/lib/api/network";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
@@ -52,8 +52,16 @@ interface ServiceFormValues {
   name: string;
   namespace: string;
   clusterId: string;
-  type: "ClusterIP" | "NodePort" | "LoadBalancer";
+  type: ServiceType;
+  externalName?: string;
+  selectorText?: string;
+  portsText?: string;
+  sessionAffinity?: "None" | "ClientIP";
+  externalTrafficPolicy?: "Cluster" | "Local";
+  internalTrafficPolicy?: "Cluster" | "Local";
 }
+
+type ServiceType = "ExternalName" | "LoadBalancer" | "ClusterIP" | "NodePort";
 
 const SERVICE_KIND = "Service";
 const SERVICE_PATH = "/network/services";
@@ -61,10 +69,12 @@ const SERVICE_TABLE_KEY = "network.services";
 const EMPTY_NETWORK_RESOURCES: NetworkResource[] = [];
 const EMPTY_CLUSTER_MAP: Record<string, string> = {};
 const SERVICE_TYPE_OPTIONS = [
+  { label: "ExternalName", value: "ExternalName" },
+  { label: "LoadBalancer", value: "LoadBalancer" },
   { label: "ClusterIP", value: "ClusterIP" },
   { label: "NodePort", value: "NodePort" },
-  { label: "LoadBalancer", value: "LoadBalancer" },
 ] satisfies Array<{ label: ServiceFormValues["type"]; value: ServiceFormValues["type"] }>;
+const SERVICE_TYPE_VALUES = new Set<ServiceType>(SERVICE_TYPE_OPTIONS.map((option) => option.value));
 const SERVICE_SORT_DIRECTIONS: AntdSortOrder[] = ["ascend", "descend", null];
 type ServiceTableChangeHandler = NonNullable<TableProps<NetworkResource>["onChange"]>;
 const ServiceNowContext = createContext<number | undefined>(undefined);
@@ -84,6 +94,100 @@ function getTextFilter(filters: HeadlampTableFilters, key: string) {
 
 function textMatches(value: unknown, filterValue: string) {
   return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+}
+
+function getServiceType(item: NetworkResource): ServiceType {
+  const rawType = item.spec?.type;
+  return typeof rawType === "string" && SERVICE_TYPE_VALUES.has(rawType as ServiceType)
+    ? rawType as ServiceType
+    : "ClusterIP";
+}
+
+function getServiceExternalName(item: NetworkResource): string {
+  const value = item.spec?.externalName;
+  return typeof value === "string" ? value : "";
+}
+
+function buildServiceSpec(values: ServiceFormValues, existingSpec?: Record<string, unknown>): Record<string, unknown> {
+  const base = { ...(existingSpec ?? {}) };
+  if (values.type === "ExternalName") {
+    return {
+      type: "ExternalName",
+      externalName: values.externalName?.trim(),
+    };
+  }
+  delete base.externalName;
+  const selector = parseKeyValueText(values.selectorText);
+  const ports = parseServicePorts(values.portsText);
+  return {
+    ...base,
+    type: values.type,
+    ...(Object.keys(selector).length > 0 ? { selector } : {}),
+    ...(ports.length > 0 ? { ports } : {}),
+    ...(values.sessionAffinity ? { sessionAffinity: values.sessionAffinity } : {}),
+    ...(values.externalTrafficPolicy && values.type !== "ClusterIP" ? { externalTrafficPolicy: values.externalTrafficPolicy } : {}),
+    ...(values.internalTrafficPolicy ? { internalTrafficPolicy: values.internalTrafficPolicy } : {}),
+  };
+}
+
+function parseKeyValueText(value?: string): Record<string, string> {
+  return Object.fromEntries(
+    (value ?? "")
+      .split(/\r?\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        const index = item.indexOf("=");
+        return index > 0 ? [item.slice(0, index).trim(), item.slice(index + 1).trim()] as const : null;
+      })
+      .filter((entry): entry is readonly [string, string] => Boolean(entry?.[0] && entry?.[1])),
+  );
+}
+
+function parseServicePorts(value?: string): Array<Record<string, unknown>> {
+  return (value ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [namePart, mappingPart = namePart] = line.includes(":") ? line.split(":", 2) : ["", line];
+      const [portPart, targetPart, protocolPart] = mappingPart.split("/");
+      const port = Number(portPart);
+      if (!Number.isFinite(port) || port <= 0) return null;
+      const item: Record<string, unknown> = {
+        port,
+        protocol: (protocolPart || "TCP").toUpperCase(),
+      };
+      if (namePart && namePart !== mappingPart) item.name = namePart.trim();
+      if (targetPart) {
+        const targetNumber = Number(targetPart);
+        item.targetPort = Number.isFinite(targetNumber) ? targetNumber : targetPart.trim();
+      }
+      return item;
+    })
+    .filter((item): item is Record<string, unknown> => Boolean(item));
+}
+
+function formatSelectorText(spec?: Record<string, unknown>): string {
+  const selector = spec?.selector;
+  if (!selector || typeof selector !== "object" || Array.isArray(selector)) return "";
+  return Object.entries(selector as Record<string, unknown>)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join("\n");
+}
+
+function formatPortsText(spec?: Record<string, unknown>): string {
+  const ports = Array.isArray(spec?.ports) ? spec.ports : [];
+  return ports
+    .map((entry) => {
+      const port = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
+      const name = typeof port.name === "string" ? `${port.name}:` : "";
+      const targetPort = port.targetPort ? `/${String(port.targetPort)}` : "";
+      const protocol = port.protocol ? `/${String(port.protocol)}` : "";
+      return `${name}${String(port.port ?? "")}${targetPort}${protocol}`;
+    })
+    .filter(Boolean)
+    .join("\n");
 }
 
 function getServiceSortOrder(
@@ -160,7 +264,12 @@ export default function ServicesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<NetworkResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [form] = Form.useForm<ServiceFormValues>();
+  const selectedServiceType = Form.useWatch("type", form);
   const page = pagination.pageIndex + 1;
   const serviceListParams = useMemo(
     () => ({
@@ -203,6 +312,7 @@ export default function ServicesPage() {
   });
 
   const clusterItems = clustersQuery.data?.items;
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
   const clusterOptions = useMemo(
     () => (clusterItems ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clusterItems],
@@ -232,6 +342,29 @@ export default function ServicesPage() {
     },
     onError: (err) => {
       void message.error(err instanceof Error ? err.message : "创建失败，请重试");
+    },
+  });
+
+  const applyYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setModalOpen(false);
+      setCreateYaml("");
+      await queryClient.invalidateQueries({
+        queryKey: ["network", SERVICE_KIND],
+      });
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "YAML 创建失败");
     },
   });
 
@@ -266,10 +399,7 @@ export default function ServicesPage() {
                 namespace: item.namespace,
                 ...(item.labels ? { labels: item.labels } : {}),
               },
-              spec: {
-                ...((item.spec ?? {}) as Record<string, unknown>),
-                type: values.type,
-              },
+              spec: buildServiceSpec(values, item.spec),
             },
             null,
             2,
@@ -294,8 +424,21 @@ export default function ServicesPage() {
   const handleOpenCreate = useCallback(() => {
     setEditingItem(null);
     form.resetFields();
+    const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+    const nextNamespace = namespace || "default";
+    form.setFieldsValue({
+      clusterId: nextClusterId,
+      namespace: nextNamespace,
+      type: "ClusterIP",
+      portsText: "http:80/80/TCP",
+      sessionAffinity: "None",
+    });
+    setCreateMode("form");
+    setCreateYaml("");
+    setCreateYamlClusterId(nextClusterId);
+    setCreateYamlNamespace(nextNamespace);
     setModalOpen(true);
-  }, [form]);
+  }, [clusterId, clusterOptions, form, namespace]);
 
   const handleOpenEdit = useCallback((item: NetworkResource) => {
     setEditingItem(item);
@@ -303,15 +446,31 @@ export default function ServicesPage() {
       name: item.name,
       namespace: item.namespace,
       clusterId: item.clusterId,
-      type:
-        item.spec?.type === "NodePort" || item.spec?.type === "LoadBalancer"
-          ? item.spec.type
-          : "ClusterIP",
+      type: getServiceType(item),
+      externalName: getServiceExternalName(item),
+      selectorText: formatSelectorText(item.spec),
+      portsText: formatPortsText(item.spec),
+      sessionAffinity: item.spec?.sessionAffinity === "ClientIP" ? "ClientIP" : "None",
+      externalTrafficPolicy: item.spec?.externalTrafficPolicy === "Local" ? "Local" : "Cluster",
+      internalTrafficPolicy: item.spec?.internalTrafficPolicy === "Local" ? "Local" : "Cluster",
     });
+    setCreateMode("form");
     setModalOpen(true);
   }, [form]);
 
   const handleModalSubmit = useCallback(async () => {
+    if (!editingItem && createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyYamlMutation.mutate();
+      return;
+    }
     let values: ServiceFormValues;
     try {
       values = await form.validateFields();
@@ -327,9 +486,9 @@ export default function ServicesPage() {
       namespace: values.namespace,
       kind: SERVICE_KIND,
       name: values.name,
-      spec: { type: values.type },
+      spec: buildServiceSpec(values),
     });
-  }, [createMutation, editingItem, form, updateMutation]);
+  }, [applyYamlMutation, createMode, createMutation, createYaml, createYamlClusterId, editingItem, form, updateMutation]);
 
   const serviceItems = data?.items ?? EMPTY_NETWORK_RESOURCES;
   const deferredServiceItems = useDeferredValue(serviceItems);
@@ -349,7 +508,7 @@ export default function ServicesPage() {
           textMatches(item.name, getTextFilter(deferredTableFilters, "name")) &&
           textMatches(getClusterDisplayName(deferredClusterMap, item.clusterId), getTextFilter(deferredTableFilters, "clusterId")) &&
           textMatches(item.namespace, getTextFilter(deferredTableFilters, "namespace")) &&
-          textMatches(SERVICE_KIND, getTextFilter(deferredTableFilters, "kind")),
+          textMatches(getServiceType(item), getTextFilter(deferredTableFilters, "type")),
       ),
     [deferredClusterMap, deferredMergedFilters, deferredServiceItems, deferredTableFilters],
   );
@@ -445,10 +604,10 @@ export default function ServicesPage() {
       },
       {
         title: "类型",
-        key: "kind",
+        key: "type",
         filter: { type: "text", placeholder: "类型" },
         width: TABLE_COL_WIDTH.type,
-        render: () => <NetworkKindChip kind={SERVICE_KIND} />,
+        render: (_: unknown, row: NetworkResource) => <NetworkKindChip kind={getServiceType(row)} />,
       },
       {
         title: "创建时间",
@@ -489,7 +648,7 @@ export default function ServicesPage() {
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path={SERVICE_PATH}
           embedded
@@ -503,6 +662,7 @@ export default function ServicesPage() {
           keywordInput={keywordInput}
           clusterOptions={clusterOptions}
           clusterLoading={clustersQuery.isLoading}
+          clusterUnavailable={clusterUnavailable}
           knownNamespaces={knownNamespaces}
           namespaceDisabled={namespaceDisabled}
           namespacePlaceholder={namespaceDisabled ? "请先选择集群" : "全部名称空间"}
@@ -531,6 +691,7 @@ export default function ServicesPage() {
           <ResourceTable<NetworkResource>
             rowKey="id"
             columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
             tableKey={SERVICE_TABLE_KEY}
             preferencesClient={preferencesClient}
             globalSearch={globalSearch}
@@ -543,10 +704,12 @@ export default function ServicesPage() {
             pagination={getPaginationConfig(data?.total ?? 0, isTableBusy)}
           />
         </ServiceTimeProvider>
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title={editingItem ? "编辑 Service" : "添加 Service"}
+        description="配置 Service 名称、作用域和类型。"
+        identity={editingItem?.name ?? "Service"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
@@ -556,10 +719,96 @@ export default function ServicesPage() {
         }}
         okText={editingItem ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending || updateMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || applyYamlMutation.isPending}
         destroyOnHidden
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+        {editingItem ? (
+          <Form form={form} layout="vertical">
+            <Form.Item
+              label="服务名称"
+              name="name"
+              rules={[{ required: true, message: "请输入服务名称" }]}
+            >
+              <Input disabled placeholder="例如：my-service" />
+            </Form.Item>
+            <Form.Item
+              label="名称空间"
+              name="namespace"
+              rules={[{ required: true, message: "请输入名称空间" }]}
+            >
+              <Input disabled placeholder="例如：default" />
+            </Form.Item>
+            <Form.Item
+              label="所属集群"
+              name="clusterId"
+              rules={[{ required: true, message: "请选择集群" }]}
+            >
+              <Select
+                placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                options={clusterOptions}
+                loading={clustersQuery.isLoading}
+                disabled
+              />
+            </Form.Item>
+            <Form.Item
+              label="服务类型"
+              name="type"
+              rules={[{ required: true, message: "请选择服务类型" }]}
+            >
+              <Select placeholder="请选择服务类型" options={SERVICE_TYPE_OPTIONS} />
+            </Form.Item>
+            {selectedServiceType === "ExternalName" ? (
+              <Form.Item
+                label="ExternalName"
+                name="externalName"
+                rules={[
+                  { required: true, message: "请输入 ExternalName" },
+                  { type: "string", min: 1, message: "请输入 ExternalName" },
+                ]}
+              >
+                <Input placeholder="example.internal" />
+              </Form.Item>
+            ) : (
+              <>
+                <Form.Item label="Selector" name="selectorText">
+                  <Input.TextArea rows={3} placeholder={"app=gateway\ntier=edge"} />
+                </Form.Item>
+                <Form.Item label="Ports" name="portsText">
+                  <Input.TextArea rows={3} placeholder={"http:80/8080/TCP\nmetrics:9090/9090/TCP"} />
+                </Form.Item>
+                <Space size={12} style={{ width: "100%" }}>
+                  <Form.Item label="会话保持" name="sessionAffinity" style={{ flex: 1 }}>
+                    <Select options={[{ label: "None", value: "None" }, { label: "ClientIP", value: "ClientIP" }]} />
+                  </Form.Item>
+                  <Form.Item label="内部流量策略" name="internalTrafficPolicy" style={{ flex: 1 }}>
+                    <Select options={[{ label: "Cluster", value: "Cluster" }, { label: "Local", value: "Local" }]} />
+                  </Form.Item>
+                </Space>
+                {selectedServiceType !== "ClusterIP" ? (
+                  <Form.Item label="外部流量策略" name="externalTrafficPolicy">
+                    <Select options={[{ label: "Cluster", value: "Cluster" }, { label: "Local", value: "Local" }]} />
+                  </Form.Item>
+                ) : null}
+              </>
+            )}
+          </Form>
+        ) : (
+          <ResourceCreateMethodTabs
+            mode={createMode}
+            onModeChange={setCreateMode}
+            yaml={createYaml}
+            onYamlChange={setCreateYaml}
+            clusterId={createYamlClusterId}
+            onClusterIdChange={setCreateYamlClusterId}
+            namespace={createYamlNamespace}
+            onNamespaceChange={setCreateYamlNamespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            clusterUnavailable={clusterUnavailable}
+            kindHint="Service"
+            disabled={createMutation.isPending || applyYamlMutation.isPending}
+            formContent={(
+              <Form form={form} layout="vertical">
           <Form.Item
             label="服务名称"
             name="name"
@@ -580,10 +829,11 @@ export default function ServicesPage() {
             rules={[{ required: true, message: "请选择集群" }]}
           >
             <Select
-              disabled={Boolean(editingItem)}
-              placeholder="请选择集群"
+              placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
               options={clusterOptions}
               loading={clustersQuery.isLoading}
+              disabled={Boolean(editingItem) || clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+              notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
               showSearch
               filterOption={(input, option) =>
                 String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
@@ -600,8 +850,45 @@ export default function ServicesPage() {
               options={SERVICE_TYPE_OPTIONS}
             />
           </Form.Item>
-        </Form>
-      </Modal>
+          {selectedServiceType === "ExternalName" ? (
+            <Form.Item
+              label="ExternalName"
+              name="externalName"
+              rules={[
+                { required: true, message: "请输入 ExternalName" },
+                { type: "string", min: 1, message: "请输入 ExternalName" },
+              ]}
+            >
+            <Input placeholder="example.internal" />
+          </Form.Item>
+          ) : (
+            <>
+              <Form.Item label="Selector" name="selectorText">
+                <Input.TextArea rows={3} placeholder={"app=gateway\ntier=edge"} />
+              </Form.Item>
+              <Form.Item label="Ports" name="portsText">
+                <Input.TextArea rows={3} placeholder={"http:80/8080/TCP\nmetrics:9090/9090/TCP"} />
+              </Form.Item>
+              <Space size={12} style={{ width: "100%" }}>
+                <Form.Item label="会话保持" name="sessionAffinity" style={{ flex: 1 }}>
+                  <Select options={[{ label: "None", value: "None" }, { label: "ClientIP", value: "ClientIP" }]} />
+                </Form.Item>
+                <Form.Item label="内部流量策略" name="internalTrafficPolicy" style={{ flex: 1 }}>
+                  <Select options={[{ label: "Cluster", value: "Cluster" }, { label: "Local", value: "Local" }]} />
+                </Form.Item>
+              </Space>
+              {selectedServiceType !== "ClusterIP" ? (
+                <Form.Item label="外部流量策略" name="externalTrafficPolicy">
+                  <Select options={[{ label: "Cluster", value: "Cluster" }, { label: "Local", value: "Local" }]} />
+                </Form.Item>
+              ) : null}
+            </>
+          )}
+              </Form>
+            )}
+          />
+        )}
+      </OpsModalShell>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}

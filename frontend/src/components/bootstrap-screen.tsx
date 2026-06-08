@@ -18,7 +18,7 @@ export function BootstrapScreen({
         justifyContent: "center",
         padding: 24,
         background:
-          "radial-gradient(ellipse at 20% 20%, rgba(59,130,246,0.12) 0%, transparent 45%), radial-gradient(ellipse at 80% 80%, rgba(56,189,248,0.08) 0%, transparent 45%), var(--color-bg)",
+          "radial-gradient(ellipse at 20% 20%, var(--kn-bg-radial-primary, rgba(59,130,246,0.12)) 0%, transparent 45%), radial-gradient(ellipse at 80% 80%, var(--kn-bg-radial-accent, rgba(56,189,248,0.08)) 0%, transparent 45%), var(--color-bg)",
       }}
     >
       <div
@@ -27,7 +27,7 @@ export function BootstrapScreen({
           border: "1px solid var(--color-border)",
           borderRadius: 20,
           background: "var(--color-card)",
-          boxShadow: "0 24px 60px rgba(15,23,42,0.18)",
+          boxShadow: "var(--kn-shadow-overlay, 0 24px 60px rgba(15,23,42,0.18))",
           padding: 28,
         }}
       >

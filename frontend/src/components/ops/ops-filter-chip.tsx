@@ -19,7 +19,9 @@ export type OpsFilterChipProps = Omit<ComponentPropsWithoutRef<"span">, "color" 
   icon?: ReactNode;
   closable?: boolean;
   onClose?: (event: MouseEvent<HTMLButtonElement>) => void;
+  closeLabel?: string;
   bordered?: boolean;
+  disabled?: boolean;
 };
 
 export function OpsFilterChip({
@@ -28,6 +30,8 @@ export function OpsFilterChip({
   children,
   icon,
   closable,
+  closeLabel = "移除",
+  disabled,
   onClose,
   bordered = true,
   ...props
@@ -44,8 +48,10 @@ export function OpsFilterChip({
         "ops-filter-chip",
         TONE_CLASS[tone],
         bordered === false ? "ops-filter-chip--borderless" : undefined,
+        disabled ? "ops-filter-chip--disabled" : undefined,
         className,
       ].filter(Boolean).join(" ")}
+      aria-disabled={disabled || undefined}
     >
       {icon ? <span className="ops-filter-chip__icon">{icon}</span> : null}
       {children}
@@ -53,7 +59,8 @@ export function OpsFilterChip({
         <button
           type="button"
           className="ops-filter-chip__close"
-          aria-label="移除"
+          aria-label={closeLabel}
+          disabled={disabled}
           onClick={handleClose}
         >
           <CloseOutlined />

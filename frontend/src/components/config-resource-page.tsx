@@ -34,6 +34,8 @@ function mapStateToStatus(state: ConfigResourceItem["state"]): string {
 function mapConfigToRecord(item: ConfigResourceItem): ModuleRecord {
   return {
     key: `${item.clusterId}/${item.namespace}/${item.name}`,
+    id: item.id,
+    kind: item.kind,
     name: item.name,
     namespace: item.namespace,
     clusterId: item.clusterId,

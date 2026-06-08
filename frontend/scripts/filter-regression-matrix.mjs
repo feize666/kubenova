@@ -277,6 +277,11 @@ async function resolveSampleClusterAndNamespace(page) {
   await page.goto(`${baseUrl}/workloads/pods`, { waitUntil: "domcontentloaded", timeout });
   await waitForPageReady(page);
 
+  const scopeTrigger = page.getByRole("button", { name: /资源范围/ }).first();
+  if ((await scopeTrigger.count()) > 0) {
+    await scopeTrigger.click();
+  }
+
   const clusterSelect = page.locator(".resource-filter-select").first();
   await clusterSelect.click();
   const clusterOptions = page.locator(".ant-select-dropdown:visible .ant-select-item-option[title]");
@@ -297,10 +302,17 @@ async function resolveSampleClusterAndNamespace(page) {
 
   await page.locator(".ant-select-dropdown:visible .ant-select-item-option", { hasText: clusterName }).first().click();
   await page.waitForTimeout(300);
+  const applyButton = page.getByRole("button", { name: "应用", exact: true }).first();
+  if ((await applyButton.count()) > 0) {
+    await applyButton.click();
+  }
   await page.waitForFunction(() => Boolean(new URL(window.location.href).searchParams.get("clusterId")), { timeout });
   const clusterId = new URL(page.url()).searchParams.get("clusterId") || "";
   if (!clusterId) fail("未能解析 clusterId");
 
+  if ((await scopeTrigger.count()) > 0) {
+    await scopeTrigger.click();
+  }
   const namespaceSelect = page.locator(".resource-filter-select--namespace").first();
   await namespaceSelect.click();
   const namespaceOptions = page.locator(".ant-select-dropdown:visible .ant-select-item-option[title]");
@@ -320,6 +332,10 @@ async function resolveSampleClusterAndNamespace(page) {
   if (!namespaceName) fail("未找到可用 namespace");
 
   await page.locator(".ant-select-dropdown:visible .ant-select-item-option", { hasText: namespaceName }).first().click();
+  const namespaceApplyButton = page.getByRole("button", { name: "应用", exact: true }).first();
+  if ((await namespaceApplyButton.count()) > 0) {
+    await namespaceApplyButton.click();
+  }
   await page.waitForFunction(() => Boolean(new URL(window.location.href).searchParams.get("namespace")), { timeout });
   const namespace = new URL(page.url()).searchParams.get("namespace") || "";
   if (!namespace) fail("未能解析 namespace");

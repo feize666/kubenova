@@ -11,6 +11,7 @@ import {
   ClustersRepository,
   type ClusterListParams,
 } from './clusters.repository';
+import * as k8s from '@kubernetes/client-node';
 import { PrismaService } from '../platform/database/prisma.service';
 import { K8sClientService } from './k8s-client.service';
 
@@ -111,6 +112,8 @@ export interface ClusterNodeListItem extends ClusterDetailNodeItem {
   containerRuntimeVersion: string | null;
   cpuCapacity: string | null;
   memoryCapacity: string | null;
+  cpuUsage: string | null;
+  memoryUsage: string | null;
   cpuUsagePercent: number | null;
   memoryUsagePercent: number | null;
   taints: string[];
@@ -126,6 +129,17 @@ export interface ClusterNodeListResponse {
   degradationReason: string | null;
   timestamp: string;
 }
+
+type NodeMetricItem = {
+  metadata?: {
+    name?: string;
+  };
+  timestamp?: string;
+  usage?: {
+    cpu?: string;
+    memory?: string;
+  };
+};
 
 export interface ClusterDetailResponse {
   id: string;
@@ -201,8 +215,7 @@ export class ClustersService implements OnModuleInit {
   private static readonly EXPORT_TOKEN_EXPIRATION_SECONDS = 3600;
   private static readonly EXPORT_CLUSTER_ROLE_NAME =
     'aiops:kubeconfig-export:read-only';
-  private static readonly EXPORT_SERVICE_ACCOUNT_PREFIX =
-    'aiops-export-reader';
+  private static readonly EXPORT_SERVICE_ACCOUNT_PREFIX = 'aiops-export-reader';
   private readonly repository: ClustersRepository;
   private readonly prisma: PrismaService;
   private readonly k8sClientService: K8sClientService;
@@ -418,8 +431,7 @@ export class ClustersService implements OnModuleInit {
       expiresAt:
         tokenRequest.status?.expirationTimestamp ??
         new Date(
-          Date.now() +
-            ClustersService.EXPORT_TOKEN_EXPIRATION_SECONDS * 1000,
+          Date.now() + ClustersService.EXPORT_TOKEN_EXPIRATION_SECONDS * 1000,
         ).toISOString(),
     };
   }
@@ -799,9 +811,7 @@ export class ClustersService implements OnModuleInit {
     return `${ClustersService.EXPORT_SERVICE_ACCOUNT_PREFIX}-${safe || 'cluster'}`;
   }
 
-  private async ensureReadonlyExportRbac(
-    kubeconfig: string,
-  ): Promise<void> {
+  private async ensureReadonlyExportRbac(kubeconfig: string): Promise<void> {
     const rbacApi = this.k8sClientService.getRbacAuthorizationApi(kubeconfig);
     const clusterRoleName = ClustersService.EXPORT_CLUSTER_ROLE_NAME;
     try {
@@ -813,12 +823,23 @@ export class ClustersService implements OnModuleInit {
           rules: [
             {
               apiGroups: [''],
-              resources: ['namespaces', 'nodes', 'pods', 'services', 'endpoints'],
+              resources: [
+                'namespaces',
+                'nodes',
+                'pods',
+                'services',
+                'endpoints',
+              ],
               verbs: ['get', 'list', 'watch'],
             },
             {
               apiGroups: ['apps'],
-              resources: ['deployments', 'statefulsets', 'daemonsets', 'replicasets'],
+              resources: [
+                'deployments',
+                'statefulsets',
+                'daemonsets',
+                'replicasets',
+              ],
               verbs: ['get', 'list', 'watch'],
             },
             {
@@ -905,8 +926,7 @@ export class ClustersService implements OnModuleInit {
       body: {
         spec: {
           audiences: ['api'],
-          expirationSeconds:
-            ClustersService.EXPORT_TOKEN_EXPIRATION_SECONDS,
+          expirationSeconds: ClustersService.EXPORT_TOKEN_EXPIRATION_SECONDS,
         },
       },
     }) as Promise<{
@@ -1168,7 +1188,10 @@ export class ClustersService implements OnModuleInit {
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   }
 
-  private async fetchNodeInventory(clusterId: string, kubeconfig: string | null): Promise<{
+  private async fetchNodeInventory(
+    clusterId: string,
+    kubeconfig: string | null,
+  ): Promise<{
     items: ClusterNodeListItem[];
     degraded: boolean;
     degradationReason: string | null;
@@ -1182,6 +1205,7 @@ export class ClustersService implements OnModuleInit {
     }
 
     try {
+      const metricsByNode = await this.fetchNodeMetrics(kubeconfig);
       const coreApi = this.k8sClientService.getCoreApi(kubeconfig);
       const resp = await coreApi.listNode();
       const items = resp.items
@@ -1215,6 +1239,19 @@ export class ClustersService implements OnModuleInit {
           const createdAt = node.metadata?.creationTimestamp
             ? node.metadata.creationTimestamp.toISOString()
             : null;
+          const cpuCapacity = node.status?.capacity?.cpu ?? null;
+          const memoryCapacity = node.status?.capacity?.memory ?? null;
+          const metrics = metricsByNode.get(name);
+          const cpuUsageRaw = metrics?.usage?.cpu ?? null;
+          const memoryUsageRaw = metrics?.usage?.memory ?? null;
+          const cpuUsage = this.parseCpuToCores(cpuUsageRaw ?? undefined);
+          const cpuTotal = this.parseCpuToCores(cpuCapacity ?? undefined);
+          const memoryUsage = this.parseMemoryToBytes(
+            memoryUsageRaw ?? undefined,
+          );
+          const memoryTotal = this.parseMemoryToBytes(
+            memoryCapacity ?? undefined,
+          );
           return {
             id: `${clusterId}:${name}`,
             name,
@@ -1228,10 +1265,12 @@ export class ClustersService implements OnModuleInit {
             kernelVersion: node.status?.nodeInfo?.kernelVersion ?? null,
             containerRuntimeVersion:
               node.status?.nodeInfo?.containerRuntimeVersion ?? null,
-            cpuCapacity: node.status?.capacity?.cpu ?? null,
-            memoryCapacity: node.status?.capacity?.memory ?? null,
-            cpuUsagePercent: null,
-            memoryUsagePercent: null,
+            cpuCapacity,
+            memoryCapacity,
+            cpuUsage: cpuUsageRaw,
+            memoryUsage: memoryUsageRaw,
+            cpuUsagePercent: this.toUsagePercent(cpuUsage, cpuTotal),
+            memoryUsagePercent: this.toUsagePercent(memoryUsage, memoryTotal),
             taints,
             age: createdAt,
             createdAt,
@@ -1248,6 +1287,102 @@ export class ClustersService implements OnModuleInit {
         degradationReason: `读取 Kubernetes 节点清单失败：${message}`,
       };
     }
+  }
+
+  private async fetchNodeMetrics(
+    kubeconfig: string,
+  ): Promise<Map<string, NodeMetricItem>> {
+    if (
+      typeof (this.k8sClientService as { createClient?: unknown })
+        .createClient !== 'function'
+    ) {
+      return new Map();
+    }
+    try {
+      const kc = this.k8sClientService.createClient(kubeconfig);
+      const metricsApi = new k8s.Metrics(kc);
+      const metrics = (await metricsApi.getNodeMetrics()) as {
+        items?: NodeMetricItem[];
+      };
+      return new Map(
+        (metrics.items ?? [])
+          .map((item): [string, NodeMetricItem] | null => {
+            const name = item.metadata?.name?.trim();
+            return name ? [name, item] : null;
+          })
+          .filter((item): item is [string, NodeMetricItem] => item !== null),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `fetch node metrics failed: ${(error as Error).message}`,
+      );
+      return new Map();
+    }
+  }
+
+  private toUsagePercent(
+    used: number | null,
+    total: number | null,
+  ): number | null {
+    if (
+      typeof used !== 'number' ||
+      typeof total !== 'number' ||
+      !Number.isFinite(used) ||
+      !Number.isFinite(total) ||
+      total <= 0
+    ) {
+      return null;
+    }
+    return Math.round((used / total) * 1000) / 10;
+  }
+
+  private parseCpuToCores(value?: string): number | null {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const numeric = Number.parseFloat(trimmed);
+    if (!Number.isFinite(numeric)) return null;
+    if (trimmed.endsWith('n')) return numeric / 1_000_000_000;
+    if (
+      trimmed.endsWith('u') ||
+      trimmed.endsWith('µ') ||
+      trimmed.endsWith('μ')
+    ) {
+      return numeric / 1_000_000;
+    }
+    if (trimmed.endsWith('m')) return numeric / 1_000;
+    if (trimmed.endsWith('K') || trimmed.endsWith('k')) return numeric * 1_000;
+    if (trimmed.endsWith('M')) return numeric * 1_000_000;
+    if (trimmed.endsWith('G')) return numeric * 1_000_000_000;
+    if (trimmed.endsWith('T')) return numeric * 1_000_000_000_000;
+    if (trimmed.endsWith('P')) return numeric * 1_000_000_000_000_000;
+    if (trimmed.endsWith('E')) return numeric * 1_000_000_000_000_000_000;
+    return numeric;
+  }
+
+  private parseMemoryToBytes(value?: string): number | null {
+    if (!value) return null;
+    const normalized = value.trim();
+    if (!normalized) return null;
+    const match = normalized.match(/^([0-9]+(?:\.[0-9]+)?)([a-zA-Z]+)?$/);
+    if (!match) return null;
+    const amount = Number.parseFloat(match[1]);
+    if (!Number.isFinite(amount)) return null;
+    const suffix = (match[2] ?? '').toLowerCase();
+    const units: Record<string, number> = {
+      '': 1,
+      k: 1_000,
+      m: 1_000_000,
+      g: 1_000_000_000,
+      t: 1_000_000_000_000,
+      ki: 1024,
+      mi: 1024 ** 2,
+      gi: 1024 ** 3,
+      ti: 1024 ** 4,
+    };
+    const base = units[suffix];
+    if (!base) return null;
+    return amount * base;
   }
 
   private requireClusterProfileModel(): {

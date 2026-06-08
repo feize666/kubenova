@@ -14,7 +14,6 @@ import { useMemo, useState } from "react";
 import {
   Alert,
   App,
-  Card,
   Dropdown,
   Form,
   Input,
@@ -43,6 +42,8 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsSurface } from "@/components/ops/ops-surface";
 import {
   applyWorkloadActionById,
   applyWorkloadAction,
@@ -99,6 +100,7 @@ type DeploymentStatus = "运行中" | "收敛中" | "异常";
 type DeploymentRow = {
   key: string;
   id: string;
+  kind: string;
   原始名称: string;
   集群: string;
   名称: string;
@@ -170,6 +172,7 @@ function mapItemToRow(item: WorkloadItem): DeploymentRow {
   return {
     key: `${item.clusterId}/${item.namespace}/${item.name}`,
     id: (item as WorkloadItem & { id?: string }).id ?? "",
+    kind: item.kind || "Deployment",
     原始名称: item.name,
     集群: item.clusterId,
     名称: item.name,
@@ -704,12 +707,13 @@ export default function DeploymentsPage() {
       return;
     }
     if (key === "delete") {
-      Modal.confirm({
+      openOpsConfirm({
         title: "确认删除部署",
-        content: `删除 ${row.名称} 后将不可恢复`,
+        description: `删除 ${row.名称} 后将不可恢复。`,
+        impact: "删除后该 Deployment 的副本集和工作负载配置将由集群回收。",
         okText: "确认",
         cancelText: "取消",
-        okButtonProps: { danger: true },
+        danger: true,
         onOk: () => void handleDelete(row),
       });
     }
@@ -840,7 +844,7 @@ export default function DeploymentsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/workloads/deployments"
           embedded
@@ -915,6 +919,7 @@ export default function DeploymentsPage() {
             }}
             sort={{ sortBy, sortOrder }}
             columns={antd列}
+            onResourceNavigate={(request) => setDetailTarget(request)}
             dataSource={表格数据}
             loading={{ spinning: query.isLoading && !query.data, description: "Deployment 数据加载中..." }}
             onChange={(paginationInfo, filters, sorter, extra) =>
@@ -924,7 +929,7 @@ export default function DeploymentsPage() {
             emptyDescription="暂无数据"
           />
         </Space>
-      </Card>
+      </OpsSurface>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}

@@ -22,6 +22,11 @@ const DEFAULT_SECTION_FIELDS: SectionFieldMap = {
 };
 
 const RENDER_PROFILES: Record<string, ResourceDetailRenderProfile> = {
+  cluster: {
+    title: "Cluster 详情",
+    overviewFields: ["clusterId", "kind", "name", "state", "createdAt", "updatedAt"],
+    runtimeFields: ["phase"],
+  },
   pod: {
     title: "Pod 详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
@@ -179,6 +184,9 @@ const RENDER_PROFILES: Record<string, ResourceDetailRenderProfile> = {
 export function normalizeKind(kind: string): string {
   const value = kind.trim().toLowerCase().replace(/[\s_-]+/g, "");
   switch (value) {
+    case "cluster":
+    case "clusters":
+      return "cluster";
     case "serviceaccount":
     case "serviceaccounts":
       return "serviceaccount";

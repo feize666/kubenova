@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Card, Form, Input, Modal, Select, Space, Typography, message } from "antd";
+import { Alert, Form, Input, Select, Space, Typography, message } from "antd";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -14,6 +14,8 @@ import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
+import { OpsModalShell, OpsSurface } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { matchLabelExpressions, parseResourceSearchInput } from "@/components/resource-action-bar";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -22,7 +24,7 @@ import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { applyNetworkResourceYaml, createNetworkResource, deleteNetworkResource, getNetworkResources, type CreateNetworkResourcePayload, type NetworkResource } from "@/lib/api/network";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
@@ -105,6 +107,10 @@ export default function NetworkPolicyPage() {
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [editingItem, setEditingItem] = useState<NetworkPolicyResource | null>(null);
   const [form] = Form.useForm<NetworkPolicyFormValues>();
   const {
@@ -164,6 +170,7 @@ export default function NetworkPolicyPage() {
   );
 
   const clusterOptions = (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id }));
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
   const clusterMap = Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]));
 
   const createMutation = useMutation({
@@ -193,6 +200,28 @@ export default function NetworkPolicyPage() {
     },
     onError: (err) => {
       void message.error(err instanceof Error ? err.message : "创建失败，请重试");
+    },
+  });
+
+  const applyYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setModalOpen(false);
+      setCreateYaml("");
+      await queryClient.invalidateQueries({ queryKey: ["network", "NetworkPolicy"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "YAML 创建失败");
     },
   });
 
@@ -298,7 +327,18 @@ export default function NetworkPolicyPage() {
 
   const handleOpenCreate = () => {
     setEditingItem(null);
+    const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+    const nextNamespace = namespace || "default";
     form.resetFields();
+    form.setFieldsValue({
+      clusterId: nextClusterId,
+      namespace: nextNamespace,
+      policyTypes: ["Ingress"],
+    });
+    setCreateMode("form");
+    setCreateYaml("");
+    setCreateYamlClusterId(nextClusterId);
+    setCreateYamlNamespace(nextNamespace);
     setModalOpen(true);
   };
 
@@ -450,6 +490,18 @@ export default function NetworkPolicyPage() {
   ];
 
   const handleModalSubmit = async () => {
+    if (!editingItem && createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyYamlMutation.mutate();
+      return;
+    }
     let values: NetworkPolicyFormValues;
     try {
       values = await form.validateFields();
@@ -507,7 +559,7 @@ export default function NetworkPolicyPage() {
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/network/networkpolicy"
           embedded
@@ -560,6 +612,7 @@ export default function NetworkPolicyPage() {
         <ResourceTable<NetworkPolicyResource>
           rowKey="id"
           columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           tableKey="network.networkpolicy"
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -580,55 +633,119 @@ export default function NetworkPolicyPage() {
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
         />
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title={editingItem ? "编辑 NetworkPolicy" : "添加 NetworkPolicy"}
+        description="配置 NetworkPolicy 的选择器、策略类型和命名空间规则。"
+        identity={editingItem?.name ?? "NetworkPolicy"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
           setEditingItem(null);
+          setCreateYaml("");
           form.resetFields();
         }}
         okText={editingItem ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending || updateMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || applyYamlMutation.isPending}
         destroyOnHidden
+        width={720}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item label="策略名称" name="name" rules={[{ required: true, message: "请输入 NetworkPolicy 名称" }]}>
-            <Input disabled={Boolean(editingItem)} placeholder="例如：allow-ingress" />
-          </Form.Item>
-          <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
-            <Input disabled={Boolean(editingItem)} placeholder="例如：default" />
-          </Form.Item>
-          <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
-            <Select disabled={Boolean(editingItem)} placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} showSearch filterOption={(input, option) => (option?.label ?? "").toLowerCase().includes(input.toLowerCase())} />
-          </Form.Item>
-          <Form.Item label="Pod 标签键" name="podSelectorKey">
-            <Input placeholder="例如：app" />
-          </Form.Item>
-          <Form.Item label="Pod 标签值" name="podSelectorValue">
-            <Input placeholder="例如：web" />
-          </Form.Item>
-          <Form.Item label="策略类型" name="policyTypes" initialValue={["Ingress"]}>
-            <Select
-              mode="multiple"
-              options={[
-                { label: "Ingress", value: "Ingress" },
-                { label: "Egress", value: "Egress" },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item label="Ingress 来源名称空间" name="ingressFromNamespace">
-            <Input placeholder="例如：default" />
-          </Form.Item>
-          <Form.Item label="Egress 目标名称空间" name="egressToNamespace">
-            <Input placeholder="例如：kube-system" />
-          </Form.Item>
-        </Form>
-      </Modal>
+        {editingItem ? (
+          <Form form={form} layout="vertical">
+            <Form.Item label="策略名称" name="name" rules={[{ required: true, message: "请输入 NetworkPolicy 名称" }]}>
+              <Input disabled placeholder="例如：allow-ingress" />
+            </Form.Item>
+            <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
+              <Input disabled placeholder="例如：default" />
+            </Form.Item>
+            <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
+              <Select disabled placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} />
+            </Form.Item>
+            <Form.Item label="Pod 标签键" name="podSelectorKey">
+              <Input placeholder="例如：app" />
+            </Form.Item>
+            <Form.Item label="Pod 标签值" name="podSelectorValue">
+              <Input placeholder="例如：web" />
+            </Form.Item>
+            <Form.Item label="策略类型" name="policyTypes" initialValue={["Ingress"]}>
+              <Select
+                mode="multiple"
+                options={[
+                  { label: "Ingress", value: "Ingress" },
+                  { label: "Egress", value: "Egress" },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item label="Ingress 来源名称空间" name="ingressFromNamespace">
+              <Input placeholder="例如：default" />
+            </Form.Item>
+            <Form.Item label="Egress 目标名称空间" name="egressToNamespace">
+              <Input placeholder="例如：kube-system" />
+            </Form.Item>
+          </Form>
+        ) : (
+          <ResourceCreateMethodTabs
+            mode={createMode}
+            onModeChange={setCreateMode}
+            yaml={createYaml}
+            onYamlChange={setCreateYaml}
+            clusterId={createYamlClusterId}
+            onClusterIdChange={setCreateYamlClusterId}
+            namespace={createYamlNamespace}
+            onNamespaceChange={setCreateYamlNamespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            clusterUnavailable={clusterUnavailable}
+            kindHint="NetworkPolicy"
+            disabled={createMutation.isPending || applyYamlMutation.isPending}
+            formContent={(
+              <Form form={form} layout="vertical">
+                <Form.Item label="策略名称" name="name" rules={[{ required: true, message: "请输入 NetworkPolicy 名称" }]}>
+                  <Input placeholder="例如：allow-ingress" />
+                </Form.Item>
+                <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
+                  <Input placeholder="例如：default" />
+                </Form.Item>
+                <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
+                  <Select
+                    placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                    options={clusterOptions}
+                    loading={clustersQuery.isLoading}
+                    disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+                    notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                    showSearch
+                    filterOption={(input, option) => (option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                  />
+                </Form.Item>
+                <Form.Item label="Pod 标签键" name="podSelectorKey">
+                  <Input placeholder="例如：app" />
+                </Form.Item>
+                <Form.Item label="Pod 标签值" name="podSelectorValue">
+                  <Input placeholder="例如：web" />
+                </Form.Item>
+                <Form.Item label="策略类型" name="policyTypes" initialValue={["Ingress"]}>
+                  <Select
+                    mode="multiple"
+                    options={[
+                      { label: "Ingress", value: "Ingress" },
+                      { label: "Egress", value: "Egress" },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item label="Ingress 来源名称空间" name="ingressFromNamespace">
+                  <Input placeholder="例如：default" />
+                </Form.Item>
+                <Form.Item label="Egress 目标名称空间" name="egressToNamespace">
+                  <Input placeholder="例如：kube-system" />
+                </Form.Item>
+              </Form>
+            )}
+          />
+        )}
+      </OpsModalShell>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}

@@ -1,5 +1,6 @@
 import { apiRequest } from "./client";
 import { buildListQuery } from "./query";
+import { load as loadYaml } from "js-yaml";
 
 export type HelmAction = "install" | "upgrade" | "rollback" | "uninstall";
 export type HelmActionType = HelmAction;
@@ -27,6 +28,28 @@ export interface HelmRepositoryMutationPayload {
   clusterId: string;
   name: string;
   url: string;
+  repositoryKind?: HelmRepositoryKind;
+  authType?: HelmRepositoryAuthType;
+  username?: string;
+  password?: string;
+  caData?: string;
+  insecureSkipTlsVerify?: boolean;
+}
+
+export type HelmRepositoryAuthType = "none" | "basic";
+export type HelmRepositoryKind = "http" | "oci";
+export type HelmRepositorySource = "manual" | "host-cli" | "preset" | "platform" | "unknown";
+
+export interface HelmRepositoryDiagnostics {
+  code?: string;
+  reason?: string;
+  suggestion?: string;
+  command?: string;
+  stdout?: string;
+  stderr?: string;
+  checkedAt?: string;
+  repositoryConfigPath?: string;
+  repositoryCachePath?: string;
 }
 
 export interface HelmRepositoryPresetItem {
@@ -63,6 +86,32 @@ export interface HelmImportRepositoryPresetsResponse {
   timestamp: string;
 }
 
+export interface HelmImportHostRepositoriesPayload {
+  clusterId?: string;
+  sync?: boolean;
+  overwrite?: boolean;
+}
+
+export interface HelmImportHostRepositoryItem {
+  name: string;
+  url: string;
+  action: "created" | "updated" | "existing" | "failed";
+  source?: HelmRepositorySource;
+  repositoryKind?: HelmRepositoryKind;
+  syncStatus: HelmRepositoryItem["syncStatus"];
+  message?: string;
+  diagnostics?: HelmRepositoryDiagnostics;
+}
+
+export interface HelmImportHostRepositoriesResponse {
+  clusterId?: string;
+  sync: boolean;
+  imported: HelmImportHostRepositoryItem[];
+  total: number;
+  timestamp: string;
+  diagnostics?: HelmRepositoryDiagnostics[];
+}
+
 export interface HelmChartListQueryParams {
   clusterId: string;
   repository?: string;
@@ -93,10 +142,17 @@ export interface HelmRepositoryItem {
   clusterId: string;
   name: string;
   url: string;
-  authType: "none";
+  authType: HelmRepositoryAuthType;
+  repositoryKind?: HelmRepositoryKind;
+  source?: HelmRepositorySource;
+  insecureSkipTlsVerify?: boolean;
   syncStatus: "saved" | "validated" | "syncing" | "synced" | "failed";
   lastSyncAt?: string;
   message?: string;
+  chartCount?: number;
+  indexUpdatedAt?: string;
+  syncDurationMs?: number;
+  diagnostics?: HelmRepositoryDiagnostics;
   createdAt: string;
   updatedAt: string;
 }
@@ -139,6 +195,7 @@ export interface HelmRepositoryListResponse {
   total: number;
   page: number;
   pageSize: number;
+  diagnostics?: HelmRepositoryDiagnostics[];
   timestamp: string;
 }
 
@@ -250,20 +307,25 @@ function pickString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function parseJsonObjectString(input?: string): Record<string, unknown> | undefined {
+function parseValuesObjectString(input?: string): Record<string, unknown> | undefined {
   const normalized = input?.trim();
   if (!normalized) {
     return undefined;
   }
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(normalized) as unknown;
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
+    parsed = JSON.parse(normalized) as unknown;
+  } catch {
+    try {
+      parsed = loadYaml(normalized);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : "values 解析失败");
     }
-    throw new Error("values 必须是 JSON object");
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "values 解析失败");
   }
+  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  throw new Error("values 必须是 JSON/YAML object");
 }
 
 function mapListItem(item: BackendHelmListItem, clusterId: string): HelmReleaseItem {
@@ -356,6 +418,20 @@ export async function importHelmRepositoryPresets(
 ): Promise<HelmImportRepositoryPresetsResponse> {
   return apiRequest<HelmImportRepositoryPresetsResponse, HelmImportRepositoryPresetsPayload>(
     "/api/helm/repositories/import-presets",
+    {
+      method: "POST",
+      body: payload,
+      token,
+    },
+  );
+}
+
+export async function importHostHelmRepositories(
+  payload: HelmImportHostRepositoriesPayload = {},
+  token?: string,
+): Promise<HelmImportHostRepositoriesResponse> {
+  return apiRequest<HelmImportHostRepositoriesResponse, HelmImportHostRepositoriesPayload>(
+    "/api/helm/repositories/import-host",
     {
       method: "POST",
       body: payload,
@@ -599,7 +675,7 @@ export async function executeHelmAction(
   const namespace = payload.namespace?.trim();
   const valuesObject =
     typeof payload.values === "string"
-      ? parseJsonObjectString(payload.values)
+      ? parseValuesObjectString(payload.values)
       : payload.values;
 
   if (action === "install") {

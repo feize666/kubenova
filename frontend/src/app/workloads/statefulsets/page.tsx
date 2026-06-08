@@ -16,7 +16,6 @@ import {
   Alert,
   App,
   Button,
-  Card,
   Col,
   Dropdown,
   Form,
@@ -49,6 +48,8 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsSurface } from "@/components/ops/ops-surface";
 import {
   applyWorkloadActionById,
   buildWorkloadSafeEditPatch,
@@ -628,12 +629,13 @@ export default function StatefulSetsPage() {
       return;
     }
     if (key === "delete") {
-      Modal.confirm({
+      openOpsConfirm({
         title: "删除 StatefulSet",
-        content: `确认删除 ${item.name} 吗？`,
+        description: `确认删除 ${item.name} 吗？`,
+        impact: "删除后有状态工作负载将停止管理副本，数据卷保留策略由集群配置决定。",
         okText: "确认",
         cancelText: "取消",
-        okButtonProps: { danger: true },
+        danger: true,
         onOk: () => void handleDelete(item),
       });
     }
@@ -737,7 +739,7 @@ export default function StatefulSetsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/workloads/statefulsets"
           embedded
@@ -819,6 +821,7 @@ export default function StatefulSetsPage() {
             }}
             sort={{ sortBy, sortOrder }}
             columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
             dataSource={filteredTableData}
             loading={isLoading || actionMutation.isPending}
             onChange={(paginationInfo, filters, sorter, extra) =>
@@ -827,7 +830,7 @@ export default function StatefulSetsPage() {
             pagination={getPaginationConfig(data?.total ?? 0, isLoading || actionMutation.isPending)}
           />
         </Space>
-      </Card>
+      </OpsSurface>
 
       <Modal
         title={editingItem ? "编辑 StatefulSet" : "新增资源"}

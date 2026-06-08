@@ -53,6 +53,8 @@ export interface ClusterDetailNodeModel {
   containerRuntimeVersion?: string | null;
   cpuCapacity?: string | null;
   memoryCapacity?: string | null;
+  cpuUsage?: string | null;
+  memoryUsage?: string | null;
   cpuUsagePercent?: number | null;
   memoryUsagePercent?: number | null;
   taints?: string[];
@@ -100,6 +102,8 @@ export interface ClusterNodeListItemModel extends Required<Pick<ClusterDetailNod
   containerRuntimeVersion: string | null;
   cpuCapacity: string | null;
   memoryCapacity: string | null;
+  cpuUsage: string | null;
+  memoryUsage: string | null;
   cpuUsagePercent: number | null;
   memoryUsagePercent: number | null;
   taints: string[];
@@ -205,6 +209,7 @@ export interface ClusterListModel {
   pageSize: number;
   total: number;
   timestamp: string;
+  selectableUnavailable?: boolean;
 }
 
 export interface ListModel<TItem> {

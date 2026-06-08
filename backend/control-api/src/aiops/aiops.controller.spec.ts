@@ -128,7 +128,10 @@ describe('AiopsController', () => {
     const { controller } = createController();
 
     expect(() =>
-      controller.precheckRecommendation({ user: {} }, { recommendationId: ' ' }),
+      controller.precheckRecommendation(
+        { user: {} },
+        { recommendationId: ' ' },
+      ),
     ).toThrow(BadRequestException);
   });
 });

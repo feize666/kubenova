@@ -20,10 +20,8 @@ import {
   Card,
   Col,
   Descriptions,
-  Drawer,
   Form,
   Input,
-  Modal,
   Progress,
   Row,
   Select,
@@ -38,11 +36,22 @@ import type { ColumnsType } from "antd/es/table";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterDetailDrawer } from "@/components/cluster-detail-drawer";
-import { OpsActionDropdown, OpsFilterChip, type OpsFilterChipTone } from "@/components/ops";
+import {
+  OpsActionDropdown,
+  OpsDrawerShell,
+  OpsFilterChip,
+  OpsFormSection,
+  OpsModalShell,
+  OpsPageHeader,
+  OpsSurface,
+  openOpsConfirm,
+  type OpsFilterChipTone,
+} from "@/components/ops";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
 } from "@/components/resource-filter-toolbar";
+import { ResourceFacetFilterButton } from "@/components/resource-facet-filter-button";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
@@ -832,26 +841,28 @@ export default function ClustersPage() {
                 return;
               }
               if (key === "delete") {
-                Modal.confirm({
+                openOpsConfirm({
                   title: "删除集群",
-                  content: `确认删除集群「${row.name}」吗？此操作不可恢复。`,
+                  description: `确认删除集群「${row.name}」吗？此操作不可恢复。`,
+                  impact: "删除后该集群的接入配置和列表记录将不可恢复。",
                   okText: "确认删除",
                   cancelText: "取消",
-                  okButtonProps: { danger: true },
+                  danger: true,
                   onOk: () => void handleDelete(row),
                 });
                 return;
               }
               if (key === "enable" || key === "disable") {
-                Modal.confirm({
+                openOpsConfirm({
                   title: key === "enable" ? "启用集群" : "停用集群",
-                  content:
+                  description:
                     key === "enable"
                       ? `确认启用集群「${row.name}」？`
                       : `确认停用集群「${row.name}」？停用后集群不可操作但可恢复。`,
+                  impact: key === "disable" ? "停用后该集群不可操作，但可以重新启用。" : undefined,
                   okText: key === "enable" ? "确认启用" : "确认停用",
                   cancelText: "取消",
-                  okButtonProps: { danger: key === "disable" },
+                  danger: key === "disable",
                   onOk: () => void handleToggleState(row),
                 });
               }
@@ -883,25 +894,17 @@ export default function ClustersPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card>
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Row align="middle" gutter={8}>
-              <Col>
-                <Typography.Title level={4} style={{ marginBottom: 4 }}>
-                  集群管理
-                </Typography.Title>
-              </Col>
-              <Col style={{ paddingBottom: 4 }}>
-                <ResourceAddButton onClick={openAddModal} aria-label="创建集群" />
-              </Col>
-            </Row>
-            <Typography.Text type="secondary">
-              查看集群版本、资源使用率和运行状态。系统自动健康探测与资源同步，支持禁用/启用。
-            </Typography.Text>
-          </Col>
-        </Row>
-      </Card>
+      <OpsPageHeader
+        title={(
+          <>
+            集群管理
+            <span className="resource-page-header__title-suffix">
+              <ResourceAddButton onClick={openAddModal} aria-label="创建集群" />
+            </span>
+          </>
+        )}
+        subtitle="查看集群版本、资源使用率和运行状态。系统自动健康探测与资源同步，支持禁用/启用。"
+      />
 
       <Row gutter={[12, 12]}>
         <Col xs={24} md={6} xl={4}>
@@ -936,19 +939,20 @@ export default function ClustersPage() {
         </Col>
       </Row>
 
-      <Card>
+      <OpsSurface variant="toolbar" padding="sm">
         <ResourceFilterToolbar>
-          <ResourceFilterToolbarItem label="环境" width="sm">
-            <Select
-              className="resource-filter-select"
-              style={{ width: "100%" }}
+          <ResourceFilterToolbarItem width="auto">
+            <ResourceFacetFilterButton
+              label="环境"
               value={environment}
-              onChange={handleEnvironmentChange}
+              allLabel="全部环境"
+              panelTitle="环境范围"
               options={ENVIRONMENT_OPTIONS}
+              onChange={handleEnvironmentChange}
             />
           </ResourceFilterToolbarItem>
         </ResourceFilterToolbar>
-      </Card>
+      </OpsSurface>
 
       {!isInitializing && !accessToken ? (
         <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再查看集群信息。" />
@@ -974,6 +978,14 @@ export default function ClustersPage() {
           globalSearch={globalSearch}
           filters={tableFilters}
           onFiltersChange={handleFiltersChange}
+          onResourceNavigate={(request) => {
+            if (request.kind !== "Cluster") return;
+            const targetId = String(request.id || request.name || "");
+            const target = visibleTableData.find((item) => item.id === targetId || item.name === targetId);
+            if (!target) return;
+            setSelectedCluster(target);
+            setDetailOpen(true);
+          }}
           loading={loadingState}
           onChange={handleResourceTableChange}
           pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, isTableBusy)}
@@ -990,13 +1002,13 @@ export default function ClustersPage() {
         onRefreshRequest={handleDetailRefreshRequest}
       />
 
-      <Drawer
+      <OpsDrawerShell
         title={healthDetailCluster ? `健康详情 · ${healthDetailCluster.name}` : "健康详情"}
         open={Boolean(healthDetailCluster)}
-        size="large"
+        variant="business"
         onClose={handleCloseHealthDetail}
-        styles={{ wrapper: { width: "min(100vw, 840px)" } }}
-        extra={
+        bodyClassName="cluster-health-drawer__body"
+        footerActions={
           healthDetailCluster ? (
             <Button
               icon={<ReloadOutlined />}
@@ -1055,10 +1067,12 @@ export default function ClustersPage() {
             </Card>
           </Space>
         ) : null}
-      </Drawer>
+      </OpsDrawerShell>
 
-      <Modal
+      <OpsModalShell
         title={editingCluster ? "编辑集群" : "添加集群"}
+        description="填写集群元数据和 KubeConfig，平台会据此连接真实集群。"
+        identity={editingCluster?.name ?? "集群"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={handleModalCancel}
@@ -1068,73 +1082,74 @@ export default function ClustersPage() {
         destroyOnHidden
         width={600}
       >
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 16, marginTop: 8 }}>
-          填写 KubeConfig 后平台将使用它连接真实集群，获取实时资源数据。不填写时集群以离线模式管理。
-        </Typography.Paragraph>
         <Form form={form} layout="vertical">
-          <Form.Item
-            label="集群名称"
-            name="name"
-            rules={[{ required: true, message: "请输入集群名称" }]}
-          >
-            <Input placeholder="例如：prod-cluster-01" />
-          </Form.Item>
-          <Form.Item
-            label="环境"
-            name="environment"
-            rules={[{ required: true, message: "请选择环境" }]}
-          >
-            <Select
-              placeholder="请选择环境"
-              options={[
-                { label: "公有云", value: "公有云" },
-                { label: "私有云", value: "私有云" },
-                { label: "本地", value: "本地" },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            label="供应商"
-            name="provider"
-            rules={[{ required: true, message: "请输入供应商" }]}
-          >
-            <Input placeholder="例如：AWS / 阿里云 / 自建" />
-          </Form.Item>
-          <Form.Item
-            label="K8s 版本"
-            name="kubernetesVersion"
-            rules={[{ required: true, message: "请输入 K8s 版本" }]}
-          >
-            <Input placeholder="例如：v1.28.4" />
-          </Form.Item>
-          <Form.Item label="状态" name="status">
-            <Select
-              placeholder="请选择状态（可选）"
-              allowClear
-              options={[
-                { label: "正常", value: "正常" },
-                { label: "告警", value: "告警" },
-                { label: "维护", value: "维护" },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            label="KubeConfig（YAML 格式）"
-            name="kubeconfig"
-            extra={
-              editingCluster
-                ? "如不修改 kubeconfig，留空即可；重新粘贴将覆盖原有配置。"
-                : "粘贴 kubectl config view --raw 的输出内容，用于接入真实集群。"
-            }
-          >
-            <Input.TextArea
-              rows={6}
-              placeholder={`粘贴 kubectl config view --raw 的输出内容，用于接入真实集群。\n\n示例：\napiVersion: v1\nclusters:\n- cluster:\n    server: https://...\n  name: my-cluster\n...`}
-              style={{ fontFamily: "monospace", fontSize: 12 }}
-            />
-          </Form.Item>
+          <OpsFormSection title="基础信息" description="用于列表筛选、状态识别和环境归属。">
+            <Form.Item
+              label="集群名称"
+              name="name"
+              rules={[{ required: true, message: "请输入集群名称" }]}
+            >
+              <Input placeholder="例如：prod-cluster-01" />
+            </Form.Item>
+            <Form.Item
+              label="环境"
+              name="environment"
+              rules={[{ required: true, message: "请选择环境" }]}
+            >
+              <Select
+                placeholder="请选择环境"
+                options={[
+                  { label: "公有云", value: "公有云" },
+                  { label: "私有云", value: "私有云" },
+                  { label: "本地", value: "本地" },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item
+              label="供应商"
+              name="provider"
+              rules={[{ required: true, message: "请输入供应商" }]}
+            >
+              <Input placeholder="例如：AWS / 阿里云 / 自建" />
+            </Form.Item>
+            <Form.Item
+              label="K8s 版本"
+              name="kubernetesVersion"
+              rules={[{ required: true, message: "请输入 K8s 版本" }]}
+            >
+              <Input placeholder="例如：v1.28.4" />
+            </Form.Item>
+            <Form.Item label="状态" name="status">
+              <Select
+                placeholder="请选择状态（可选）"
+                allowClear
+                options={[
+                  { label: "正常", value: "正常" },
+                  { label: "告警", value: "告警" },
+                  { label: "维护", value: "维护" },
+                ]}
+              />
+            </Form.Item>
+          </OpsFormSection>
+          <OpsFormSection title="接入配置" description="不填写 KubeConfig 时，集群以离线模式管理。">
+            <Form.Item
+              label="KubeConfig（YAML 格式）"
+              name="kubeconfig"
+              extra={
+                editingCluster
+                  ? "如不修改 kubeconfig，留空即可；重新粘贴将覆盖原有配置。"
+                  : "粘贴 kubectl config view --raw 的输出内容，用于接入真实集群。"
+              }
+            >
+              <Input.TextArea
+                rows={6}
+                placeholder={`粘贴 kubectl config view --raw 的输出内容，用于接入真实集群。\n\n示例：\napiVersion: v1\nclusters:\n- cluster:\n    server: https://...\n  name: my-cluster\n...`}
+                style={{ fontFamily: "monospace", fontSize: 12 }}
+              />
+            </Form.Item>
+          </OpsFormSection>
         </Form>
-      </Modal>
+      </OpsModalShell>
     </Space>
   );
 }

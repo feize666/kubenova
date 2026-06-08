@@ -1,9 +1,9 @@
 "use client";
 
-import { Empty, Space, Typography } from "antd";
+import { Space, Typography } from "antd";
 import type { ReactNode } from "react";
 import { DetailDescriptions, DetailSection } from "@/components/resource-detail/section-primitives";
-import { OpsDrawerShell } from "@/components/ops";
+import { OpsDrawerShell, OpsEmptyState, OpsFilterChip } from "@/components/ops";
 
 export type BusinessDetailItem = {
   key: string;
@@ -50,14 +50,20 @@ export function BusinessDetailDrawer({
       destroyOnHidden
       size="large"
       variant="business"
+      bodyClassName="business-detail-drawer__body"
       styles={{
         body: { padding: 24 },
       }}
     >
       {sections.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无详情数据" />
+        <OpsEmptyState title="暂无详情数据" description="当前记录没有可展示的业务明细。" />
       ) : (
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+          <div className="business-detail-drawer__identity">
+            <OpsFilterChip tone="info">业务详情</OpsFilterChip>
+            {subtitle ? <OpsFilterChip tone="neutral">{subtitle}</OpsFilterChip> : null}
+            <OpsFilterChip tone="neutral">{sections.length} 个分组</OpsFilterChip>
+          </div>
           {sections.map((section) => (
             <DetailSection key={section.key} title={section.title} subtitle={section.subtitle}>
               <DetailDescriptions items={section.items} />

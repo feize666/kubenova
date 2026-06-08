@@ -455,7 +455,9 @@ describe('ResourcesService detail aggregation', () => {
           kind: 'GatewayClass',
           name: 'nginx',
           state: 'accepted',
-          spec: { controllerName: 'gateway.nginx.org/nginx-gateway-controller' },
+          spec: {
+            controllerName: 'gateway.nginx.org/nginx-gateway-controller',
+          },
           statusJson: { conditions: [{ type: 'Accepted', status: 'True' }] },
           labels: null,
           annotations: null,
@@ -1152,64 +1154,65 @@ describe('ResourcesService dynamic listing', () => {
         listEventForAllNamespaces: jest.fn().mockResolvedValue({ items: [] }),
       }),
       createClient: jest.fn((kubeconfig: string) => ({
-            __api: kubeconfig === 'kubeconfig-a'
-          ? {
-              list: jest.fn().mockResolvedValue({
-                items: [
-                  {
-                    metadata: {
-                      name: 'web-a',
-                      namespace: 'default',
-                      creationTimestamp: '2026-04-16T10:00:00.000Z',
+        __api:
+          kubeconfig === 'kubeconfig-a'
+            ? {
+                list: jest.fn().mockResolvedValue({
+                  items: [
+                    {
+                      metadata: {
+                        name: 'web-a',
+                        namespace: 'default',
+                        creationTimestamp: '2026-04-16T10:00:00.000Z',
+                      },
+                      status: { phase: 'Running' },
                     },
-                    status: { phase: 'Running' },
+                  ],
+                }),
+                read: jest.fn().mockResolvedValue({
+                  apiVersion: 'example.com/v1',
+                  kind: 'Widget',
+                  metadata: {
+                    name: 'widget-a',
+                    namespace: 'default',
+                    labels: { app: 'widget' },
+                    creationTimestamp: new Date('2026-04-16T10:00:00.000Z'),
                   },
-                ],
-              }),
-              read: jest.fn().mockResolvedValue({
-                apiVersion: 'example.com/v1',
-                kind: 'Widget',
-                metadata: {
-                  name: 'widget-a',
-                  namespace: 'default',
-                  labels: { app: 'widget' },
-                  creationTimestamp: new Date('2026-04-16T10:00:00.000Z'),
-                },
-                spec: {
-                  size: 'small',
-                  gatewayClassName: 'edge',
-                  rules: [{ backendRefs: [{ name: 'web', port: 80 }] }],
-                },
-                status: {
-                  phase: 'Ready',
-                  conditions: [{ type: 'Available', status: 'True' }],
-                },
-              }),
-            }
-          : {
-              list: jest.fn().mockResolvedValue({
-                items: [
-                  {
-                    metadata: {
-                      name: 'web-b',
-                      namespace: 'default',
-                      creationTimestamp: '2026-04-16T10:01:00.000Z',
+                  spec: {
+                    size: 'small',
+                    gatewayClassName: 'edge',
+                    rules: [{ backendRefs: [{ name: 'web', port: 80 }] }],
+                  },
+                  status: {
+                    phase: 'Ready',
+                    conditions: [{ type: 'Available', status: 'True' }],
+                  },
+                }),
+              }
+            : {
+                list: jest.fn().mockResolvedValue({
+                  items: [
+                    {
+                      metadata: {
+                        name: 'web-b',
+                        namespace: 'default',
+                        creationTimestamp: '2026-04-16T10:01:00.000Z',
+                      },
+                      status: { state: 'Pending' },
                     },
-                    status: { state: 'Pending' },
+                  ],
+                }),
+                read: jest.fn().mockResolvedValue({
+                  apiVersion: 'example.com/v1',
+                  kind: 'Widget',
+                  metadata: {
+                    name: 'widget-b',
+                    namespace: 'default',
+                    creationTimestamp: '2026-04-16T10:01:00.000Z',
                   },
-                ],
-              }),
-              read: jest.fn().mockResolvedValue({
-                apiVersion: 'example.com/v1',
-                kind: 'Widget',
-                metadata: {
-                  name: 'widget-b',
-                  namespace: 'default',
-                  creationTimestamp: '2026-04-16T10:01:00.000Z',
-                },
-                status: { state: 'Pending' },
-              }),
-            },
+                  status: { state: 'Pending' },
+                }),
+              },
       })),
     };
 
@@ -1260,11 +1263,10 @@ describe('ResourcesService dynamic listing', () => {
 
     const { service, clustersService, clusterHealthService } =
       buildDynamicService(prisma);
-    (clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock).mockResolvedValue([
-      'cluster-a',
-      'cluster-b',
-    ]);
-    (clustersService.getKubeconfig as jest.Mock).mockImplementation(
+    clusterHealthService.listReadableClusterIdsForResourceRead.mockResolvedValue(
+      ['cluster-a', 'cluster-b'],
+    );
+    clustersService.getKubeconfig.mockImplementation(
       async (clusterId: string) =>
         clusterId === 'cluster-a' ? 'kubeconfig-a' : 'kubeconfig-b',
     );
@@ -1275,9 +1277,9 @@ describe('ResourcesService dynamic listing', () => {
       resource: 'deployments',
     });
 
-    expect(clusterHealthService.listReadableClusterIdsForResourceRead).toHaveBeenCalledTimes(
-      1,
-    );
+    expect(
+      clusterHealthService.listReadableClusterIdsForResourceRead,
+    ).toHaveBeenCalledTimes(1);
     expect(clustersService.list).not.toHaveBeenCalled();
     expect(result.clusterId).toBe('');
     expect(result.kind).toBe('Deployment');
@@ -1333,9 +1335,7 @@ describe('ResourcesService dynamic listing', () => {
 
     const { service, clustersService, clusterHealthService } =
       buildDynamicService(prisma);
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
-      'kubeconfig-a',
-    );
+    clustersService.getKubeconfig.mockResolvedValue('kubeconfig-a');
 
     const result = await service.listDynamicResources({
       clusterId: 'cluster-a',
@@ -1343,7 +1343,9 @@ describe('ResourcesService dynamic listing', () => {
       resource: 'deployments',
     });
 
-    expect(clusterHealthService.listReadableClusterIdsForResourceRead).not.toHaveBeenCalled();
+    expect(
+      clusterHealthService.listReadableClusterIdsForResourceRead,
+    ).not.toHaveBeenCalled();
     expect(result.clusterId).toBe('cluster-a');
     expect(result.kind).toBe('Deployment');
     expect(result.total).toBe(1);
@@ -1379,9 +1381,7 @@ describe('ResourcesService dynamic listing', () => {
     };
 
     const { service, clustersService } = buildDynamicService(prisma);
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
-      'kubeconfig-a',
-    );
+    clustersService.getKubeconfig.mockResolvedValue('kubeconfig-a');
 
     const result = await service.listDynamicResources({
       clusterId: 'cluster-a',
@@ -1434,9 +1434,7 @@ describe('ResourcesService dynamic listing', () => {
       },
     };
     const { service, clustersService } = buildDynamicService(prisma);
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
-      'kubeconfig-a',
-    );
+    clustersService.getKubeconfig.mockResolvedValue('kubeconfig-a');
 
     const result = await service.getDynamicResourceDetail({
       clusterId: 'cluster-a',
@@ -1461,7 +1459,9 @@ describe('ResourcesService dynamic listing', () => {
     expect(result.detail.runtime).toEqual(
       expect.objectContaining({
         phase: 'Ready',
-        conditions: [expect.objectContaining({ type: 'Available', status: 'True' })],
+        conditions: [
+          expect.objectContaining({ type: 'Available', status: 'True' }),
+        ],
       }),
     );
     expect(result.detail.metadata.labels).toEqual({ app: 'widget' });
@@ -1480,7 +1480,9 @@ describe('ResourcesService dynamic listing', () => {
     expect(drawerDetail.rawStatus).toEqual(
       expect.objectContaining({
         phase: 'Ready',
-        conditions: [expect.objectContaining({ type: 'Available', status: 'True' })],
+        conditions: [
+          expect.objectContaining({ type: 'Available', status: 'True' }),
+        ],
       }),
     );
   });
@@ -1515,9 +1517,7 @@ describe('ResourcesService dynamic listing', () => {
       },
     };
     const { service, clustersService } = buildDynamicService(prisma);
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
-      'kubeconfig-a',
-    );
+    clustersService.getKubeconfig.mockResolvedValue('kubeconfig-a');
 
     const detail = await service.getDetail(
       'dynamic',

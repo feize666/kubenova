@@ -3,6 +3,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 export type HelmRepositoryAuthType = 'none' | 'basic';
+export type HelmRepositoryKind = 'http' | 'oci';
+export type HelmRepositorySource =
+  | 'manual'
+  | 'host-cli'
+  | 'preset'
+  | 'platform';
 export type HelmRepositorySyncStatus =
   | 'saved'
   | 'validated'
@@ -15,9 +21,14 @@ export interface HelmRepositoryRecord {
   clusterId: string;
   name: string;
   url: string;
+  repositoryKind?: HelmRepositoryKind;
+  source?: HelmRepositorySource;
   authType: HelmRepositoryAuthType;
   username?: string;
   password?: string;
+  caFile?: string;
+  caData?: string;
+  insecureSkipTlsVerify?: boolean;
   syncStatus: HelmRepositorySyncStatus;
   lastSyncAt?: string;
   message?: string;
@@ -140,6 +151,10 @@ export class HelmRepositoryStore {
       typeof row.name === 'string' &&
       typeof row.url === 'string' &&
       typeof row.authType === 'string' &&
+      (row.repositoryKind === undefined ||
+        ['http', 'oci'].includes(row.repositoryKind)) &&
+      (row.source === undefined ||
+        ['manual', 'host-cli', 'preset', 'platform'].includes(row.source)) &&
       typeof row.syncStatus === 'string' &&
       ['saved', 'validated', 'syncing', 'synced', 'failed', 'ready'].includes(
         row.syncStatus,

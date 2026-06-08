@@ -5,7 +5,6 @@ import { useMemo, useState } from "react";
 import {
   Alert,
   App,
-  Card,
   Dropdown,
   Form,
   Input,
@@ -32,8 +31,11 @@ import {
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsSurface } from "@/components/ops/ops-surface";
 import {
   buildWorkloadSafeEditPatch,
   createWorkload,
@@ -44,7 +46,7 @@ import {
   patchWorkloadById,
   type WorkloadListItem,
 } from "@/lib/api/workloads";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -125,6 +127,10 @@ export default function CronJobsPage() {
   const [editingItem, setEditingItem] = useState<CronJobItem | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [form] = Form.useForm<FormValues>();
 
   const queryKey = [
@@ -173,6 +179,7 @@ export default function CronJobsPage() {
     () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
     [clustersQuery.data],
   );
+  const clusterUnavailable = !clustersQuery.isLoading && clusterSelectOptions.length === 0;
 
   const knownNamespaces = useMemo(
     () => Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean))),
@@ -222,6 +229,13 @@ export default function CronJobsPage() {
   const openAddModal = () => {
     setEditingItem(null);
     form.resetFields();
+    const defaultClusterId = clusterId || clusterSelectOptions[0]?.value || "";
+    const defaultNamespace = namespace || "default";
+    form.setFieldsValue({ clusterId: defaultClusterId, namespace: defaultNamespace });
+    setCreateMode("form");
+    setCreateYaml("");
+    setCreateYamlClusterId(defaultClusterId);
+    setCreateYamlNamespace(defaultNamespace);
     setModalOpen(true);
   };
 
@@ -229,9 +243,42 @@ export default function CronJobsPage() {
     setModalOpen(false);
     setEditingItem(null);
     form.resetFields();
+    setCreateYaml("");
   };
 
   const handleModalSubmit = async () => {
+    if (!editingItem && createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await applyResourceYaml(
+          {
+            clusterId: createYamlClusterId.trim(),
+            namespace: createYamlNamespace.trim() || undefined,
+            yaml: createYaml.trim(),
+          },
+          accessToken || undefined,
+        );
+        void message.success("CronJob YAML 已提交");
+        setModalOpen(false);
+        setCreateYaml("");
+        void queryClient.invalidateQueries({ queryKey });
+      } catch (err) {
+        void message.error(err instanceof Error ? err.message : "YAML 提交失败，请重试");
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     let values: FormValues;
     try {
       values = await form.validateFields();
@@ -268,6 +315,7 @@ export default function CronJobsPage() {
       setModalOpen(false);
       setEditingItem(null);
       form.resetFields();
+      setCreateYaml("");
       void queryClient.invalidateQueries({ queryKey });
     } catch (err) {
       void message.error(err instanceof Error ? err.message : "操作失败，请重试");
@@ -331,12 +379,13 @@ export default function CronJobsPage() {
       return;
     }
     if (key === "delete") {
-      Modal.confirm({
+      openOpsConfirm({
         title: "确认删除",
-        content: `删除 ${row.name} 后将不可恢复`,
+        description: `删除 ${row.name} 后将不可恢复。`,
+        impact: "删除后该 CronJob 不再按计划触发新任务。",
         okText: "确认",
         cancelText: "取消",
-        okButtonProps: { danger: true },
+        danger: true,
         onOk: () => void handleDelete(row),
       });
     }
@@ -430,7 +479,7 @@ export default function CronJobsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/workloads/cronjobs"
           embedded
@@ -483,6 +532,7 @@ export default function CronJobsPage() {
             }}
             sort={{ sortBy, sortOrder }}
             columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
             dataSource={filteredTableData}
             loading={isLoading && !data}
             onChange={(paginationInfo, filters, sorter, extra) =>
@@ -491,7 +541,7 @@ export default function CronJobsPage() {
             pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
           />
         </Space>
-      </Card>
+      </OpsSurface>
 
       <Modal
         title={editingItem ? "编辑 CronJob" : "新增资源"}
@@ -502,8 +552,65 @@ export default function CronJobsPage() {
         cancelText="取消"
         confirmLoading={submitting}
         destroyOnHidden
+        width={editingItem ? 540 : 720}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+        {editingItem ? null : (
+          <ResourceCreateMethodTabs
+            mode={createMode}
+            onModeChange={setCreateMode}
+            yaml={createYaml}
+            onYamlChange={setCreateYaml}
+            clusterId={createYamlClusterId}
+            onClusterIdChange={setCreateYamlClusterId}
+            namespace={createYamlNamespace}
+            onNamespaceChange={setCreateYamlNamespace}
+            clusterOptions={clusterSelectOptions}
+            clusterLoading={clustersQuery.isLoading}
+            clusterUnavailable={clusterUnavailable}
+            kindHint="CronJob"
+            formContent={(
+              <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+                <Form.Item
+                  label="名称"
+                  name="name"
+                  rules={[{ required: true, message: "请输入 CronJob 名称" }]}
+                >
+                  <Input placeholder="例如：daily-report" />
+                </Form.Item>
+                <Form.Item
+                  label="名称空间"
+                  name="namespace"
+                  rules={[{ required: true, message: "请输入名称空间" }]}
+                >
+                  <Input placeholder="例如：default" />
+                </Form.Item>
+                <Form.Item
+                  label="集群"
+                  name="clusterId"
+                  rules={[{ required: true, message: "请选择集群" }]}
+                >
+                  <Select
+                    placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                    options={clusterSelectOptions}
+                    loading={clustersQuery.isLoading}
+                    disabled={clusterUnavailable}
+                    showSearch
+                    optionFilterProp="label"
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="调度表达式（Cron）"
+                  name="schedule"
+                  rules={[{ required: true, message: "请输入 Cron 表达式" }]}
+                >
+                  <Input placeholder="例如：0 2 * * *（每天凌晨 2 点）" />
+                </Form.Item>
+              </Form>
+            )}
+          />
+        )}
+        {editingItem ? (
+          <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item
             label="名称"
             name="name"
@@ -552,7 +659,8 @@ export default function CronJobsPage() {
               </Form.Item>
             </>
           ) : null}
-        </Form>
+          </Form>
+        ) : null}
       </Modal>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}

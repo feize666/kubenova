@@ -1,23 +1,56 @@
 "use client";
 
 import { DownOutlined } from "@ant-design/icons";
-import { Button } from "antd";
+import { Button, Tooltip } from "antd";
 import type { ButtonProps } from "antd";
 import { forwardRef } from "react";
 import type { ReactNode } from "react";
 
 export type OpsIconActionButtonTone = "default" | "primary" | "danger";
+export type OpsButtonVariant =
+  | "secondary"
+  | "primary"
+  | "ghost"
+  | "danger"
+  | "icon"
+  | "filter"
+  | "row-action"
+  | "command";
 
 export function OpsIconActionButton({
   className,
   opsTone = "default",
+  opsVariant = "secondary",
+  disabledReason,
   ...props
-}: ButtonProps & { opsTone?: OpsIconActionButtonTone }) {
-  return (
+}: ButtonProps & {
+  opsTone?: OpsIconActionButtonTone;
+  opsVariant?: OpsButtonVariant;
+  disabledReason?: ReactNode;
+}) {
+  const button = (
     <Button
       {...props}
-      className={["ops-icon-action-button", `ops-icon-action-button--${opsTone}`, className].filter(Boolean).join(" ")}
+      aria-label={props["aria-label"] ?? (typeof props.title === "string" ? props.title : undefined)}
+      aria-disabled={props.disabled || props.loading ? true : undefined}
+      className={[
+        "ops-icon-action-button",
+        `ops-icon-action-button--${opsTone}`,
+        `ops-icon-action-button--variant-${opsVariant}`,
+        disabledReason ? "ops-icon-action-button--has-disabled-reason" : undefined,
+        className,
+      ].filter(Boolean).join(" ")}
     />
+  );
+
+  if (!disabledReason) {
+    return button;
+  }
+
+  return (
+    <Tooltip title={disabledReason}>
+      <span className="ops-icon-action-button__disabled-wrap">{button}</span>
+    </Tooltip>
   );
 }
 
@@ -52,6 +85,11 @@ export const OpsFilterTriggerButton = forwardRef<HTMLAnchorElement | HTMLButtonE
   slotClassNames,
   ...props
 }, ref) {
+  const accessibleLabel =
+    props["aria-label"] ??
+    (typeof label === "string" && (typeof value === "string" || typeof value === "number")
+      ? `${label}：${value}`
+      : undefined);
   const iconNode = (
     <span className={slotClassNames?.icon ?? "resource-scope-filter-icon"} aria-hidden>
       {icon}
@@ -61,6 +99,7 @@ export const OpsFilterTriggerButton = forwardRef<HTMLAnchorElement | HTMLButtonE
   return (
     <Button
       {...props}
+      aria-label={accessibleLabel}
       ref={ref}
       className={[baseClassName, active ? "is-active" : undefined, className].filter(Boolean).join(" ")}
     >

@@ -1,11 +1,17 @@
 "use client";
 
-import { DeleteOutlined, FileTextOutlined } from "@ant-design/icons";
+import {
+  DeleteOutlined,
+  FileTextOutlined,
+  ImportOutlined,
+  ReloadOutlined,
+  SyncOutlined,
+} from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Dropdown, Form, Input, Modal, Select, Space, Switch, Typography } from "antd";
+import { Alert, App, Button, Dropdown, Form, Input, Modal, Select, Space, Switch, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { MenuProps } from "antd";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
@@ -23,6 +29,7 @@ import { useAuth } from "@/components/auth-context";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
+import { OpsIconActionButton, OpsSurface } from "@/components/ops";
 import { getClusters } from "@/lib/api/clusters";
 import { ApiError } from "@/lib/api/client";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -32,29 +39,50 @@ import {
   deleteHelmRepository,
   getHelmRepositoryPresets,
   getHelmRepositories,
+  importHostHelmRepositories,
   importHelmRepositoryPresets,
   syncHelmRepository,
   updateHelmRepository,
   type HelmRepositoryItem,
+  type HelmRepositoryAuthType,
+  type HelmRepositoryKind,
+  type HelmRepositorySource,
   type HelmRepositoryPresetItem,
 } from "@/lib/api/helm";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
-import { OpsStatusTag } from "@/components/ops/ops-status";
+import { OpsStatusTag, type OpsStatusTone } from "@/components/ops/ops-status";
 
 interface RepositoryFormValues {
   clusterId: string;
   name: string;
   url: string;
+  repositoryKind?: HelmRepositoryKind;
+  authType?: HelmRepositoryAuthType;
+  username?: string;
+  password?: string;
+  caData?: string;
+  insecureSkipTlsVerify?: boolean;
 }
 
 interface QuickUrlFormValues {
   clusterId: string;
   url: string;
   name?: string;
+  repositoryKind?: HelmRepositoryKind;
 }
+
+const repositoryKindOptions: Array<{ label: string; value: HelmRepositoryKind }> = [
+  { label: "HTTP/S Chart 仓库", value: "http" },
+  { label: "OCI Registry", value: "oci" },
+];
+
+const authTypeOptions: Array<{ label: string; value: HelmRepositoryAuthType }> = [
+  { label: "无认证", value: "none" },
+  { label: "Basic Auth", value: "basic" },
+];
 
 function syncStatusTag(status: HelmRepositoryItem["syncStatus"]) {
   if (status === "saved") return <OpsStatusTag tone="neutral">已保存</OpsStatusTag>;
@@ -63,6 +91,36 @@ function syncStatusTag(status: HelmRepositoryItem["syncStatus"]) {
   if (status === "synced") return <OpsStatusTag tone="success">已同步</OpsStatusTag>;
   if (status === "failed") return <OpsStatusTag tone="danger">失败</OpsStatusTag>;
   return <OpsStatusTag tone="unknown">{status}</OpsStatusTag>;
+}
+
+function repositoryKindTag(kind?: HelmRepositoryKind) {
+  if (kind === "oci") return <OpsStatusTag tone="processing">OCI</OpsStatusTag>;
+  return <OpsStatusTag tone="info">HTTP/S</OpsStatusTag>;
+}
+
+function repositorySourceTag(source?: HelmRepositorySource) {
+  const sourceMap: Record<HelmRepositorySource, { label: string; tone: OpsStatusTone }> = {
+    manual: { label: "手动", tone: "neutral" },
+    "host-cli": { label: "宿主", tone: "success" },
+    preset: { label: "模板", tone: "info" },
+    platform: { label: "平台", tone: "processing" },
+    unknown: { label: "未知", tone: "unknown" },
+  };
+  const resolved = sourceMap[source ?? "unknown"] ?? sourceMap.unknown;
+  return <OpsStatusTag tone={resolved.tone}>{resolved.label}</OpsStatusTag>;
+}
+
+function buildRepositoryErrorText(item: HelmRepositoryItem) {
+  const diagnostics = item.diagnostics;
+  return [
+    item.message,
+    diagnostics?.code ? `代码：${diagnostics.code}` : "",
+    diagnostics?.reason ? `原因：${diagnostics.reason}` : "",
+    diagnostics?.suggestion ? `建议：${diagnostics.suggestion}` : "",
+    diagnostics?.stderr ? `stderr：${diagnostics.stderr}` : "",
+  ]
+    .filter(Boolean)
+    .join("；");
 }
 
 export default function HelmRepositoriesPage() {
@@ -94,20 +152,38 @@ export default function HelmRepositoriesPage() {
   const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
+  const [failedOnly, setFailedOnly] = useState(false);
+  const [autoImportHost, setAutoImportHost] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
   const [quickUrlError, setQuickUrlError] = useState<string | null>(null);
+  const autoImportedHostTargets = useRef(new Set<string>());
   const [form] = Form.useForm<RepositoryFormValues>();
   const [quickUrlForm] = Form.useForm<QuickUrlFormValues>();
+  const repositoryKind = Form.useWatch("repositoryKind", form) ?? "http";
+  const authType = Form.useWatch("authType", form) ?? "none";
 
   const formatMutationError = (error: unknown, fallback: string) => {
     if (error instanceof ApiError) {
-      const details = (error.details ?? {}) as { reason?: string; suggestion?: string };
+      const details = (error.details ?? {}) as {
+        code?: string;
+        reason?: string;
+        suggestion?: string;
+        stderr?: string;
+      };
+      const code = typeof details.code === "string" && details.code.trim().length > 0 ? details.code.trim() : "";
       const reason = typeof details.reason === "string" && details.reason.trim().length > 0 ? details.reason.trim() : "";
       const suggestion =
         typeof details.suggestion === "string" && details.suggestion.trim().length > 0
           ? details.suggestion.trim()
           : "";
-      return [error.message, reason ? `原因：${reason}` : "", suggestion ? `建议：${suggestion}` : ""]
+      const stderr = typeof details.stderr === "string" && details.stderr.trim().length > 0 ? details.stderr.trim() : "";
+      return [
+        error.message,
+        code ? `代码：${code}` : "",
+        reason ? `原因：${reason}` : "",
+        suggestion ? `建议：${suggestion}` : "",
+        stderr ? `stderr：${stderr}` : "",
+      ]
         .filter(Boolean)
         .join("；");
     }
@@ -141,15 +217,19 @@ export default function HelmRepositoriesPage() {
 
   const mutation = useMutation({
     mutationFn: async (values: RepositoryFormValues) => {
+      const payload = {
+        clusterId: values.clusterId,
+        name: values.name.trim(),
+        url: values.url.trim(),
+        repositoryKind: values.repositoryKind ?? "http",
+        authType: values.authType ?? "none",
+        username: values.authType === "basic" ? values.username?.trim() : undefined,
+        password: values.authType === "basic" ? values.password : undefined,
+        caData: values.caData?.trim() || undefined,
+        insecureSkipTlsVerify: Boolean(values.insecureSkipTlsVerify),
+      };
       if (mode === "create") {
-        return createHelmRepository(
-          {
-            clusterId: values.clusterId,
-            name: values.name,
-            url: values.url,
-          },
-          accessToken ?? undefined,
-        );
+        return createHelmRepository(payload, accessToken ?? undefined);
       }
       if (!editingRepository) {
         throw new Error("请选择要编辑的仓库");
@@ -157,8 +237,14 @@ export default function HelmRepositoriesPage() {
       return updateHelmRepository(
         editingRepository.name,
         {
-          clusterId: values.clusterId,
-          url: values.url,
+          clusterId: payload.clusterId,
+          url: payload.url,
+          repositoryKind: payload.repositoryKind,
+          authType: payload.authType,
+          username: payload.username,
+          password: payload.password,
+          caData: payload.caData,
+          insecureSkipTlsVerify: payload.insecureSkipTlsVerify,
         },
         accessToken ?? undefined,
       );
@@ -216,6 +302,58 @@ export default function HelmRepositoriesPage() {
     },
   });
 
+  const batchSyncMutation = useMutation({
+    mutationFn: async (repositories: HelmRepositoryItem[]) => {
+      const results = await Promise.allSettled(
+        repositories.map((repository) =>
+          syncHelmRepository(repository.name, repository.clusterId, accessToken ?? undefined),
+        ),
+      );
+      const failed = results.filter((result) => result.status === "rejected").length;
+      return { total: repositories.length, failed };
+    },
+    onSuccess: async ({ total, failed }) => {
+      if (failed > 0) {
+        void message.warning(`批量同步完成：提交 ${total - failed}，失败 ${failed}`);
+      } else {
+        void message.success(`批量同步已提交：${total} 个仓库`);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["helm", "repositories"] });
+      await queryClient.invalidateQueries({ queryKey: ["helm", "charts"] });
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : "批量同步失败");
+    },
+  });
+
+  const importHostMutation = useMutation({
+    mutationFn: async (targetClusterId?: string) =>
+      importHostHelmRepositories(
+        {
+          clusterId: targetClusterId || undefined,
+          sync: true,
+          overwrite: false,
+        },
+        accessToken ?? undefined,
+      ),
+    onSuccess: async (result) => {
+      const failed = result.imported.filter((item) => item.action === "failed" || item.syncStatus === "failed");
+      const createdOrUpdated = result.imported.filter((item) => item.action === "created" || item.action === "updated").length;
+      const existing = result.imported.filter((item) => item.action === "existing").length;
+      const summary = `宿主仓库导入完成：新增/更新 ${createdOrUpdated}，已存在 ${existing}`;
+      if (failed.length > 0) {
+        void message.warning(`${summary}，失败 ${failed.length}`);
+      } else if (result.total > 0) {
+        void message.success(summary);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["helm", "repositories"] });
+      await queryClient.invalidateQueries({ queryKey: ["helm", "charts"] });
+    },
+    onError: (error) => {
+      void message.error(formatMutationError(error, "宿主 Helm 仓库导入失败"));
+    },
+  });
+
   const importPresetsMutation = useMutation({
     mutationFn: async () =>
       importHelmRepositoryPresets(
@@ -255,6 +393,8 @@ export default function HelmRepositoriesPage() {
           clusterId: values.clusterId,
           name: derivedName,
           url: values.url.trim(),
+          repositoryKind: values.repositoryKind ?? "http",
+          authType: "none",
         },
         accessToken ?? undefined,
       ).then((result) => ({
@@ -287,6 +427,16 @@ export default function HelmRepositoriesPage() {
       })),
     [clustersQuery.data?.items],
   );
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
+  const hostImportClusterId = clusterId || repositoryClusterOptions[0]?.value || "";
+  useEffect(() => {
+    if (!autoImportHost || !accessToken || !hostImportClusterId || importHostMutation.isPending) return;
+    const importKey = `${hostImportClusterId}:sync`;
+    if (autoImportedHostTargets.current.has(importKey)) return;
+    autoImportedHostTargets.current.add(importKey);
+    void importHostMutation.mutateAsync(hostImportClusterId);
+  }, [accessToken, autoImportHost, hostImportClusterId, importHostMutation]);
+
   const repositoriesQuery = useQuery({
     queryKey: [
       "helm",
@@ -330,33 +480,46 @@ export default function HelmRepositoriesPage() {
     const nameFilter = typeof tableFilters.name === "string" ? tableFilters.name.toLowerCase() : "";
     const clusterFilter = typeof tableFilters.clusterId === "string" ? tableFilters.clusterId.toLowerCase() : "";
     const urlFilter = typeof tableFilters.url === "string" ? tableFilters.url.toLowerCase() : "";
+    const sourceFilter = typeof tableFilters.source === "string" ? tableFilters.source : "";
+    const kindFilter = typeof tableFilters.repositoryKind === "string" ? tableFilters.repositoryKind : "";
     const syncStatusFilter = typeof tableFilters.syncStatus === "string" ? tableFilters.syncStatus : "";
     const messageFilter = typeof tableFilters.message === "string" ? tableFilters.message.toLowerCase() : "";
     return raw.filter((item) => {
+      if (failedOnly && item.syncStatus !== "failed") return false;
       const matchName = nameFilter ? item.name.toLowerCase().includes(nameFilter) : true;
       const clusterName = getClusterDisplayName(clusterMap, item.clusterId).toLowerCase();
       const matchCluster = clusterFilter
         ? item.clusterId.toLowerCase().includes(clusterFilter) || clusterName.includes(clusterFilter)
         : true;
       const matchUrl = urlFilter ? item.url.toLowerCase().includes(urlFilter) : true;
+      const matchSource = sourceFilter ? (item.source ?? "unknown") === sourceFilter : true;
+      const matchKind = kindFilter ? (item.repositoryKind ?? "http") === kindFilter : true;
       const matchStatus = syncStatusFilter ? item.syncStatus === syncStatusFilter : true;
-      const matchMessage = messageFilter ? (item.message ?? "").toLowerCase().includes(messageFilter) : true;
+      const diagnosticsText = buildRepositoryErrorText(item).toLowerCase();
+      const matchMessage = messageFilter
+        ? (item.message ?? "").toLowerCase().includes(messageFilter) || diagnosticsText.includes(messageFilter)
+        : true;
       const matchKeyword = keywordFilter
         ? item.name.toLowerCase().includes(keywordFilter) ||
           item.url.toLowerCase().includes(keywordFilter) ||
           item.clusterId.toLowerCase().includes(keywordFilter) ||
           clusterName.includes(keywordFilter) ||
-          (item.message ?? "").toLowerCase().includes(keywordFilter)
+          (item.source ?? "unknown").toLowerCase().includes(keywordFilter) ||
+          (item.repositoryKind ?? "http").toLowerCase().includes(keywordFilter) ||
+          diagnosticsText.includes(keywordFilter)
         : true;
-      return matchKeyword && matchName && matchCluster && matchUrl && matchStatus && matchMessage;
+      return matchKeyword && matchName && matchCluster && matchUrl && matchSource && matchKind && matchStatus && matchMessage;
     });
   }, [
     clusterMap,
+    failedOnly,
     keyword,
     repositoriesQuery.data?.items,
     tableFilters.clusterId,
     tableFilters.message,
     tableFilters.name,
+    tableFilters.repositoryKind,
+    tableFilters.source,
     tableFilters.syncStatus,
     tableFilters.url,
   ]);
@@ -388,6 +551,12 @@ export default function HelmRepositoriesPage() {
       clusterId: repository.clusterId,
       name: repository.name,
       url: repository.url,
+      repositoryKind: repository.repositoryKind ?? "http",
+      authType: repository.authType ?? "none",
+      username: "",
+      password: "",
+      caData: "",
+      insecureSkipTlsVerify: Boolean(repository.insecureSkipTlsVerify),
     });
     setFormOpen(true);
   };
@@ -470,6 +639,36 @@ export default function HelmRepositoriesPage() {
       ...getSortableColumnProps("namespace"),
       render: () => "-",
     },
+    {
+      title: "来源",
+      dataIndex: "source",
+      key: "source",
+      width: 104,
+      filter: {
+        type: "select",
+        placeholder: "以来源过滤",
+        options: [
+          { label: "手动", value: "manual" },
+          { label: "宿主", value: "host-cli" },
+          { label: "模板", value: "preset" },
+          { label: "平台", value: "platform" },
+          { label: "未知", value: "unknown" },
+        ],
+      },
+      render: (value?: HelmRepositorySource) => repositorySourceTag(value),
+    },
+    {
+      title: "类型",
+      dataIndex: "repositoryKind",
+      key: "repositoryKind",
+      width: 116,
+      filter: {
+        type: "select",
+        placeholder: "以类型过滤",
+        options: repositoryKindOptions.map((item) => item),
+      },
+      render: (value?: HelmRepositoryKind) => repositoryKindTag(value),
+    },
     { title: "仓库地址", dataIndex: "url", key: "url", width: TABLE_COL_WIDTH.url, filter: { type: "text", placeholder: "以地址过滤" } },
     {
       title: "同步状态",
@@ -497,7 +696,30 @@ export default function HelmRepositoriesPage() {
       ...getSortableColumnProps("updatedAt"),
       render: (value?: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
-    { title: "状态消息", dataIndex: "message", key: "message", filter: { type: "text", placeholder: "以消息过滤" } },
+    {
+      title: "Charts",
+      dataIndex: "chartCount",
+      key: "chartCount",
+      width: 96,
+      align: "right",
+      render: (value?: number) => (typeof value === "number" ? value : "-"),
+    },
+    {
+      title: "状态消息",
+      dataIndex: "message",
+      key: "message",
+      filter: { type: "text", placeholder: "以消息过滤" },
+      render: (_: string | undefined, row: HelmRepositoryItem) => {
+        const text = buildRepositoryErrorText(row);
+        return text ? (
+          <Typography.Text type={row.syncStatus === "failed" ? "danger" : "secondary"} ellipsis={{ tooltip: text }}>
+            {text}
+          </Typography.Text>
+        ) : (
+          "-"
+        );
+      },
+    },
     {
       title: "操作",
       key: "actions",
@@ -540,6 +762,12 @@ export default function HelmRepositoriesPage() {
                 clusterId: clusterId || undefined,
                 name: "",
                 url: "",
+                repositoryKind: "http",
+                authType: "none",
+                username: "",
+                password: "",
+                caData: "",
+                insecureSkipTlsVerify: false,
               });
               setFormOpen(true);
             }}
@@ -548,7 +776,7 @@ export default function HelmRepositoriesPage() {
         }
       />
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <div style={{ marginBottom: 12 }}>
           <ResourceScopeFilterButton
             clusterId={clusterId}
@@ -585,6 +813,7 @@ export default function HelmRepositoriesPage() {
           rowKey={(row) => `${row.clusterId}/${row.name}`}
           tableKey="workloads.helm.repositories"
           columns={columns as ColumnsType<HelmRepositoryItem>}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           dataSource={rows}
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -597,6 +826,70 @@ export default function HelmRepositoriesPage() {
             setTableFilters(nextFilters);
             resetPage();
           }}
+          toolbarExtra={
+            <Space size={8} wrap>
+              <OpsIconActionButton
+                icon={<ImportOutlined />}
+                loading={importHostMutation.isPending}
+                disabled={!accessToken || !hostImportClusterId}
+                disabledReason={!hostImportClusterId ? "请选择集群后导入宿主 Helm 仓库" : undefined}
+                onClick={() => void importHostMutation.mutateAsync(hostImportClusterId)}
+              >
+                重新导入宿主
+              </OpsIconActionButton>
+              <OpsIconActionButton
+                icon={<FileTextOutlined />}
+                disabled={!accessToken}
+                onClick={() => {
+                  quickUrlForm.setFieldsValue({
+                    clusterId: hostImportClusterId || undefined,
+                    url: "",
+                    name: "",
+                    repositoryKind: "http",
+                  });
+                  setQuickUrlError(null);
+                  setQuickUrlOpen(true);
+                }}
+              >
+                URL 新增
+              </OpsIconActionButton>
+              <OpsIconActionButton
+                icon={<ImportOutlined />}
+                disabled={!accessToken || !hostImportClusterId}
+                disabledReason={!hostImportClusterId ? "请选择集群后导入模板仓库" : undefined}
+                onClick={() => {
+                  setClusterId(hostImportClusterId);
+                  setPresetOpen(true);
+                }}
+              >
+                模板导入
+              </OpsIconActionButton>
+              <OpsIconActionButton
+                icon={<SyncOutlined />}
+                loading={batchSyncMutation.isPending}
+                disabled={rows.length === 0}
+                disabledReason={rows.length === 0 ? "当前筛选结果为空" : undefined}
+                onClick={() => void batchSyncMutation.mutateAsync(rows)}
+              >
+                批量同步
+              </OpsIconActionButton>
+              <OpsIconActionButton
+                icon={<ReloadOutlined />}
+                loading={repositoriesQuery.isFetching}
+                onClick={() => void repositoriesQuery.refetch()}
+              >
+                刷新
+              </OpsIconActionButton>
+              <Space size={6}>
+                <Switch size="small" checked={failedOnly} onChange={setFailedOnly} />
+                <Typography.Text type="secondary">只看失败</Typography.Text>
+              </Space>
+              <Space size={6}>
+                <Switch size="small" checked={autoImportHost} onChange={setAutoImportHost} />
+                <Typography.Text type="secondary">自动导入宿主</Typography.Text>
+              </Space>
+            </Space>
+          }
           loading={repositoriesQuery.isLoading && rows.length === 0}
           onChange={(paginationInfo, filters, sorter, extra) =>
             handleTableChange(
@@ -612,7 +905,7 @@ export default function HelmRepositoriesPage() {
             repositoriesQuery.isLoading && rows.length === 0,
           )}
         />
-      </Card>
+      </OpsSurface>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
@@ -647,13 +940,59 @@ export default function HelmRepositoriesPage() {
       >
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
-            <Select disabled={mode === "edit"} options={repositoryClusterOptions} />
+            <Select
+              disabled={mode === "edit" || clusterUnavailable || (!clustersQuery.isLoading && repositoryClusterOptions.length === 0)}
+              options={repositoryClusterOptions}
+              loading={clustersQuery.isLoading}
+              placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+              notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+            />
           </Form.Item>
           <Form.Item name="name" label="仓库名称" rules={[{ required: true, message: "请输入仓库名称" }]}>
             <Input disabled={mode === "edit"} placeholder="bitnami" />
           </Form.Item>
           <Form.Item name="url" label="仓库地址" rules={[{ required: true, message: "请输入仓库地址" }]}>
-            <Input placeholder="https://charts.bitnami.com/bitnami" />
+            <Input placeholder={repositoryKind === "oci" ? "oci://registry.example.com/charts" : "https://charts.bitnami.com/bitnami"} />
+          </Form.Item>
+          <Form.Item name="repositoryKind" label="仓库类型" initialValue="http">
+            <Select options={repositoryKindOptions} />
+          </Form.Item>
+          <Form.Item name="authType" label="认证方式" initialValue="none">
+            <Select options={authTypeOptions} />
+          </Form.Item>
+          {authType === "basic" ? (
+            <Space size={12} style={{ width: "100%" }} align="start">
+              <Form.Item
+                name="username"
+                label="用户名"
+                rules={[{ required: true, message: "请输入 Basic Auth 用户名" }]}
+                style={{ flex: 1 }}
+              >
+                <Input autoComplete="username" placeholder="username" />
+              </Form.Item>
+              <Form.Item
+                name="password"
+                label="密码"
+                rules={mode === "create" ? [{ required: true, message: "请输入 Basic Auth 密码" }] : []}
+                style={{ flex: 1 }}
+              >
+                <Input.Password autoComplete="new-password" placeholder={mode === "edit" ? "留空则不修改" : "password"} />
+              </Form.Item>
+            </Space>
+          ) : null}
+          <Form.Item
+            name="caData"
+            label="CA 证书"
+            tooltip="填写 PEM 内容。留空时使用默认信任链。"
+          >
+            <Input.TextArea rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+          </Form.Item>
+          <Form.Item
+            name="insecureSkipTlsVerify"
+            valuePropName="checked"
+            tooltip="仅用于受控内网或临时排障。生产仓库建议配置 CA。"
+          >
+            <Switch /> <Typography.Text style={{ marginLeft: 8 }}>跳过 TLS 证书校验</Typography.Text>
           </Form.Item>
         </Form>
         {formError ? (
@@ -704,7 +1043,13 @@ export default function HelmRepositoriesPage() {
       >
         <Form form={quickUrlForm} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
-            <Select options={repositoryClusterOptions} />
+            <Select
+              options={repositoryClusterOptions}
+              loading={clustersQuery.isLoading}
+              placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+              disabled={clusterUnavailable || (!clustersQuery.isLoading && repositoryClusterOptions.length === 0)}
+              notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+            />
           </Form.Item>
           <Form.Item
             name="url"
@@ -712,6 +1057,9 @@ export default function HelmRepositoriesPage() {
             rules={[{ required: true, message: "请输入仓库 URL" }]}
           >
             <Input placeholder="https://charts.bitnami.com/bitnami" />
+          </Form.Item>
+          <Form.Item name="repositoryKind" label="仓库类型" initialValue="http">
+            <Select options={repositoryKindOptions} />
           </Form.Item>
           <Form.Item
             name="name"

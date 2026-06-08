@@ -108,7 +108,9 @@ describe('UsersService table preferences', () => {
     const prisma = {
       userPreference: {
         findUnique: jest.fn(async () => {
-          const error = new Error('The table `public.UserPreference` does not exist');
+          const error = new Error(
+            'The table `public.UserPreference` does not exist',
+          );
           Object.assign(error, { code: 'P2021' });
           throw error;
         }),
@@ -131,7 +133,9 @@ describe('UsersService table preferences', () => {
       userPreference: {
         findUnique: jest.fn(),
         upsert: jest.fn(async () => {
-          const error = new Error('The table `public.UserPreference` does not exist');
+          const error = new Error(
+            'The table `public.UserPreference` does not exist',
+          );
           Object.assign(error, { code: 'P2021' });
           throw error;
         }),

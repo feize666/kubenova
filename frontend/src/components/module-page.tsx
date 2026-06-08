@@ -3,14 +3,20 @@
 import { Alert, Card, Col, Input, Row, Select, Space, Switch, Typography } from "antd";
 import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
+import { useAuth } from "@/components/auth-context";
 import { OpsStatusTag, type OpsStatusTone } from "@/components/ops";
+import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTable } from "@/components/resource-table";
+import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { buildCompactTablePagination } from "@/lib/table/pagination";
 
 export type ModuleRecord = {
   key: string;
+  id?: string;
+  kind?: string;
   name: string;
+  clusterId?: string;
   namespace?: string;
   status?: string;
   [key: string]: string | number | boolean | undefined;
@@ -106,9 +112,11 @@ export function ModulePage({
   tableProps,
   filterState,
 }: ModulePageProps) {
+  const { accessToken } = useAuth();
   const [localKeyword, setLocalKeyword] = useState("");
   const [localNamespace, setLocalNamespace] = useState<string>("全部名称空间");
   const [localOnlyHealthy, setLocalOnlyHealthy] = useState(false);
+  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const keyword = filterState?.keyword ?? localKeyword;
   const namespace = filterState?.namespace ?? localNamespace;
   const onlyHealthy = filterState?.onlyHealthy ?? localOnlyHealthy;
@@ -215,6 +223,7 @@ export function ModulePage({
             actionWidth: TABLE_COL_WIDTH.action,
           }}
           scroll={{ x: tableScrollX }}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           pagination={buildCompactTablePagination({
             current: 1,
             pageSize: 6,
@@ -224,6 +233,14 @@ export function ModulePage({
           {...tableProps}
         />
       </Card>
+
+      <ResourceDetailDrawer
+        open={Boolean(detailTarget)}
+        onClose={() => setDetailTarget(null)}
+        request={detailTarget}
+        onNavigateRequest={(request) => setDetailTarget(request)}
+        token={accessToken ?? undefined}
+      />
     </Space>
   );
 }

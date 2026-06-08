@@ -3,7 +3,7 @@
 import { SearchOutlined } from "@ant-design/icons";
 import { Space } from "antd";
 import type { ReactNode } from "react";
-import { OpsIconActionButton } from "@/components/ops";
+import { OpsIconActionButton, type OpsActiveFilter } from "@/components/ops";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
@@ -19,6 +19,7 @@ type ResourceClusterNamespaceFiltersProps = {
   keywordInput: string;
   clusterOptions: Option[];
   clusterLoading?: boolean;
+  clusterUnavailable?: boolean;
   knownNamespaces?: string[];
   namespaceLoading?: boolean;
   namespaceDisabled?: boolean;
@@ -41,6 +42,7 @@ export function ResourceClusterNamespaceFilters({
   keywordInput,
   clusterOptions,
   clusterLoading,
+  clusterUnavailable = false,
   knownNamespaces = [],
   namespaceLoading = false,
   namespaceDisabled,
@@ -60,10 +62,56 @@ export function ResourceClusterNamespaceFilters({
   const resolvedNamespaceDisabled = namespaceDisabled ?? !hasConcreteCluster;
   const resolvedNamespacePlaceholder =
     namespacePlaceholder ?? (hasConcreteCluster ? "全部名称空间" : "请先选择具体集群");
+  const clusterLabel = clusterId
+    ? clusterOptions.find((option) => option.value === clusterId)?.label ?? clusterId
+    : "";
+  const activeFilters: OpsActiveFilter[] = [
+    clusterId
+      ? {
+          key: "cluster",
+          label: "集群",
+          value: clusterLabel,
+          tone: "info",
+          onClear: () => {
+            if (onScopeChange) {
+              onScopeChange("", "");
+            } else {
+              onClusterChange("");
+              onNamespaceChange?.("");
+            }
+          },
+        }
+      : null,
+    namespaceVisible && namespace
+      ? {
+          key: "namespace",
+          label: "名称空间",
+          value: namespace,
+          tone: "neutral",
+          onClear: () => {
+            if (onScopeChange) {
+              onScopeChange(clusterId, "");
+            } else {
+              onNamespaceChange?.("");
+            }
+          },
+        }
+      : null,
+    showKeywordSearch && keywordInput.trim()
+      ? {
+          key: "keyword",
+          label: "关键词",
+          value: keywordInput.trim(),
+          tone: "warning",
+          onClear: () => onKeywordInputChange(""),
+        }
+      : null,
+  ].filter(Boolean) as OpsActiveFilter[];
 
   return (
     <div style={{ marginBottom }}>
       <ResourceFilterToolbar
+        activeFilters={activeFilters}
         actions={
           showKeywordSearch ? (
             <OpsIconActionButton icon={<SearchOutlined />} opsTone="primary" onClick={onSearch}>
@@ -78,6 +126,7 @@ export function ResourceClusterNamespaceFilters({
             namespace={namespace}
             clusterOptions={clusterOptions}
             clusterLoading={clusterLoading}
+            clusterUnavailable={clusterUnavailable}
             knownNamespaces={knownNamespaces}
             namespaceLoading={namespaceLoading}
             namespaceDisabled={resolvedNamespaceDisabled}

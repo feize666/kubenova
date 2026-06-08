@@ -16,7 +16,6 @@ import {
   Alert,
   App,
   Button,
-  Card,
   Col,
   Dropdown,
   Form,
@@ -49,6 +48,8 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsSurface } from "@/components/ops/ops-surface";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
@@ -574,12 +575,13 @@ export default function DaemonSetsPage() {
       return;
     }
     if (key === "delete") {
-      Modal.confirm({
+      openOpsConfirm({
         title: "删除 DaemonSet",
-        content: `确认删除 ${item.name} 吗？`,
+        description: `确认删除 ${item.name} 吗？`,
+        impact: "删除后该 DaemonSet 不再保证每个节点运行对应 Pod。",
         okText: "确认",
         cancelText: "取消",
-        okButtonProps: { danger: true },
+        danger: true,
         onOk: () => void handleDelete(item),
       });
     }
@@ -673,7 +675,7 @@ export default function DaemonSetsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/workloads/daemonsets"
           embedded
@@ -726,6 +728,7 @@ export default function DaemonSetsPage() {
             }}
             sort={{ sortBy, sortOrder }}
             columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
             dataSource={filteredTableData}
             loading={(isLoading && !data) || actionMutation.isPending}
             onChange={(paginationInfo, filters, sorter, extra) =>
@@ -734,7 +737,7 @@ export default function DaemonSetsPage() {
             pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
           />
         </Space>
-      </Card>
+      </OpsSurface>
 
       <Modal
         title={editingItem ? "编辑 DaemonSet" : "新增资源"}

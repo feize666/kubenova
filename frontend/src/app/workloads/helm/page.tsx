@@ -1,12 +1,10 @@
 "use client";
 
-import { DownloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { DownloadOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   App,
-  Button,
-  Card,
   Dropdown,
   Form,
   Input,
@@ -16,12 +14,15 @@ import {
   Space,
   Tabs,
   Typography,
+  Upload,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { MenuProps } from "antd";
+import type { UploadProps } from "antd";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { OpsIconActionButton, OpsSurface } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -127,6 +128,20 @@ export default function HelmPage() {
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [installForm] = Form.useForm<InstallFormValues>();
   const [rollbackForm] = Form.useForm<RollbackFormValues>();
+  const valuesUploadProps: UploadProps = {
+    accept: ".yaml,.yml,.json,text/yaml,text/x-yaml,application/x-yaml,application/json",
+    maxCount: 1,
+    showUploadList: false,
+    beforeUpload: async (file) => {
+      try {
+        installForm.setFieldValue("values", await file.text());
+        void message.success(`已读取 ${file.name}`);
+      } catch {
+        void message.error("Values 文件读取失败");
+      }
+      return false;
+    },
+  };
 
   const installClusterId = Form.useWatch("clusterId", installForm);
   const installRepositoryName = Form.useWatch("repositoryName", installForm);
@@ -147,6 +162,7 @@ export default function HelmPage() {
       })),
     [clustersQuery.data?.items],
   );
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
 
   const selectedClusterId = useMemo(() => {
     return clusterId;
@@ -631,7 +647,7 @@ export default function HelmPage() {
         }
       />
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <ResourceFilterToolbar className="resource-filter-toolbar--section">
           <ResourceFilterToolbarItem width="auto">
             <ResourceScopeFilterButton
@@ -693,6 +709,7 @@ export default function HelmPage() {
           }}
           sort={{ sortBy, sortOrder }}
           columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           dataSource={rows}
           onRow={(record) => ({
             onClick: () => setSelectedRowId(record.id),
@@ -706,7 +723,7 @@ export default function HelmPage() {
           }}
           pagination={getPaginationConfig(releasesQuery.data?.total ?? 0, releasesQuery.isLoading)}
         />
-      </Card>
+      </OpsSurface>
 
       {renderPodLikeResourceActionStyles({
         triggerClassName: POD_ACTION_TRIGGER_CLASS,
@@ -728,9 +745,10 @@ export default function HelmPage() {
                 label: "Values",
                 children: (
                   <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-                    <Button
+                    <OpsIconActionButton
                       icon={<DownloadOutlined />}
                       disabled={!valuesQuery.data?.values?.trim()}
+                      disabledReason={!valuesQuery.data?.values?.trim() ? "没有可下载的 Values" : undefined}
                       onClick={() => {
                         if (!activeDetailRelease || !valuesQuery.data?.values?.trim()) {
                           return;
@@ -740,7 +758,7 @@ export default function HelmPage() {
                       }}
                     >
                       下载 Values
-                    </Button>
+                    </OpsIconActionButton>
                     <Input.TextArea
                       readOnly
                       autoSize={{ minRows: 14, maxRows: 24 }}
@@ -755,9 +773,10 @@ export default function HelmPage() {
                 label: "Manifest",
                 children: (
                   <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-                    <Button
+                    <OpsIconActionButton
                       icon={<DownloadOutlined />}
                       disabled={!manifestQuery.data?.manifest?.trim()}
+                      disabledReason={!manifestQuery.data?.manifest?.trim() ? "没有可下载的 Manifest" : undefined}
                       onClick={() => {
                         if (!activeDetailRelease || !manifestQuery.data?.manifest?.trim()) {
                           return;
@@ -767,7 +786,7 @@ export default function HelmPage() {
                       }}
                     >
                       下载 Manifest
-                    </Button>
+                    </OpsIconActionButton>
                     <Input.TextArea
                       readOnly
                       autoSize={{ minRows: 14, maxRows: 24 }}
@@ -788,6 +807,7 @@ export default function HelmPage() {
                     size="small"
                     bordered
                     columns={historyColumns}
+                    onResourceNavigate={(request) => setDetailTarget(request)}
                     dataSource={historyQuery.data?.items ?? []}
                     loading={historyQuery.isLoading}
                     pagination={false}
@@ -820,6 +840,10 @@ export default function HelmPage() {
           <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
             <Select
               options={installClusterOptions}
+              loading={clustersQuery.isLoading}
+              placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+              disabled={clusterUnavailable || (!clustersQuery.isLoading && installClusterOptions.length === 0)}
+              notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
               onChange={() => {
                 installForm.setFieldsValue({ repositoryName: undefined, chartName: undefined, version: undefined });
               }}
@@ -878,9 +902,9 @@ export default function HelmPage() {
                 onChange={(e) => setInstallChartKeywordInput(e.target.value)}
                 onPressEnter={handleChartSearch}
               />
-              <Button icon={<SearchOutlined />} onClick={handleChartSearch}>
+              <OpsIconActionButton icon={<SearchOutlined />} onClick={handleChartSearch}>
                 搜索
-              </Button>
+              </OpsIconActionButton>
             </Space.Compact>
           </Form.Item>
           <Form.Item name="chartName" label="Chart" rules={[{ required: true, message: "请选择 Chart" }]}>
@@ -897,8 +921,23 @@ export default function HelmPage() {
           <Form.Item name="version" label="Chart 版本">
             <Select allowClear placeholder="默认使用最新版本" options={versionOptions} />
           </Form.Item>
-          <Form.Item name="values" label="Values (JSON)">
-            <Input.TextArea rows={6} placeholder='可选，示例：{"replicaCount":2}' />
+          <Form.Item
+            name="values"
+            label={(
+              <Space size={8}>
+                <span>Values YAML / JSON</span>
+                <Upload {...valuesUploadProps} disabled={actionMutation.isPending}>
+                  <OpsIconActionButton icon={<UploadOutlined />} disabled={actionMutation.isPending}>
+                    上传
+                  </OpsIconActionButton>
+                </Upload>
+              </Space>
+            )}
+          >
+            <Input.TextArea
+              rows={8}
+              placeholder={"可选，支持 YAML 或 JSON\nreplicaCount: 2\nimage:\n  tag: 1.27"}
+            />
           </Form.Item>
         </Form>
 

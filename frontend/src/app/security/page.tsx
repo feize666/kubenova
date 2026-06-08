@@ -28,7 +28,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsStatusTag, type OpsFilterChipTone, type OpsStatusTone } from "@/components/ops";
+import { OpsFilterChip, OpsPageHeader, OpsStatusTag, OpsSurface, type OpsFilterChipTone, type OpsStatusTone } from "@/components/ops";
 import {
   ResourceActionDropdown,
   type ResourceActionItem,
@@ -38,12 +38,19 @@ import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
 } from "@/components/resource-filter-toolbar";
+import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
+import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import {
+  buildNamespaceDetailRequest,
+  buildResourceRefDetailRequest,
+  resolveClusterId,
+} from "@/lib/resource-navigation";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { buildTablePagination } from "@/lib/table/pagination";
 import { usePersistentTableSortState } from "@/lib/table/use-persistent-table-sort-state";
@@ -167,6 +174,7 @@ function SecurityEventsTab() {
   const [messageApi, contextHolder] = message.useMessage();
   const [refreshingEvents, setRefreshingEvents] = useState(false);
   const [detailRecord, setDetailRecord] = useState<SecurityEvent | null>(null);
+  const [resourceDetailTarget, setResourceDetailTarget] = useState<ResourceDetailRequest | null>(null);
 
   const [severityFilter, setSeverityFilter] = useState<string | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
@@ -303,6 +311,14 @@ function SecurityEventsTab() {
     const start = (page - 1) * pageSize;
     return sortedItems.slice(start, start + pageSize);
   }, [page, pageSize, sortedItems]);
+  const tableRows = useMemo(
+    () =>
+      pagedItems.map((item) => ({
+        ...item,
+        clusterId: resolveClusterId(item.cluster, clusterMap),
+      })),
+    [clusterMap, pagedItems],
+  );
 
   useEffect(() => {
     const maxPage = Math.max(1, Math.ceil(sortedItems.length / pageSize));
@@ -387,11 +403,23 @@ function SecurityEventsTab() {
       ellipsis: true,
       filter: { type: "text", placeholder: "以资源过滤" },
       ...getSortableColumnProps("resourceName", isLoading && !data),
-      render: (v: string) => (
-        <Typography.Text code ellipsis={{ tooltip: v }} style={{ fontSize: 12, maxWidth: 150 }}>
-          {v}
-        </Typography.Text>
-      ),
+      render: (v: string, record) => {
+        const request = buildResourceRefDetailRequest({
+          resourceRef: v,
+          resourceName: v,
+          clusterId: record.cluster,
+          namespace: record.namespace,
+          clusterMap,
+        });
+        const content = (
+          <Typography.Text code ellipsis={{ tooltip: v }} style={{ fontSize: 12, maxWidth: 150 }}>
+            {v}
+          </Typography.Text>
+        );
+        return request ? (
+          <Typography.Link onClick={() => setResourceDetailTarget(request)}>{content}</Typography.Link>
+        ) : content;
+      },
     },
     {
       title: "集群",
@@ -405,6 +433,25 @@ function SecurityEventsTab() {
           {getClusterDisplayName(clusterMap, v)}
         </OpsFilterChip>
       ),
+    },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      width: TABLE_COL_WIDTH.namespace,
+      ellipsis: true,
+      render: (value: string | null | undefined, record) => {
+        const namespaceText = value?.trim();
+        if (!namespaceText) return <Typography.Text type="secondary">-</Typography.Text>;
+        const request = buildNamespaceDetailRequest({
+          clusterId: record.cluster,
+          namespace: namespaceText,
+          clusterMap,
+        });
+        return request ? (
+          <Typography.Link onClick={() => setResourceDetailTarget(request)}>{namespaceText}</Typography.Link>
+        ) : namespaceText;
+      },
     },
     {
       title: "发生时间",
@@ -483,7 +530,8 @@ function SecurityEventsTab() {
         rowKey="id"
         tableKey="business.security.events"
         columns={columns as ColumnsType<SecurityEvent>}
-        dataSource={pagedItems}
+        onResourceNavigate={(request) => setResourceDetailTarget(request)}
+        dataSource={tableRows}
         preferencesClient={createTablePreferencesClient(accessToken || undefined)}
         globalSearch={{
           value: keyword,
@@ -543,6 +591,13 @@ function SecurityEventsTab() {
         subtitle={detailRecord ? `${getEventTypeLabel(detailRecord.type)} / ${detailRecord.resourceName}` : undefined}
         onClose={() => setDetailRecord(null)}
         sections={buildSecurityEventDetailSections(detailRecord, clusterMap)}
+      />
+      <ResourceDetailDrawer
+        open={Boolean(resourceDetailTarget)}
+        onClose={() => setResourceDetailTarget(null)}
+        request={resourceDetailTarget}
+        onNavigateRequest={(request) => setResourceDetailTarget(request)}
+        token={accessToken ?? undefined}
       />
     </>
   );
@@ -934,9 +989,9 @@ export default function SecurityPage() {
         </Space>
       ),
       children: (
-        <Card className="cyber-panel">
+        <OpsSurface variant="panel" padding="sm">
           <SecurityEventsTab />
-        </Card>
+        </OpsSurface>
       ),
     },
     {
@@ -948,21 +1003,19 @@ export default function SecurityPage() {
         </Space>
       ),
       children: (
-        <Card className="cyber-panel">
+        <OpsSurface variant="panel" padding="sm">
           <AuditLogsTab />
-        </Card>
+        </OpsSurface>
       ),
     },
   ];
 
   return (
     <div>
-      <Typography.Title level={3} style={{ marginTop: 0 }}>
-        安全审计
-      </Typography.Title>
-      <Typography.Paragraph type="secondary" style={{ marginTop: -6 }}>
-        聚合漏洞扫描、安全事件与操作审计日志，全面掌握集群安全态势。
-      </Typography.Paragraph>
+      <OpsPageHeader
+        title="安全审计"
+        subtitle="聚合漏洞扫描、安全事件与操作审计日志，全面掌握集群安全态势。"
+      />
 
       {/* 统计卡片 */}
       <Skeleton loading={statsLoading} active paragraph={{ rows: 1 }}>

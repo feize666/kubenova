@@ -8,11 +8,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Card,
   Dropdown,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Typography,
@@ -35,6 +33,8 @@ import {
   type ResourceMenuItem,
 } from "@/components/resource-action-bar";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
@@ -47,7 +47,7 @@ import {
   type CreateStorageResourcePayload,
   type StorageResource,
 } from "@/lib/api/storage";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
@@ -63,6 +63,7 @@ interface ScFormValues {
   clusterId: string;
   provisioner: string;
   bindingMode: string;
+  reclaimPolicy: string;
   allowVolumeExpansion: "true" | "false";
 }
 
@@ -128,6 +129,9 @@ export default function StorageClassPage() {
     defaultPageSize: 10,
   });
   const [modalOpen, setModalOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
   const [editTarget, setEditTarget] = useState<StorageResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
@@ -176,6 +180,7 @@ export default function StorageClassPage() {
     [clustersQuery.data],
   );
   const clusterOptions = (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id }));
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
   const clusterMap = Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]));
 
   const tableData = useMemo(
@@ -228,6 +233,27 @@ export default function StorageClassPage() {
     },
     onError: (err) => {
       void message.error(err instanceof Error ? err.message : "创建失败，请重试");
+    },
+  });
+
+  const applyYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          yaml: createYaml.trim(),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setModalOpen(false);
+      setCreateYaml("");
+      await queryClient.invalidateQueries({ queryKey: ["storage", "SC"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "YAML 创建失败");
     },
   });
 
@@ -454,6 +480,18 @@ export default function StorageClassPage() {
   ];
 
   const handleCreate = async () => {
+    if (createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyYamlMutation.mutate();
+      return;
+    }
     let values: ScFormValues;
     try {
       values = await form.validateFields();
@@ -468,6 +506,8 @@ export default function StorageClassPage() {
       storageClass: values.name,
       spec: {
         provisioner: values.provisioner,
+        volumeBindingMode: values.bindingMode,
+        reclaimPolicy: values.reclaimPolicy,
         allowVolumeExpansion: values.allowVolumeExpansion === "true",
       },
     });
@@ -497,10 +537,23 @@ export default function StorageClassPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/storage/sc"
-        titleSuffix={<ResourceAddButton title="创建StorageClass" onClick={() => setModalOpen(true)} />}
+        titleSuffix={<ResourceAddButton title="创建StorageClass" onClick={() => {
+          const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+          form.resetFields();
+          form.setFieldsValue({
+            clusterId: nextClusterId,
+            bindingMode: "WaitForFirstConsumer",
+            reclaimPolicy: "Delete",
+            allowVolumeExpansion: "false",
+          });
+          setCreateMode("form");
+          setCreateYaml("");
+          setCreateYamlClusterId(nextClusterId);
+          setModalOpen(true);
+        }} />}
       />
 
-      <Card>
+      <OpsSurface variant="toolbar" padding="sm">
         <ResourceClusterNamespaceFilters
           clusterId={clusterId}
           keywordInput={keywordInput}
@@ -515,7 +568,7 @@ export default function StorageClassPage() {
           onSearch={handleSearch}
           keywordPlaceholder="按名称/标签搜索（示例：sc-fast tier=prod）"
         />
-      </Card>
+      </OpsSurface>
 
       {!isInitializing && !accessToken ? (
         <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再查看 StorageClass 信息。" />
@@ -529,78 +582,116 @@ export default function StorageClassPage() {
         />
       ) : null}
 
-      <Card>
-          <ResourceTable<StorageResource>
-            rowKey="id"
-            columns={columns}
-            tableKey="storage.sc"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称/标签搜索（示例：sc-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            dataSource={tableData}
-            bordered={false}
-            layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
-            loading={isLoading && !data}
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
-            }
-            pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          />
-      </Card>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourceTable<StorageResource>
+          rowKey="id"
+          columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
+          tableKey="storage.sc"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称/标签搜索（示例：sc-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
+          dataSource={tableData}
+          bordered={false}
+          layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
+          loading={isLoading && !data}
+          onChange={(nextPagination, filters, sorter, extra) =>
+            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+        />
+      </OpsSurface>
 
       {renderPodLikeResourceActionStyles({ triggerClassName: POD_ACTION_TRIGGER_CLASS, menuClassName: POD_ACTION_MENU_CLASS })}
 
-      <Modal
+      <OpsModalShell
         title="添加 StorageClass"
+        description="创建 StorageClass，配置 provisioner、绑定模式和扩容能力。"
+        identity="StorageClass"
         open={modalOpen}
         onCancel={() => {
           setModalOpen(false);
+          setCreateYaml("");
           form.resetFields();
         }}
         onOk={() => void handleCreate()}
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || applyYamlMutation.isPending}
         okText="创建"
         cancelText="取消"
+        width={720}
       >
-        <Form form={form} layout="vertical">
-          <Form.Item label="名称" name="name" rules={[{ required: true, message: "请输入 SC 名称" }]}>
-            <Input placeholder="例如：fast-ssd" />
-          </Form.Item>
-          <Form.Item label="集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
-            <Select options={clusterOptions} placeholder="请选择集群" />
-          </Form.Item>
-          <Form.Item label="Provisioner" name="provisioner" rules={[{ required: true, message: "请输入 provisioner" }]}>
-            <Input placeholder="例如：kubernetes.io/no-provisioner" />
-          </Form.Item>
-          <Form.Item label="绑定模式" name="bindingMode" initialValue="WaitForFirstConsumer">
-            <Select
-              options={[
-                { label: "WaitForFirstConsumer", value: "WaitForFirstConsumer" },
-                { label: "Immediate", value: "Immediate" },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item label="允许扩容" name="allowVolumeExpansion" initialValue="false">
-            <Select
-              options={[
-                { label: "否", value: "false" },
-                { label: "是", value: "true" },
-              ]}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
-      <Modal
+        <ResourceCreateMethodTabs
+          mode={createMode}
+          onModeChange={setCreateMode}
+          yaml={createYaml}
+          onYamlChange={setCreateYaml}
+          clusterId={createYamlClusterId}
+          onClusterIdChange={setCreateYamlClusterId}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          clusterUnavailable={clusterUnavailable}
+          kindHint="StorageClass"
+          disabled={createMutation.isPending || applyYamlMutation.isPending}
+          formContent={(
+            <Form form={form} layout="vertical">
+              <OpsFormSection title="存储类定义" description="指定集群、provisioner、回收策略和卷绑定策略。parameters、mountOptions、allowedTopologies 请用 YAML。">
+                <Form.Item label="名称" name="name" rules={[{ required: true, message: "请输入 SC 名称" }]}>
+                  <Input placeholder="例如：fast-ssd" />
+                </Form.Item>
+                <Form.Item label="集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
+                  <Select
+                    options={clusterOptions}
+                    placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                    loading={clustersQuery.isLoading}
+                    disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+                    notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                  />
+                </Form.Item>
+                <Form.Item label="Provisioner" name="provisioner" rules={[{ required: true, message: "请输入 provisioner" }]}>
+                  <Input placeholder="例如：kubernetes.io/no-provisioner" />
+                </Form.Item>
+                <Form.Item label="绑定模式" name="bindingMode" initialValue="WaitForFirstConsumer">
+                  <Select
+                    options={[
+                      { label: "WaitForFirstConsumer", value: "WaitForFirstConsumer" },
+                      { label: "Immediate", value: "Immediate" },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item label="回收策略" name="reclaimPolicy" initialValue="Delete">
+                  <Select
+                    options={[
+                      { label: "Delete", value: "Delete" },
+                      { label: "Retain", value: "Retain" },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item label="允许扩容" name="allowVolumeExpansion" initialValue="false">
+                  <Select
+                    options={[
+                      { label: "否", value: "false" },
+                      { label: "是", value: "true" },
+                    ]}
+                  />
+                </Form.Item>
+              </OpsFormSection>
+            </Form>
+          )}
+        />
+      </OpsModalShell>
+      <OpsModalShell
         title={`编辑 StorageClass · ${editTarget?.name ?? ""}`}
+        description="StorageClass 关键字段不可变，仅可调整可编辑属性。"
+        identity={editTarget?.name ?? "StorageClass"}
         open={Boolean(editTarget)}
         onCancel={() => {
           setEditTarget(null);
@@ -613,28 +704,30 @@ export default function StorageClassPage() {
         destroyOnHidden
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item label="名称" name="name">
-            <Input disabled />
-          </Form.Item>
-          <Form.Item label="Provisioner" name="provisioner">
-            <Input disabled />
-          </Form.Item>
-          <Form.Item label="绑定模式" name="bindingMode">
-            <Input disabled />
-          </Form.Item>
-          <Form.Item label="回收策略" name="reclaimPolicy">
-            <Input disabled />
-          </Form.Item>
-          <Form.Item label="允许扩容" name="allowVolumeExpansion" rules={[{ required: true, message: "请选择扩容能力" }]}>
-            <Select
-              options={[
-                { label: "否", value: "false" },
-                { label: "是", value: "true" },
-              ]}
-            />
-          </Form.Item>
+          <OpsFormSection title="可编辑属性" description="不可变字段保持只读，避免误改集群存储类身份。">
+            <Form.Item label="名称" name="name">
+              <Input disabled />
+            </Form.Item>
+            <Form.Item label="Provisioner" name="provisioner">
+              <Input disabled />
+            </Form.Item>
+            <Form.Item label="绑定模式" name="bindingMode">
+              <Input disabled />
+            </Form.Item>
+            <Form.Item label="回收策略" name="reclaimPolicy">
+              <Input disabled />
+            </Form.Item>
+            <Form.Item label="允许扩容" name="allowVolumeExpansion" rules={[{ required: true, message: "请选择扩容能力" }]}>
+              <Select
+                options={[
+                  { label: "否", value: "false" },
+                  { label: "是", value: "true" },
+                ]}
+              />
+            </Form.Item>
+          </OpsFormSection>
         </Form>
-      </Modal>
+      </OpsModalShell>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}

@@ -30,6 +30,7 @@ export interface ResourceActionItem {
   danger?: boolean;
   ghost?: boolean;
   disabled?: boolean;
+  disabledReason?: ReactNode;
   loading?: boolean;
   availability?: "available" | "unavailable";
   confirm?: {
@@ -211,6 +212,11 @@ export function ResourceActionDropdown({
 }: ResourceActionDropdownProps) {
   const items = buildResourceActionMenuItems(actions);
   const itemActions = actions.filter(isResourceActionItem);
+  const disabledReasonByKey = Object.fromEntries(
+    itemActions
+      .filter((action) => action.disabledReason)
+      .map((action) => [action.key, action.disabledReason]),
+  );
 
   return (
     <OpsActionDropdown
@@ -219,6 +225,7 @@ export function ResourceActionDropdown({
       className={[className, menuClassName].filter(Boolean).join(" ")}
       placement={placement}
       trigger={trigger ?? renderResourceActionTriggerButton({ ariaLabel, baseClassName: triggerClassName })}
+      disabledReasonByKey={disabledReasonByKey}
       onClick={({ key }) => {
         const action = itemActions.find((item) => item.key === key);
         if (!action || action.disabled) {
@@ -374,6 +381,7 @@ function resolveActionsBySchema(
         type: "dashed",
         danger: Boolean(slotRule.danger),
         disabled: true,
+        disabledReason: slotRule.requiresSelection ? "先选择一条资源后可用" : "当前页面暂不支持此操作",
         availability: "unavailable",
       } satisfies ResourceActionItem;
     })
@@ -395,6 +403,7 @@ function renderActionButton(
       opsTone={opsTone}
       ghost={action.ghost}
       disabled={action.disabled || unavailable}
+      disabledReason={action.disabledReason}
       loading={action.loading}
       onClick={action.confirm || unavailable ? undefined : action.onClick}
       style={{

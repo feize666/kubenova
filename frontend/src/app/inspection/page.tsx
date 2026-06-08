@@ -10,7 +10,6 @@ import {
   DatePicker,
   Descriptions,
   message,
-  Modal,
   Row,
   Select,
   Space,
@@ -23,19 +22,23 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
+import { OpsFilterChip, OpsIconActionButton, OpsModalShell, OpsPageHeader, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
 } from "@/components/resource-filter-toolbar";
+import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
+import type { ResourceDetailRequest } from "@/lib/api/resources";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { buildTablePagination } from "@/lib/table/pagination";
+import { buildResourceRefDetailRequest } from "@/lib/resource-navigation";
 import {
   getCapabilityBaseline,
   type CapabilityBaselineMatrixItem,
@@ -126,6 +129,7 @@ export default function InspectionPage() {
   const [activeResult, setActiveResult] = useState<InspectionActionResult | null>(null);
   const [issueDetail, setIssueDetail] = useState<InspectionIssue | null>(null);
   const [capabilityDetail, setCapabilityDetail] = useState<CapabilityBaselineMatrixItem | null>(null);
+  const [resourceDetailTarget, setResourceDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [refreshingInspection, setRefreshingInspection] = useState(false);
   const [timePreset, setTimePreset] = useState<MonitoringTimePreset | "custom">("24h");
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null);
@@ -194,6 +198,10 @@ export default function InspectionPage() {
   const clusterOptions = useMemo(
     () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
     [clustersQuery.data],
+  );
+  const clusterMap = useMemo(
+    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
+    [clustersQuery.data?.items],
   );
   const knownNamespaces = useMemo(
     () =>
@@ -319,6 +327,34 @@ export default function InspectionPage() {
       width: 260,
       ellipsis: true,
       filter: { type: "text", placeholder: "以资源过滤" },
+      render: (value: string, record) => {
+        const request = buildResourceRefDetailRequest({
+          resourceRef: value,
+          clusterId: record.clusterId ?? clusterId,
+          namespace: record.namespace ?? namespace,
+          clusterMap,
+        });
+        return request ? (
+          <Typography.Link onClick={() => setResourceDetailTarget(request)}>{value}</Typography.Link>
+        ) : (
+          value
+        );
+      },
+    },
+    {
+      title: "集群",
+      dataIndex: "clusterId",
+      key: "clusterId",
+      width: 150,
+      render: (value: string | null | undefined) =>
+        value ? getClusterDisplayName(clusterMap, value) : <Typography.Text type="secondary">-</Typography.Text>,
+    },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      width: 150,
+      render: (value: string | null | undefined) => value || <Typography.Text type="secondary">-</Typography.Text>,
     },
     {
       title: "诊断证据",
@@ -365,7 +401,7 @@ export default function InspectionPage() {
         );
       },
     },
-  ], [inspectionActionPending, mutateInspectionAction]);
+  ], [clusterId, clusterMap, inspectionActionPending, mutateInspectionAction, namespace]);
 
   const capabilityColumns = useMemo<Array<HeadlampResourceTableColumn<CapabilityBaselineMatrixItem>>>(() => [
     {
@@ -603,26 +639,18 @@ export default function InspectionPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card>
-        <Row justify="space-between" align="middle" gutter={[16, 12]}>
-          <Col>
-            <Typography.Title level={4} style={{ marginBottom: 4 }}>
-              集群资源巡检
-            </Typography.Title>
-            <Typography.Text type="secondary">
-              参考主流 Kubernetes 平台，统一巡检集群、名称空间、工作负载、网络、存储、配置与活跃告警。
-            </Typography.Text>
-          </Col>
-        </Row>
-      </Card>
+      <OpsPageHeader
+        title="集群资源巡检"
+        subtitle="参考主流 Kubernetes 平台，统一巡检集群、名称空间、工作负载、网络、存储、配置与活跃告警。"
+      />
 
-      <Card>
+      <OpsSurface variant="toolbar" padding="sm">
         <ResourceFilterToolbar
           actions={
             <>
-              <Button icon={<ReloadOutlined />} onClick={() => void handleRefreshInspection()} loading={refreshingInspection}>
+              <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void handleRefreshInspection()} loading={refreshingInspection}>
                 重新巡检
-              </Button>
+              </OpsIconActionButton>
               <Select
                 style={{ width: 130 }}
                 value={exportFormat}
@@ -633,15 +661,17 @@ export default function InspectionPage() {
                   { label: "Excel", value: "xlsx" },
                 ]}
               />
-              <Button
-                type="primary"
+              <OpsIconActionButton
+                opsTone="primary"
+                opsVariant="primary"
                 icon={<DownloadOutlined />}
                 onClick={() => exportMutation.mutate()}
                 loading={exportMutation.isPending}
                 disabled={!enabled}
+                disabledReason={!enabled ? "登录后可导出报告" : undefined}
               >
                 导出报告
-              </Button>
+              </OpsIconActionButton>
               <Typography.Text type="secondary">
                 最后更新时间：{reportQuery.dataUpdatedAt ? new Date(reportQuery.dataUpdatedAt).toLocaleString("zh-CN") : "-"}
               </Typography.Text>
@@ -682,7 +712,7 @@ export default function InspectionPage() {
             </ResourceFilterToolbarItem>
           ) : null}
         </ResourceFilterToolbar>
-      </Card>
+      </OpsSurface>
 
       {!enabled ? <Alert type="warning" showIcon message="请先登录后再执行资源巡检。" /> : null}
 
@@ -733,9 +763,11 @@ export default function InspectionPage() {
         />
       ) : null}
 
-      <Card
+      <OpsSurface
+        variant="panel"
+        padding="sm"
         title="能力基线矩阵（Rancher / KubeSphere 对标）"
-        extra={
+        actions={
           <Typography.Text type="secondary">
             最后更新时间：{capabilityQuery.data?.updatedAt ? new Date(capabilityQuery.data.updatedAt).toLocaleString("zh-CN") : "-"}
           </Typography.Text>
@@ -771,7 +803,7 @@ export default function InspectionPage() {
           pagination={capabilityPagination}
           scroll={{ x: 1300 }}
         />
-      </Card>
+      </OpsSurface>
 
       {reportQuery.isError ? (
         <Alert
@@ -782,11 +814,12 @@ export default function InspectionPage() {
         />
       ) : null}
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<InspectionIssue>
           rowKey="id"
           tableKey="business.inspection.issues"
           columns={columns as ColumnsType<InspectionIssue>}
+          onResourceNavigate={(request) => setResourceDetailTarget(request)}
           dataSource={issuePagedItems}
           preferencesClient={tablePreferencesClient}
           globalSearch={{
@@ -816,12 +849,14 @@ export default function InspectionPage() {
             },
           }}
         />
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         open={Boolean(activeResult)}
         width={900}
         title={activeResult?.action === "create-hpa-draft" ? "HPA 草案" : "修复 YAML"}
+        description="查看巡检动作生成的修复内容，可下载 YAML 后再应用。"
+        identity={activeResult?.issueId ?? "巡检动作"}
         onCancel={() => setActiveResult(null)}
         footer={
           <Space>
@@ -865,13 +900,20 @@ export default function InspectionPage() {
             </Card>
           </Space>
         ) : null}
-      </Modal>
+      </OpsModalShell>
       <BusinessDetailDrawer
         open={Boolean(issueDetail)}
         title={issueDetail ? `巡检问题 · ${issueDetail.title}` : "巡检问题"}
         subtitle={issueDetail ? `${CATEGORY_LABEL[issueDetail.category] ?? issueDetail.category} / ${issueDetail.resourceRef}` : undefined}
         onClose={() => setIssueDetail(null)}
         sections={buildInspectionIssueDetailSections(issueDetail)}
+      />
+      <ResourceDetailDrawer
+        open={Boolean(resourceDetailTarget)}
+        onClose={() => setResourceDetailTarget(null)}
+        request={resourceDetailTarget}
+        onNavigateRequest={(request) => setResourceDetailTarget(request)}
+        token={accessToken ?? undefined}
       />
       <BusinessDetailDrawer
         open={Boolean(capabilityDetail)}

@@ -121,13 +121,22 @@ export class StorageService {
       sortOrder: query.sortOrder,
     };
     if (waitForSync) {
-      await this.refreshStorageSyncState(shouldSync, clusterId, readableClusterIds, {
-        strict: Boolean(clusterId),
-      });
+      await this.refreshStorageSyncState(
+        shouldSync,
+        clusterId,
+        readableClusterIds,
+        {
+          strict: Boolean(clusterId),
+        },
+      );
     }
     const result = await this.storageRepository.list(params);
     if (!waitForSync) {
-      void this.refreshStorageSyncState(shouldSync, clusterId, readableClusterIds);
+      void this.refreshStorageSyncState(
+        shouldSync,
+        clusterId,
+        readableClusterIds,
+      );
     }
     return {
       ...result,
@@ -145,7 +154,7 @@ export class StorageService {
       return;
     }
 
-    const targets = clusterId ? [clusterId] : readableClusterIds ?? [];
+    const targets = clusterId ? [clusterId] : (readableClusterIds ?? []);
     if (targets.length === 0) {
       return;
     }
@@ -383,6 +392,8 @@ export class StorageService {
     const { coreApi, storageApi } = await this.getApis(body.clusterId);
     const specInput = body.spec ?? {};
     if (body.kind === 'SC') {
+      const reclaimPolicy =
+        (specInput.reclaimPolicy as string | undefined) ?? 'Delete';
       await storageApi.createStorageClass({
         body: {
           apiVersion: 'storage.k8s.io/v1',
@@ -395,7 +406,20 @@ export class StorageService {
             body.bindingMode ??
             (specInput.volumeBindingMode as string | undefined) ??
             'Immediate',
-          reclaimPolicy: 'Delete',
+          reclaimPolicy,
+          allowVolumeExpansion:
+            typeof specInput.allowVolumeExpansion === 'boolean'
+              ? specInput.allowVolumeExpansion
+              : undefined,
+          parameters:
+            specInput.parameters &&
+            typeof specInput.parameters === 'object' &&
+            !Array.isArray(specInput.parameters)
+              ? (specInput.parameters as Record<string, string>)
+              : undefined,
+          mountOptions: Array.isArray(specInput.mountOptions)
+            ? (specInput.mountOptions as string[])
+            : undefined,
         },
       });
       return;

@@ -158,7 +158,9 @@ export class MonitoringController {
       body.clusterId && body.clusterId.trim()
         ? body.clusterId.trim()
         : undefined,
-      body.namespace && body.namespace.trim() ? body.namespace.trim() : undefined,
+      body.namespace && body.namespace.trim()
+        ? body.namespace.trim()
+        : undefined,
       this.parseTimeFilter(body.range, body.from, body.to, '24h'),
     );
   }

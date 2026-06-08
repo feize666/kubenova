@@ -12,7 +12,7 @@ import {
   LoadingOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { App, Button, Select, Space, Tooltip, Typography, theme } from "antd";
+import { App, Select, Space, Tooltip, Typography, theme } from "antd";
 import { ApiError } from "@/lib/api/client";
 import { getClusters } from "@/lib/api/clusters";
 import { createRuntimeSession, resolveSafeRuntimeReturnTo, type CreateRuntimeSessionResponse } from "@/lib/api/runtime";
@@ -31,7 +31,7 @@ import {
   type TerminalParsedMessage,
 } from "@/lib/ws/terminal";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsFrameShell, OpsStatusTag, type OpsFrameShellState, type OpsStatusTone } from "@/components/ops";
+import { OpsFilterChip, OpsFrameShell, OpsIconActionButton, OpsStatusTag, type OpsFrameShellState, type OpsStatusTone } from "@/components/ops";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -114,6 +114,33 @@ function formatExpiry(expiresAtMs?: number): string {
 function readCssVar(name: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+function readOpsTerminalTheme() {
+  const background = readCssVar("--ops-terminal-bg", "#061120");
+  return {
+    background,
+    foreground: readCssVar("--ops-terminal-fg", "#eef6ff"),
+    cursor: readCssVar("--ops-status-info-text", "#38bdf8"),
+    cursorAccent: background,
+    selectionBackground: readCssVar("--ops-terminal-selection", "rgba(56, 189, 248, 0.45)"),
+    black: "#020617",
+    red: "#ef4444",
+    green: "#22c55e",
+    yellow: "#f59e0b",
+    blue: "#3b82f6",
+    magenta: "#a855f7",
+    cyan: "#06b6d4",
+    white: "#e2e8f0",
+    brightBlack: "#475569",
+    brightRed: "#f87171",
+    brightGreen: "#4ade80",
+    brightYellow: "#facc15",
+    brightBlue: "#60a5fa",
+    brightMagenta: "#c084fc",
+    brightCyan: "#67e8f9",
+    brightWhite: "#f8fafc",
+  };
 }
 
 function normalizeRuntimeError(code?: string, fallback?: string): { text: string; blockReconnect: boolean } {
@@ -700,10 +727,6 @@ export default function TerminalPage() {
   useEffect(() => {
     const host = terminalHostRef.current;
     if (!host || terminalRef.current) return;
-    const terminalBackground = readCssVar("--ops-terminal-bg", "#061120");
-    const terminalForeground = readCssVar("--ops-terminal-fg", "#eef6ff");
-    const terminalSelection = readCssVar("--ops-terminal-selection", "rgba(56, 189, 248, 0.45)");
-    const statusInfo = readCssVar("--ops-status-info-text", "#38bdf8");
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -712,29 +735,7 @@ export default function TerminalPage() {
       fontSize: 13,
       lineHeight: 1.35,
       scrollback: 5000,
-      theme: {
-        background: terminalBackground,
-        foreground: terminalForeground,
-        cursor: statusInfo,
-        cursorAccent: terminalBackground,
-        selectionBackground: terminalSelection,
-        black: "#020617",
-        red: "#ef4444",
-        green: "#22c55e",
-        yellow: "#f59e0b",
-        blue: "#3b82f6",
-        magenta: "#a855f7",
-        cyan: "#06b6d4",
-        white: "#e2e8f0",
-        brightBlack: "#475569",
-        brightRed: "#f87171",
-        brightGreen: "#4ade80",
-        brightYellow: "#facc15",
-        brightBlue: "#60a5fa",
-        brightMagenta: "#c084fc",
-        brightCyan: "#67e8f9",
-        brightWhite: "#f8fafc",
-      },
+      theme: readOpsTerminalTheme(),
     });
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
@@ -768,9 +769,21 @@ export default function TerminalPage() {
           })
         : null;
     resizeObserver?.observe(host);
+    const themeObserver =
+      typeof MutationObserver !== "undefined"
+        ? new MutationObserver(() => {
+            terminal.options.theme = readOpsTerminalTheme();
+            fitTerminal();
+          })
+        : null;
+    themeObserver?.observe(document.documentElement, {
+      attributeFilter: ["data-theme"],
+      attributes: true,
+    });
 
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
+      themeObserver?.disconnect();
       resizeObserver?.disconnect();
       terminal.dispose();
       terminalRef.current = null;
@@ -884,40 +897,47 @@ export default function TerminalPage() {
         status={<OpsStatusTag tone={visualTone}>{VISUAL_STATUS_LABEL[visualState]}</OpsStatusTag>}
         toolbar={(
           <Space wrap size={8} className="terminal-workbench-toolbar">
-            <Select
-              value={selectedContainer || undefined}
-              className="terminal-workbench-container-select"
-              placeholder="选择容器"
-              options={availableContainers.map((container) => ({ label: container, value: container }))}
-              onChange={(value) => setSelectedContainer(value)}
-            />
-            <Tooltip title="新建会话">
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={() => void connectTerminal({ forceNewSession: true, userInitiated: true })}
-                disabled={status === "connecting" || missingParams.length > 0}
-              >
-                新建会话
-              </Button>
-            </Tooltip>
-            <Tooltip title="断开终端连接">
-              <Button onClick={() => disconnectTerminal(true)}>断开</Button>
-            </Tooltip>
-            <Tooltip title="退出终端">
-              <Button danger icon={<ArrowLeftOutlined />} onClick={() => handleDisconnectAndReturn()}>
-                退出
-              </Button>
-            </Tooltip>
-            <Tooltip title="清屏">
-              <Button icon={<ColumnWidthOutlined />} onClick={clearTerminal}>
-                清屏
-              </Button>
-            </Tooltip>
-            <Tooltip title="复制终端内容">
-              <Button icon={<CopyOutlined />} onClick={copyTerminal}>
-                复制
-              </Button>
-            </Tooltip>
+            <span className="terminal-workbench-toolbar__select">
+              <Select
+                value={selectedContainer || undefined}
+                className="terminal-workbench-container-select"
+                placeholder="选择容器"
+                options={availableContainers.map((container) => ({ label: container, value: container }))}
+                onChange={(value) => setSelectedContainer(value)}
+              />
+            </span>
+            <span className="terminal-workbench-toolbar__group">
+              <Tooltip title="新建会话">
+                <OpsIconActionButton
+                  opsTone="primary"
+                  opsVariant="command"
+                  icon={<ReloadOutlined />}
+                  onClick={() => void connectTerminal({ forceNewSession: true, userInitiated: true })}
+                  disabled={status === "connecting" || missingParams.length > 0}
+                  disabledReason={status === "connecting" ? "正在连接终端" : missingParams.length > 0 ? missingText : undefined}
+                >
+                  新建
+                </OpsIconActionButton>
+              </Tooltip>
+              <Tooltip title="断开终端连接">
+                <OpsIconActionButton opsVariant="command" icon={<CloseCircleOutlined />} onClick={() => disconnectTerminal(true)}>
+                  断开
+                </OpsIconActionButton>
+              </Tooltip>
+              <Tooltip title="退出终端">
+                <OpsIconActionButton opsTone="danger" opsVariant="command" icon={<ArrowLeftOutlined />} onClick={() => handleDisconnectAndReturn()}>
+                  退出
+                </OpsIconActionButton>
+              </Tooltip>
+            </span>
+            <span className="terminal-workbench-toolbar__group terminal-workbench-toolbar__group--utility">
+              <Tooltip title="清屏">
+                <OpsIconActionButton opsVariant="icon" icon={<ColumnWidthOutlined />} aria-label="清屏" onClick={clearTerminal} />
+              </Tooltip>
+              <Tooltip title="复制终端内容">
+                <OpsIconActionButton opsVariant="icon" icon={<CopyOutlined />} aria-label="复制终端内容" onClick={copyTerminal} />
+              </Tooltip>
+            </span>
           </Space>
         )}
         chips={(
@@ -970,30 +990,137 @@ export default function TerminalPage() {
       </OpsFrameShell>
       <style jsx global>{`
         .terminal-workbench-shell.ops-frame-shell {
+          --ops-terminal-bg: #fbfdff;
+          --ops-terminal-fg: #162033;
+          --ops-terminal-selection: rgba(37, 99, 235, 0.22);
+          --terminal-bg: var(--ops-terminal-bg);
+          --terminal-border-glow: rgba(37, 99, 235, 0.16);
+          --terminal-workbench-shell-bg: linear-gradient(180deg, #ffffff, #f8fbff);
+          --terminal-workbench-toolbar-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 249, 255, 0.96));
+          --terminal-workbench-toolbar-border: rgba(37, 99, 235, 0.16);
+          --terminal-workbench-select-bg: #ffffff;
+          --terminal-workbench-select-text: #162033;
+          --terminal-workbench-select-muted: #5d6675;
+          --terminal-workbench-select-border: #d7e2f1;
+          --terminal-workbench-stage-bg:
+            linear-gradient(90deg, transparent 0 23px, rgba(37, 99, 235, 0.04) 23px 24px, transparent 24px 48px),
+            linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+          --terminal-workbench-stage-border: rgba(37, 99, 235, 0.22);
+          --terminal-workbench-stage-active-border: rgba(14, 165, 233, 0.36);
+          --terminal-workbench-stage-danger-border: rgba(220, 38, 38, 0.32);
+          --terminal-workbench-stage-warning-border: rgba(180, 83, 9, 0.3);
+          --terminal-workbench-titlebar-bg: rgba(255, 255, 255, 0.96);
+          --terminal-workbench-titlebar-border: rgba(37, 99, 235, 0.14);
+          --terminal-workbench-title-color: #162033;
+          --terminal-workbench-dot-ring: rgba(15, 23, 42, 0.12);
+          --terminal-workbench-host-bg:
+            linear-gradient(90deg, transparent 0 23px, rgba(37, 99, 235, 0.035) 23px 24px, transparent 24px 48px),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, var(--ops-terminal-bg) 52%);
+          --terminal-workbench-host-scanline: rgba(37, 99, 235, 0.055);
+          --terminal-workbench-host-inner-line: rgba(37, 99, 235, 0.1);
+          --terminal-workbench-scrollbar-track: rgba(226, 232, 240, 0.86);
+          --terminal-workbench-scrollbar-thumb: linear-gradient(180deg, rgba(14, 165, 233, 0.62), rgba(37, 99, 235, 0.5));
           min-height: calc(100vh - 112px);
-          border-radius: 10px;
+          border-radius: 8px;
+          background: var(--terminal-workbench-shell-bg);
+        }
+
+        [data-theme="light"] {
+          --ops-terminal-bg: #fbfdff;
+          --ops-terminal-fg: #162033;
+          --ops-terminal-selection: rgba(37, 99, 235, 0.22);
+          --terminal-bg: var(--ops-terminal-bg);
+          --terminal-border-glow: rgba(37, 99, 235, 0.16);
+        }
+
+        [data-theme="dark"] .terminal-workbench-shell.ops-frame-shell {
+          --ops-terminal-bg: #061120;
+          --ops-terminal-fg: #eef6ff;
+          --ops-terminal-selection: rgba(56, 189, 248, 0.45);
+          --terminal-bg: var(--ops-terminal-bg);
+          --terminal-border-glow: rgba(56, 189, 248, 0.24);
+          --terminal-workbench-shell-bg: linear-gradient(180deg, rgba(8, 18, 31, 0.98), rgba(3, 10, 20, 0.98));
+          --terminal-workbench-toolbar-bg: rgba(2, 8, 23, 0.28);
+          --terminal-workbench-toolbar-border: rgba(148, 163, 184, 0.16);
+          --terminal-workbench-select-bg: rgba(2, 8, 23, 0.34);
+          --terminal-workbench-select-text: rgba(248, 250, 252, 0.92);
+          --terminal-workbench-select-muted: rgba(226, 232, 240, 0.74);
+          --terminal-workbench-select-border: rgba(148, 163, 184, 0.22);
+          --terminal-workbench-stage-bg:
+            linear-gradient(90deg, transparent 0 23px, rgba(56, 189, 248, 0.055) 23px 24px, transparent 24px 48px),
+            var(--ops-terminal-bg);
+          --terminal-workbench-stage-border: rgba(56, 189, 248, 0.24);
+          --terminal-workbench-stage-active-border: rgba(34, 211, 238, 0.38);
+          --terminal-workbench-stage-danger-border: rgba(248, 113, 113, 0.4);
+          --terminal-workbench-stage-warning-border: rgba(251, 191, 36, 0.36);
+          --terminal-workbench-titlebar-bg: rgba(8, 18, 31, 0.96);
+          --terminal-workbench-titlebar-border: rgba(56, 189, 248, 0.16);
+          --terminal-workbench-title-color: var(--ops-terminal-fg);
+          --terminal-workbench-dot-ring: rgba(255, 255, 255, 0.06);
+          --terminal-workbench-host-bg:
+            linear-gradient(90deg, transparent 0 23px, rgba(56, 189, 248, 0.052) 23px 24px, transparent 24px 48px),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.018) 0, transparent 48%),
+            var(--terminal-bg);
+          --terminal-workbench-host-scanline: rgba(255, 255, 255, 0.035);
+          --terminal-workbench-host-inner-line: rgba(255, 255, 255, 0.026);
+          --terminal-workbench-scrollbar-track: rgba(15, 23, 42, 0.56);
+          --terminal-workbench-scrollbar-thumb: linear-gradient(180deg, rgba(56, 189, 248, 0.72), rgba(59, 130, 246, 0.56));
         }
 
         .terminal-workbench-shell .ops-frame-shell__header {
           align-items: center;
+          gap: 14px;
         }
 
         .terminal-workbench-shell .ops-frame-shell__title {
-          font-size: 18px;
+          font-size: 16px;
+          letter-spacing: 0;
         }
 
         .terminal-workbench-body {
           display: grid;
           min-height: 0;
-          padding: 14px;
+          padding: 12px;
         }
 
         .terminal-workbench-toolbar.ant-space {
-          row-gap: 8px;
+          align-items: center;
+          row-gap: 6px;
+        }
+
+        .terminal-workbench-toolbar__select,
+        .terminal-workbench-toolbar__group {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+        }
+
+        .terminal-workbench-toolbar__group {
+          padding: 3px;
+          border: 1px solid var(--terminal-workbench-toolbar-border);
+          border-radius: 8px;
+          background: var(--terminal-workbench-toolbar-bg);
+        }
+
+        .terminal-workbench-toolbar__group--utility {
+          gap: 3px;
         }
 
         .terminal-workbench-container-select.ant-select {
-          min-width: 180px;
+          min-width: 176px;
+        }
+
+        .terminal-workbench-container-select .ant-select-selector {
+          border-color: var(--terminal-workbench-select-border) !important;
+          background: var(--terminal-workbench-select-bg) !important;
+          color: var(--terminal-workbench-select-text) !important;
+        }
+
+        .terminal-workbench-container-select .ant-select-arrow,
+        .terminal-workbench-container-select .ant-select-selection-placeholder,
+        .terminal-workbench-container-select .ant-select-selection-item {
+          color: var(--terminal-workbench-select-muted) !important;
         }
 
         .terminal-workbench-stage {
@@ -1002,24 +1129,24 @@ export default function TerminalPage() {
           grid-template-rows: auto minmax(0, 1fr);
           min-height: 72vh;
           overflow: hidden;
-          border: 1px solid var(--ops-frame-border);
-          border-radius: 10px;
-          background: var(--ops-terminal-bg);
-          box-shadow: inset 0 1px 0 var(--ops-frame-divider), 0 1px 2px rgba(15, 23, 42, 0.08);
+          border: 1px solid var(--terminal-workbench-stage-border);
+          border-radius: 8px;
+          background: var(--terminal-workbench-stage-bg);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76), 0 1px 2px rgba(15, 23, 42, 0.06);
         }
 
         .terminal-workbench-stage--connecting,
         .terminal-workbench-stage--connected {
-          border-color: var(--ops-status-info-border);
+          border-color: var(--terminal-workbench-stage-active-border);
         }
 
         .terminal-workbench-stage--expired,
         .terminal-workbench-stage--error {
-          border-color: var(--ops-status-danger-border);
+          border-color: var(--terminal-workbench-stage-danger-border);
         }
 
         .terminal-workbench-stage--non-reconnectable {
-          border-color: var(--ops-status-warning-border);
+          border-color: var(--terminal-workbench-stage-warning-border);
         }
 
         .terminal-workbench-titlebar {
@@ -1027,9 +1154,10 @@ export default function TerminalPage() {
           align-items: center;
           justify-content: space-between;
           gap: 12px;
-          padding: 10px 14px;
-          border-bottom: 1px solid var(--ops-frame-divider);
-          background: var(--ops-frame-header-bg);
+          min-height: 40px;
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--terminal-workbench-titlebar-border);
+          background: var(--terminal-workbench-titlebar-bg);
         }
 
         .terminal-workbench-title-group,
@@ -1044,7 +1172,7 @@ export default function TerminalPage() {
           min-width: 0;
           margin: 0;
           overflow: hidden;
-          color: var(--ops-terminal-fg);
+          color: var(--terminal-workbench-title-color);
           font-weight: 650;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -1055,7 +1183,7 @@ export default function TerminalPage() {
           height: 9px;
           flex: 0 0 auto;
           border-radius: 50%;
-          box-shadow: 0 0 0 1px var(--ops-frame-divider);
+          box-shadow: 0 0 0 1px var(--terminal-workbench-dot-ring);
         }
 
         .terminal-workbench-dot--warn {
@@ -1095,6 +1223,48 @@ export default function TerminalPage() {
           max-height: 72vh;
           min-height: 0;
           overflow: hidden;
+        }
+
+        .terminal-workbench-terminal-area .terminal-xterm-host {
+          background: var(--terminal-workbench-host-bg);
+          box-shadow:
+            inset 0 0 0 1px var(--terminal-workbench-host-inner-line),
+            inset 0 0 28px color-mix(in srgb, var(--terminal-border-glow) 36%, transparent);
+        }
+
+        .terminal-workbench-terminal-area .terminal-xterm-host::before {
+          background:
+            repeating-linear-gradient(
+              180deg,
+              var(--terminal-workbench-host-scanline) 0,
+              var(--terminal-workbench-host-scanline) 1px,
+              transparent 1px,
+              transparent 20px
+            );
+          opacity: 0.1;
+        }
+
+        .terminal-workbench-terminal-area .terminal-xterm-host .xterm,
+        .terminal-workbench-terminal-area .terminal-xterm-host .xterm-viewport,
+        .terminal-workbench-terminal-area .terminal-xterm-host .xterm-screen {
+          background-color: var(--ops-terminal-bg) !important;
+        }
+
+        .terminal-workbench-terminal-area .terminal-xterm-host .xterm-viewport {
+          scrollbar-color: rgba(37, 99, 235, 0.5) var(--terminal-workbench-scrollbar-track);
+        }
+
+        .terminal-workbench-terminal-area .terminal-xterm-host .xterm-viewport::-webkit-scrollbar-track {
+          background: var(--terminal-workbench-scrollbar-track);
+        }
+
+        .terminal-workbench-terminal-area .terminal-xterm-host .xterm-viewport::-webkit-scrollbar-thumb {
+          background: var(--terminal-workbench-scrollbar-thumb);
+          border-color: var(--terminal-workbench-scrollbar-track);
+        }
+
+        [data-theme="dark"] .terminal-workbench-stage {
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 1px 2px rgba(2, 8, 23, 0.16);
         }
 
         @media (max-width: 720px) {

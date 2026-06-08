@@ -10,8 +10,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
-  Card,
-  Modal,
   Space,
   Typography,
   message,
@@ -55,7 +53,9 @@ import { useAntdTableSortPagination } from "@/lib/table";
 import { QUERY_CACHE_TIMINGS } from "@/lib/query";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { OpsActionDropdown } from "@/components/ops/ops-action-dropdown";
+import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
+import { OpsSurface } from "@/components/ops/ops-surface";
 import { OpsStatusTag } from "@/components/ops/ops-status";
 
 // Pod 状态类型
@@ -862,12 +862,13 @@ export default function PodsPage() {
               return;
             }
             if (key === "delete") {
-              Modal.confirm({
+              openOpsConfirm({
                 title: "确认删除 Pod",
-                content: `删除 Pod ${row.name} 后将不可恢复`,
+                description: `删除 Pod ${row.name} 后将不可恢复。`,
+                impact: "删除后需要由上层控制器重新调度或手动重建。",
                 okText: "确认",
                 cancelText: "取消",
-                okButtonProps: { danger: true },
+                danger: true,
                 onOk: () => void handleDelete(row),
               });
             }
@@ -889,7 +890,7 @@ export default function PodsPage() {
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-      <Card className="cyber-panel pods-workbench-card">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path={POD_PATH}
           embedded
@@ -902,53 +903,55 @@ export default function PodsPage() {
             />
           }
         />
-        <ResourceScopeFilterButton
-          clusterId={clusterId}
-          namespace={namespace}
-          clusterOptions={clusterFilterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onApply={handleScopeApply}
-        />
-
-        {!isInitializing && !accessToken ? (
-          <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再查看 Pod 信息。" style={{ marginBottom: 12 }} />
-        ) : null}
-
-        {podsQuery.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="加载失败"
-            description={
-              podsQuery.error instanceof Error ? podsQuery.error.message : "获取 Pod 数据时发生错误"
-            }
-            style={{ marginBottom: 12 }}
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterFilterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={handleScopeApply}
           />
-        ) : null}
 
-        <PodTimeProvider>
-          <ResourceTable<PodRow>
-            rowKey="key"
-            tableKey={POD_TABLE_KEY}
-            className="pod-table"
-            bordered
-            columns={columns as ColumnsType<PodRow>}
-            dataSource={displayedRows}
-            preferencesClient={preferencesClient}
-            globalSearch={globalSearch}
-            filters={tableFilters}
-            onFiltersChange={handleFiltersChange}
-            sort={sortState}
-            loading={loadingState}
-            onChange={handleResourceTableChange}
-            pagination={getPaginationConfig(displayedTotal, tableBusy)}
-            emptyDescription="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。"
-          />
-        </PodTimeProvider>
-      </Card>
+          {!isInitializing && !accessToken ? (
+            <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再查看 Pod 信息。" />
+          ) : null}
+
+          {podsQuery.isError ? (
+            <Alert
+              type="error"
+              showIcon
+              message="加载失败"
+              description={
+                podsQuery.error instanceof Error ? podsQuery.error.message : "获取 Pod 数据时发生错误"
+              }
+            />
+          ) : null}
+
+          <PodTimeProvider>
+            <ResourceTable<PodRow>
+              rowKey="key"
+              tableKey={POD_TABLE_KEY}
+              className="pod-table"
+              bordered
+              columns={columns as ColumnsType<PodRow>}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              dataSource={displayedRows}
+              preferencesClient={preferencesClient}
+              globalSearch={globalSearch}
+              filters={tableFilters}
+              onFiltersChange={handleFiltersChange}
+              sort={sortState}
+              loading={loadingState}
+              onChange={handleResourceTableChange}
+              pagination={getPaginationConfig(displayedTotal, tableBusy)}
+              emptyDescription="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。"
+            />
+          </PodTimeProvider>
+        </Space>
+      </OpsSurface>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}

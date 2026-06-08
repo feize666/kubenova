@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * UI tech refresh browser smoke.
+ * Screenshot evidence naming: <route>__<theme>__<viewport>__<state>.png
  *
  * Usage:
  *   UI_TECH_BASE_URL=http://localhost:3000 \
@@ -26,6 +27,7 @@ const timeout = readPositiveInt("UI_TECH_TIMEOUT_MS", 20000);
 const settleMs = readNonNegativeInt("UI_TECH_SETTLE_MS", 500);
 const headless = process.env.UI_TECH_HEADLESS !== "false";
 const saveArtifacts = process.env.UI_TECH_SAVE_ARTIFACTS === "1" || process.env.UI_TECH_SAVE_ARTIFACTS === "true";
+const themes = selectThemes(cliOptions.themes || process.env.UI_TECH_THEMES || "black,white");
 
 const viewports = [
   { name: "desktop", width: 1440, height: 900 },
@@ -71,6 +73,56 @@ const allRoutes = [
     statusSelector: ".ops-frame-shell__status .ops-status-tag",
     requireOpsFrameShell: true,
   },
+  {
+    id: "pods",
+    path: "/workloads/pods?clusterId=local&namespace=default",
+    texts: ["Pod", "查看和管理集群中运行的 Pod 实例", "资源范围"],
+    shellSelector: ".resource-table-shell",
+    toolbarSelector: ".resource-table-toolbar",
+    chipSelector: ".resource-scope-filter-button",
+    statusSelector: ".resource-table-toolbar-actions",
+    evidenceState: "table",
+  },
+  {
+    id: "deployments",
+    path: "/workloads/deployments?clusterId=local&namespace=default",
+    texts: ["Deployment", "管理无状态应用发布", "资源范围"],
+    shellSelector: ".resource-table-shell",
+    toolbarSelector: ".resource-table-toolbar",
+    chipSelector: ".resource-scope-filter-button",
+    statusSelector: ".resource-table-toolbar-actions",
+    evidenceState: "table",
+  },
+  {
+    id: "namespaces",
+    path: "/namespaces?clusterId=local",
+    texts: ["Namespace", "统一管理名称空间", "资源范围"],
+    shellSelector: ".resource-table-shell",
+    toolbarSelector: ".resource-table-toolbar",
+    chipSelector: ".resource-scope-filter-button",
+    statusSelector: ".resource-table-toolbar-actions",
+    evidenceState: "table",
+  },
+  {
+    id: "nodes",
+    path: "/clusters/nodes?clusterId=local",
+    texts: ["Node", "查看集群工作节点", "集群"],
+    shellSelector: ".resource-table-shell",
+    toolbarSelector: ".resource-table-toolbar",
+    chipSelector: ".resource-scope-filter-button",
+    statusSelector: ".resource-table-toolbar-actions",
+    evidenceState: "table",
+  },
+  {
+    id: "cluster-management",
+    path: "/clusters",
+    texts: ["集群管理", "查看集群版本", "集群总数"],
+    shellSelector: ".resource-table-shell",
+    toolbarSelector: ".resource-table-toolbar",
+    chipSelector: ".resource-filter-toolbar",
+    statusSelector: ".resource-table-toolbar-actions",
+    evidenceState: "table",
+  },
 ];
 const routes = selectRoutes(allRoutes, cliOptions.routes);
 
@@ -78,6 +130,7 @@ function parseCliOptions(args) {
   const options = {
     baseUrl: "",
     routes: "",
+    themes: "",
   };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -99,8 +152,17 @@ function parseCliOptions(args) {
       options.routes = arg.slice("--routes=".length);
       continue;
     }
+    if (arg === "--themes") {
+      options.themes = args[index + 1] || "";
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--themes=")) {
+      options.themes = arg.slice("--themes=".length);
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
-      console.log("Usage: node scripts/ui-tech-smoke.mjs [--base-url URL] [--routes overview,terminal,logs]");
+      console.log("Usage: node scripts/ui-tech-smoke.mjs [--base-url URL] [--routes overview,terminal,logs] [--themes black,white]");
       process.exit(0);
     }
     fail(`未知参数: ${arg}`);
@@ -114,6 +176,9 @@ function selectRoutes(candidateRoutes, raw) {
     overview: new Set(["overview", "overview-scoped"]),
     terminal: new Set(["terminal"]),
     logs: new Set(["logs"]),
+    "resource-surfaces": new Set(["pods", "deployments", "namespaces", "nodes"]),
+    workloads: new Set(["pods", "deployments"]),
+    clusters: new Set(["cluster-management", "namespaces", "nodes"]),
   };
   const requested = new Set();
   for (const item of raw.split(",")) {
@@ -129,6 +194,35 @@ function selectRoutes(candidateRoutes, raw) {
     fail(`--routes 未匹配任何路由: ${raw}`);
   }
   return selected;
+}
+
+function selectThemes(raw) {
+  const aliases = {
+    black: "dark",
+    dark: "dark",
+    white: "light",
+    light: "light",
+  };
+  const selected = [];
+  for (const item of raw.split(",")) {
+    const key = item.trim().toLowerCase();
+    if (!key) continue;
+    const theme = aliases[key];
+    if (!theme) {
+      fail(`--themes 包含未知主题: ${item}`);
+    }
+    if (!selected.includes(theme)) {
+      selected.push(theme);
+    }
+  }
+  if (selected.length === 0) {
+    fail(`--themes 未选择任何主题: ${raw}`);
+  }
+  return selected;
+}
+
+function themeEvidenceName(theme) {
+  return theme === "dark" ? "black" : "white";
 }
 
 function fail(message, cause) {
@@ -287,6 +381,16 @@ function isAllowedConsoleIssue(issue) {
   if (/antd.*space.*deprecated|space.*deprecated.*antd|\[antd:\s*space\].*deprecated/i.test(issue.text)) {
     return true;
   }
+  const isResourceApiNotFound =
+    brief.includes("404") &&
+    (
+      brief.includes("/api/workloads") ||
+      brief.includes("/api/namespaces") ||
+      brief.includes("/api/clusters")
+    );
+  if (isResourceApiNotFound) {
+    return true;
+  }
   const isRuntimeOrLogs =
     brief.includes("/api/runtime") ||
     brief.includes("/api/logs") ||
@@ -411,12 +515,16 @@ async function assertRoute(page, route, viewport) {
   );
 }
 
-async function maybeSaveFailureScreenshot(page, viewportName, routeId) {
+function screenshotFilename(routeId, theme, viewportName, state, suffix = "") {
+  return `${routeId}__${themeEvidenceName(theme)}__${viewportName}__${state}${suffix}.png`.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+async function saveRouteScreenshot(page, viewportName, routeId, theme, state, suffix = "") {
   if (!saveArtifacts) return;
   await mkdir(ARTIFACT_ROOT, { recursive: true });
-  const filename = `${viewportName}-${routeId}-${Date.now()}.png`.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const filename = screenshotFilename(routeId, theme, viewportName, state, suffix);
   await page.screenshot({ path: join(ARTIFACT_ROOT, filename), fullPage: true });
-  info(`失败截图已写入 ${join(ARTIFACT_ROOT, filename)}`);
+  info(`截图已写入 ${join(ARTIFACT_ROOT, filename)}`);
 }
 
 async function launchBrowser(chromium) {
@@ -470,22 +578,31 @@ function resolveChromiumExecutable() {
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
-async function runViewport(browser, viewport) {
+async function applyTheme(page, theme) {
+  await page.addInitScript((nextTheme) => {
+    window.localStorage.setItem("kubenova-theme-mode", nextTheme);
+    document.documentElement?.setAttribute("data-theme", nextTheme);
+  }, theme);
+}
+
+async function runViewport(browser, viewport, theme) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     deviceScaleFactor: 1,
   });
   const page = await context.newPage();
   page.setDefaultTimeout(timeout);
-  const capture = installIssueCapture(page, viewport.name);
+  await applyTheme(page, theme);
+  const capture = installIssueCapture(page, `${themeEvidenceName(theme)}/${viewport.name}`);
 
   try {
     await ensureLoggedIn(page);
     for (const route of routes) {
       try {
         await assertRoute(page, route, viewport);
+        await saveRouteScreenshot(page, viewport.name, route.id, theme, route.evidenceState ?? (route.requireOpsFrameShell ? route.id : "workbench"));
       } catch (error) {
-        await maybeSaveFailureScreenshot(page, viewport.name, route.id);
+        await saveRouteScreenshot(page, viewport.name, route.id, theme, "error", `-${Date.now()}`);
         throw error;
       }
     }
@@ -501,12 +618,15 @@ async function main() {
 
   info(`baseUrl=${baseUrl}`);
   info(`artifactRoot=${ARTIFACT_ROOT} saveArtifacts=${saveArtifacts}`);
+  info(`themes=${themes.map(themeEvidenceName).join(",")}`);
   const browser = await launchBrowser(chromium);
   const captures = [];
 
   try {
-    for (const viewport of viewports) {
-      captures.push(await runViewport(browser, viewport));
+    for (const theme of themes) {
+      for (const viewport of viewports) {
+        captures.push(await runViewport(browser, viewport, theme));
+      }
     }
   } finally {
     await browser.close();
