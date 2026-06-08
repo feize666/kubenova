@@ -1,12 +1,11 @@
 "use client";
 
-import { ReloadOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Empty, Select, Space, Typography } from "antd";
+import { Alert, Space, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip } from "@/components/ops";
+import { OpsEmptyState, OpsFilterChip, OpsSurface } from "@/components/ops";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -14,8 +13,8 @@ import { ResourceTable } from "@/components/resource-table";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
-  ResourceKeywordSearch,
 } from "@/components/resource-filter-toolbar";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { StatusTag } from "@/components/status-tag";
 import { getClusters, getClusterNodes } from "@/lib/api/clusters";
@@ -35,21 +34,94 @@ function textMatches(value: unknown, filterValue: string) {
   return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
 }
 
-function renderMetric(value: number | null | undefined, capacity: string | null | undefined) {
-  if (value === null || value === undefined) {
+function parseCpuToCores(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const numeric = Number.parseFloat(trimmed);
+  if (!Number.isFinite(numeric)) return null;
+  if (trimmed.endsWith("n")) return numeric / 1_000_000_000;
+  if (trimmed.endsWith("u") || trimmed.endsWith("µ") || trimmed.endsWith("μ")) return numeric / 1_000_000;
+  if (trimmed.endsWith("m")) return numeric / 1_000;
+  if (trimmed.endsWith("K") || trimmed.endsWith("k")) return numeric * 1_000;
+  if (trimmed.endsWith("M")) return numeric * 1_000_000;
+  if (trimmed.endsWith("G")) return numeric * 1_000_000_000;
+  return numeric;
+}
+
+function parseMemoryToBytes(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const match = value.trim().match(/^([0-9]+(?:\.[0-9]+)?)([a-zA-Z]+)?$/);
+  if (!match) return null;
+  const amount = Number.parseFloat(match[1]);
+  if (!Number.isFinite(amount)) return null;
+  const suffix = (match[2] ?? "").toLowerCase();
+  const units: Record<string, number> = {
+    "": 1,
+    k: 1_000,
+    m: 1_000_000,
+    g: 1_000_000_000,
+    ki: 1024,
+    mi: 1024 ** 2,
+    gi: 1024 ** 3,
+    ti: 1024 ** 4,
+  };
+  const base = units[suffix];
+  return base ? amount * base : null;
+}
+
+function formatCpu(cores: number): string {
+  if (cores > 0 && cores < 1) return `${Math.round(cores * 1000)}m`;
+  return `${Math.round(cores * 10) / 10}`;
+}
+
+function formatMemory(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${Math.round((bytes / 1024 ** 3) * 10) / 10}Gi`;
+  if (bytes >= 1024 ** 2) return `${Math.round((bytes / 1024 ** 2) * 10) / 10}Mi`;
+  if (bytes >= 1024) return `${Math.round((bytes / 1024) * 10) / 10}Ki`;
+  return `${Math.round(bytes)}B`;
+}
+
+function renderUsageBar(
+  usage: string | null | undefined,
+  capacity: string | null | undefined,
+  type: "cpu" | "memory",
+) {
+  const usedValue = type === "cpu" ? parseCpuToCores(usage) : parseMemoryToBytes(usage);
+  const capacityValue = type === "cpu" ? parseCpuToCores(capacity) : parseMemoryToBytes(capacity);
+  const rawPercent =
+    usedValue !== null && capacityValue !== null && capacityValue > 0
+      ? (usedValue / capacityValue) * 100
+      : null;
+  const percent =
+    typeof rawPercent === "number" && Number.isFinite(rawPercent)
+      ? Math.max(0, Math.min(rawPercent, 100))
+      : null;
+
+  if (percent === null || capacityValue === null) {
     return (
-      <Space size={4}>
-        <Typography.Text>N/A</Typography.Text>
-        {capacity ? <Typography.Text type="secondary">/ {capacity}</Typography.Text> : null}
-      </Space>
+      <Tooltip title="未检测到 metrics-server 节点指标，当前仅显示容量。">
+        <span className="node-usage-fallback">{capacity ? formatK8sQuantity(capacity, type) : "N/A"}</span>
+      </Tooltip>
     );
   }
+
+  const formatter = type === "cpu" ? formatCpu : formatMemory;
+  const tooltip = `${formatter(usedValue ?? 0)} of ${formatter(capacityValue)} (${(rawPercent ?? 0).toFixed(1)}%)`;
   return (
-    <Space size={4}>
-      <Typography.Text>{value}%</Typography.Text>
-      {capacity ? <Typography.Text type="secondary">/ {capacity}</Typography.Text> : null}
-    </Space>
+    <Tooltip title={tooltip}>
+      <span className="node-usage-cell" aria-label={tooltip}>
+        <span className="node-usage-track">
+          <span className="node-usage-fill" style={{ width: `${percent}%` }} />
+        </span>
+      </span>
+    </Tooltip>
   );
+}
+
+function formatK8sQuantity(value: string, type: "cpu" | "memory"): string {
+  const parsed = type === "cpu" ? parseCpuToCores(value) : parseMemoryToBytes(value);
+  if (parsed === null) return value;
+  return type === "cpu" ? formatCpu(parsed) : formatMemory(parsed);
 }
 
 function renderRoles(roles: string[]) {
@@ -69,7 +141,6 @@ export default function ClusterNodesPage() {
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
   const [clusterId, setClusterId] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
   const [keyword, setKeyword] = useState("");
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
@@ -181,26 +252,26 @@ export default function ClusterNodesPage() {
       title: "CPU",
       dataIndex: "cpuUsagePercent",
       key: "cpuUsagePercent",
-      width: 140,
-      render: (_: number | null, row) => renderMetric(row.cpuUsagePercent, row.cpuCapacity),
+      width: 118,
+      render: (_: number | null, row) => renderUsageBar(row.cpuUsage, row.cpuCapacity, "cpu"),
     },
     {
       title: "内存",
       dataIndex: "memoryUsagePercent",
       key: "memoryUsagePercent",
-      width: 150,
-      render: (_: number | null, row) => renderMetric(row.memoryUsagePercent, row.memoryCapacity),
+      width: 128,
+      render: (_: number | null, row) => renderUsageBar(row.memoryUsage, row.memoryCapacity, "memory"),
     },
     {
       title: "Taints",
       dataIndex: "taints",
       key: "taints",
-      width: 180,
+      width: 280,
       render: (value: string[]) =>
         value.length > 0 ? (
-          <Space size={4} wrap>
+          <Space className="node-taints-cell" size={4} wrap>
             {value.slice(0, 2).map((item) => (
-              <OpsFilterChip key={item} tone="neutral">{item}</OpsFilterChip>
+              <OpsFilterChip key={item} className="node-taint-chip" title={item} tone="neutral">{item}</OpsFilterChip>
             ))}
             {value.length > 2 ? <OpsFilterChip tone="neutral">+{value.length - 2}</OpsFilterChip> : null}
           </Space>
@@ -241,133 +312,107 @@ export default function ClusterNodesPage() {
     },
   ];
 
-  const handleSearch = () => {
+  const handleGlobalSearchChange = (value: string) => {
     resetPage();
-    setKeyword(keywordInput.trim());
+    setKeyword(value.trim());
   };
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/clusters/nodes"
           embedded
-          freshness={
-            nodesQuery.data?.timestamp
-              ? { label: "采集时间", value: nodesQuery.data.timestamp, color: "blue" }
-              : undefined
-          }
-          extra={
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => void nodesQuery.refetch()}
-              loading={nodesQuery.isFetching}
-              disabled={!effectiveClusterId}
-            >
-              刷新
-            </Button>
-          }
+          style={{ marginBottom: 12 }}
         />
-      </Card>
 
-      <Card className="cyber-panel">
-        <ResourceFilterToolbar
-          actions={
-            <Button type="primary" onClick={handleSearch}>
-              查询
-            </Button>
-          }
-        >
-          <ResourceFilterToolbarItem label="集群" width="md">
-            <Select
-              showSearch
-              allowClear={false}
-              placeholder="选择集群"
-              value={effectiveClusterId || undefined}
-              loading={clustersQuery.isLoading}
-              options={clusterOptions}
-              optionFilterProp="label"
-              onChange={(value) => {
-                resetPage();
-                setClusterId(value);
-              }}
-              style={{ width: "100%" }}
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceFilterToolbar>
+            <ResourceFilterToolbarItem width="auto">
+              <ResourceScopeFilterButton
+                label="集群"
+                clusterId={effectiveClusterId}
+                namespaceVisible={false}
+                clusterOptions={clusterOptions}
+                clusterLoading={clustersQuery.isLoading}
+                onApply={({ clusterId: nextClusterId }) => {
+                  resetPage();
+                  setClusterId(nextClusterId || clusterOptions[0]?.value || "");
+                }}
+              />
+            </ResourceFilterToolbarItem>
+          </ResourceFilterToolbar>
+
+          {!isInitializing && !accessToken ? (
+            <Alert type="warning" showIcon title="未检测到登录状态，请先登录后再查看工作节点。" />
+          ) : null}
+
+          {!clustersQuery.isLoading && clusterOptions.length === 0 ? (
+            <Alert
+              type="info"
+              showIcon
+              title="暂无可读集群"
+              description="工作节点页面需要已启用、已配置 kubeconfig 且健康探测可读的集群。"
             />
-          </ResourceFilterToolbarItem>
-          <ResourceKeywordSearch
-            value={keywordInput}
-            onChange={setKeywordInput}
-            onSearch={handleSearch}
-            placeholder="搜索名称 / 角色 / IP / 版本"
-            width="xl"
-          />
-        </ResourceFilterToolbar>
-      </Card>
+          ) : null}
 
-      {!isInitializing && !accessToken ? (
-        <Alert type="warning" showIcon title="未检测到登录状态，请先登录后再查看工作节点。" />
-      ) : null}
+          {nodesQuery.data?.degraded ? (
+            <Alert
+              type="warning"
+              showIcon
+              title="节点数据处于降级状态"
+              description={nodesQuery.data.degradationReason ?? "当前集群节点数据不可用"}
+            />
+          ) : null}
 
-      {!clustersQuery.isLoading && clusterOptions.length === 0 ? (
-        <Alert
-          type="info"
-          showIcon
-          title="暂无可读集群"
-          description="工作节点页面需要已启用、已配置 kubeconfig 且健康探测可读的集群。"
-        />
-      ) : null}
+          {nodesQuery.isError ? (
+            <Alert
+              type="error"
+              showIcon
+              title="工作节点加载失败"
+              description={nodesQuery.error instanceof Error ? nodesQuery.error.message : "获取节点数据时发生错误"}
+            />
+          ) : null}
 
-      {nodesQuery.data?.degraded ? (
-        <Alert
-          type="warning"
-          showIcon
-          title="节点数据处于降级状态"
-          description={nodesQuery.data.degradationReason ?? "当前集群节点数据不可用"}
-        />
-      ) : null}
-
-      {nodesQuery.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          title="工作节点加载失败"
-          description={nodesQuery.error instanceof Error ? nodesQuery.error.message : "获取节点数据时发生错误"}
-        />
-      ) : null}
-
-      <Card className="cyber-panel">
-        {!effectiveClusterId && !clustersQuery.isLoading ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先选择集群" />
-        ) : (
-          <ResourceTable<ClusterNodeListItemModel>
-            rowKey="id"
-            tableKey="business.cluster-nodes"
-            columns={columns as ColumnsType<ClusterNodeListItemModel>}
-            dataSource={tableData}
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            loading={{
-              spinning: clustersQuery.isLoading || nodesQuery.isLoading,
-              description: selectedClusterName
-                ? `${selectedClusterName} 工作节点加载中...`
-                : "工作节点加载中...",
-            }}
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, nodesQuery.isLoading)
-            }
-            pagination={getPaginationConfig(nodesQuery.data?.total ?? tableData.length, nodesQuery.isLoading)}
-            layoutOptions={{
-              nameValues: tableData.map((item) => item.name),
-              actionWidth: 0,
-            }}
-            emptyDescription="暂无符合条件的工作节点"
-          />
-        )}
-      </Card>
+          {!effectiveClusterId && !clustersQuery.isLoading ? (
+            <OpsEmptyState title="请先选择集群" description="工作节点列表需要一个可读集群作为数据源。" />
+          ) : (
+            <ResourceTable<ClusterNodeListItemModel>
+              rowKey="id"
+              tableKey="business.cluster-nodes"
+              columns={columns as ColumnsType<ClusterNodeListItemModel>}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              dataSource={tableData}
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: keyword,
+                onChange: handleGlobalSearchChange,
+                placeholder: "搜索名称 / 角色 / IP / 版本",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              loading={{
+                spinning: clustersQuery.isLoading || nodesQuery.isLoading,
+                description: selectedClusterName
+                  ? `${selectedClusterName} 工作节点加载中...`
+                  : "工作节点加载中...",
+              }}
+              onChange={(nextPagination, filters, sorter, extra) =>
+                handleTableChange(nextPagination, filters, sorter, extra, nodesQuery.isLoading)
+              }
+              pagination={getPaginationConfig(nodesQuery.data?.total ?? tableData.length, nodesQuery.isLoading)}
+              layoutOptions={{
+                nameValues: tableData.map((item) => item.name),
+                actionWidth: 0,
+              }}
+              emptyDescription="暂无符合条件的工作节点"
+            />
+          )}
+        </Space>
+      </OpsSurface>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}

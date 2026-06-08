@@ -89,7 +89,9 @@ describe('StorageService list online gate', () => {
     (
       clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
     ).mockResolvedValue(['c-1', 'c-2']);
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
+    );
     (clusterSyncService.syncCluster as jest.Mock).mockResolvedValue({
       errors: [],
     });
@@ -126,11 +128,15 @@ describe('StorageService list online gate', () => {
     (
       clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
     ).mockResolvedValue(['c-1']);
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
-    (clusterSyncService.syncCluster as jest.Mock).mockImplementation(async () => {
-      calls.push('sync');
-      return { errors: [] };
-    });
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
+    );
+    (clusterSyncService.syncCluster as jest.Mock).mockImplementation(
+      async () => {
+        calls.push('sync');
+        return { errors: [] };
+      },
+    );
     (storageRepository.list as jest.Mock).mockImplementation(async () => {
       calls.push('list');
       return {

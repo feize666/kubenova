@@ -47,6 +47,9 @@ sudo apt-get install -y bash curl tar gzip psmisc postgresql postgresql-client r
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version --short
+
 GO_VERSION=1.25.0
 curl -fsSLO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
@@ -122,6 +125,12 @@ DEFAULT_ADMIN_PASSWORD=change-me-now
 AI_MODEL_BASE_URL=https://api.openai.com/v1
 AI_MODEL_API_KEY=
 AI_MODEL_NAME=gpt-4o-mini
+```
+
+Helm 仓库管理依赖 control-api 运行环境里的 `helm` 命令。若需要自动导入宿主 `helm repo list`，可在 `/etc/kubenova/control-api.env` 配置：
+
+```bash
+KUBENOVA_HELM_REPOSITORY_CONFIGS=/root/.config/helm/repositories.yaml:/etc/kubenova/helm/repositories.yaml
 ```
 
 ### 6. 启动

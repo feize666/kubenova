@@ -25,7 +25,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useMemo } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsScopeSelector, OpsStatusTag, type OpsScopeSelectorOption } from "@/components/ops";
+import { OpsFilterChip, OpsPageHeader, OpsScopeSelector, OpsStatusTag, type OpsScopeSelectorOption } from "@/components/ops";
 import { MetricUnitFormatter } from "@/components/visual-system";
 import { getClusters } from "@/lib/api/clusters";
 import { getDashboardStats, type DashboardStats } from "@/lib/api/dashboard";
@@ -480,20 +480,19 @@ export default function HomePage() {
 
   return (
     <div className={["ops-overview-shell", statsQuery.isFetching ? "ops-scoped-loading" : undefined].filter(Boolean).join(" ")}>
-      <header className="ops-overview-header">
-        <div className="ops-overview-title-group">
-          <div className="ops-overview-title">总览</div>
-          <div className="ops-overview-subtitle">
-            {scopeLabel} 的风险态势、资源容量、服务影响与运维入口
-          </div>
-        </div>
-        <Space size={8} wrap className="ops-overview-header__chips">
+      <OpsPageHeader
+        className="ops-overview-header"
+        title="总览"
+        subtitle={`${scopeLabel} 的风险态势、资源容量、服务影响与运维入口`}
+        actions={(
+          <Space size={8} wrap className="ops-overview-header__chips">
           <OpsStatusTag tone={riskSummary.riskLevel}>{riskSummary.riskLevel === "critical" ? "高风险" : riskSummary.riskLevel === "warning" ? "需关注" : "稳定"}</OpsStatusTag>
           <OpsFilterChip tone="info" icon={<ClusterOutlined />}>集群 {stats?.clusters.total ?? 0}</OpsFilterChip>
           <OpsFilterChip tone="warning">活跃告警 {stats?.alerts.total ?? 0}</OpsFilterChip>
           {clusterId ? <OpsFilterChip tone="neutral">单集群</OpsFilterChip> : <OpsFilterChip tone="neutral">全部集群</OpsFilterChip>}
-        </Space>
-      </header>
+          </Space>
+        )}
+      />
 
       {scopedFallback ? (
         <Alert

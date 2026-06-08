@@ -47,6 +47,7 @@ check_dep npm  "npm"
 check_dep curl "curl"
 check_dep psql "PostgreSQL client (apt install postgresql-client)"
 check_dep redis-cli "Redis (apt install redis)"
+check_dep helm "Helm CLI (https://helm.sh/docs/intro/install/)"
 
 if [[ "$START_GATEWAY" == "true" ]]; then
   check_dep go "Go (https://go.dev)"

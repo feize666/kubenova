@@ -2,12 +2,13 @@
 
 import { ReloadOutlined, RobotOutlined, SafetyOutlined, WarningOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Descriptions, Drawer, Empty, Row, Select, Space, Statistic, Table, Typography } from "antd";
+import { Alert, App, Card, Col, Descriptions, Empty, Row, Select, Space, Statistic, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
+import { OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ResourceTable } from "@/components/resource-table";
 import {
   approveAiopsRecommendation,
   getAiopsSummary,
@@ -201,7 +202,7 @@ export default function AiopsCenterPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="none">
         <ResourcePageHeader
           path={AIOPS_PATH}
           embedded
@@ -214,13 +215,13 @@ export default function AiopsCenterPage() {
                 onChange={setRange}
                 options={AIOPS_RANGE_OPTIONS}
               />
-              <Button icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
+              <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
                 刷新
-              </Button>
+              </OpsIconActionButton>
             </Space>
           }
         />
-      </Card>
+      </OpsSurface>
 
       {!enabled ? <Alert type="warning" showIcon title="未检测到登录状态，请先登录后查看 KubeNova 中台。" /> : null}
       {summaryQuery.isError ? (
@@ -237,42 +238,42 @@ export default function AiopsCenterPage() {
 
       <Row gutter={[12, 12]}>
         <Col xs={24} md={6}>
-          <Card className="cyber-panel">
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="异常总数" value={summary?.anomalyOverview.total ?? 0} prefix={<RobotOutlined />} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6}>
-          <Card className="cyber-panel">
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="严重异常" value={summary?.anomalyOverview.critical ?? 0} styles={{ content: { color: "#cf1322" } }} prefix={<WarningOutlined />} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6}>
-          <Card className="cyber-panel">
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="关联分组" value={summary?.correlationGroups.length ?? 0} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6}>
-          <Card className="cyber-panel">
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="审计状态" value={summary?.auditState.auditTrailReady ? "就绪" : "缺失"} prefix={<SafetyOutlined />} />
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
-      <Card className="cyber-panel" title="事故队列">
-        <Table
+      <OpsSurface variant="panel" padding="sm" title="事故队列">
+        <ResourceTable
           rowKey="id"
           size="small"
           columns={incidentColumns}
           dataSource={incidentQueue}
           pagination={false}
           loading={summaryQuery.isLoading}
-          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事故" /> }}
+          emptyDescription="暂无事故"
         />
-      </Card>
+      </OpsSurface>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={12}>
-          <Card className="cyber-panel" title="根因候选">
+          <OpsSurface variant="panel" padding="sm" title="根因候选">
             <Space orientation="vertical" size={10} style={{ width: "100%" }}>
               {rootCauseCandidates.map((item) => (
                 <Card size="small" key={item.incidentId}>
@@ -290,28 +291,29 @@ export default function AiopsCenterPage() {
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无根因候选" />
               ) : null}
             </Space>
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} xl={12}>
-          <Card className="cyber-panel" title="推荐动作">
-            <Table
+          <OpsSurface variant="panel" padding="sm" title="推荐动作">
+            <ResourceTable
               rowKey="id"
               size="small"
               columns={recommendationColumns}
               dataSource={recommendations}
               pagination={false}
               loading={summaryQuery.isLoading}
+              emptyDescription="暂无推荐动作"
             />
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
-      <Drawer
+      <OpsDrawerShell
         title="Incident Workbench"
         open={Boolean(selectedIncident)}
-        size="large"
+        variant="workbench"
         onClose={closeIncidentDrawer}
-        styles={{ wrapper: { width: "min(100vw, 1040px, max(56vw, 760px))" } }}
+        bodyClassName="business-detail-drawer__body"
       >
         {selectedIncident ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -386,12 +388,13 @@ export default function AiopsCenterPage() {
             </Card>
 
             <Card size="small" title="推荐与审批">
-              <Table
+              <ResourceTable
                 rowKey="id"
                 size="small"
                 columns={recommendationColumns}
                 dataSource={selectedRecommendations}
                 pagination={false}
+                emptyDescription="暂无推荐动作"
                 expandable={{
                   expandedRowRender: (record) => {
                     const precheck = precheckResults[record.id];
@@ -399,22 +402,24 @@ export default function AiopsCenterPage() {
                     return (
                       <Space orientation="vertical" size={10} style={{ width: "100%" }}>
                         <Space wrap>
-                          <Button
+                          <OpsIconActionButton
                             size="small"
                             onClick={() => precheckMutation.mutate(record.id)}
                             loading={precheckMutation.isPending}
                           >
                             Precheck
-                          </Button>
-                          <Button
+                          </OpsIconActionButton>
+                          <OpsIconActionButton
                             size="small"
-                            type="primary"
+                            opsTone="primary"
+                            opsVariant="primary"
                             disabled={!record.approvalRequired}
+                            disabledReason={!record.approvalRequired ? "该建议不需要审批" : undefined}
                             onClick={() => approvalMutation.mutate(record.id)}
                             loading={approvalMutation.isPending}
                           >
                             记录审批
-                          </Button>
+                          </OpsIconActionButton>
                           <OpsStatusTag tone={record.precheckStatus === "pending" ? "warning" : "success"}>
                             {record.precheckStatus === "pending" ? "等待 precheck" : "无需 precheck"}
                           </OpsStatusTag>
@@ -447,7 +452,7 @@ export default function AiopsCenterPage() {
             </Card>
           </Space>
         ) : null}
-      </Drawer>
+      </OpsDrawerShell>
     </Space>
   );
 }

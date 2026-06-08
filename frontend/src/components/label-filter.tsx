@@ -34,7 +34,7 @@ export function LabelFilter({ value, onChange }: LabelFilterProps) {
         onPressEnter={handleAdd}
         suffix={
           <span
-            style={{ fontSize: 11, color: '#94a3b8', cursor: 'pointer' }}
+            style={{ fontSize: 11, color: 'var(--surface-muted, var(--color-text-muted, #94a3b8))', cursor: 'pointer' }}
             onClick={handleAdd}
           >
             添加

@@ -1,7 +1,19 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard } from '../common/auth.guard';
-import { LogsService, type LogsQueryRequest, type LogsStreamBootstrapRequest } from './logs.service';
+import {
+  LogsService,
+  type LogsQueryRequest,
+  type LogsStreamBootstrapRequest,
+} from './logs.service';
 
 @Controller('api/logs')
 @UseGuards(AuthGuard)

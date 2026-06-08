@@ -5,7 +5,6 @@ import { useMemo, useState } from "react";
 import {
   Alert,
   App,
-  Card,
   Dropdown,
   Form,
   Input,
@@ -35,6 +34,8 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsSurface } from "@/components/ops/ops-surface";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
@@ -412,12 +413,13 @@ export default function ReplicaSetsPage() {
       return;
     }
     if (key === "delete") {
-      Modal.confirm({
+      openOpsConfirm({
         title: "确认删除",
-        content: `删除 ${row.name} 后将不可恢复`,
+        description: `删除 ${row.name} 后将不可恢复。`,
+        impact: "删除后该 ReplicaSet 管理的副本可能被上层控制器重新创建。",
         okText: "确认",
         cancelText: "取消",
-        okButtonProps: { danger: true },
+        danger: true,
         onOk: () => void handleDelete(row),
       });
     }
@@ -510,7 +512,7 @@ export default function ReplicaSetsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/workloads/replicasets"
           embedded
@@ -592,6 +594,7 @@ export default function ReplicaSetsPage() {
             }}
             sort={{ sortBy, sortOrder }}
             columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
             dataSource={filteredTableData}
             loading={(isLoading && !data) || actionMutation.isPending}
             onChange={(paginationInfo, filters, sorter, extra) =>
@@ -600,7 +603,7 @@ export default function ReplicaSetsPage() {
             pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
           />
         </Space>
-      </Card>
+      </OpsSurface>
 
       <Modal
         title={editingItem ? "编辑 ReplicaSet" : "新增资源"}

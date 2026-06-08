@@ -21,9 +21,12 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { OpsFormSection, OpsPageHeader, OpsSurface } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { getClusters } from "@/lib/api/clusters";
 import { getStorageResources } from "@/lib/api/storage";
 import { ApiError } from "@/lib/api/client";
+import { applyResourceYaml } from "@/lib/api/resources";
 import {
   renderWorkloadWorkspaceYaml,
   submitWorkloadWorkspace,
@@ -476,6 +479,10 @@ export default function WorkloadCreateWorkspacePage() {
   const searchParams = useSearchParams();
   const { accessToken, isInitializing } = useAuth();
   const [submitting, setSubmitting] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("default");
   const [currentStep, setCurrentStep] = useState(0);
   const [isDirty, setIsDirty] = useState(false);
   const [form] = Form.useForm<WorkspaceFormValues>();
@@ -493,6 +500,7 @@ export default function WorkloadCreateWorkspacePage() {
     () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
     [clustersQuery.data?.items],
   );
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
 
   const watchOptions = useMemo(() => ({ form, preserve: true }), [form]);
   const kind = Form.useWatch("kind", watchOptions) ?? initialKind;
@@ -893,31 +901,108 @@ export default function WorkloadCreateWorkspacePage() {
     return mapApiErrorToWorkspaceIssues(error);
   };
 
+  const handleYamlSubmit = async () => {
+    if (!accessToken) {
+      message.warning("请先登录");
+      return;
+    }
+    if (!createYamlClusterId.trim()) {
+      message.warning("请选择集群");
+      return;
+    }
+    if (!createYaml.trim()) {
+      message.warning("请输入或上传 YAML");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken,
+      );
+      message.success(result.message || "YAML 已应用");
+      clearDraft();
+      const firstWorkload = result.items.find((item) => item.kind in TARGET_ROUTE_MAP);
+      if (firstWorkload) {
+        router.push(TARGET_ROUTE_MAP[firstWorkload.kind as SupportedKind]);
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "YAML 创建失败");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card>
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Typography.Title level={4} style={{ marginBottom: 4 }}>
-              统一创建工作区
-            </Typography.Title>
-            <Typography.Text type="secondary">
-              支持 Pod / Deployment / StatefulSet / ReplicaSet / DaemonSet，并提供镜像、存储、网络与初始化容器配置。
-            </Typography.Text>
-          </Col>
-          <Col>
+    <Space className="workload-create-workspace" orientation="vertical" size={16} style={{ width: "100%" }}>
+      <OpsPageHeader
+        title="统一创建工作区"
+        subtitle="支持 Pod / Deployment / StatefulSet / ReplicaSet / DaemonSet，集中配置镜像、存储、网络与初始化容器。"
+        scope={`${kind} / ${namespace || "default"}`}
+        actions={(
+          <Space>
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => {
+                const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+                setCreateYamlClusterId(nextClusterId);
+                setCreateYamlNamespace(namespace || "default");
+                setCreateMode((mode) => (mode === "yaml" ? "form" : "yaml"));
+              }}
+            >
+              {createMode === "yaml" ? "表单创建" : "YAML / 上传"}
+            </Button>
             <Button icon={<ArrowLeftOutlined />} onClick={handleGoBack}>
               返回
             </Button>
-          </Col>
-        </Row>
-      </Card>
+          </Space>
+        )}
+      />
 
       {!isInitializing && !accessToken ? (
         <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再创建资源。" />
       ) : null}
 
-      <Card>
+      {createMode === "yaml" ? (
+        <OpsSurface variant="workbench" padding="md" className="workload-create-workspace__surface">
+          <ResourceCreateMethodTabs
+            mode={createMode}
+            onModeChange={(mode) => setCreateMode(mode)}
+            yaml={createYaml}
+            onYamlChange={setCreateYaml}
+            clusterId={createYamlClusterId}
+            onClusterIdChange={setCreateYamlClusterId}
+            namespace={createYamlNamespace}
+            onNamespaceChange={setCreateYamlNamespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            clusterUnavailable={clusterUnavailable}
+            kindHint="Workload"
+            disabled={submitting}
+            formContent={(
+              <Alert
+                type="info"
+                showIcon
+                message="表单工作区"
+                description="切回表单后可继续使用七步创建流程，当前 YAML 内容不会自动回填到表单。"
+              />
+            )}
+          />
+          <div className="workload-create-workspace__footer">
+            <Space>
+              <Button onClick={() => setCreateMode("form")}>返回表单创建</Button>
+              <Button type="primary" loading={submitting} onClick={() => void handleYamlSubmit()}>
+                创建资源
+              </Button>
+            </Space>
+          </div>
+        </OpsSurface>
+      ) : (
+      <OpsSurface variant="workbench" padding="md" className="workload-create-workspace__surface">
         <Form
           form={form}
           layout="vertical"
@@ -989,11 +1074,17 @@ export default function WorkloadCreateWorkspacePage() {
           />
 
           {currentStep === 0 ? (
-            <>
+            <OpsFormSection title="基础信息" description="选择创建目标、资源类型和基础副本设置。">
               <Row gutter={[16, 16]}>
                 <Col xs={24} md={8}>
                   <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
-                    <Select options={clusterOptions} loading={clustersQuery.isLoading} placeholder="选择集群" />
+                    <Select
+                      options={clusterOptions}
+                      loading={clustersQuery.isLoading}
+                      placeholder={clusterUnavailable ? "集群状态不可用" : "选择集群"}
+                      disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+                      notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                    />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={8}>
@@ -1022,12 +1113,11 @@ export default function WorkloadCreateWorkspacePage() {
                   </Col>
                 ) : null}
               </Row>
-            </>
+            </OpsFormSection>
           ) : null}
 
           {currentStep === 1 ? (
-            <>
-              <Typography.Title level={5}>主容器</Typography.Title>
+            <OpsFormSection title="主容器" description="配置主容器名称、镜像和可选启动命令。">
               <Row gutter={[16, 16]}>
                 <Col xs={24} md={8}>
                   <Form.Item name="containerName" label="容器名称" rules={[{ required: true, message: "请输入容器名称" }]}>
@@ -1050,12 +1140,11 @@ export default function WorkloadCreateWorkspacePage() {
                   </Form.Item>
                 </Col>
               </Row>
-            </>
+            </OpsFormSection>
           ) : null}
 
           {currentStep === 2 ? (
-            <>
-              <Typography.Title level={5}>存储配置</Typography.Title>
+            <OpsFormSection title="存储配置" description="按需挂载现有 PVC/PV/StorageClass，或创建新的 PVC。">
               <Form.Item name="mountPvc" valuePropName="checked">
                 <Switch checkedChildren="启用 PVC 挂载" unCheckedChildren="不挂载 PVC" />
               </Form.Item>
@@ -1220,12 +1309,11 @@ export default function WorkloadCreateWorkspacePage() {
                   </Form.Item>
                 </Card>
               ) : null}
-            </>
+            </OpsFormSection>
           ) : null}
 
           {currentStep === 3 ? (
-            <>
-              <Typography.Title level={5}>网络配置</Typography.Title>
+            <OpsFormSection title="网络配置" description="可同时创建 Service、Ingress 或 Traefik IngressRoute。">
               <Form.Item name="createService" valuePropName="checked">
                 <Switch checkedChildren="同时创建 Service" unCheckedChildren="不创建 Service" />
               </Form.Item>
@@ -1353,12 +1441,11 @@ export default function WorkloadCreateWorkspacePage() {
                   )}
                 </Card>
               ) : null}
-            </>
+            </OpsFormSection>
           ) : null}
 
           {currentStep === 4 ? (
-            <>
-              <Typography.Title level={5}>初始化容器</Typography.Title>
+            <OpsFormSection title="初始化容器" description="为工作负载添加按顺序执行的 init containers。">
               <Form.List name="initContainers">
                 {(fields, { add, remove }) => (
                   <Space orientation="vertical" size={12} style={{ width: "100%" }}>
@@ -1405,12 +1492,11 @@ export default function WorkloadCreateWorkspacePage() {
                   </Space>
                 )}
               </Form.List>
-            </>
+            </OpsFormSection>
           ) : null}
 
           {currentStep === 5 ? (
-            <>
-              <Typography.Title level={5}>高级选项</Typography.Title>
+            <OpsFormSection title="高级选项" description="配置调度策略、亲和性、容忍度和健康探针。">
               <Card size="small" style={{ background: "rgba(37,99,235,0.04)", marginBottom: 12 }}>
                 <Typography.Title level={5} style={{ marginTop: 0 }}>
                   调度策略
@@ -1572,81 +1658,90 @@ export default function WorkloadCreateWorkspacePage() {
                   </Card>
                 );
               })}
-            </>
+            </OpsFormSection>
           ) : null}
 
           {currentStep === 6 ? (
-            <Card size="small" style={{ background: "rgba(37,99,235,0.04)" }}>
-              <Typography.Title level={5}>预览提交</Typography.Title>
-              <Typography.Paragraph>
-                资源类型：{previewYamlQuery.data?.summary.kind || previewValues?.kind || initialKind}
-                <br />
-                名称：{previewYamlQuery.data?.summary.name || previewValues?.name || "-"}
-                <br />
-                名称空间：{previewYamlQuery.data?.summary.namespace || previewValues?.namespace || "-"}
-                <br />
-                集群：{previewYamlQuery.data?.summary.clusterId || previewValues?.clusterId || "-"}
-              </Typography.Paragraph>
-              <Typography.Paragraph>
-                主容器镜像：{previewYamlQuery.data?.summary.image || previewValues?.image || "-"}
-                <br />
-                PVC 挂载：{previewYamlQuery.data?.summary.createPvc ? "新建" : (previewValues?.mountPvc ? "已启用" : "否")}
-                <br />
-                创建 Service：{previewYamlQuery.data?.summary.createService ? "是" : "否"}
-                <br />
-                创建 Ingress：{previewYamlQuery.data?.summary.createIngress ? "是" : "否"}
-                <br />
-                网络模式：{createIngress ? (networkMode === "ingressroute" ? "IngressRoute" : "Ingress") : "-"}
-                <br />
-                调度策略：
-                {previewValues?.scheduling?.nodeSelector?.trim() ||
-                previewValues?.scheduling?.tolerations?.trim() ||
-                previewValues?.scheduling?.affinity?.trim()
-                  ? "已配置"
-                  : "默认"}
-                <br />
-                探针配置：
-                {(previewValues?.probes?.liveness?.enabled ||
-                  previewValues?.probes?.readiness?.enabled ||
-                  previewValues?.probes?.startup?.enabled)
-                  ? "已配置"
-                  : "默认"}
-                <br />
-                初始化容器数量：{previewValues?.initContainers?.filter((item) => item.name?.trim() && item.image?.trim()).length ?? 0}
-              </Typography.Paragraph>
-              {previewYamlQuery.isLoading ? (
-                <Typography.Text type="secondary">正在渲染 YAML 预览...</Typography.Text>
-              ) : null}
-              {previewYamlQuery.isError ? (
-                <Alert
-                  type="error"
-                  showIcon
-                  message={previewYamlQuery.error instanceof Error ? previewYamlQuery.error.message : "YAML 预览生成失败"}
-                  style={{ marginBottom: 12 }}
-                />
-              ) : null}
-              <Typography.Text code style={{ whiteSpace: "pre-wrap", display: "block" }}>
-                {previewYamlQuery.data?.yaml || JSON.stringify(previewSpec ?? {}, null, 2)}
-              </Typography.Text>
-            </Card>
+            <OpsFormSection title="预览提交" description="提交前确认资源摘要和渲染后的 YAML。">
+              <div className="workload-create-workspace__preview-grid">
+                <div className="workload-create-workspace__summary">
+                  <span>资源类型</span>
+                  <strong>{previewYamlQuery.data?.summary.kind || previewValues?.kind || initialKind}</strong>
+                  <span>名称</span>
+                  <strong>{previewYamlQuery.data?.summary.name || previewValues?.name || "-"}</strong>
+                  <span>名称空间</span>
+                  <strong>{previewYamlQuery.data?.summary.namespace || previewValues?.namespace || "-"}</strong>
+                  <span>集群</span>
+                  <strong>{previewYamlQuery.data?.summary.clusterId || previewValues?.clusterId || "-"}</strong>
+                  <span>主容器镜像</span>
+                  <strong>{previewYamlQuery.data?.summary.image || previewValues?.image || "-"}</strong>
+                  <span>PVC 挂载</span>
+                  <strong>{previewYamlQuery.data?.summary.createPvc ? "新建" : (previewValues?.mountPvc ? "已启用" : "否")}</strong>
+                  <span>创建 Service</span>
+                  <strong>{previewYamlQuery.data?.summary.createService ? "是" : "否"}</strong>
+                  <span>创建 Ingress</span>
+                  <strong>{previewYamlQuery.data?.summary.createIngress ? "是" : "否"}</strong>
+                  <span>网络模式</span>
+                  <strong>{createIngress ? (networkMode === "ingressroute" ? "IngressRoute" : "Ingress") : "-"}</strong>
+                  <span>调度策略</span>
+                  <strong>
+                    {previewValues?.scheduling?.nodeSelector?.trim() ||
+                    previewValues?.scheduling?.tolerations?.trim() ||
+                    previewValues?.scheduling?.affinity?.trim()
+                      ? "已配置"
+                      : "默认"}
+                  </strong>
+                  <span>探针配置</span>
+                  <strong>
+                    {(previewValues?.probes?.liveness?.enabled ||
+                      previewValues?.probes?.readiness?.enabled ||
+                      previewValues?.probes?.startup?.enabled)
+                      ? "已配置"
+                      : "默认"}
+                  </strong>
+                  <span>初始化容器</span>
+                  <strong>{previewValues?.initContainers?.filter((item) => item.name?.trim() && item.image?.trim()).length ?? 0}</strong>
+                </div>
+                <div className="workload-create-workspace__yaml-panel">
+                  <div className="workload-create-workspace__yaml-header">
+                    <span>YAML</span>
+                    {previewYamlQuery.isLoading ? <Typography.Text type="secondary">渲染中</Typography.Text> : null}
+                  </div>
+                  {previewYamlQuery.isError ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message={previewYamlQuery.error instanceof Error ? previewYamlQuery.error.message : "YAML 预览生成失败"}
+                      style={{ marginBottom: 12 }}
+                    />
+                  ) : null}
+                  <pre className="workload-create-workspace__yaml">
+                    {previewYamlQuery.data?.yaml || JSON.stringify(previewSpec ?? {}, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            </OpsFormSection>
           ) : null}
 
-          <Space style={{ marginTop: 20 }}>
-            <Button onClick={prevStep} disabled={currentStep === 0}>
-              上一步
-            </Button>
-            {currentStep < WORKSPACE_STEPS.length - 1 ? (
-              <Button type="primary" onClick={() => void nextStep()}>
-                下一步
+          <div className="workload-create-workspace__footer">
+            <Space>
+              <Button onClick={prevStep} disabled={currentStep === 0}>
+                上一步
               </Button>
-            ) : (
-              <Button type="primary" htmlType="submit" loading={submitting}>
-                创建资源
-              </Button>
-            )}
-          </Space>
+              {currentStep < WORKSPACE_STEPS.length - 1 ? (
+                <Button type="primary" onClick={() => void nextStep()}>
+                  下一步
+                </Button>
+              ) : (
+                <Button type="primary" htmlType="submit" loading={submitting}>
+                  创建资源
+                </Button>
+              )}
+            </Space>
+          </div>
         </Form>
-      </Card>
+      </OpsSurface>
+      )}
     </Space>
   );
 }

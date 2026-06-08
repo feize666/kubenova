@@ -149,21 +149,19 @@ export class LogsService {
       });
 
       const selectedContainer = this.resolveContainerName(podResult, container);
-      const raw = await coreApi.readNamespacedPodLog(
-        {
-          name: pod,
-          namespace,
-          container: selectedContainer,
-          follow: false,
-          timestamps,
-          tailLines: tailLines > 0 ? tailLines : undefined,
-          // Absolute filters are applied below against parsed log text. Do not
-          // push sinceTime to Kubernetes here because app logs such as nginx
-          // carry their own timestamp inside the message body.
-          sinceSeconds: sinceTime || untilTime ? undefined : sinceSeconds,
-          previous,
-        },
-      );
+      const raw = await coreApi.readNamespacedPodLog({
+        name: pod,
+        namespace,
+        container: selectedContainer,
+        follow: false,
+        timestamps,
+        tailLines: tailLines > 0 ? tailLines : undefined,
+        // Absolute filters are applied below against parsed log text. Do not
+        // push sinceTime to Kubernetes here because app logs such as nginx
+        // carry their own timestamp inside the message body.
+        sinceSeconds: sinceTime || untilTime ? undefined : sinceSeconds,
+        previous,
+      });
       rawText = this.extractLogText(raw);
     } catch (error) {
       const message =

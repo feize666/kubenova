@@ -1,12 +1,13 @@
 "use client";
 
+import { CloudDownloadOutlined, ReloadOutlined, RollbackOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Divider, Input, Row, Space, Typography } from "antd";
+import { Alert, App, Col, Divider, Input, Row, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
+import { OpsFilterChip, OpsIconActionButton, OpsPageHeader, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -208,10 +209,19 @@ export default function SystemUpdatePage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Typography.Title level={3} style={{ marginBottom: 0 }}>
-        更新管理
-      </Typography.Title>
-      <Typography.Text type="secondary">系统管理 / 更新管理</Typography.Text>
+      <OpsPageHeader
+        title="更新管理"
+        subtitle="系统管理 / 更新管理"
+        scope={(
+          <>
+            <OpsFilterChip tone="neutral">运行 {status?.runningVersion ?? "-"}</OpsFilterChip>
+            <OpsFilterChip tone={status?.installable ? "success" : "warning"}>
+              {status?.installable ? "可安装" : "暂不可安装"}
+            </OpsFilterChip>
+            {status ? statusTag(status.installStatus) : <OpsStatusTag tone="neutral">加载中</OpsStatusTag>}
+          </>
+        )}
+      />
 
       <Alert
         showIcon
@@ -222,7 +232,7 @@ export default function SystemUpdatePage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} md={12}>
-          <Card title="版本状态" bordered>
+          <OpsSurface variant="panel" padding="sm" title="版本状态">
             <Space orientation="vertical" size={12} style={{ width: "100%" }}>
               <div>
                 <Typography.Text type="secondary">当前版本</Typography.Text>
@@ -304,11 +314,11 @@ export default function SystemUpdatePage() {
                 </div>
               </div>
             </Space>
-          </Card>
+          </OpsSurface>
         </Col>
 
         <Col xs={24} md={12}>
-          <Card title="操作区" bordered>
+          <OpsSurface variant="panel" padding="sm" title="操作区">
             <Space orientation="vertical" size={12} style={{ width: "100%" }}>
               <Typography.Text type="secondary">
                 安装不阻塞运行流量；重启后激活新版本并异步审计。回滚采用指针切换，目标秒级完成。
@@ -318,29 +328,49 @@ export default function SystemUpdatePage() {
                 onChange={(e) => setTargetVersion(e.target.value)}
                 placeholder="目标发布版本，例如 v1.4.2"
               />
-              <Button type="primary" loading={installMutation.isPending} onClick={() => installMutation.mutate()}>
+              <OpsIconActionButton
+                icon={<CloudDownloadOutlined />}
+                loading={installMutation.isPending}
+                opsTone="primary"
+                opsVariant="primary"
+                onClick={() => installMutation.mutate()}
+              >
                 安装更新（不立即激活）
-              </Button>
-              <Button loading={restartMutation.isPending} onClick={() => restartMutation.mutate()}>
+              </OpsIconActionButton>
+              <OpsIconActionButton
+                icon={<ReloadOutlined />}
+                loading={restartMutation.isPending}
+                onClick={() => restartMutation.mutate()}
+              >
                 重启并激活已安装版本
-              </Button>
+              </OpsIconActionButton>
               <Input
                 value={rollbackVersion}
                 onChange={(e) => setRollbackVersion(e.target.value)}
                 placeholder="回滚到版本（可选，默认最近备份）"
               />
-              <Button danger loading={rollbackMutation.isPending} onClick={() => rollbackMutation.mutate()}>
+              <OpsIconActionButton
+                icon={<RollbackOutlined />}
+                loading={rollbackMutation.isPending}
+                opsTone="danger"
+                opsVariant="danger"
+                onClick={() => rollbackMutation.mutate()}
+              >
                 秒级回滚（指针切换）
-              </Button>
-              <Button loading={auditMutation.isPending} onClick={() => auditMutation.mutate()}>
+              </OpsIconActionButton>
+              <OpsIconActionButton
+                icon={<SafetyCertificateOutlined />}
+                loading={auditMutation.isPending}
+                onClick={() => auditMutation.mutate()}
+              >
                 手动触发发布后审计
-              </Button>
+              </OpsIconActionButton>
             </Space>
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
-      <Card title="更新历史">
+      <OpsSurface variant="panel" padding="sm" title="更新历史">
         <ResourceTable<SystemUpdateHistoryItem>
           rowKey={(row, idx) => `${row.timestamp}-${row.operationType}-${idx}`}
           tableKey="business.system.updateHistory"
@@ -353,7 +383,7 @@ export default function SystemUpdatePage() {
           pagination={false}
           scroll={{ x: 1100 }}
         />
-      </Card>
+      </OpsSurface>
       <BusinessDetailDrawer
         open={Boolean(detailRecord)}
         title={detailRecord ? `更新历史 · ${detailRecord.operationType}` : "更新历史"}

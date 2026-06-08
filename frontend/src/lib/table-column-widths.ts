@@ -15,7 +15,7 @@ export const TABLE_COL_WIDTH = {
   actionCompact: 86,
   image: 260,
   imageCompact: 240,
-  type: 110,
+  type: 140,
   version: 110,
   revision: 110,
   ip: 140,

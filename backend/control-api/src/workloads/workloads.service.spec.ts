@@ -16,11 +16,24 @@ import type { K8sClientService } from '../clusters/k8s-client.service';
 import type { LiveMetricsService } from '../metrics/live-metrics.service';
 import type { PrismaService } from '../platform/database/prisma.service';
 
+interface WorkloadsRepositoryMock {
+  list: jest.Mock;
+  findByKey?: jest.Mock;
+  getClusterKubeconfig?: jest.Mock;
+  create?: jest.Mock;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 describe('WorkloadsService list online gate', () => {
   function build() {
-    const repository = {
+    const repository: WorkloadsRepositoryMock = {
       list: jest.fn(),
-    } as unknown as WorkloadsRepository;
+    };
     const storageService = {} as StorageService;
     const networkService = {} as NetworkService;
     const clustersService = {
@@ -28,14 +41,14 @@ describe('WorkloadsService list online gate', () => {
     } as unknown as ClustersService;
     const clusterSyncService = {
       syncCluster: jest.fn(),
-    } as unknown as ClusterSyncService;
+    };
     const clusterEventSyncService = {
       consumeClusterDirty: jest.fn().mockReturnValue(false),
     } as unknown as ClusterEventSyncService;
     const clusterHealthService = {
       assertClusterOnlineForRead: jest.fn(),
       listReadableClusterIdsForResourceRead: jest.fn(),
-    } as unknown as ClusterHealthService;
+    };
     const k8sClientService = {} as K8sClientService;
     const liveMetricsService = {
       getClusterSnapshot: jest.fn(),
@@ -43,12 +56,12 @@ describe('WorkloadsService list online gate', () => {
     const prisma = {} as PrismaService;
 
     const service = new WorkloadsService(
-      repository,
+      repository as unknown as WorkloadsRepository,
       storageService,
       networkService,
       clustersService,
-      clusterSyncService,
-      clusterHealthService,
+      clusterSyncService as unknown as ClusterSyncService,
+      clusterHealthService as unknown as ClusterHealthService,
       clusterEventSyncService,
       k8sClientService,
       liveMetricsService,
@@ -59,9 +72,9 @@ describe('WorkloadsService list online gate', () => {
 
   it('returns empty when no readable clusters', async () => {
     const { service, repository, clusterHealthService } = build();
-    (
-      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
-    ).mockResolvedValue([]);
+    clusterHealthService.listReadableClusterIdsForResourceRead.mockResolvedValue(
+      [],
+    );
 
     const result = await service.list({ page: '2', pageSize: '9' });
 
@@ -75,16 +88,16 @@ describe('WorkloadsService list online gate', () => {
   it('passes clusterIds when clusterId is absent', async () => {
     const { service, repository, clusterHealthService, clusterSyncService } =
       build();
-    (
-      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
-    ).mockResolvedValue(['c-1', 'c-2']);
-    (clusterSyncService.syncCluster as jest.Mock).mockResolvedValue({
+    clusterHealthService.listReadableClusterIdsForResourceRead.mockResolvedValue(
+      ['c-1', 'c-2'],
+    );
+    clusterSyncService.syncCluster.mockResolvedValue({
       errors: [],
     });
     (
       service as unknown as { clustersService: { getKubeconfig: jest.Mock } }
     ).clustersService.getKubeconfig.mockResolvedValue('kubeconfig');
-    (repository.list as jest.Mock).mockResolvedValue({
+    repository.list.mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
@@ -104,7 +117,7 @@ describe('WorkloadsService list online gate', () => {
 
   it('asserts online for explicit clusterId', async () => {
     const { service, repository, clusterHealthService } = build();
-    (repository.list as jest.Mock).mockResolvedValue({
+    repository.list.mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
@@ -123,15 +136,15 @@ describe('WorkloadsService list online gate', () => {
 
   it('passes normalized sortBy/sortOrder to repository', async () => {
     const { service, repository, clusterHealthService } = build();
-    (repository.list as jest.Mock).mockResolvedValue({
+    repository.list.mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
       pageSize: 10,
     });
-    (
-      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
-    ).mockResolvedValue(['c-1']);
+    clusterHealthService.listReadableClusterIdsForResourceRead.mockResolvedValue(
+      ['c-1'],
+    );
 
     await service.list({
       kind: 'pods',
@@ -150,15 +163,15 @@ describe('WorkloadsService list online gate', () => {
 
   it('ignores invalid sortBy/sortOrder and keeps default behavior', async () => {
     const { service, repository, clusterHealthService } = build();
-    (repository.list as jest.Mock).mockResolvedValue({
+    repository.list.mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
       pageSize: 10,
     });
-    (
-      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
-    ).mockResolvedValue(['c-1']);
+    clusterHealthService.listReadableClusterIdsForResourceRead.mockResolvedValue(
+      ['c-1'],
+    );
 
     await service.list({
       sortBy: 'unknownField',
@@ -191,15 +204,15 @@ describe('WorkloadsService list online gate', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       updatedAt: new Date('2026-01-01T00:01:00.000Z'),
     };
-    (repository.list as jest.Mock).mockResolvedValue({
+    repository.list.mockResolvedValue({
       items: [record],
       total: 1,
       page: 1,
       pageSize: 10,
     });
-    (
-      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
-    ).mockResolvedValue(['c-1']);
+    clusterHealthService.listReadableClusterIdsForResourceRead.mockResolvedValue(
+      ['c-1'],
+    );
 
     const result = await service.list({});
 
@@ -213,16 +226,16 @@ describe('WorkloadsService list online gate', () => {
     const { service, repository, clusterHealthService, clusterSyncService } =
       build();
     const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    (clusterSyncService.syncCluster as jest.Mock).mockResolvedValue({
+    clusterSyncService.syncCluster.mockResolvedValue({
       errors: [],
     });
     (
       service as unknown as { clustersService: { getKubeconfig: jest.Mock } }
     ).clustersService.getKubeconfig.mockResolvedValue('kubeconfig');
-    (
-      clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
-    ).mockResolvedValue(['c-1']);
-    (repository.list as jest.Mock).mockResolvedValue({
+    clusterHealthService.listReadableClusterIdsForResourceRead.mockResolvedValue(
+      ['c-1'],
+    );
+    repository.list.mockResolvedValue({
       items: [
         {
           id: 'pod-1',
@@ -256,7 +269,7 @@ describe('WorkloadsService list online gate', () => {
       kind: 'pods',
       projection: 'topology',
     });
-    const item = result.items[0] as Record<string, unknown>;
+    const item = result.items[0] as unknown as Record<string, unknown>;
 
     expect(repository.list).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -286,22 +299,25 @@ describe('WorkloadsService list online gate', () => {
 
 describe('WorkloadsService workspace advanced validation', () => {
   function build() {
-    const repository = {
+    const repository: Required<WorkloadsRepositoryMock> = {
       findByKey: jest.fn().mockResolvedValue(null),
       getClusterKubeconfig: jest.fn().mockResolvedValue('kubeconfig'),
-      create: jest.fn().mockImplementation(async (payload: any) => ({
-        id: 'w-1',
-        clusterId: payload.clusterId,
-        namespace: payload.namespace,
-        kind: payload.kind,
-        name: payload.name,
-        state: 'active',
-        replicas: payload.replicas ?? 1,
-        readyReplicas: payload.readyReplicas ?? 0,
-        spec: payload.spec,
-      })),
+      create: jest.fn().mockImplementation((payload: unknown) => {
+        const data = asRecord(payload);
+        return Promise.resolve({
+          id: 'w-1',
+          clusterId: data.clusterId,
+          namespace: data.namespace,
+          kind: data.kind,
+          name: data.name,
+          state: 'active',
+          replicas: data.replicas ?? 1,
+          readyReplicas: data.readyReplicas ?? 0,
+          spec: data.spec,
+        });
+      }),
       list: jest.fn(),
-    } as unknown as WorkloadsRepository;
+    };
     const storageService = {
       create: jest.fn(),
     } as unknown as StorageService;
@@ -343,7 +359,7 @@ describe('WorkloadsService workspace advanced validation', () => {
     } as unknown as PrismaService;
 
     const service = new WorkloadsService(
-      repository,
+      repository as unknown as WorkloadsRepository,
       storageService,
       networkService,
       clustersService,
@@ -431,10 +447,13 @@ describe('WorkloadsService workspace advanced validation', () => {
         expect.objectContaining({
           step: 'advanced',
           fieldPath: 'probes.readiness.periodSeconds',
-          message: expect.stringContaining('范围内'),
         }),
       ]),
     );
+    const readinessError = result.errors.find(
+      (error) => error.fieldPath === 'probes.readiness.periodSeconds',
+    );
+    expect(readinessError?.message).toContain('范围内');
   });
 
   it('keeps render-yaml and submit serialization from same normalized source', async () => {
@@ -469,10 +488,14 @@ describe('WorkloadsService workspace advanced validation', () => {
       (item) => item.source === 'workload',
     );
     expect(workloadManifest).toBeDefined();
-    const renderedSpec = JSON.parse(workloadManifest!.yaml).spec;
-    const submitSpec = (repository.create as jest.Mock).mock.calls[0][0].spec;
+    const renderedSpec = asRecord(JSON.parse(workloadManifest!.yaml)).spec;
+    const submitCall = repository.create.mock.calls.at(0) as
+      | unknown[]
+      | undefined;
+    const submitPayload = asRecord(submitCall?.[0]);
+    const submitSpec = submitPayload.spec;
 
-    expect((repository.create as jest.Mock).mock.calls[0][0]).toEqual(
+    expect(submitPayload).toEqual(
       expect.objectContaining({
         clusterId: 'c-1',
         namespace: 'default',

@@ -186,7 +186,9 @@ export class TopologySummaryService {
     };
   }
 
-  private async resolveReadableClusterIds(clusterId?: string): Promise<string[]> {
+  private async resolveReadableClusterIds(
+    clusterId?: string,
+  ): Promise<string[]> {
     const normalizedClusterId = clusterId?.trim();
     if (normalizedClusterId) {
       await this.clusterHealthService.assertClusterOnlineForRead(

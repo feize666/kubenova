@@ -12,6 +12,7 @@ type ResourceScopeFilterButtonProps = {
   namespace?: string;
   clusterOptions: ClusterOption[];
   clusterLoading?: boolean;
+  clusterUnavailable?: boolean;
   knownNamespaces?: string[];
   namespaceLoading?: boolean;
   namespaceDisabled?: boolean;
@@ -26,6 +27,7 @@ export function ResourceScopeFilterButton({
   namespace = "",
   clusterOptions,
   clusterLoading,
+  clusterUnavailable = false,
   knownNamespaces = [],
   namespaceLoading = false,
   namespaceDisabled,
@@ -97,6 +99,7 @@ export function ResourceScopeFilterButton({
             }}
             options={clusterOptions}
             loading={clusterLoading}
+            unavailable={clusterUnavailable}
             showAllOption
           />
         </div>

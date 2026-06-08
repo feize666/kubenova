@@ -3,6 +3,11 @@
 import { SearchOutlined } from "@ant-design/icons";
 import { Input, Space } from "antd";
 import type { ReactNode } from "react";
+import {
+  OpsFilterBar,
+  OpsFilterBarItem,
+  type OpsActiveFilter,
+} from "@/components/ops";
 
 export type ResourceFilterToolbarItemWidth = "xs" | "sm" | "md" | "lg" | "xl" | "auto" | "fill";
 
@@ -16,6 +21,7 @@ export type ResourceFilterToolbarItemProps = {
 export type ResourceFilterToolbarProps = {
   children?: ReactNode;
   actions?: ReactNode;
+  activeFilters?: OpsActiveFilter[];
   className?: string;
 };
 
@@ -37,16 +43,19 @@ const widthClassMap: Record<ResourceFilterToolbarItemWidth, string> = {
   fill: "resource-filter-toolbar-item-fill",
 };
 
-export function ResourceFilterToolbar({ children, actions, className }: ResourceFilterToolbarProps) {
+export function ResourceFilterToolbar({ activeFilters, children, actions, className }: ResourceFilterToolbarProps) {
   return (
-    <div className={["resource-filter-toolbar", className].filter(Boolean).join(" ")}>
-      <div className="resource-filter-toolbar-controls">{children}</div>
-      {actions ? (
+    <OpsFilterBar
+      activeFilters={activeFilters}
+      className={["resource-filter-toolbar", className].filter(Boolean).join(" ")}
+      actions={actions ? (
         <Space className="resource-filter-toolbar-actions" size={8} wrap>
           {actions}
         </Space>
       ) : null}
-    </div>
+    >
+      {children}
+    </OpsFilterBar>
   );
 }
 
@@ -57,10 +66,13 @@ export function ResourceFilterToolbarItem({
   className,
 }: ResourceFilterToolbarItemProps) {
   return (
-    <div className={["resource-filter-toolbar-item", widthClassMap[width], className].filter(Boolean).join(" ")}>
-      {label ? <div className="resource-filter-toolbar-label">{label}</div> : null}
+    <OpsFilterBarItem
+      label={label}
+      width={width}
+      className={["resource-filter-toolbar-item", widthClassMap[width], className].filter(Boolean).join(" ")}
+    >
       {children}
-    </div>
+    </OpsFilterBarItem>
   );
 }
 

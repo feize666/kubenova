@@ -2058,7 +2058,8 @@ export class ClusterSyncService {
             statusJson: toJson({
               phase: pvc.status?.phase,
               capacity: pvc.status?.capacity ?? {},
-              accessModes: pvc.status?.accessModes ?? pvc.spec?.accessModes ?? [],
+              accessModes:
+                pvc.status?.accessModes ?? pvc.spec?.accessModes ?? [],
               creationTimestamp: createdAt,
             }),
           },
@@ -2073,7 +2074,8 @@ export class ClusterSyncService {
             statusJson: toJson({
               phase: pvc.status?.phase,
               capacity: pvc.status?.capacity ?? {},
-              accessModes: pvc.status?.accessModes ?? pvc.spec?.accessModes ?? [],
+              accessModes:
+                pvc.status?.accessModes ?? pvc.spec?.accessModes ?? [],
               creationTimestamp: createdAt,
             }),
           },

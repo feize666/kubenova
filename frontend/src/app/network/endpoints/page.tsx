@@ -3,13 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Card,
   Form,
   Input,
   Select,
   Space,
   Typography,
-  Modal,
   message,
 } from "antd";
 import { useSearchParams } from "next/navigation";
@@ -26,6 +24,8 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { OpsModalShell, OpsSurface } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
@@ -40,7 +40,7 @@ import {
   type CreateNetworkResourcePayload,
   type NetworkResource,
 } from "@/lib/api/network";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 
@@ -136,6 +136,10 @@ export default function EndpointsPage() {
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [form] = Form.useForm<EndpointsFormValues>();
   const {
     sortBy,
@@ -199,6 +203,7 @@ export default function EndpointsPage() {
     label: cluster.name,
     value: cluster.id,
   }));
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
 
   const clusterMap = Object.fromEntries((clustersQuery.data?.items ?? []).map((cluster) => [cluster.id, cluster.name]));
 
@@ -215,6 +220,28 @@ export default function EndpointsPage() {
     },
     onError: (err) => {
       void message.error(err instanceof Error ? err.message : "创建失败，请重试");
+    },
+  });
+
+  const applyYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setModalOpen(false);
+      setCreateYaml("");
+      await queryClient.invalidateQueries({ queryKey: ["network", "Endpoints"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "YAML 创建失败");
     },
   });
 
@@ -274,6 +301,18 @@ export default function EndpointsPage() {
   });
 
   const handleModalSubmit = async () => {
+    if (createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyYamlMutation.mutate();
+      return;
+    }
     let values: EndpointsFormValues;
     try {
       values = await form.validateFields();
@@ -384,13 +423,23 @@ export default function EndpointsPage() {
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/network/endpoints"
           embedded
           description="查看 Service 后端地址集合、端口与实际连通目标。"
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建Endpoints" onClick={() => { form.resetFields(); form.setFieldsValue({ ports: "http:80/TCP" }); setModalOpen(true); }} />}
+          titleSuffix={<ResourceAddButton title="创建Endpoints" onClick={() => {
+            const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+            const nextNamespace = namespace || "default";
+            form.resetFields();
+            form.setFieldsValue({ clusterId: nextClusterId, namespace: nextNamespace, ports: "http:80/TCP" });
+            setCreateMode("form");
+            setCreateYaml("");
+            setCreateYamlClusterId(nextClusterId);
+            setCreateYamlNamespace(nextNamespace);
+            setModalOpen(true);
+          }} />}
         />
         <NetworkResourcePageFilters
           clusterId={clusterId}
@@ -431,6 +480,7 @@ export default function EndpointsPage() {
         <ResourceTable<EndpointsResource>
           rowKey="id"
           columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           tableKey="network.endpoints"
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -451,48 +501,71 @@ export default function EndpointsPage() {
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
         />
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title="添加 Endpoints"
+        description="创建 Endpoints，指定地址和端口定义。"
+        identity="Endpoints"
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
+          setCreateYaml("");
           form.resetFields();
         }}
         okText="创建"
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || applyYamlMutation.isPending}
         destroyOnHidden
+        width={720}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item label="端点名称" name="name" rules={[{ required: true, message: "请输入 Endpoints 名称" }]}>
-            <Input placeholder="例如：my-service" />
-          </Form.Item>
-          <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
-            <Input placeholder="例如：default" />
-          </Form.Item>
-          <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
-            <Select
-              placeholder="请选择集群"
-              options={clusterOptions}
-              loading={clustersQuery.isLoading}
-              showSearch
-              filterOption={(input, option) => (option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-            />
-          </Form.Item>
-          <Form.Item label="就绪地址" name="addresses" rules={[{ required: true, message: "请输入至少一个地址" }]}>
-            <Input placeholder="例如：10.42.0.15,10.42.0.16" />
-          </Form.Item>
-          <Form.Item label="未就绪地址" name="notReadyAddresses">
-            <Input placeholder="例如：10.42.0.18" />
-          </Form.Item>
-          <Form.Item label="端口定义" name="ports" rules={[{ required: true, message: "请输入端口定义" }]}>
-            <Input placeholder="例如：http:80/TCP,metrics:9090/TCP" />
-          </Form.Item>
-        </Form>
-      </Modal>
+        <ResourceCreateMethodTabs
+          mode={createMode}
+          onModeChange={setCreateMode}
+          yaml={createYaml}
+          onYamlChange={setCreateYaml}
+          clusterId={createYamlClusterId}
+          onClusterIdChange={setCreateYamlClusterId}
+          namespace={createYamlNamespace}
+          onNamespaceChange={setCreateYamlNamespace}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          clusterUnavailable={clusterUnavailable}
+          kindHint="Endpoints"
+          disabled={createMutation.isPending || applyYamlMutation.isPending}
+          formContent={(
+            <Form form={form} layout="vertical">
+              <Form.Item label="端点名称" name="name" rules={[{ required: true, message: "请输入 Endpoints 名称" }]}>
+                <Input placeholder="例如：my-service" />
+              </Form.Item>
+              <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
+                <Input placeholder="例如：default" />
+              </Form.Item>
+              <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
+                <Select
+                  placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                  options={clusterOptions}
+                  loading={clustersQuery.isLoading}
+                  disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+                  notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                  showSearch
+                  filterOption={(input, option) => (option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                />
+              </Form.Item>
+              <Form.Item label="就绪地址" name="addresses" rules={[{ required: true, message: "请输入至少一个地址" }]}>
+                <Input placeholder="例如：10.42.0.15,10.42.0.16" />
+              </Form.Item>
+              <Form.Item label="未就绪地址" name="notReadyAddresses">
+                <Input placeholder="例如：10.42.0.18" />
+              </Form.Item>
+              <Form.Item label="端口定义" name="ports" rules={[{ required: true, message: "请输入端口定义" }]}>
+                <Input placeholder="例如：http:80/TCP,metrics:9090/TCP" />
+              </Form.Item>
+            </Form>
+          )}
+        />
+      </OpsModalShell>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}

@@ -347,6 +347,14 @@ function main() {
     "sectionIconMap[section.key]",
   ];
   const missingShellContracts = requiredShellContracts.filter((contract) => !shellLayoutText.includes(contract));
+  const clusterDomain = sections.find((section) => section.key === "section-cluster-domain");
+  const clusterDomainPaths = clusterDomain?.items.map((item) => item.path) ?? [];
+  const nodeIndex = clusterDomainPaths.indexOf("/clusters/nodes");
+  const namespaceIndex = clusterDomainPaths.indexOf("/namespaces");
+  const invalidClusterDomainOrder =
+    nodeIndex === -1 || namespaceIndex === -1 || namespaceIndex !== nodeIndex + 1
+      ? [`section-cluster-domain: /namespaces must be directly below /clusters/nodes (current order: ${clusterDomainPaths.join(", ")})`]
+      : [];
 
   const failures = [];
   if (missingPages.length > 0) failures.push(`Missing app pages:\n${formatList(missingPages)}`);
@@ -360,6 +368,7 @@ function main() {
   if (forbiddenPaths.length > 0) failures.push(`Forbidden sidebar paths:\n${formatList([...new Set(forbiddenPaths)])}`);
   if (invalidSections.length > 0) failures.push(`Invalid section shapes:\n${formatList(invalidSections)}`);
   if (missingShellContracts.length > 0) failures.push(`Missing shell navigation contracts:\n${formatList(missingShellContracts)}`);
+  if (invalidClusterDomainOrder.length > 0) failures.push(`Invalid cluster domain order:\n${formatList(invalidClusterDomainOrder)}`);
 
   const summary = {
     status: failures.length > 0 ? "fail" : "pass",
@@ -378,6 +387,7 @@ function main() {
     forbiddenPaths: [...new Set(forbiddenPaths)],
     invalidSections,
     missingShellContracts,
+    invalidClusterDomainOrder,
     generatedAt: new Date().toISOString(),
   };
 

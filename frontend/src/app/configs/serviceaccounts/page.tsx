@@ -4,8 +4,6 @@ import { CopyOutlined, DownloadOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Alert,
-  Button,
-  Card,
   Form,
   Input,
   Modal,
@@ -18,6 +16,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
@@ -25,6 +24,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import {
   matchLabelExpressions,
   parseResourceSearchInput,
@@ -39,6 +39,7 @@ import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths
 import { useAntdTableSortPagination } from "@/lib/table";
 import type { HeadlampTableFilters } from "@/lib/table";
 import {
+  applyResourceYaml,
   deleteDynamicResource,
   getDynamicResourceDetail,
   getDynamicResources,
@@ -57,23 +58,90 @@ type CreateSaFormValues = {
   clusterId: string;
   name: string;
   namespace: string;
+  automountServiceAccountToken?: boolean;
+  imagePullSecretsText?: string;
+  secretsText?: string;
+  labelsText?: string;
+  annotationsText?: string;
 };
 
 type SecretTokenRow = {
   key: string;
+  clusterId: string;
+  namespace: string;
+  id: string;
+  kind: "dynamic";
   secretName: string;
   tokenMasked: string;
   tokenRaw: string | undefined;
   createdAt: string | undefined;
 };
 
-function buildServiceAccountYaml(name: string, namespace: string): string {
+function parseNameLines(value?: string): Array<{ name: string }> {
+  return (value ?? "")
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((name) => ({ name }));
+}
+
+function parseMetadataText(value?: string): Record<string, string> {
+  return Object.fromEntries(
+    (value ?? "")
+      .split(/\r?\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        const index = item.indexOf("=");
+        return index > 0 ? [item.slice(0, index).trim(), item.slice(index + 1).trim()] as const : null;
+      })
+      .filter((entry): entry is readonly [string, string] => Boolean(entry?.[0] && entry?.[1])),
+  );
+}
+
+function buildServiceAccountYaml(values: CreateSaFormValues): string {
+  const labels = parseMetadataText(values.labelsText);
+  const annotations = parseMetadataText(values.annotationsText);
+  const imagePullSecrets = parseNameLines(values.imagePullSecretsText);
+  const secrets = parseNameLines(values.secretsText);
+  const manifest: Record<string, unknown> = {
+    apiVersion: "v1",
+    kind: "ServiceAccount",
+    metadata: {
+      name: values.name.trim(),
+      namespace: values.namespace.trim(),
+      ...(Object.keys(labels).length > 0 ? { labels } : {}),
+      ...(Object.keys(annotations).length > 0 ? { annotations } : {}),
+    },
+    ...(typeof values.automountServiceAccountToken === "boolean"
+      ? { automountServiceAccountToken: values.automountServiceAccountToken }
+      : {}),
+    ...(imagePullSecrets.length > 0 ? { imagePullSecrets } : {}),
+    ...(secrets.length > 0 ? { secrets } : {}),
+  };
   return [
-    "apiVersion: v1",
-    "kind: ServiceAccount",
+    `apiVersion: ${manifest.apiVersion}`,
+    `kind: ${manifest.kind}`,
     "metadata:",
-    `  name: ${name}`,
-    `  namespace: ${namespace}`,
+    `  name: ${(manifest.metadata as Record<string, unknown>).name}`,
+    `  namespace: ${(manifest.metadata as Record<string, unknown>).namespace}`,
+    ...Object.entries(labels).flatMap(([key, value], index) => [
+      index === 0 ? "  labels:" : "",
+      `    ${key}: ${value}`,
+    ]).filter(Boolean),
+    ...Object.entries(annotations).flatMap(([key, value], index) => [
+      index === 0 ? "  annotations:" : "",
+      `    ${key}: ${value}`,
+    ]).filter(Boolean),
+    ...(typeof values.automountServiceAccountToken === "boolean"
+      ? [`automountServiceAccountToken: ${values.automountServiceAccountToken}`]
+      : []),
+    ...(imagePullSecrets.length > 0
+      ? ["imagePullSecrets:", ...imagePullSecrets.map((item) => `  - name: ${item.name}`)]
+      : []),
+    ...(secrets.length > 0
+      ? ["secrets:", ...secrets.map((item) => `  - name: ${item.name}`)]
+      : []),
     "",
   ].join("\n");
 }
@@ -132,6 +200,10 @@ export default function ServiceAccountsPage() {
   const [yamlTarget, setYamlTarget] = useState<DynamicResourceIdentity | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [createForm] = Form.useForm<CreateSaFormValues>();
   const createClusterId = Form.useWatch("clusterId", createForm);
 
@@ -150,6 +222,7 @@ export default function ServiceAccountsPage() {
     () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
     [clustersQuery.data?.items],
   );
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
 
   const createNamespacesQuery = useQuery({
     queryKey: ["serviceaccounts", "create-namespaces", createClusterId || "all", accessToken],
@@ -258,7 +331,7 @@ export default function ServiceAccountsPage() {
       const targetClusterId = values.clusterId.trim();
       const name = values.name.trim();
       const ns = values.namespace.trim();
-      const yaml = buildServiceAccountYaml(name, ns);
+      const yaml = buildServiceAccountYaml(values);
       return updateDynamicResourceYaml(
         {
           clusterId: targetClusterId,
@@ -280,6 +353,27 @@ export default function ServiceAccountsPage() {
     },
     onError: (error) => {
       void message.error(error instanceof Error ? error.message : "创建失败");
+    },
+  });
+
+  const applyCreateYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken ?? undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setCreateOpen(false);
+      setCreateYaml("");
+      await listQuery.refetch();
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : "YAML 创建失败");
     },
   });
 
@@ -398,6 +492,10 @@ export default function ServiceAccountsPage() {
           }
           return {
             key: secretName,
+            clusterId: row.clusterId,
+            namespace: row.namespace,
+            id: `dynamic:${row.clusterId}::v1:secrets:${row.namespace}:${secretName}`,
+            kind: "dynamic",
             secretName,
             tokenMasked: maskToken(tokenRaw),
             tokenRaw: tokenRaw || undefined,
@@ -548,13 +646,24 @@ export default function ServiceAccountsPage() {
             title="创建ServiceAccount"
             onClick={() => {
               createForm.resetFields();
+              const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+              const nextNamespace = namespace || "default";
+              createForm.setFieldsValue({
+                clusterId: nextClusterId,
+                namespace: nextNamespace,
+                automountServiceAccountToken: true,
+              });
+              setCreateMode("form");
+              setCreateYaml("");
+              setCreateYamlClusterId(nextClusterId);
+              setCreateYamlNamespace(nextNamespace);
               setCreateOpen(true);
             }}
           />
         }
       />
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <NetworkResourcePageFilters
           clusterId={clusterId}
           namespace={namespace}
@@ -594,6 +703,7 @@ export default function ServiceAccountsPage() {
         <ResourceTable<ServiceAccountRecord>
           rowKey="id"
           columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           tableKey="configs.serviceaccounts"
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -631,7 +741,7 @@ export default function ServiceAccountsPage() {
           })}
           pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
         />
-      </Card>
+      </OpsSurface>
 
       <Modal
         title="YAML"
@@ -647,9 +757,14 @@ export default function ServiceAccountsPage() {
         confirmLoading={applyYamlMutation.isPending}
         footer={(_, { OkBtn, CancelBtn }) => (
           <Space>
-            <Button icon={<DownloadOutlined />} disabled={!yamlTarget || !yamlValue.trim()} onClick={handleDownloadYaml}>
+            <OpsIconActionButton
+              icon={<DownloadOutlined />}
+              disabled={!yamlTarget || !yamlValue.trim()}
+              disabledReason={!yamlTarget || !yamlValue.trim() ? "没有可下载的 YAML" : undefined}
+              onClick={handleDownloadYaml}
+            >
               下载 YAML
-            </Button>
+            </OpsIconActionButton>
             <CancelBtn />
             <OkBtn />
           </Space>
@@ -664,66 +779,121 @@ export default function ServiceAccountsPage() {
         />
       </Modal>
 
-      <Modal
+      <OpsModalShell
         title="新建 ServiceAccount"
+        description="创建命名空间内的 ServiceAccount，用于工作负载或自动化流程身份。"
+        identity="ServiceAccount"
         open={createOpen}
         onCancel={() => {
           createForm.resetFields();
+          setCreateYaml("");
           setCreateOpen(false);
         }}
         onOk={() => {
+          if (createMode === "yaml") {
+            if (!createYamlClusterId.trim()) {
+              void message.warning("请选择集群");
+              return;
+            }
+            if (!createYaml.trim()) {
+              void message.warning("请输入或上传 YAML");
+              return;
+            }
+            applyCreateYamlMutation.mutate();
+            return;
+          }
           void createForm.validateFields().then((values) => createMutation.mutate(values));
         }}
         okText="创建"
         cancelText="取消"
-        confirmLoading={createMutation.isPending}
+        confirmLoading={createMutation.isPending || applyCreateYamlMutation.isPending}
+        width={720}
       >
-        <Form form={createForm} layout="vertical" requiredMark>
-          <Form.Item
-            name="clusterId"
-            label="集群"
-            rules={[{ required: true, message: "请选择集群" }]}
-          >
-            <Select
-              showSearch
-              placeholder="请选择集群"
-              options={clusterOptions}
-              loading={clustersQuery.isLoading}
-              filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-              onChange={() => {
-                createForm.setFieldValue("namespace", undefined);
-              }}
-            />
-          </Form.Item>
-          <Form.Item
-            name="name"
-            label="名称"
-            rules={[
-              { required: true, message: "请输入名称" },
-              { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: "名称需符合 DNS-1123 label" },
-            ]}
-          >
-            <Input placeholder="例如：ci-runner" />
-          </Form.Item>
-          <Form.Item
-            name="namespace"
-            label="名称空间"
-            rules={[{ required: true, message: "请选择或输入名称空间" }]}
-          >
-            <Select
-              showSearch
-              allowClear
-              placeholder={createClusterId ? "选择名称空间" : "请先选择集群"}
-              disabled={!createClusterId}
-              loading={createNamespacesQuery.isLoading}
-              options={(createNamespacesQuery.data?.items ?? []).map((item) => ({
-                label: item.namespace,
-                value: item.namespace,
-              }))}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+        <ResourceCreateMethodTabs
+          mode={createMode}
+          onModeChange={setCreateMode}
+          yaml={createYaml}
+          onYamlChange={setCreateYaml}
+          clusterId={createYamlClusterId}
+          onClusterIdChange={setCreateYamlClusterId}
+          namespace={createYamlNamespace}
+          onNamespaceChange={setCreateYamlNamespace}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          clusterUnavailable={clusterUnavailable}
+          kindHint="ServiceAccount"
+          disabled={createMutation.isPending || applyCreateYamlMutation.isPending}
+          formContent={(
+            <Form form={createForm} layout="vertical" requiredMark>
+              <Form.Item
+                name="clusterId"
+                label="集群"
+                rules={[{ required: true, message: "请选择集群" }]}
+              >
+                <Select
+                  showSearch
+                  placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                  options={clusterOptions}
+                  loading={clustersQuery.isLoading}
+                  disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+                  notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                  filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                  onChange={() => {
+                    createForm.setFieldValue("namespace", undefined);
+                  }}
+                />
+              </Form.Item>
+              <Form.Item
+                name="name"
+                label="名称"
+                rules={[
+                  { required: true, message: "请输入名称" },
+                  { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: "名称需符合 DNS-1123 label" },
+                ]}
+              >
+                <Input placeholder="例如：ci-runner" />
+              </Form.Item>
+              <Form.Item
+                name="namespace"
+                label="名称空间"
+                rules={[{ required: true, message: "请选择或输入名称空间" }]}
+              >
+                <Select
+                  showSearch
+                  allowClear
+                  placeholder={createClusterId ? "选择名称空间" : "请先选择集群"}
+                  disabled={!createClusterId}
+                  loading={createNamespacesQuery.isLoading}
+                  options={(createNamespacesQuery.data?.items ?? []).map((item) => ({
+                    label: item.namespace,
+                    value: item.namespace,
+                  }))}
+                />
+              </Form.Item>
+              <Form.Item name="automountServiceAccountToken" label="自动挂载 Token">
+                <Select
+                  options={[
+                    { label: "true", value: true },
+                    { label: "false", value: false },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item name="imagePullSecretsText" label="ImagePullSecrets">
+                <Input.TextArea rows={2} placeholder={"registry-secret\nharbor-secret"} />
+              </Form.Item>
+              <Form.Item name="secretsText" label="Secrets">
+                <Input.TextArea rows={2} placeholder={"manual-token-secret"} />
+              </Form.Item>
+              <Form.Item name="labelsText" label="标签">
+                <Input.TextArea rows={2} placeholder={"app=ci\nteam=platform"} />
+              </Form.Item>
+              <Form.Item name="annotationsText" label="注解">
+                <Input.TextArea rows={2} placeholder={"iam.gke.io/gcp-service-account=ci@example.iam.gserviceaccount.com"} />
+              </Form.Item>
+            </Form>
+          )}
+        />
+      </OpsModalShell>
 
       <Modal
         title={`关联 Secret/Token · ${tokenTitle}`}
@@ -739,8 +909,9 @@ export default function ServiceAccountsPage() {
           loading={tokenLoading}
           pagination={false}
           locale={{ emptyText: "未发现可用的 ServiceAccount Token Secret" }}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           columns={[
-            { title: "Secret", dataIndex: "secretName", key: "secretName" },
+            { title: "Secret", dataIndex: "secretName", key: "name" },
             {
               title: "Token（脱敏）",
               dataIndex: "tokenMasked",
@@ -758,10 +929,11 @@ export default function ServiceAccountsPage() {
               key: "actions",
               width: 120,
               render: (_, record) => (
-                <Button
+                <OpsIconActionButton
                   size="small"
                   icon={<CopyOutlined />}
                   disabled={!record.tokenRaw}
+                  disabledReason={!record.tokenRaw ? "Token 原文不可用" : undefined}
                   onClick={async () => {
                     if (!record.tokenRaw) return;
                     try {
@@ -773,7 +945,7 @@ export default function ServiceAccountsPage() {
                   }}
                 >
                   复制
-                </Button>
+                </OpsIconActionButton>
               ),
             },
           ]}

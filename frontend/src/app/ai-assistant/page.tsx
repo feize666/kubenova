@@ -5,7 +5,6 @@ import {
   ApiOutlined,
   ClusterOutlined,
   DeleteOutlined,
-  MessageOutlined,
   PaperClipOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -19,10 +18,8 @@ import {
 import {
   Avatar,
   Button,
-  Card,
   Col,
   Divider,
-  Drawer,
   Empty,
   Form,
   Grid,
@@ -49,7 +46,7 @@ import remarkGfm from "remark-gfm";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/components/auth-context";
 import { AiDeleteSessionDialog, type AiDeleteSessionTarget } from "@/components/ai/delete-session-dialog";
-import { OpsFilterChip, OpsIconActionButton, OpsStatusTag } from "@/components/ops";
+import { OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
 import {
   createSession,
   executeAction,
@@ -370,12 +367,13 @@ function ModelSettingsDrawer({ open, onClose, token }: { open: boolean; onClose:
   }, [form, token, onClose]);
 
   return (
-    <Drawer
+    <OpsDrawerShell
       title="模型中转站设置"
       open={open}
       onClose={onClose}
-      size="default"
-      footer={
+      variant="business"
+      styles={{ body: { padding: 16, overflowY: "auto" } }}
+      footerActions={
         <Space style={{ width: "100%", justifyContent: "flex-end" }}>
           <Button onClick={onClose}>取消</Button>
           <Button type="primary" loading={saving} onClick={() => void handleSave()}>
@@ -416,7 +414,7 @@ function ModelSettingsDrawer({ open, onClose, token }: { open: boolean; onClose:
           </Typography.Text>
         </Form>
       </Spin>
-    </Drawer>
+    </OpsDrawerShell>
   );
 }
 
@@ -1312,7 +1310,7 @@ export default function AiAssistantPage() {
 
   if (!isInitializing && !isAdmin) {
     return (
-      <Card style={{ borderRadius: 12 }}>
+      <OpsSurface variant="panel" padding="md">
         <Result
           status="403"
           title="无权限访问 KubeNova 中台"
@@ -1323,7 +1321,7 @@ export default function AiAssistantPage() {
             </OpsIconActionButton>
           }
         />
-      </Card>
+      </OpsSurface>
     );
   }
 
@@ -1421,7 +1419,7 @@ export default function AiAssistantPage() {
         overflow: "hidden",
       }}
     >
-      <Card style={{ borderRadius: 12, flex: "0 0 auto", minWidth: 0, overflow: "hidden" }}>
+      <OpsSurface variant="workbench" padding="sm" style={{ flex: "0 0 auto", minWidth: 0, overflow: "hidden" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div>
             <Typography.Title level={3} style={{ margin: 0 }}>
@@ -1458,22 +1456,22 @@ export default function AiAssistantPage() {
 
         <Row gutter={[12, 12]} style={{ marginTop: 8 }}>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small">
+            <OpsSurface variant="panel" padding="sm">
               <Statistic title="活跃告警" value={suggestions?.items.length ?? 0} prefix={<WarningOutlined />} />
-            </Card>
+            </OpsSurface>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small">
+            <OpsSurface variant="panel" padding="sm">
               <Statistic title="严重告警" value={criticalCount} styles={{ content: { color: "#cf1322" } }} />
-            </Card>
+            </OpsSurface>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small">
+            <OpsSurface variant="panel" padding="sm">
               <Statistic title="高风险告警" value={highCount} styles={{ content: { color: "#d46b08" } }} />
-            </Card>
+            </OpsSurface>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small">
+            <OpsSurface variant="panel" padding="sm">
               <Space orientation="vertical" size={4} style={{ width: "100%" }}>
                 <Typography.Text type="secondary">模型中转站</Typography.Text>
                 <OpsStatusTag tone={pingData?.ok ? "success" : "danger"} className="ai-assistant-status-chip">
@@ -1483,60 +1481,42 @@ export default function AiAssistantPage() {
                   {pingData?.config.modelName ?? "未配置模型"}
                 </Typography.Text>
               </Space>
-            </Card>
+            </OpsSurface>
           </Col>
         </Row>
-      </Card>
+      </OpsSurface>
 
       <Row gutter={[12, 12]} style={{ flex: 1, minHeight: 0, minWidth: 0, alignItems: "stretch" }}>
         {showAlertPanelInline ? (
           <Col xs={24} xl={9} style={{ display: "flex", minHeight: 0, minWidth: 0 }}>
-            <Card
-              title={
-                <Space>
-                  <ApiOutlined />
-                  告警接入模拟
-                </Space>
-              }
-              extra={<OpsFilterChip tone="info">Webhook</OpsFilterChip>}
+            <OpsSurface
+              title="告警接入模拟"
+              actions={<OpsFilterChip tone="info">Webhook</OpsFilterChip>}
+              variant="panel"
+              padding="sm"
+              className="ai-assistant-alert-surface"
               style={{
-                borderRadius: 12,
                 flex: 1,
                 minHeight: 0,
-                display: "flex",
-                flexDirection: "column",
-              }}
-              styles={{
-                body: {
-                  flex: 1,
-                  minHeight: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                  overflowY: "auto",
-                },
               }}
             >
               {alertSimulator}
-            </Card>
+            </OpsSurface>
           </Col>
         ) : null}
 
         <Col xs={24} xl={showAlertPanelInline ? 15 : 24} style={{ display: "flex", minHeight: 0, minWidth: 0 }}>
-          <Card
-            title={
-              <Space>
-                <MessageOutlined />
-                ChatOps
-              </Space>
-            }
-            extra={
+          <OpsSurface
+            title="ChatOps"
+            actions={
               <OpsStatusTag tone="processing">
                 {currentSessionId ? "会话中" : "待启动"}
               </OpsStatusTag>
             }
+            variant="workbench"
+            padding="none"
+            className="ai-assistant-chat-surface"
             style={{
-              borderRadius: 12,
               flex: 1,
               height: screens.xl ? CHAT_WORKSPACE_DESKTOP_HEIGHT : "calc(100vh - 220px)",
               minHeight: 0,
@@ -1545,7 +1525,6 @@ export default function AiAssistantPage() {
               flexDirection: "column",
               overflow: "hidden",
             }}
-            styles={{ body: { padding: 0, flex: 1, minHeight: 0, minWidth: 0, display: "flex", overflow: "hidden" } }}
           >
             <Layout style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
               <Sider
@@ -1593,10 +1572,19 @@ export default function AiAssistantPage() {
                       size="small"
                       dataSource={sessions}
                       renderItem={(session) => (
-                        <List.Item
-                          onClick={() => void handleSelectSession(session.id)}
-                          style={{
-                            cursor: "pointer",
+	                        <List.Item
+	                          onClick={() => void handleSelectSession(session.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                void handleSelectSession(session.id);
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            aria-current={session.id === currentSessionId ? "true" : undefined}
+	                          style={{
+	                            cursor: "pointer",
                             marginBottom: 4,
                             borderRadius: 8,
                             border: session.id === currentSessionId ? "1px solid rgba(22,119,255,0.35)" : "1px solid transparent",
@@ -1619,6 +1607,7 @@ export default function AiAssistantPage() {
                                 opsTone="danger"
                                 className="resource-table-icon-action-compact"
                                 icon={<DeleteOutlined />}
+                                aria-label="删除会话"
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   void handleDeleteSession(session.id);
@@ -1741,6 +1730,7 @@ export default function AiAssistantPage() {
                         <OpsIconActionButton
                           className="resource-table-icon-action-compact"
                           icon={<PaperClipOutlined />}
+                          aria-label="上传文件或图片"
                           onClick={handleFileChoose}
                           disabled={loading || isInitializing || !accessToken}
                         />
@@ -1749,6 +1739,7 @@ export default function AiAssistantPage() {
                         <OpsIconActionButton
                           className="resource-table-icon-action-compact"
                           icon={recording ? <StopOutlined /> : <AudioOutlined />}
+                          aria-label={recording ? "停止录音" : "语音输入"}
                           onClick={toggleRecording}
                           disabled={!voiceSupported || loading || isInitializing || !accessToken}
                           opsTone={recording ? "danger" : "default"}
@@ -1772,6 +1763,7 @@ export default function AiAssistantPage() {
                         opsTone="primary"
                         className="resource-table-icon-action-compact"
                         icon={<SendOutlined />}
+                        aria-label="发送消息"
                         onClick={() => void handleSend(inputText)}
                         loading={loading}
                         disabled={
@@ -1785,7 +1777,7 @@ export default function AiAssistantPage() {
                 </div>
               </Content>
             </Layout>
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
@@ -1797,7 +1789,7 @@ export default function AiAssistantPage() {
         onCancel={handleCancelDelete}
         onConfirm={() => void handleConfirmDelete()}
       />
-      <Drawer
+      <OpsDrawerShell
         title={
           <Space>
             <ApiOutlined />
@@ -1806,13 +1798,13 @@ export default function AiAssistantPage() {
         }
         open={!showAlertPanelInline && alertDrawerOpen}
         onClose={() => setAlertDrawerOpen(false)}
-        size="default"
-        styles={{ body: { padding: 12 } }}
+        variant="business"
+        styles={{ body: { padding: 12, overflowY: "auto" } }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {alertSimulator}
         </div>
-      </Drawer>
+      </OpsDrawerShell>
     </div>
   );
 }

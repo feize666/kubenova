@@ -17,7 +17,6 @@ import {
   Descriptions,
   Form,
   Input,
-  Modal,
   Row,
   Select,
   Space,
@@ -28,7 +27,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsIconActionButton, OpsStatusTag, type OpsFilterChipTone } from "@/components/ops";
+import { OpsFilterChip, OpsFormSection, OpsIconActionButton, OpsModalShell, OpsPageHeader, OpsStatusTag, OpsSurface, type OpsFilterChipTone } from "@/components/ops";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import {
   POD_ACTION_MENU_CLASS,
@@ -342,8 +341,10 @@ function CreateRbacModal({ open, accessToken, onClose, onSuccess }: CreateRbacMo
   };
 
   return (
-    <Modal
+    <OpsModalShell
       title="新建角色绑定"
+      description="把用户、用户组或 ServiceAccount 绑定到 Kubernetes Role / ClusterRole。"
+      identity={watchedKind ?? "RoleBinding"}
       open={open}
       onCancel={handleClose}
       onOk={handleOk}
@@ -351,7 +352,7 @@ function CreateRbacModal({ open, accessToken, onClose, onSuccess }: CreateRbacMo
       cancelText="取消"
       confirmLoading={mutation.isPending}
       destroyOnHidden
-      width={520}
+      width={600}
     >
       {mutation.isError ? (
         <Alert
@@ -368,137 +369,145 @@ function CreateRbacModal({ open, accessToken, onClose, onSuccess }: CreateRbacMo
         requiredMark
         initialValues={{ kind: "RoleBinding", subjectKind: "User" }}
       >
-        {watchedSubjectKind === "ServiceAccount" ? (
-          <Form.Item
-            name="subject"
-            label="ServiceAccount 名称"
-            rules={[
-              { required: true, message: "请选择或输入 ServiceAccount 名称" },
-              { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: "ServiceAccount 名称需符合 DNS-1123 label" },
-            ]}
-          >
+        <OpsFormSection title="主体" description="选择被授予权限的账号、用户组或 ServiceAccount。">
+          {watchedSubjectKind === "ServiceAccount" ? (
+            <Form.Item
+              name="subject"
+              label="ServiceAccount 名称"
+              rules={[
+                { required: true, message: "请选择或输入 ServiceAccount 名称" },
+                { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: "ServiceAccount 名称需符合 DNS-1123 label" },
+              ]}
+            >
+              <Select
+                showSearch
+                allowClear
+                loading={saQuery.isLoading}
+                placeholder="从集群中选择或手动输入"
+                options={Array.from(new Set((saQuery.data?.items ?? []).map((item) => item.name))).map((name) => ({
+                  label: name,
+                  value: name,
+                }))}
+                notFoundContent="未查到 SA，可手动输入"
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="subject"
+              label="主体名称"
+              rules={[
+                { required: true, message: "请输入主体名称" },
+                { pattern: /^[a-zA-Z0-9:._-]{2,64}$/, message: "主体名称仅支持字母数字:._-，长度 2-64" },
+              ]}
+            >
+              <Input prefix={<UserOutlined />} placeholder="例如：ops-admin / dev-team" />
+            </Form.Item>
+          )}
+
+          <Form.Item name="subjectKind" label="主体类型" rules={[{ required: true, message: "请选择主体类型" }]}>
+            <Select
+              options={[
+                { label: "User", value: "User" },
+                ...(watchedKind === "ClusterRoleBinding" ? [{ label: "Group", value: "Group" }] : []),
+                { label: "ServiceAccount", value: "ServiceAccount" },
+              ]}
+            />
+          </Form.Item>
+        </OpsFormSection>
+
+        <OpsFormSection title="角色绑定" description="选择要授予的 Role / ClusterRole 和绑定类型。">
+          <Form.Item name="name" label="角色名（RoleName）" rules={[{ required: true, message: "请选择或输入角色名" }]}>
             <Select
               showSearch
               allowClear
-              loading={saQuery.isLoading}
-              placeholder="从集群中选择或手动输入"
-              options={Array.from(new Set((saQuery.data?.items ?? []).map((item) => item.name))).map((name) => ({
-                label: name,
-                value: name,
-              }))}
-              notFoundContent="未查到 SA，可手动输入"
+              placeholder="选择预定义角色或输入自定义角色名"
+              options={PRESET_ROLES}
+              optionFilterProp="label"
+              mode="tags"
+              maxCount={1}
+              tokenSeparators={[",", " "]}
+              notFoundContent="无匹配角色，可直接输入自定义角色名"
             />
           </Form.Item>
-        ) : (
+
+          <Form.Item name="kind" label="绑定类型" rules={[{ required: true, message: "请选择绑定类型" }]}>
+            <Select
+              options={[
+                {
+                  label: (
+                    <Tooltip title="绑定到指定名称空间，需填写名称空间">
+                      <span>RoleBinding（名称空间级）</span>
+                    </Tooltip>
+                  ),
+                  value: "RoleBinding",
+                },
+                {
+                  label: (
+                    <Tooltip title="全集群生效，名称空间留空">
+                      <span>ClusterRoleBinding（集群级）</span>
+                    </Tooltip>
+                  ),
+                  value: "ClusterRoleBinding",
+                },
+              ]}
+            />
+          </Form.Item>
+        </OpsFormSection>
+
+        <OpsFormSection title="作用域" description="RoleBinding 需要名称空间，ClusterRoleBinding 全集群生效。">
+          {watchedKind === "RoleBinding" ? (
+            <Form.Item
+              name="namespace"
+              label="名称空间"
+              rules={[{ required: true, message: "RoleBinding 需要指定名称空间" }]}
+              tooltip="RoleBinding 需指定名称空间，ClusterRoleBinding 留空即可"
+            >
+              <Input placeholder="例如: default, production" />
+            </Form.Item>
+          ) : (
+            <Form.Item name="namespace" label="名称空间" tooltip="ClusterRoleBinding 全集群生效，留空即可">
+              <Input placeholder="ClusterRoleBinding 可留空" disabled />
+            </Form.Item>
+          )}
+
           <Form.Item
-            name="subject"
-            label="主体名称"
-            rules={[
-              { required: true, message: "请输入主体名称" },
-              { pattern: /^[a-zA-Z0-9:._-]{2,64}$/, message: "主体名称仅支持字母数字:._-，长度 2-64" },
-            ]}
+            name="subjectNamespace"
+            label="主体名称空间"
+            tooltip="仅 ServiceAccount 需要填写"
+            rules={
+              watchedSubjectKind === "ServiceAccount"
+                ? [
+                    { required: true, message: "ServiceAccount 需要主体名称空间" },
+                    { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: "名称空间需符合 DNS-1123 label" },
+                  ]
+                : []
+            }
           >
-            <Input prefix={<UserOutlined />} placeholder="例如：ops-admin / dev-team" />
+            <Input placeholder={watchedSubjectKind === "ServiceAccount" ? "例如: default" : "非 ServiceAccount 可留空"} />
           </Form.Item>
-        )}
-
-        <Form.Item name="subjectKind" label="主体类型" rules={[{ required: true, message: "请选择主体类型" }]}>
-          <Select
-            options={[
-              { label: "User", value: "User" },
-              ...(watchedKind === "ClusterRoleBinding" ? [{ label: "Group", value: "Group" }] : []),
-              { label: "ServiceAccount", value: "ServiceAccount" },
-            ]}
-          />
-        </Form.Item>
-
-        <Form.Item name="name" label="角色名（RoleName）" rules={[{ required: true, message: "请选择或输入角色名" }]}>
-          <Select
-            showSearch
-            allowClear
-            placeholder="选择预定义角色或输入自定义角色名"
-            options={PRESET_ROLES}
-            optionFilterProp="label"
-            mode="tags"
-            maxCount={1}
-            tokenSeparators={[",", " "]}
-            notFoundContent="无匹配角色，可直接输入自定义角色名"
-          />
-        </Form.Item>
-
-        <Form.Item name="kind" label="绑定类型" rules={[{ required: true, message: "请选择绑定类型" }]}>
-          <Select
-            options={[
-              {
-                label: (
-                  <Tooltip title="绑定到指定名称空间，需填写名称空间">
-                    <span>RoleBinding（名称空间级）</span>
-                  </Tooltip>
-                ),
-                value: "RoleBinding",
-              },
-              {
-                label: (
-                  <Tooltip title="全集群生效，名称空间留空">
-                    <span>ClusterRoleBinding（集群级）</span>
-                  </Tooltip>
-                ),
-                value: "ClusterRoleBinding",
-              },
-            ]}
-          />
-        </Form.Item>
-
-        {watchedKind === "RoleBinding" ? (
-          <Form.Item
-            name="namespace"
-            label="名称空间"
-            rules={[{ required: true, message: "RoleBinding 需要指定名称空间" }]}
-            tooltip="RoleBinding 需指定名称空间，ClusterRoleBinding 留空即可"
-          >
-            <Input placeholder="例如: default, production" />
-          </Form.Item>
-        ) : (
-          <Form.Item name="namespace" label="名称空间" tooltip="ClusterRoleBinding 全集群生效，留空即可">
-            <Input placeholder="ClusterRoleBinding 可留空" disabled />
-          </Form.Item>
-        )}
-
-        <Form.Item
-          name="subjectNamespace"
-          label="主体名称空间"
-          tooltip="仅 ServiceAccount 需要填写"
-          rules={
-            watchedSubjectKind === "ServiceAccount"
-              ? [
-                  { required: true, message: "ServiceAccount 需要主体名称空间" },
-                  { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: "名称空间需符合 DNS-1123 label" },
-                ]
-              : []
-          }
-        >
-          <Input placeholder={watchedSubjectKind === "ServiceAccount" ? "例如: default" : "非 ServiceAccount 可留空"} />
-        </Form.Item>
+        </OpsFormSection>
 
         {watchedSubjectKind === "ServiceAccount" ? (
-          <Form.Item
-            name="lookupClusterId"
-            label="SA 来源集群（仅用于查询候选）"
-            tooltip="此字段仅用于联动查询现有 ServiceAccount，不写入绑定对象"
-          >
-            <Select
-              allowClear
-              showSearch
-              placeholder="选择集群"
-              options={(clustersQuery.data?.items ?? []).map((item) => ({
-                label: item.name,
-                value: item.id,
-              }))}
-            />
-          </Form.Item>
+          <OpsFormSection title="ServiceAccount 查询" description="只用于候选项查询，不写入绑定对象。">
+            <Form.Item
+              name="lookupClusterId"
+              label="SA 来源集群（仅用于查询候选）"
+              tooltip="此字段仅用于联动查询现有 ServiceAccount，不写入绑定对象"
+            >
+              <Select
+                allowClear
+                showSearch
+                placeholder="选择集群"
+                options={(clustersQuery.data?.items ?? []).map((item) => ({
+                  label: item.name,
+                  value: item.id,
+                }))}
+              />
+            </Form.Item>
+          </OpsFormSection>
         ) : null}
       </Form>
-    </Modal>
+    </OpsModalShell>
   );
 }
 
@@ -841,18 +850,11 @@ export default function RbacPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      {/* 页头 */}
-      <Card>
-        <Row justify="space-between" align="middle">
-          <Col>
-            <Typography.Title level={4} style={{ marginBottom: 4 }}>
-              访问控制（RBAC）
-            </Typography.Title>
-            <Typography.Text type="secondary">
-              管理平台角色绑定关系，控制用户对 Kubernetes 资源的访问权限。
-            </Typography.Text>
-          </Col>
-          <Col>
+      <OpsPageHeader
+        title="访问控制（RBAC）"
+        subtitle="管理平台角色绑定关系，控制用户对 Kubernetes 资源的访问权限。"
+        actions={
+          <div className="rbac-page-header__stats">
             <Row gutter={16}>
               {[
                 { label: "绑定总数", value: stats.total, color: "#1677ff" },
@@ -870,14 +872,14 @@ export default function RbacPage() {
                 </Col>
               ))}
             </Row>
-          </Col>
-        </Row>
-      </Card>
+          </div>
+        }
+      />
 
       {/* 角色说明卡片 */}
       <RoleCards />
 
-      <Card>
+      <OpsSurface variant="toolbar" padding="sm">
         <ResourceFilterToolbar>
           <ResourceFilterToolbarItem width="auto">
             <ResourceScopeFilterButton
@@ -895,7 +897,7 @@ export default function RbacPage() {
             />
           </ResourceFilterToolbarItem>
         </ResourceFilterToolbar>
-      </Card>
+      </OpsSurface>
 
       {/* 错误提示 */}
       {!isInitializing && !accessToken ? (
@@ -930,15 +932,11 @@ export default function RbacPage() {
       ) : null}
 
       {/* 绑定列表 */}
-      <Card
-        title={
-          <Space>
-            <span>角色绑定列表</span>
-            {query.data ? (
-              <OpsFilterChip tone="info">共 {query.data.total} 条</OpsFilterChip>
-            ) : null}
-          </Space>
-        }
+      <OpsSurface
+        variant="panel"
+        padding="sm"
+        title="角色绑定列表"
+        actions={query.data ? <OpsFilterChip tone="info">共 {query.data.total} 条</OpsFilterChip> : null}
       >
         <ResourceTable<RbacTableRecord>
           rowKey="key"
@@ -1001,7 +999,7 @@ export default function RbacPage() {
               : "暂无 RBAC 绑定，点击「新建绑定」创建"
           }
         />
-      </Card>
+      </OpsSurface>
 
       <CreateRbacModal
         open={createOpen}

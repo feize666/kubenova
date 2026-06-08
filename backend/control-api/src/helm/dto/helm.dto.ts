@@ -20,6 +20,13 @@ export interface HelmRepositoryCreateRequest {
   clusterId?: string;
   name?: string;
   url?: string;
+  repositoryKind?: 'http' | 'oci';
+  authType?: 'none' | 'basic';
+  username?: string;
+  password?: string;
+  caFile?: string;
+  caData?: string;
+  insecureSkipTlsVerify?: boolean;
 }
 
 export interface HelmRepositoryImportPresetsRequest {
@@ -28,9 +35,22 @@ export interface HelmRepositoryImportPresetsRequest {
   sync?: boolean;
 }
 
+export interface HelmRepositoryImportHostRequest {
+  clusterId?: string;
+  sync?: boolean;
+  overwrite?: boolean;
+}
+
 export interface HelmRepositoryUpdateRequest {
   clusterId?: string;
   url?: string;
+  repositoryKind?: 'http' | 'oci';
+  authType?: 'none' | 'basic';
+  username?: string;
+  password?: string;
+  caFile?: string;
+  caData?: string;
+  insecureSkipTlsVerify?: boolean;
 }
 
 export interface HelmChartQuery {

@@ -1,16 +1,19 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Typography, message } from "antd";
+import { Alert, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Typography, message } from "antd";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
+import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
+import { OpsSurface } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -25,6 +28,7 @@ import {
   getDynamicResourceDetail,
   getResourceDiscoveryCatalog,
   getDynamicResources,
+  applyResourceYaml,
   refreshResourceDiscovery,
   updateDynamicResourceYaml,
   type DiscoveryCatalogItem,
@@ -257,6 +261,10 @@ export default function GatewayApiPage() {
   const [dynamicYamlTarget, setDynamicYamlTarget] = useState<DynamicResourceIdentity | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [editingRow, setEditingRow] = useState<GatewayRow | null>(null);
   const [editingSpec, setEditingSpec] = useState<Record<string, unknown>>({});
   const [createForm] = Form.useForm<GatewayFormValues & HttpRouteFormValues>();
@@ -273,7 +281,7 @@ export default function GatewayApiPage() {
   });
 
   const baseKindMeta = GATEWAY_KIND_META[normalizeGatewayKindKey(kind)] ?? GATEWAY_KIND_META.gatewayclass;
-  const canCreate = Boolean(clusterId) && isStructuredGatewayKind(kind);
+  const canCreate = Boolean(clusterId);
 
   const clustersQuery = useQuery({
     queryKey: ["gateway-api", "clusters", accessToken],
@@ -285,6 +293,7 @@ export default function GatewayApiPage() {
     () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
     [clustersQuery.data?.items],
   );
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
   const clusterMap = useMemo(
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
     [clustersQuery.data?.items],
@@ -438,6 +447,27 @@ export default function GatewayApiPage() {
     },
     onError: (error) => {
       void message.error(error instanceof Error ? error.message : "创建失败，请重试");
+    },
+  });
+
+  const applyCreateYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken ?? undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setCreateOpen(false);
+      setCreateYaml("");
+      await listQuery.refetch();
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : "YAML 创建失败");
     },
   });
 
@@ -601,13 +631,16 @@ export default function GatewayApiPage() {
       void message.error("请先选择集群后再新增资源");
       return;
     }
-    if (!isStructuredGatewayKind(kind)) {
-      void message.info(`${kindMeta.title} 请使用 YAML 创建或编辑`);
-      return;
-    }
     setEditingRow(null);
     setEditingSpec({});
     createForm.resetFields();
+    createForm.setFieldsValue({
+      namespace: kindMeta.namespaced ? namespace || "default" : "",
+    });
+    setCreateMode(isStructuredGatewayKind(kind) ? "form" : "yaml");
+    setCreateYaml("");
+    setCreateYamlClusterId(clusterId);
+    setCreateYamlNamespace(kindMeta.namespaced ? namespace || "default" : "");
     setCreateOpen(true);
   };
 
@@ -621,6 +654,18 @@ export default function GatewayApiPage() {
   };
 
   const handleCreateSubmit = async () => {
+    if (!editingRow && createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyCreateYamlMutation.mutate();
+      return;
+    }
     let values: GatewayFormValues & HttpRouteFormValues;
     try {
       values = await createForm.validateFields();
@@ -1013,17 +1058,16 @@ export default function GatewayApiPage() {
         titleEn="Gateway API"
         description="管理 Gateway API 资源。"
         titleSuffix={
-          <Button
-            type="primary"
+          <ResourceAddButton
+            compact={false}
+            label="新增资源"
             disabled={!canCreate}
             onClick={handleOpenCreate}
-          >
-            新增资源
-          </Button>
+          />
         }
       />
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <Row gutter={[12, 12]} style={{ marginBottom: 14 }}>
           <Col span={24}>
             <Select
@@ -1079,6 +1123,7 @@ export default function GatewayApiPage() {
         <ResourceTable<GatewayRow>
           rowKey="id"
           columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           tableKey="network.gateway-api"
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -1106,7 +1151,7 @@ export default function GatewayApiPage() {
             },
           })}
         />
-      </Card>
+      </OpsSurface>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
@@ -1136,13 +1181,38 @@ export default function GatewayApiPage() {
           setCreateOpen(false);
           setEditingRow(null);
           setEditingSpec({});
+          setCreateYaml("");
         }}
         okText={editingRow ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending || updateMutation.isPending || openStructuredEditMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || openStructuredEditMutation.isPending || applyCreateYamlMutation.isPending}
         destroyOnHidden
+        width={760}
       >
+        {!editingRow && createMode === "yaml" ? (
+          <ResourceCreateMethodTabs
+            mode={createMode}
+            onModeChange={(mode) => setCreateMode(isStructuredGatewayKind(kind) ? mode : "yaml")}
+            yaml={createYaml}
+            onYamlChange={setCreateYaml}
+            clusterId={createYamlClusterId}
+            onClusterIdChange={setCreateYamlClusterId}
+            namespace={createYamlNamespace}
+            onNamespaceChange={kindMeta.namespaced ? setCreateYamlNamespace : undefined}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            clusterUnavailable={clusterUnavailable}
+            kindHint={kindMeta.title}
+            disabled={applyCreateYamlMutation.isPending}
+            formContent={null}
+          />
+        ) : (
         <Form form={createForm} layout="vertical" style={{ marginTop: 16 }}>
+          {!editingRow ? (
+            <Form.Item>
+              <Typography.Link onClick={() => setCreateMode("yaml")}>使用 YAML / 上传创建</Typography.Link>
+            </Form.Item>
+          ) : null}
           <Form.Item label="名称" name="name" rules={[{ required: true, message: "请输入名称" }]}>
             <Input disabled={Boolean(editingRow)} />
           </Form.Item>
@@ -1243,6 +1313,7 @@ export default function GatewayApiPage() {
             </>
           ) : null}
         </Form>
+        )}
       </Modal>
     </Space>
   );

@@ -500,7 +500,7 @@ const AppSider = memo(function AppSider({
     <Sider
       width={260}
       theme={mode as "dark" | "light"}
-      style={{ borderRight: "1px solid rgba(59,130,246,0.15)" }}
+      style={{ borderRight: "1px solid var(--kn-border)" }}
     >
       <div
         className="logo-wrap"
@@ -509,7 +509,7 @@ const AppSider = memo(function AppSider({
           alignItems: "center",
           gap: 10,
           padding: "18px 16px 14px",
-          borderBottom: "1px solid rgba(59,130,246,0.2)",
+          borderBottom: "1px solid var(--kn-border)",
         }}
       >
         <div style={{ flexShrink: 0 }}>
@@ -517,22 +517,22 @@ const AppSider = memo(function AppSider({
             <path
               d="M16 2L28 9V23L16 30L4 23V9L16 2Z"
               fill="url(#grad1)"
-              stroke="#3b82f6"
+              stroke="var(--kn-primary)"
               strokeWidth="1.5"
             />
-            <circle cx="16" cy="16" r="5" fill="none" stroke="#60a5fa" strokeWidth="1.5" />
-            <line x1="16" y1="8" x2="16" y2="11" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="16" y1="21" x2="16" y2="24" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="8" y1="16" x2="11" y2="16" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="21" y1="16" x2="24" y2="16" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="10.3" y1="10.3" x2="12.5" y2="12.5" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="19.5" y1="19.5" x2="21.7" y2="21.7" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="21.7" y1="10.3" x2="19.5" y2="12.5" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" />
-            <line x1="12.5" y1="19.5" x2="10.3" y2="21.7" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" />
+            <circle cx="16" cy="16" r="5" fill="none" stroke="var(--kn-accent)" strokeWidth="1.5" />
+            <line x1="16" y1="8" x2="16" y2="11" stroke="var(--kn-accent)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="16" y1="21" x2="16" y2="24" stroke="var(--kn-accent)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="8" y1="16" x2="11" y2="16" stroke="var(--kn-accent)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="21" y1="16" x2="24" y2="16" stroke="var(--kn-accent)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="10.3" y1="10.3" x2="12.5" y2="12.5" stroke="var(--kn-accent)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="19.5" y1="19.5" x2="21.7" y2="21.7" stroke="var(--kn-accent)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="21.7" y1="10.3" x2="19.5" y2="12.5" stroke="var(--kn-accent)" strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="12.5" y1="19.5" x2="10.3" y2="21.7" stroke="var(--kn-accent)" strokeWidth="1.5" strokeLinecap="round" />
             <defs>
               <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#1e3a5f" stopOpacity="0.9" />
-                <stop offset="100%" stopColor="#0a1628" stopOpacity="0.9" />
+                <stop offset="0%" stopColor="var(--kn-surface-raised)" stopOpacity="0.9" />
+                <stop offset="100%" stopColor="var(--kn-sider)" stopOpacity="0.9" />
               </linearGradient>
             </defs>
           </svg>
@@ -542,14 +542,14 @@ const AppSider = memo(function AppSider({
             style={{
               fontWeight: 800,
               fontSize: 16,
-              color: "#3b82f6",
+              color: "var(--kn-primary)",
               letterSpacing: "0.08em",
               lineHeight: 1.2,
             }}
           >
             KubeNova
           </div>
-          <div style={{ fontSize: 11, color: "#64748b", letterSpacing: "0.16em" }}>
+          <div style={{ fontSize: 11, color: "var(--kn-text-muted)", letterSpacing: "0.16em" }}>
             CLOUD NATIVE OPS
           </div>
         </div>
@@ -720,25 +720,21 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <Layout style={{ minHeight: "100vh" }}>
-      {/* AppSider 用 memo 隔离，pathname 变化时只有 selectedKeys/openKeys 更新，父级其余 state 不会触发它重渲染 */}
-      <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} />
-      <Layout>
+    <>
+      <a className="shell-skip-link" href="#kubenova-main-content">
+        跳到主内容
+      </a>
+      <Layout style={{ minHeight: "100vh" }}>
+        {/* AppSider 用 memo 隔离，pathname 变化时只有 selectedKeys/openKeys 更新，父级其余 state 不会触发它重渲染 */}
+        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} />
+        <Layout>
         <Header
           className="app-header"
-          style={
-            mode === "dark"
-              ? {
-                  background: "rgba(10,14,26,0.95)",
-                  borderBottom: "1px solid rgba(59,130,246,0.3)",
-                  boxShadow: "0 1px 20px rgba(59,130,246,0.08)",
-                }
-              : {
-                  background: "#ffffff",
-                  borderBottom: "1px solid rgba(59,130,246,0.15)",
-                  boxShadow: "0 1px 8px rgba(37,99,235,0.06)",
-                }
-          }
+          style={{
+            background: "color-mix(in srgb, var(--kn-surface) 94%, transparent)",
+            borderBottom: "1px solid var(--kn-border)",
+            boxShadow: "var(--kn-shadow-subtle)",
+          }}
         >
           <Breadcrumb
             items={[
@@ -746,7 +742,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
                 title: (
                   <span
                     style={{
-                      color: mode === "dark" ? "#64748b" : "#94a3b8",
+                      color: "var(--kn-text-muted)",
                       fontSize: 13,
                     }}
                   >
@@ -758,7 +754,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
                 title: (
                   <span
                     style={{
-                      color: mode === "dark" ? "#e2e8f0" : "#1e293b",
+                      color: "var(--kn-text)",
                       fontWeight: 600,
                       fontSize: 13,
                     }}
@@ -792,7 +788,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               <strong>{role || "user"}</strong>
             </span>
           </div>
-          <Space size={12}>
+          <Space size={12} className="shell-topbar-actions">
             <Input
               id="shell-global-search"
               name="shell-global-search"
@@ -806,9 +802,11 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               刷新
             </OpsIconActionButton>
             <OpsIconActionButton
-              className="shell-theme-toggle"
+              className={`shell-theme-toggle shell-theme-toggle--${mode}`}
               onClick={toggleTheme}
+              aria-pressed={mode === "dark"}
               aria-label={`切换到${mode === "dark" ? "浅色" : "深色"}主题`}
+              data-mode={mode}
             >
               <span className={`shell-theme-segment ${mode === "light" ? "is-active" : ""}`}>
                 <SunFilled />
@@ -831,17 +829,18 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               }}
               trigger={["click"]}
             >
-              <Avatar style={{ cursor: "pointer", background: "#3b82f6", color: "#ffffff" }}>
+              <Avatar style={{ cursor: "pointer", background: "var(--kn-primary)", color: "var(--ops-on-primary)" }}>
                 {(username || "管").slice(0, 1).toUpperCase()}
               </Avatar>
             </Dropdown>
           </Space>
         </Header>
         {/* Suspense 边界：路由切换时保持旧内容可见直到新页面就绪，同时提供骨架屏兜底 */}
-        <Content className="app-content">
+        <Content id="kubenova-main-content" className="app-content" tabIndex={-1}>
           <Suspense fallback={<LoadingSkeleton />}>{children}</Suspense>
         </Content>
       </Layout>
-    </Layout>
+      </Layout>
+    </>
   );
 }

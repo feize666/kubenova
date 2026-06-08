@@ -5,13 +5,14 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Descriptions, Drawer, Empty, Row, Select, Space, Statistic, Table, Typography } from "antd";
+import { Alert, Card, Col, Descriptions, Empty, Row, Select, Space, Statistic, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsStatusTag } from "@/components/ops";
+import { OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
+import { ResourceTable } from "@/components/resource-table";
 import {
   getObservabilitySummary,
   type ObservabilityEntityHealth,
@@ -199,7 +200,7 @@ export default function ObservabilityCenterPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="none">
         <ResourcePageHeader
           path={OBSERVABILITY_PATH}
           embedded
@@ -212,13 +213,13 @@ export default function ObservabilityCenterPage() {
                 onChange={setRange}
                 options={OBSERVABILITY_RANGE_OPTIONS}
               />
-              <Button icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
+              <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
                 刷新
-              </Button>
+              </OpsIconActionButton>
             </Space>
           }
         />
-      </Card>
+      </OpsSurface>
 
       {!enabled ? <Alert type="warning" showIcon title="未检测到登录状态，请先登录后查看可观测性中心。" /> : null}
       {summaryQuery.isError ? (
@@ -231,28 +232,28 @@ export default function ObservabilityCenterPage() {
       ) : null}
       <Row gutter={[12, 12]}>
         <Col xs={24} md={6}>
-          <Card className="cyber-panel">
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="健康分" value={summary?.healthScore ?? 0} suffix="/ 100" />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6}>
-          <Card className="cyber-panel">
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="活跃告警" value={summary?.activeAlerts.total ?? 0} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6}>
-          <Card className="cyber-panel">
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="严重" value={summary?.activeAlerts.critical ?? 0} styles={{ content: { color: "#cf1322" } }} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6}>
-          <Card className="cyber-panel">
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="风险" value={summary?.activeAlerts.warning ?? 0} styles={{ content: { color: "#d48806" } }} />
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
-      <Card className="cyber-panel" title="数据源状态">
+      <OpsSurface variant="panel" padding="sm" title="数据源状态">
         {sourceStatus.length ? (
           <Row gutter={[12, 12]}>
             {sourceStatus.map((item) => (
@@ -272,52 +273,55 @@ export default function ObservabilityCenterPage() {
         ) : (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据源状态" />
         )}
-      </Card>
+      </OpsSurface>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={10}>
-          <Card className="cyber-panel" title="实体健康">
-            <Table
+          <OpsSurface variant="panel" padding="sm" title="实体健康">
+            <ResourceTable
               rowKey="scope"
               size="small"
               columns={entityColumns}
               dataSource={entities}
               pagination={false}
               loading={summaryQuery.isLoading}
+              emptyDescription="暂无实体健康数据"
             />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} xl={14}>
-          <Card className="cyber-panel" title="信号联动">
-            <Table
+          <OpsSurface variant="panel" padding="sm" title="信号联动">
+            <ResourceTable
               rowKey="key"
               size="small"
               columns={signalColumns}
               dataSource={signalPanels}
               pagination={false}
               loading={summaryQuery.isLoading}
+              emptyDescription="暂无信号联动数据"
             />
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
-      <Card className="cyber-panel" title="最近事件">
-        <Table
+      <OpsSurface variant="panel" padding="sm" title="最近事件">
+        <ResourceTable
           rowKey="id"
           size="small"
           columns={eventColumns}
           dataSource={recentEvents}
           pagination={false}
           loading={summaryQuery.isLoading}
+          emptyDescription="暂无最近事件"
         />
-      </Card>
+      </OpsSurface>
 
-      <Drawer
+      <OpsDrawerShell
         title="实体信号详情"
         open={Boolean(selectedEntity)}
-        size="large"
+        variant="business"
         onClose={closeEntityDrawer}
-        styles={{ wrapper: { width: "min(52vw, 960px)", minWidth: 720 } }}
+        bodyClassName="business-detail-drawer__body"
       >
         {selectedEntity ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
@@ -359,9 +363,9 @@ export default function ObservabilityCenterPage() {
               <Space wrap>
                 {selectedEntity.deepLinks.map((item) =>
                   item.available && item.url ? (
-                    <Button key={item.key} href={item.url} target="_blank" icon={<LinkOutlined />} size="small">
+                    <OpsIconActionButton key={item.key} href={item.url} target="_blank" icon={<LinkOutlined />} size="small">
                       {item.label}
-                    </Button>
+                    </OpsIconActionButton>
                   ) : (
                     <OpsFilterChip key={item.key} tone="neutral">{item.label}: 未配置</OpsFilterChip>
                   ),
@@ -378,7 +382,7 @@ export default function ObservabilityCenterPage() {
             </Card>
           </Space>
         ) : null}
-      </Drawer>
+      </OpsDrawerShell>
     </Space>
   );
 }

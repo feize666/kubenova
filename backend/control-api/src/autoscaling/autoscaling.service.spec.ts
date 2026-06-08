@@ -208,7 +208,9 @@ describe('AutoscalingService list and create guards', () => {
       { hpa: { minReplicas: 2 } },
     );
 
-    expect(hpaApi.replaceNamespacedHorizontalPodAutoscaler).toHaveBeenCalledWith(
+    expect(
+      hpaApi.replaceNamespacedHorizontalPodAutoscaler,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'web-hpa',
         namespace: 'default',
@@ -387,7 +389,9 @@ describe('AutoscalingService list and create guards', () => {
 
   it('updates HPA with the exact resource name', async () => {
     const { service, clustersService, hpaApi } = build();
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
+    );
     hpaApi.readNamespacedHorizontalPodAutoscaler.mockResolvedValue(
       makeHpaResource('web-hpa'),
     );
@@ -404,7 +408,9 @@ describe('AutoscalingService list and create guards', () => {
       { hpa: { minReplicas: 2 } },
     );
 
-    expect(hpaApi.replaceNamespacedHorizontalPodAutoscaler).toHaveBeenCalledWith(
+    expect(
+      hpaApi.replaceNamespacedHorizontalPodAutoscaler,
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'web-hpa',
         body: expect.objectContaining({
@@ -416,7 +422,9 @@ describe('AutoscalingService list and create guards', () => {
 
   it('updates VPA with the exact resource name', async () => {
     const { service, clustersService, customApi } = build();
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
+    );
     customApi.getNamespacedCustomObject.mockResolvedValue(
       makeVpaResource('web-vpa'),
     );

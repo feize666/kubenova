@@ -17,6 +17,7 @@ import type {
   HelmListQuery,
   HelmReleaseQuery,
   HelmRepositoryCreateRequest,
+  HelmRepositoryImportHostRequest,
   HelmRepositoryImportPresetsRequest,
   HelmRepositoryQuery,
   HelmRepositoryUpdateRequest,
@@ -25,12 +26,16 @@ import type {
   HelmUpgradeRequest,
 } from './dto/helm.dto';
 import {
+  type HelmRepositoryAuthType,
+  type HelmRepositoryKind,
   type HelmRepositoryRecord,
+  type HelmRepositorySource,
   HelmRepositoryStore,
 } from './helm-repository.store';
 
 const execFileAsync = promisify(execFile);
 const HELM_ALL_RELEASES_CLUSTER_TIMEOUT_MS = 7000;
+const HELM_COMMAND_TIMEOUT_MS = 15000;
 
 interface HelmReleaseItem {
   name: string;
@@ -64,12 +69,27 @@ interface HelmRepositoryItem {
   clusterId: string;
   name: string;
   url: string;
-  authType: 'none';
+  repositoryKind: HelmRepositoryKind;
+  authType: HelmRepositoryAuthType;
+  source?: HelmRepositorySource;
+  username?: string;
+  caFile?: string;
+  hasCaData?: boolean;
+  insecureSkipTlsVerify?: boolean;
   syncStatus: 'saved' | 'validated' | 'syncing' | 'synced' | 'failed';
+  chartCount?: number;
   lastSyncAt?: string;
   message?: string;
+  diagnostics?: HelmRepositoryItemDiagnostics;
   createdAt: string;
   updatedAt: string;
+}
+
+interface HelmRepositoryItemDiagnostics {
+  code?: string;
+  reason?: string;
+  suggestion?: string;
+  checkedAt?: string;
 }
 
 interface HelmRepositoryListPayload {
@@ -77,12 +97,33 @@ interface HelmRepositoryListPayload {
   total: number;
   page: number;
   pageSize: number;
+  diagnostics?: HelmRepositoryInventoryDiagnostic[];
   timestamp: string;
 }
 
 interface HelmCliRepositoryItem {
   name: string;
   url: string;
+  repositoryKind: HelmRepositoryKind;
+}
+
+interface HelmRepositoryInventoryDiagnostic {
+  source: 'repositories.yaml' | 'helm repo list';
+  status: 'success' | 'failed' | 'skipped';
+  message: string;
+  path?: string;
+  command?: string;
+  code?: string;
+}
+
+interface HelmHostRepositoryInventory {
+  items: HelmCliRepositoryItem[];
+  diagnostics: HelmRepositoryInventoryDiagnostic[];
+}
+
+interface HelmRepositoryInventoryMerge {
+  records: HelmRepositoryRecord[];
+  diagnostics: HelmRepositoryInventoryDiagnostic[];
 }
 
 interface HelmRepositoryMutationPayload {
@@ -119,6 +160,26 @@ interface HelmRepositoryPresetImportPayload {
   imported: HelmRepositoryPresetImportItem[];
   total: number;
   timestamp: string;
+}
+
+interface HelmRepositoryHostImportItem {
+  name: string;
+  url: string;
+  action: 'created' | 'updated' | 'existing' | 'failed';
+  source: HelmRepositorySource;
+  repositoryKind: HelmRepositoryKind;
+  syncStatus: HelmRepositoryItem['syncStatus'];
+  message?: string;
+  diagnostics?: HelmRepositoryItemDiagnostics;
+}
+
+interface HelmRepositoryHostImportPayload {
+  clusterId: string;
+  sync: boolean;
+  imported: HelmRepositoryHostImportItem[];
+  total: number;
+  timestamp: string;
+  diagnostics: HelmRepositoryInventoryDiagnostic[];
 }
 
 interface HelmChartVersionItem {
@@ -202,7 +263,7 @@ export class HelmService {
     private readonly repositoryStore: HelmRepositoryStore,
   ) {}
 
-  async listRepositoryPresets(): Promise<HelmRepositoryPresetListPayload> {
+  listRepositoryPresets(): HelmRepositoryPresetListPayload {
     return {
       items: HELM_REPOSITORY_PRESETS.map((item) => ({ ...item })),
       total: HELM_REPOSITORY_PRESETS.length,
@@ -245,6 +306,7 @@ export class HelmService {
         clusterId,
         name: preset.name,
         url: preset.url,
+        source: 'preset',
         authType: 'none',
         syncStatus: sync ? 'syncing' : 'saved',
         message: sync ? '准备同步模板仓库' : '模板仓库已保存（待同步）',
@@ -294,6 +356,95 @@ export class HelmService {
     };
   }
 
+  async importHostRepositories(
+    body: HelmRepositoryImportHostRequest,
+  ): Promise<HelmRepositoryHostImportPayload> {
+    const clusterId = this.requireNonEmpty(body.clusterId, 'clusterId');
+    await this.ensureClusterExists(clusterId);
+    const sync = body.sync !== false;
+    const overwrite = body.overwrite === true;
+    const hostInventory = await this.readHostRepositoryInventory();
+    const now = new Date().toISOString();
+    const imported: HelmRepositoryHostImportItem[] = [];
+    const recordsToSync: HelmRepositoryRecord[] = [];
+
+    for (const item of hostInventory.items) {
+      const existing = await this.repositoryStore.findByName(
+        clusterId,
+        item.name,
+      );
+      const record: HelmRepositoryRecord = {
+        ...(existing ?? {
+          clusterId,
+          name: item.name,
+          createdAt: now,
+        }),
+        clusterId,
+        name: item.name,
+        url: overwrite || !existing ? item.url : existing.url,
+        repositoryKind:
+          overwrite || !existing
+            ? item.repositoryKind
+            : existing.repositoryKind,
+        source: 'host-cli',
+        authType: existing?.authType ?? 'none',
+        username: existing?.username,
+        password: existing?.password,
+        caFile: existing?.caFile,
+        caData: existing?.caData,
+        insecureSkipTlsVerify: existing?.insecureSkipTlsVerify,
+        syncStatus: sync ? 'syncing' : (existing?.syncStatus ?? 'saved'),
+        message: sync
+          ? '准备同步宿主 Helm 仓库'
+          : (existing?.message ?? '来源于宿主 Helm 仓库配置'),
+        lastSyncAt: existing?.lastSyncAt,
+        updatedAt: now,
+      };
+      await this.repositoryStore.save(record);
+      imported.push({
+        name: record.name,
+        url: record.url,
+        action: existing ? (overwrite ? 'updated' : 'existing') : 'created',
+        source: 'host-cli',
+        repositoryKind: this.resolveRepositoryKind(record),
+        syncStatus: this.normalizeSyncStatus(record.syncStatus),
+        message: record.message,
+      });
+      if (sync) {
+        recordsToSync.push(record);
+      }
+    }
+
+    if (sync && recordsToSync.length > 0) {
+      await this.withKubeconfig(clusterId, async (ctx) => {
+        await this.syncRepositoriesForContext(ctx, {
+          only: recordsToSync,
+          strict: false,
+        });
+      });
+      for (const item of imported) {
+        const latest = await this.repositoryStore.findByName(
+          clusterId,
+          item.name,
+        );
+        if (!latest) {
+          continue;
+        }
+        item.syncStatus = this.normalizeSyncStatus(latest.syncStatus);
+        item.message = latest.message ?? item.message;
+      }
+    }
+
+    return {
+      clusterId,
+      sync,
+      imported,
+      total: imported.length,
+      timestamp: new Date().toISOString(),
+      diagnostics: hostInventory.diagnostics,
+    };
+  }
+
   async listRepositories(
     query: HelmRepositoryQuery,
   ): Promise<HelmRepositoryListPayload> {
@@ -301,11 +452,11 @@ export class HelmService {
     const pageSize = this.parsePositiveInt(query.pageSize, 20);
     const clusterId = this.normalizeOptional(query.clusterId);
 
-    const records = clusterId
+    const inventory = clusterId
       ? await this.mergeRepositoryInventory(clusterId)
       : await this.listAllRepositoryInventory();
     const sorted = this.sortRepositoryRecords(
-      records,
+      inventory.records,
       query.sortBy,
       query.sortOrder,
     );
@@ -319,6 +470,7 @@ export class HelmService {
       total,
       page,
       pageSize,
+      diagnostics: inventory.diagnostics,
       timestamp: new Date().toISOString(),
     };
   }
@@ -328,7 +480,7 @@ export class HelmService {
   ): Promise<HelmRepositoryMutationPayload> {
     const clusterId = this.requireNonEmpty(body.clusterId, 'clusterId');
     const name = this.requireNonEmpty(body.name, 'name');
-    const url = this.normalizeRepositoryUrl(body.url);
+    const url = this.normalizeRepositoryUrl(body.url, body.repositoryKind);
     await this.ensureClusterExists(clusterId);
 
     const existing = await this.repositoryStore.findByName(clusterId, name);
@@ -340,11 +492,13 @@ export class HelmService {
     }
 
     const now = new Date().toISOString();
+    const repositoryOptions = this.normalizeRepositoryOptions(body, url);
     const record: HelmRepositoryRecord = {
       clusterId,
       name,
       url,
-      authType: 'none',
+      ...repositoryOptions,
+      source: 'manual',
       syncStatus: 'syncing',
       message: '正在验证仓库连通性',
       createdAt: now,
@@ -356,7 +510,7 @@ export class HelmService {
       await this.withKubeconfig(clusterId, async (ctx) => {
         await this.syncRepositoriesForContext(ctx, {
           only: [record],
-          strict: true,
+          strict: false,
         });
       });
     } catch (error) {
@@ -364,10 +518,16 @@ export class HelmService {
     }
 
     const latest = await this.repositoryStore.findByName(clusterId, name);
+    const latestStatus = latest
+      ? this.normalizeSyncStatus(latest.syncStatus)
+      : 'saved';
     return {
       item: latest ? this.toRepositoryItem(latest) : undefined,
       clusterId,
-      message: '仓库已创建并同步成功',
+      message:
+        latestStatus === 'failed'
+          ? '仓库已保存，但同步失败'
+          : '仓库已创建并同步成功',
       timestamp: new Date().toISOString(),
     };
   }
@@ -389,14 +549,18 @@ export class HelmService {
     }
 
     const nextUrl = body.url
-      ? this.normalizeRepositoryUrl(body.url)
+      ? this.normalizeRepositoryUrl(body.url, body.repositoryKind)
       : existing.url;
+    const repositoryOptions = this.normalizeRepositoryOptions(
+      body,
+      nextUrl,
+      existing,
+    );
     const next: HelmRepositoryRecord = {
       ...existing,
       url: nextUrl,
-      authType: 'none',
-      username: undefined,
-      password: undefined,
+      ...repositoryOptions,
+      source: existing.source ?? 'manual',
       syncStatus: 'syncing',
       message: '正在验证仓库连通性',
       updatedAt: new Date().toISOString(),
@@ -407,7 +571,7 @@ export class HelmService {
       await this.withKubeconfig(clusterId, async (ctx) => {
         await this.syncRepositoriesForContext(ctx, {
           only: [next],
-          strict: true,
+          strict: false,
         });
       });
     } catch (error) {
@@ -418,10 +582,16 @@ export class HelmService {
       clusterId,
       repositoryName,
     );
+    const latestStatus = latest
+      ? this.normalizeSyncStatus(latest.syncStatus)
+      : 'saved';
     return {
       item: latest ? this.toRepositoryItem(latest) : undefined,
       clusterId,
-      message: '仓库已更新并同步成功',
+      message:
+        latestStatus === 'failed'
+          ? '仓库已更新，但同步失败'
+          : '仓库已更新并同步成功',
       timestamp: new Date().toISOString(),
     };
   }
@@ -1239,6 +1409,7 @@ export class HelmService {
       const result = await execFileAsync('helm', finalArgs, {
         maxBuffer: 10 * 1024 * 1024,
         env: ctx.helmEnv,
+        timeout: HELM_COMMAND_TIMEOUT_MS,
       });
       return {
         stdout: result.stdout ?? '',
@@ -1249,6 +1420,7 @@ export class HelmService {
         stdout?: string;
         stderr?: string;
         code?: number | string;
+        killed?: boolean;
       };
 
       if (err.code === 'ENOENT') {
@@ -1258,9 +1430,21 @@ export class HelmService {
         });
       }
 
+      if (err.code === 'ETIMEDOUT' || err.killed) {
+        throw new BadRequestException({
+          code: 'HELM_COMMAND_TIMEOUT',
+          message: `helm 命令执行超时: helm ${this.sanitizeHelmArgs(args).join(' ')}`,
+          details: {
+            timeoutMs: HELM_COMMAND_TIMEOUT_MS,
+            stderr: err.stderr?.trim() || undefined,
+            stdout: err.stdout?.trim() || undefined,
+          },
+        });
+      }
+
       throw new BadRequestException({
-        code: 'HELM_COMMAND_FAILED',
-        message: `helm 命令执行失败: helm ${args.join(' ')}`,
+        code: this.classifyHelmCommandFailure(err.stderr, err.stdout),
+        message: `helm 命令执行失败: helm ${this.sanitizeHelmArgs(args).join(' ')}`,
         details: {
           exitCode: typeof err.code === 'number' ? err.code : undefined,
           stderr: err.stderr?.trim() || undefined,
@@ -1280,7 +1464,7 @@ export class HelmService {
       return;
     }
 
-    const failed: string[] = [];
+    const failed: Array<{ name: string; code: string; message: string }> = [];
     for (const repository of records) {
       const syncing: HelmRepositoryRecord = {
         ...repository,
@@ -1291,29 +1475,39 @@ export class HelmService {
       await this.repositoryStore.save(syncing);
 
       try {
-        await this.validateRepositoryUrl(repository.url);
+        const repositoryKind = this.resolveRepositoryKind(repository);
+        await this.validateRepositoryDefinition(repository, ctx);
         await this.repositoryStore.save({
           ...repository,
           syncStatus: 'validated',
-          message: '仓库地址校验通过，准备同步 Helm 索引',
+          message:
+            repositoryKind === 'oci'
+              ? 'OCI 仓库定义校验通过，准备验证 registry'
+              : '仓库地址校验通过，准备同步 Helm 索引',
           updatedAt: new Date().toISOString(),
         });
 
-        await this.runHelm(
-          ['repo', 'add', repository.name, repository.url, '--force-update'],
-          ctx,
-        );
-        await this.runHelm(['repo', 'update', repository.name], ctx);
+        if (repositoryKind === 'oci') {
+          await this.syncOciRepository(ctx, repository);
+        } else {
+          await this.syncHttpRepository(ctx, repository);
+        }
 
         await this.repositoryStore.save({
           ...repository,
+          repositoryKind,
           syncStatus: 'synced',
-          message: '仓库同步成功',
+          message:
+            repositoryKind === 'oci' ? 'OCI 仓库校验成功' : '仓库同步成功',
           lastSyncAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
       } catch (error) {
-        failed.push(repository.name);
+        failed.push({
+          name: repository.name,
+          code: this.extractErrorCode(error),
+          message: this.extractErrorMessage(error),
+        });
         await this.repositoryStore.save({
           ...repository,
           syncStatus: 'failed',
@@ -1326,19 +1520,25 @@ export class HelmService {
 
     if (options?.strict && failed.length > 0) {
       throw new BadRequestException({
-        code: 'HELM_REPO_SYNC_FAILED',
-        message: `Helm 仓库同步失败: ${failed.join(', ')}`,
+        code: 'HELM_REPOSITORY_SYNC_FAILED',
+        message: `Helm 仓库同步失败: ${failed
+          .map((item) => item.name)
+          .join(', ')}`,
+        details: { failed },
       });
     }
   }
 
   private async mergeRepositoryInventory(
     clusterId: string,
-  ): Promise<HelmRepositoryRecord[]> {
+  ): Promise<HelmRepositoryInventoryMerge> {
     const storedRecords = await this.repositoryStore.list(clusterId);
-    const cliRecords = await this.readHostRepositoryInventory();
-    if (cliRecords.length === 0) {
-      return storedRecords;
+    const hostInventory = await this.readHostRepositoryInventory();
+    if (hostInventory.items.length === 0) {
+      return {
+        records: storedRecords,
+        diagnostics: hostInventory.diagnostics,
+      };
     }
 
     const merged = new Map<string, HelmRepositoryRecord>();
@@ -1347,18 +1547,23 @@ export class HelmService {
     }
 
     const now = new Date().toISOString();
-    for (const item of cliRecords) {
+    for (const item of hostInventory.items) {
       const existing = merged.get(item.name);
       const next: HelmRepositoryRecord = {
         clusterId,
         name: item.name,
         url: item.url,
+        repositoryKind: item.repositoryKind,
+        source: existing?.source ?? 'host-cli',
         authType: existing?.authType ?? 'none',
         username: existing?.username,
         password: existing?.password,
+        caFile: existing?.caFile,
+        caData: existing?.caData,
+        insecureSkipTlsVerify: existing?.insecureSkipTlsVerify,
         syncStatus: existing?.syncStatus ?? 'synced',
         lastSyncAt: existing?.lastSyncAt ?? now,
-        message: existing?.message ?? '来源于 helm repo list',
+        message: existing?.message ?? '来源于宿主 Helm 仓库配置',
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       };
@@ -1369,26 +1574,41 @@ export class HelmService {
     await Promise.all(
       mergedRecords.map((record) => this.repositoryStore.save(record)),
     );
-    return mergedRecords;
+    return {
+      records: mergedRecords,
+      diagnostics: hostInventory.diagnostics,
+    };
   }
 
-  private async listAllRepositoryInventory(): Promise<HelmRepositoryRecord[]> {
+  private async listAllRepositoryInventory(): Promise<HelmRepositoryInventoryMerge> {
     const clusters = await this.listHelmClusters();
     if (clusters.length === 0) {
-      return [];
+      return { records: [], diagnostics: [] };
     }
 
     const records: HelmRepositoryRecord[] = [];
+    const diagnostics: HelmRepositoryInventoryDiagnostic[] = [];
     for (const cluster of clusters) {
       try {
         const merged = await this.mergeRepositoryInventory(cluster.id);
-        records.push(...merged);
-      } catch {
+        records.push(...merged.records);
+        diagnostics.push(...merged.diagnostics);
+      } catch (error) {
+        diagnostics.push({
+          source: 'repositories.yaml',
+          status: 'failed',
+          message: `集群 ${cluster.id} 自动导入宿主 Helm 仓库失败：${this.extractErrorMessage(
+            error,
+          )}`,
+        });
         continue;
       }
     }
 
-    return this.sortRepositoryRecords(records);
+    return {
+      records: this.sortRepositoryRecords(records),
+      diagnostics,
+    };
   }
 
   private async listAllReleases(
@@ -1458,11 +1678,9 @@ export class HelmService {
     }
   }
 
-  private async readHostRepositoryInventory(): Promise<
-    HelmCliRepositoryItem[]
-  > {
+  private async readHostRepositoryInventory(): Promise<HelmHostRepositoryInventory> {
     const fileRecords = await this.readHelmRepositoryConfigInventory();
-    if (fileRecords.length > 0) {
+    if (fileRecords.items.length > 0) {
       return fileRecords;
     }
 
@@ -1470,14 +1688,23 @@ export class HelmService {
       { args: ['repo', 'list', '--output', 'json'] as const, parseJson: true },
       { args: ['repo', 'list'] as const, parseJson: false },
     ] as const;
+    const diagnostics = [...fileRecords.diagnostics];
 
     for (const outputSpec of outputs) {
+      const command = `helm ${outputSpec.args.join(' ')}`;
       try {
         const output = await execFileAsync('helm', [...outputSpec.args], {
           maxBuffer: 2 * 1024 * 1024,
+          timeout: HELM_COMMAND_TIMEOUT_MS,
         });
         const text = (output.stdout ?? '').trim();
         if (!text) {
+          diagnostics.push({
+            source: 'helm repo list',
+            status: 'skipped',
+            command,
+            message: '命令无输出',
+          });
           continue;
         }
 
@@ -1493,25 +1720,41 @@ export class HelmService {
               : this.parseHelmRepoListText(text);
 
         if (rows.length > 0) {
-          return rows
+          const items = rows
             .map((item) => {
               const row = this.isRecord(item) ? item : {};
+              const url = this.asString(row.url).trim();
               return {
                 name: this.asString(row.name).trim(),
-                url: this.asString(row.url).trim(),
+                url,
+                repositoryKind: this.inferRepositoryKind(url),
               };
             })
             .filter(
               (item): item is HelmCliRepositoryItem =>
                 Boolean(item.name) && Boolean(item.url),
             );
+          diagnostics.push({
+            source: 'helm repo list',
+            status: 'success',
+            command,
+            message: `读取到 ${items.length} 个宿主 Helm 仓库`,
+          });
+          return { items, diagnostics };
         }
-      } catch {
+      } catch (error) {
+        diagnostics.push({
+          source: 'helm repo list',
+          status: 'failed',
+          command,
+          code: this.extractProcessErrorCode(error),
+          message: this.extractProcessErrorMessage(error),
+        });
         continue;
       }
     }
 
-    return [];
+    return { items: [], diagnostics };
   }
 
   private parseHelmRepoListText(text: string): HelmCliRepositoryItem[] {
@@ -1530,6 +1773,7 @@ export class HelmService {
       .map((parts) => ({
         name: parts[0] ?? '',
         url: parts[1] ?? '',
+        repositoryKind: this.inferRepositoryKind(parts[1] ?? ''),
       }))
       .filter(
         (item): item is HelmCliRepositoryItem =>
@@ -1537,10 +1781,9 @@ export class HelmService {
       );
   }
 
-  private async readHelmRepositoryConfigInventory(): Promise<
-    HelmCliRepositoryItem[]
-  > {
+  private async readHelmRepositoryConfigInventory(): Promise<HelmHostRepositoryInventory> {
     const candidates = this.getHelmRepositoryConfigCandidates();
+    const diagnostics: HelmRepositoryInventoryDiagnostic[] = [];
     for (const helmRepoConfig of candidates) {
       try {
         const raw = await readFile(helmRepoConfig, 'utf8');
@@ -1556,9 +1799,11 @@ export class HelmService {
         const records = rows
           .map((item) => {
             const row = this.isRecord(item) ? item : {};
+            const url = this.asString(row.url).trim();
             return {
               name: this.asString(row.name).trim(),
-              url: this.asString(row.url).trim(),
+              url,
+              repositoryKind: this.inferRepositoryKind(url),
             };
           })
           .filter(
@@ -1567,18 +1812,48 @@ export class HelmService {
           );
 
         if (records.length > 0) {
-          return records;
+          diagnostics.push({
+            source: 'repositories.yaml',
+            status: 'success',
+            path: helmRepoConfig,
+            message: `读取到 ${records.length} 个宿主 Helm 仓库`,
+          });
+          return { items: records, diagnostics };
         }
-      } catch {
+        diagnostics.push({
+          source: 'repositories.yaml',
+          status: 'skipped',
+          path: helmRepoConfig,
+          message: '文件存在但未读取到仓库',
+        });
+      } catch (error) {
+        diagnostics.push({
+          source: 'repositories.yaml',
+          status: 'failed',
+          path: helmRepoConfig,
+          code: this.extractProcessErrorCode(error),
+          message: this.extractProcessErrorMessage(error),
+        });
         continue;
       }
     }
 
-    return [];
+    return { items: [], diagnostics };
   }
 
   private getHelmRepositoryConfigCandidates(): string[] {
     const candidates = new Set<string>();
+    const explicitConfigs = [
+      process.env.KUBENOVA_HELM_REPOSITORY_CONFIG,
+      process.env.KUBENOVA_HELM_REPOSITORY_CONFIGS,
+    ]
+      .flatMap((value) => (value ?? '').split(':'))
+      .map((value) => value.trim())
+      .filter(Boolean);
+    for (const configPath of explicitConfigs) {
+      candidates.add(configPath);
+    }
+
     const envConfig = process.env.HELM_REPOSITORY_CONFIG?.trim();
     if (envConfig) {
       candidates.add(envConfig);
@@ -1594,15 +1869,74 @@ export class HelmService {
       candidates.add(join(home, '.config', 'helm', 'repositories.yaml'));
       candidates.add(join(home, '.helm', 'repositories.yaml'));
     }
+    candidates.add('/root/.config/helm/repositories.yaml');
+    candidates.add('/root/.helm/repositories.yaml');
+    candidates.add('/etc/kubenova/helm/repositories.yaml');
 
     return Array.from(candidates);
   }
 
-  private async validateRepositoryUrl(url: string): Promise<void> {
-    const normalized = this.requireNonEmpty(url, 'repository url').replace(
-      /\/+$/,
-      '',
-    );
+  private async validateRepositoryDefinition(
+    repository: HelmRepositoryRecord,
+    ctx: HelmExecContext,
+  ): Promise<void> {
+    const repositoryKind = this.resolveRepositoryKind(repository);
+    if (repositoryKind === 'oci') {
+      this.validateOciRepositoryUrl(repository.url);
+      await this.ensureOciRepositorySupported(ctx);
+      return;
+    }
+
+    await this.validateHttpRepositoryUrl(repository);
+  }
+
+  private async syncHttpRepository(
+    ctx: HelmExecContext,
+    repository: HelmRepositoryRecord,
+  ): Promise<void> {
+    const addArgs = [
+      'repo',
+      'add',
+      repository.name,
+      repository.url,
+      '--force-update',
+    ];
+    await this.appendRepositoryAccessFlags(addArgs, ctx, repository, 'http');
+    await this.runHelm(addArgs, ctx);
+    await this.runHelm(['repo', 'update', repository.name], ctx);
+  }
+
+  private async syncOciRepository(
+    ctx: HelmExecContext,
+    repository: HelmRepositoryRecord,
+  ): Promise<void> {
+    this.validateOciRepositoryUrl(repository.url);
+    await this.ensureOciRepositorySupported(ctx);
+    if (repository.authType !== 'basic') {
+      return;
+    }
+
+    const url = new URL(repository.url);
+    const args = ['registry', 'login', url.host];
+    await this.appendRepositoryAccessFlags(args, ctx, repository, 'oci');
+    await this.runHelm(args, ctx);
+  }
+
+  private async validateHttpRepositoryUrl(
+    repository: HelmRepositoryRecord,
+  ): Promise<void> {
+    if (
+      repository.caFile ||
+      repository.caData ||
+      repository.insecureSkipTlsVerify
+    ) {
+      return;
+    }
+
+    const normalized = this.requireNonEmpty(
+      repository.url,
+      'repository url',
+    ).replace(/\/+$/, '');
     const endpoint = normalized.endsWith('index.yaml')
       ? normalized
       : `${normalized}/index.yaml`;
@@ -1611,16 +1945,24 @@ export class HelmService {
     const timer = setTimeout(() => controller.abort(), 8000);
 
     try {
+      const headers: Record<string, string> = {
+        Accept: 'application/x-yaml, text/yaml, text/plain, */*',
+      };
+      if (repository.authType === 'basic') {
+        const token = Buffer.from(
+          `${repository.username ?? ''}:${repository.password ?? ''}`,
+          'utf8',
+        ).toString('base64');
+        headers.Authorization = `Basic ${token}`;
+      }
       const response = await fetch(endpoint, {
         method: 'GET',
         signal: controller.signal,
-        headers: {
-          Accept: 'application/x-yaml, text/yaml, text/plain, */*',
-        },
+        headers,
       });
       if (!response.ok) {
         throw new BadRequestException({
-          code: 'HELM_REPOSITORY_VALIDATE_FAILED',
+          code: 'HELM_REPOSITORY_INDEX_UNAVAILABLE',
           message: `仓库索引不可访问（HTTP ${response.status}）`,
         });
       }
@@ -1631,7 +1973,7 @@ export class HelmService {
         !normalizedContent.includes('entries:')
       ) {
         throw new BadRequestException({
-          code: 'HELM_REPOSITORY_VALIDATE_FAILED',
+          code: 'HELM_REPOSITORY_INDEX_INVALID',
           message: '仓库 index.yaml 格式无效',
         });
       }
@@ -1641,7 +1983,7 @@ export class HelmService {
       }
       if (error instanceof Error && error.name === 'AbortError') {
         throw new BadRequestException({
-          code: 'HELM_REPOSITORY_VALIDATE_FAILED',
+          code: 'HELM_REPOSITORY_TIMEOUT',
           message: '仓库校验超时，请检查网络连通性',
         });
       }
@@ -1652,6 +1994,88 @@ export class HelmService {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private validateOciRepositoryUrl(url: string): void {
+    const normalized = this.requireNonEmpty(url, 'repository url');
+    let parsed: URL;
+    try {
+      parsed = new URL(normalized);
+    } catch {
+      throw new BadRequestException({
+        code: 'HELM_REPOSITORY_URL_INVALID',
+        message: 'OCI 仓库 URL 格式不合法',
+        details: { url: normalized },
+      });
+    }
+    if (parsed.protocol !== 'oci:' || !parsed.host) {
+      throw new BadRequestException({
+        code: 'HELM_OCI_REPOSITORY_INVALID',
+        message: 'OCI 仓库 URL 必须使用 oci://registry/path',
+        details: { url: normalized },
+      });
+    }
+  }
+
+  private async ensureOciRepositorySupported(
+    ctx: HelmExecContext,
+  ): Promise<void> {
+    const output = await this.runHelm(
+      ['version', '--template', '{{.Version}}'],
+      ctx,
+    );
+    const version = output.stdout.trim().replace(/^v/, '');
+    const [majorRaw, minorRaw] = version.split('.');
+    const major = Number.parseInt(majorRaw ?? '', 10);
+    const minor = Number.parseInt(minorRaw ?? '', 10);
+    if (!Number.isInteger(major) || !Number.isInteger(minor)) {
+      return;
+    }
+    if (major < 3 || (major === 3 && minor < 8)) {
+      throw new BadRequestException({
+        code: 'HELM_OCI_UNSUPPORTED',
+        message: `当前 helm ${output.stdout.trim()} 不支持稳定 OCI 仓库，请升级到 Helm 3.8+`,
+      });
+    }
+  }
+
+  private async appendRepositoryAccessFlags(
+    args: string[],
+    ctx: HelmExecContext,
+    repository: HelmRepositoryRecord,
+    repositoryKind: HelmRepositoryKind,
+  ): Promise<void> {
+    if (repository.authType === 'basic') {
+      args.push('--username', repository.username ?? '');
+      args.push('--password', repository.password ?? '');
+    }
+    const caFile = await this.resolveRepositoryCaFile(ctx, repository);
+    if (caFile) {
+      args.push('--ca-file', caFile);
+    }
+    if (repository.insecureSkipTlsVerify) {
+      args.push(
+        repositoryKind === 'oci' ? '--insecure' : '--insecure-skip-tls-verify',
+      );
+    }
+  }
+
+  private async resolveRepositoryCaFile(
+    ctx: HelmExecContext,
+    repository: HelmRepositoryRecord,
+  ): Promise<string | undefined> {
+    if (repository.caFile) {
+      return repository.caFile;
+    }
+    if (!repository.caData) {
+      return undefined;
+    }
+    const caPath = join(
+      ctx.workspaceDir,
+      `helm-repository-ca-${repository.name}.pem`,
+    );
+    await writeFile(caPath, repository.caData, 'utf8');
+    return caPath;
   }
 
   private async applyCommonMutationFlags(
@@ -1915,6 +2339,52 @@ export class HelmService {
     );
   }
 
+  private classifyHelmCommandFailure(
+    stderr: string | undefined,
+    stdout: string | undefined,
+  ): string {
+    const text = `${stderr ?? ''} ${stdout ?? ''}`.toLowerCase();
+    if (
+      text.includes('no such host') ||
+      text.includes('connection refused') ||
+      text.includes('network is unreachable') ||
+      text.includes('i/o timeout') ||
+      text.includes('timeout')
+    ) {
+      return 'HELM_COMMAND_TIMEOUT';
+    }
+    if (
+      text.includes('already exists') ||
+      text.includes('cannot re-use a name')
+    ) {
+      return 'HELM_REPOSITORY_DUPLICATE';
+    }
+    if (
+      text.includes('index.yaml') ||
+      text.includes('not a valid chart repository') ||
+      text.includes('looks like') ||
+      text.includes('failed to fetch')
+    ) {
+      return 'HELM_REPOSITORY_INDEX_INVALID';
+    }
+    if (
+      text.includes('oci') &&
+      (text.includes('unsupported') ||
+        text.includes('unknown command') ||
+        text.includes('experimental'))
+    ) {
+      return 'HELM_OCI_UNSUPPORTED';
+    }
+    return 'HELM_COMMAND_FAILED';
+  }
+
+  private sanitizeHelmArgs(args: string[]): string[] {
+    return args.map((arg, index) => {
+      const previous = args[index - 1];
+      return previous === '--password' ? '******' : arg;
+    });
+  }
+
   private extractErrorDetails(error: unknown): string {
     if (!(error instanceof BadRequestException)) {
       return '';
@@ -1927,6 +2397,30 @@ export class HelmService {
     const stderr = this.asString(details.stderr);
     const stdout = this.asString(details.stdout);
     return `${stderr} ${stdout}`.trim();
+  }
+
+  private extractProcessErrorCode(error: unknown): string | undefined {
+    const processError = error as NodeJS.ErrnoException | undefined;
+    const code = processError?.code;
+    return typeof code === 'string' ? code : undefined;
+  }
+
+  private extractProcessErrorMessage(error: unknown): string {
+    const processError = error as
+      | (NodeJS.ErrnoException & { stderr?: string; stdout?: string })
+      | undefined;
+    const stderr = processError?.stderr?.trim();
+    if (stderr) {
+      return stderr;
+    }
+    const stdout = processError?.stdout?.trim();
+    if (stdout) {
+      return stdout;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return '未知错误';
   }
 
   private requireConfirmFlag(
@@ -2006,16 +2500,39 @@ export class HelmService {
 
   private toRepositoryItem(source: HelmRepositoryRecord): HelmRepositoryItem {
     const normalizedStatus = this.normalizeSyncStatus(source.syncStatus);
+    const diagnostics =
+      normalizedStatus === 'failed'
+        ? this.buildRepositoryItemDiagnostics(source)
+        : undefined;
     return {
       clusterId: source.clusterId,
       name: source.name,
       url: source.url,
-      authType: 'none',
+      repositoryKind: this.resolveRepositoryKind(source),
+      authType: source.authType ?? 'none',
+      source: source.source ?? 'manual',
+      username: source.authType === 'basic' ? source.username : undefined,
+      caFile: source.caFile,
+      hasCaData: Boolean(source.caData),
+      insecureSkipTlsVerify: source.insecureSkipTlsVerify,
       syncStatus: normalizedStatus,
+      chartCount: undefined,
       lastSyncAt: source.lastSyncAt,
       message: source.message,
+      diagnostics,
       createdAt: source.createdAt,
       updatedAt: source.updatedAt,
+    };
+  }
+
+  private buildRepositoryItemDiagnostics(
+    source: HelmRepositoryRecord,
+  ): HelmRepositoryItemDiagnostics {
+    return {
+      code: this.inferRepositoryFailureCode(source.message),
+      reason: source.message,
+      suggestion: this.resolveRepositoryFailureSuggestion(source.message),
+      checkedAt: source.lastSyncAt ?? source.updatedAt,
     };
   }
 
@@ -2059,22 +2576,114 @@ export class HelmService {
     return '未知错误';
   }
 
+  private extractErrorCode(error: unknown): string {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof ServiceUnavailableException
+    ) {
+      const response = error.getResponse();
+      if (this.isRecord(response)) {
+        const code = this.asString(response.code);
+        if (code) {
+          return code;
+        }
+      }
+    }
+    return 'HELM_COMMAND_FAILED';
+  }
+
   private toRepositorySyncException(
     error: unknown,
     repositoryName: string,
   ): BadRequestException {
     return new BadRequestException({
-      code: 'HELM_REPOSITORY_VALIDATE_FAILED',
+      code: this.extractErrorCode(error),
       message: `仓库 ${repositoryName} 同步失败`,
       details: {
         reason: this.extractErrorMessage(error),
+        failed: this.toRecord(
+          this.toRecord(
+            error instanceof BadRequestException ? error.getResponse() : {},
+          ).details,
+        ).failed,
         retryable: true,
-        suggestion: '请检查 URL 连通性和仓库索引，再重试同步',
+        suggestion: this.resolveRepositoryErrorSuggestion(error),
       },
     });
   }
 
-  private normalizeRepositoryUrl(url: string | undefined): string {
+  private resolveRepositoryErrorSuggestion(error: unknown): string {
+    const code = this.extractErrorCode(error);
+    if (code === 'HELM_CLI_NOT_FOUND') {
+      return '请在 control-api 运行环境安装 helm，并确认 PATH 可访问';
+    }
+    if (code === 'HELM_REPOSITORY_INDEX_INVALID') {
+      return '请确认 HTTP/S 仓库根路径存在 index.yaml，或切换为 OCI 仓库类型';
+    }
+    if (code === 'HELM_REPOSITORY_TIMEOUT' || code === 'HELM_COMMAND_TIMEOUT') {
+      return '请检查 control-api 到仓库地址的网络、DNS、代理和防火墙';
+    }
+    if (code === 'HELM_OCI_UNSUPPORTED') {
+      return '请升级 Helm 到 3.8+，或先使用 HTTP/S Chart 仓库';
+    }
+    if (code === 'HELM_REPOSITORY_DUPLICATE') {
+      return '请使用不同仓库名，或编辑已有仓库';
+    }
+    return '请查看失败详情后重试同步';
+  }
+
+  private inferRepositoryFailureCode(message: string | undefined): string {
+    const text = (message ?? '').toLowerCase();
+    if (text.includes('helm cli 不可用') || text.includes('not found')) {
+      return 'HELM_CLI_NOT_FOUND';
+    }
+    if (text.includes('index.yaml') || text.includes('索引')) {
+      return 'HELM_REPOSITORY_INDEX_INVALID';
+    }
+    if (text.includes('timeout') || text.includes('超时')) {
+      return 'HELM_REPOSITORY_TIMEOUT';
+    }
+    if (text.includes('duplicate') || text.includes('已存在')) {
+      return 'HELM_REPOSITORY_DUPLICATE';
+    }
+    if (text.includes('unsupported') || text.includes('不支持')) {
+      return 'HELM_OCI_UNSUPPORTED';
+    }
+    if (text.includes('oci')) {
+      return 'HELM_OCI_REPOSITORY_INVALID';
+    }
+    return 'HELM_REPOSITORY_SYNC_FAILED';
+  }
+
+  private resolveRepositoryFailureSuggestion(
+    message: string | undefined,
+  ): string {
+    const code = this.inferRepositoryFailureCode(message);
+    if (code === 'HELM_CLI_NOT_FOUND') {
+      return '请在 control-api 运行环境安装 helm，并确认 PATH 可访问';
+    }
+    if (code === 'HELM_REPOSITORY_INDEX_INVALID') {
+      return '请确认 HTTP/S 仓库根路径存在 index.yaml，或切换为 OCI 仓库类型';
+    }
+    if (code === 'HELM_REPOSITORY_TIMEOUT') {
+      return '请检查 control-api 到仓库地址的网络、DNS、代理和防火墙';
+    }
+    if (code === 'HELM_REPOSITORY_DUPLICATE') {
+      return '请使用不同仓库名，或编辑已有仓库';
+    }
+    if (code === 'HELM_OCI_UNSUPPORTED') {
+      return '请升级 Helm 到 3.8+，或先使用 HTTP/S Chart 仓库';
+    }
+    if (code === 'HELM_OCI_REPOSITORY_INVALID') {
+      return '请确认 OCI URL 形如 oci://registry.example.com/path';
+    }
+    return '请查看失败详情后重试同步';
+  }
+
+  private normalizeRepositoryUrl(
+    url: string | undefined,
+    repositoryKind?: HelmRepositoryKind,
+  ): string {
     const normalized = this.requireNonEmpty(url, 'url');
     let parsed: URL;
     try {
@@ -2088,10 +2697,24 @@ export class HelmService {
         },
       });
     }
+    const kind = this.normalizeRepositoryKind(repositoryKind, normalized);
+    if (kind === 'oci') {
+      if (parsed.protocol !== 'oci:' || !parsed.host) {
+        throw new BadRequestException({
+          code: 'HELM_REPOSITORY_URL_INVALID',
+          message: 'OCI 仓库 URL 必须使用 oci://registry/path',
+          details: {
+            url: normalized,
+            protocol: parsed.protocol,
+          },
+        });
+      }
+      return normalized;
+    }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       throw new BadRequestException({
         code: 'HELM_REPOSITORY_URL_INVALID',
-        message: '仓库 URL 仅支持 http/https',
+        message: 'HTTP Helm 仓库 URL 仅支持 http/https',
         details: {
           url: normalized,
           protocol: parsed.protocol,
@@ -2099,6 +2722,93 @@ export class HelmService {
       });
     }
     return normalized;
+  }
+
+  private normalizeRepositoryOptions(
+    input: HelmRepositoryCreateRequest | HelmRepositoryUpdateRequest,
+    url: string,
+    existing?: HelmRepositoryRecord,
+  ): Pick<
+    HelmRepositoryRecord,
+    | 'repositoryKind'
+    | 'authType'
+    | 'username'
+    | 'password'
+    | 'caFile'
+    | 'caData'
+    | 'insecureSkipTlsVerify'
+  > {
+    const repositoryKind = this.normalizeRepositoryKind(
+      input.repositoryKind ?? existing?.repositoryKind,
+      url,
+    );
+    const authType = this.normalizeRepositoryAuthType(
+      input.authType ?? existing?.authType,
+    );
+    const username =
+      authType === 'basic'
+        ? (this.normalizeOptional(input.username) ??
+          this.normalizeOptional(existing?.username))
+        : undefined;
+    const password =
+      authType === 'basic'
+        ? (this.normalizeOptional(input.password) ??
+          this.normalizeOptional(existing?.password))
+        : undefined;
+    if (authType === 'basic' && (!username || !password)) {
+      throw new BadRequestException({
+        code: 'HELM_REPOSITORY_AUTH_INVALID',
+        message: 'Basic Auth 仓库必须提供 username 和 password',
+      });
+    }
+
+    return {
+      repositoryKind,
+      authType,
+      username,
+      password,
+      caFile: this.normalizeOptional(input.caFile) ?? existing?.caFile,
+      caData: this.normalizeOptional(input.caData) ?? existing?.caData,
+      insecureSkipTlsVerify:
+        input.insecureSkipTlsVerify ?? existing?.insecureSkipTlsVerify ?? false,
+    };
+  }
+
+  private normalizeRepositoryAuthType(
+    value: HelmRepositoryAuthType | undefined,
+  ): HelmRepositoryAuthType {
+    if (!value || value === 'none') {
+      return 'none';
+    }
+    if (value === 'basic') {
+      return 'basic';
+    }
+    throw new BadRequestException({
+      code: 'HELM_REPOSITORY_AUTH_INVALID',
+      message: 'authType 仅支持 none/basic',
+    });
+  }
+
+  private normalizeRepositoryKind(
+    value: HelmRepositoryKind | undefined,
+    url: string,
+  ): HelmRepositoryKind {
+    if (value === 'http' || value === 'oci') {
+      return value;
+    }
+    return this.inferRepositoryKind(url);
+  }
+
+  private resolveRepositoryKind(
+    repository: HelmRepositoryRecord,
+  ): HelmRepositoryKind {
+    return (
+      repository.repositoryKind ?? this.inferRepositoryKind(repository.url)
+    );
+  }
+
+  private inferRepositoryKind(url: string): HelmRepositoryKind {
+    return url.trim().toLowerCase().startsWith('oci://') ? 'oci' : 'http';
   }
 
   private resolveChartReference(
@@ -2181,7 +2891,8 @@ export class HelmService {
         const cmp = (left.namespace ?? '').localeCompare(right.namespace ?? '');
         if (cmp !== 0) return cmp * order;
       }
-      const shouldSortByUpdated = field === 'updatedAt' || field === '' || field === 'createdAt';
+      const shouldSortByUpdated =
+        field === 'updatedAt' || field === '' || field === 'createdAt';
       if (shouldSortByUpdated) {
         const leftUpdated = this.toSortableTime(left.updated);
         const rightUpdated = this.toSortableTime(right.updated);
@@ -2211,7 +2922,8 @@ export class HelmService {
         const cmp = left.clusterId.localeCompare(right.clusterId);
         if (cmp !== 0) return cmp * order;
       }
-      const shouldSortByUpdated = field === 'updatedAt' || field === '' || field === 'createdAt';
+      const shouldSortByUpdated =
+        field === 'updatedAt' || field === '' || field === 'createdAt';
       if (shouldSortByUpdated) {
         const leftTime = this.toSortableTime(left.updatedAt);
         const rightTime = this.toSortableTime(right.updatedAt);

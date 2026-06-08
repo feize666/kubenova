@@ -11,6 +11,7 @@ type NetworkResourcePageFiltersProps = {
   keywordInput: string;
   clusterOptions: Option[];
   clusterLoading?: boolean;
+  clusterUnavailable?: boolean;
   knownNamespaces: string[];
   namespaceLoading?: boolean;
   namespaceDisabled?: boolean;
@@ -31,6 +32,7 @@ export function NetworkResourcePageFilters({
   keywordInput,
   clusterOptions,
   clusterLoading,
+  clusterUnavailable = false,
   knownNamespaces,
   namespaceLoading = false,
   namespaceDisabled,
@@ -51,6 +53,7 @@ export function NetworkResourcePageFilters({
       keywordInput={keywordInput}
       clusterOptions={clusterOptions}
       clusterLoading={clusterLoading}
+      clusterUnavailable={clusterUnavailable}
       knownNamespaces={knownNamespaces}
       namespaceLoading={namespaceLoading}
       namespaceDisabled={namespaceDisabled}

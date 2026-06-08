@@ -557,7 +557,9 @@ export class UsersService {
         },
         select: { name: true },
       });
-      const namespaceNames = namespaces.map((item) => item.name).filter(Boolean);
+      const namespaceNames = namespaces
+        .map((item) => item.name)
+        .filter(Boolean);
       where.AND = [
         {
           OR: [
@@ -592,10 +594,19 @@ export class UsersService {
     sort?: string | string[],
   ): Array<Record<string, 'asc' | 'desc'>> {
     const firstSort = Array.isArray(sort) ? sort[0] : sort;
-    const [rawField, rawOrder] = String(firstSort ?? 'updatedAt:desc').split(':');
+    const [rawField, rawOrder] = String(firstSort ?? 'updatedAt:desc').split(
+      ':',
+    );
     const field = rawField?.trim();
     const order: 'asc' | 'desc' = rawOrder?.trim() === 'asc' ? 'asc' : 'desc';
-    const allowedFields = new Set(['name', 'kind', 'namespace', 'subject', 'state', 'updatedAt']);
+    const allowedFields = new Set([
+      'name',
+      'kind',
+      'namespace',
+      'subject',
+      'state',
+      'updatedAt',
+    ]);
     const resolvedField = allowedFields.has(field) ? field : 'updatedAt';
     return [{ [resolvedField]: order }, { id: 'asc' }];
   }
@@ -833,8 +844,8 @@ export class UsersService {
     const repo = (this.prisma as unknown as { userPreference?: unknown })
       .userPreference as
       | {
-      findUnique: (args: unknown) => Promise<UserPreferenceRecord | null>;
-      upsert: (args: unknown) => Promise<UserPreferenceRecord>;
+          findUnique: (args: unknown) => Promise<UserPreferenceRecord | null>;
+          upsert: (args: unknown) => Promise<UserPreferenceRecord>;
         }
       | undefined;
     if (
@@ -908,7 +919,9 @@ export class UsersService {
       return await write();
     } catch (error) {
       if (this.isPrismaBusinessError(error)) {
-        throw new BadRequestException('RBAC 绑定数据无效，请检查名称和主体配置');
+        throw new BadRequestException(
+          'RBAC 绑定数据无效，请检查名称和主体配置',
+        );
       }
       throw error;
     }
@@ -921,7 +934,9 @@ export class UsersService {
     };
     return (
       maybePrismaError.name === 'PrismaClientValidationError' ||
-      ['P2000', 'P2002', 'P2003', 'P2011', 'P2012'].includes(maybePrismaError.code ?? '')
+      ['P2000', 'P2002', 'P2003', 'P2011', 'P2012'].includes(
+        maybePrismaError.code ?? '',
+      )
     );
   }
 

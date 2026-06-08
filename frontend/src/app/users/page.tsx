@@ -2,13 +2,13 @@
 
 import { ReloadOutlined, UserOutlined, CrownOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Card, Form, Input, Modal, Select, Space, Typography, theme, Badge } from "antd";
+import { Alert, Form, Input, Select, Space, Typography, theme, Badge } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { useModuleTableState } from "@/components/module-page";
-import { OpsFilterChip, OpsIconActionButton } from "@/components/ops";
+import { OpsFilterChip, OpsFormSection, OpsIconActionButton, OpsModalShell, OpsPageHeader, OpsSurface } from "@/components/ops";
 import {
   ResourceActionDropdown,
   type ResourceActionItem,
@@ -77,8 +77,10 @@ function CreateUserModal({ open, accessToken, onClose, onSuccess }: CreateUserMo
   };
 
   return (
-    <Modal
+    <OpsModalShell
       title="新建用户"
+      description="创建可登录 Kubenova 控制台的本地用户，并分配基础访问角色。"
+      identity="用户"
       open={open}
       onCancel={() => {
         form.resetFields();
@@ -90,6 +92,7 @@ function CreateUserModal({ open, accessToken, onClose, onSuccess }: CreateUserMo
       cancelText="取消"
       confirmLoading={mutation.isPending}
       destroyOnHidden
+      width={520}
     >
       {mutation.isError ? (
         <Alert
@@ -101,46 +104,50 @@ function CreateUserModal({ open, accessToken, onClose, onSuccess }: CreateUserMo
         />
       ) : null}
       <Form form={form} layout="vertical" requiredMark>
-        <Form.Item
-          name="username"
-          label="用户名（用于登录）"
-          rules={[
-            { required: true, message: "请输入用户名" },
-            { pattern: /^[a-zA-Z0-9._-]{3,32}$/, message: "用户名仅支持字母数字._-，长度 3-32" },
-          ]}
-        >
-          <Input placeholder="例如：ops-admin" autoComplete="off" />
-        </Form.Item>
-        <Form.Item
-          name="password"
-          label="登录密码"
-          rules={[
-            { required: true, message: "请输入密码" },
-            { min: 8, message: "密码至少 8 位" },
-          ]}
-        >
-          <Input.Password placeholder="请输入密码（至少 8 位）" autoComplete="new-password" />
-        </Form.Item>
-        <Form.Item
-          name="role"
-          label="角色"
-          rules={[{ required: true, message: "请选择角色" }]}
-          extra={
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              管理员：拥有所有权限；普通用户：只能查看基础资源
-            </Typography.Text>
-          }
-        >
-          <Select
-            options={[
-              { label: "管理员 (admin)", value: "admin" },
-              { label: "普通用户 (user)", value: "user" },
+        <OpsFormSection title="登录身份" description="用户名用于审计和登录，密码仅在创建时写入。">
+          <Form.Item
+            name="username"
+            label="用户名（用于登录）"
+            rules={[
+              { required: true, message: "请输入用户名" },
+              { pattern: /^[a-zA-Z0-9._-]{3,32}$/, message: "用户名仅支持字母数字._-，长度 3-32" },
             ]}
-            placeholder="请选择角色"
-          />
-        </Form.Item>
+          >
+            <Input placeholder="例如：ops-admin" autoComplete="off" />
+          </Form.Item>
+          <Form.Item
+            name="password"
+            label="登录密码"
+            rules={[
+              { required: true, message: "请输入密码" },
+              { min: 8, message: "密码至少 8 位" },
+            ]}
+          >
+            <Input.Password placeholder="请输入密码（至少 8 位）" autoComplete="new-password" />
+          </Form.Item>
+        </OpsFormSection>
+        <OpsFormSection title="权限范围" description="角色决定用户可访问的控制台能力。">
+          <Form.Item
+            name="role"
+            label="角色"
+            rules={[{ required: true, message: "请选择角色" }]}
+            extra={
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                管理员：拥有所有权限；普通用户：只能查看基础资源
+              </Typography.Text>
+            }
+          >
+            <Select
+              options={[
+                { label: "管理员 (admin)", value: "admin" },
+                { label: "普通用户 (user)", value: "user" },
+              ]}
+              placeholder="请选择角色"
+            />
+          </Form.Item>
+        </OpsFormSection>
       </Form>
-    </Modal>
+    </OpsModalShell>
   );
 }
 
@@ -184,8 +191,10 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
   };
 
   return (
-    <Modal
+    <OpsModalShell
       title="编辑用户"
+      description="更新用户登录标识、角色或密码；留空密码则保留原密码。"
+      identity={record?.username ?? "用户"}
       open={Boolean(record)}
       onCancel={() => {
         form.resetFields();
@@ -197,6 +206,7 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
       cancelText="取消"
       confirmLoading={mutation.isPending}
       destroyOnHidden
+      width={520}
       afterOpenChange={(visible) => {
         if (visible && record) {
           form.setFieldsValue({ username: record.username, role: record.role });
@@ -213,34 +223,38 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
         />
       ) : null}
       <Form form={form} layout="vertical" requiredMark>
-        <Form.Item
-          name="username"
-          label="用户名"
-          rules={[
-            { required: true, message: "请输入用户名" },
-            { pattern: /^[a-zA-Z0-9._-]{3,32}$/, message: "用户名仅支持字母数字._-，长度 3-32" },
-          ]}
-        >
-          <Input placeholder="请输入用户名" />
-        </Form.Item>
-        <Form.Item name="role" label="角色" rules={[{ required: true, message: "请选择角色" }]}>
-          <Select
-            options={[
-              { label: "管理员 (admin)", value: "admin" },
-              { label: "普通用户 (user)", value: "user" },
+        <OpsFormSection title="账号资料" description="用户名与角色会立即影响控制台访问范围。">
+          <Form.Item
+            name="username"
+            label="用户名"
+            rules={[
+              { required: true, message: "请输入用户名" },
+              { pattern: /^[a-zA-Z0-9._-]{3,32}$/, message: "用户名仅支持字母数字._-，长度 3-32" },
             ]}
-            placeholder="请选择角色"
-          />
-        </Form.Item>
-        <Form.Item
-          name="password"
-          label="新密码（可选，留空则不修改）"
-          rules={[{ min: 8, message: "密码至少 8 位" }]}
-        >
-          <Input.Password placeholder="留空则不修改密码" autoComplete="new-password" />
-        </Form.Item>
+          >
+            <Input placeholder="请输入用户名" />
+          </Form.Item>
+          <Form.Item name="role" label="角色" rules={[{ required: true, message: "请选择角色" }]}>
+            <Select
+              options={[
+                { label: "管理员 (admin)", value: "admin" },
+                { label: "普通用户 (user)", value: "user" },
+              ]}
+              placeholder="请选择角色"
+            />
+          </Form.Item>
+        </OpsFormSection>
+        <OpsFormSection title="密码" description="留空则不修改当前登录密码。">
+          <Form.Item
+            name="password"
+            label="新密码（可选，留空则不修改）"
+            rules={[{ min: 8, message: "密码至少 8 位" }]}
+          >
+            <Input.Password placeholder="留空则不修改密码" autoComplete="new-password" />
+          </Form.Item>
+        </OpsFormSection>
       </Form>
-    </Modal>
+    </OpsModalShell>
   );
 }
 
@@ -490,14 +504,10 @@ export default function UsersPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card>
-        <Typography.Title level={4} style={{ marginBottom: 4, color: themeToken.colorText }}>
-          用户管理
-        </Typography.Title>
-        <Typography.Text type="secondary">
-          管理平台用户账号、角色权限与账号状态。用户创建后可使用用户名+密码登录。
-        </Typography.Text>
-      </Card>
+      <OpsPageHeader
+        title="用户管理"
+        subtitle="管理平台用户账号、角色权限与账号状态。用户创建后可使用用户名+密码登录。"
+      />
 
       {!isInitializing && !accessToken ? (
         <Alert type="warning" showIcon message="未检测到登录状态，请先登录。" />
@@ -512,7 +522,7 @@ export default function UsersPage() {
         />
       ) : null}
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<UserTableRecord>
           rowKey="key"
           tableKey="business.users"
@@ -567,7 +577,7 @@ export default function UsersPage() {
           })}
           emptyDescription="暂无用户数据"
         />
-      </Card>
+      </OpsSurface>
 
       <CreateUserModal
         open={createOpen}

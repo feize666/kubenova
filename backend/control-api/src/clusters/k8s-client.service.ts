@@ -48,9 +48,7 @@ export class K8sClientService {
   }
 
   /** 获取 RbacAuthorizationV1Api */
-  getRbacAuthorizationApi(
-    kubeconfigYaml: string,
-  ): k8s.RbacAuthorizationV1Api {
+  getRbacAuthorizationApi(kubeconfigYaml: string): k8s.RbacAuthorizationV1Api {
     const kc = this.createClient(kubeconfigYaml);
     return kc.makeApiClient(k8s.RbacAuthorizationV1Api);
   }

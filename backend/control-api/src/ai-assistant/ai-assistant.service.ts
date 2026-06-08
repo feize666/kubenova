@@ -435,7 +435,8 @@ export class AiAssistantService {
     const errors: string[] = [];
 
     for (const attempt of attempts) {
-      const maxAttemptRetry = 2;
+      const maxAttemptRetry = 1;
+      let stopAfterAttempt = false;
       for (let retryIndex = 0; retryIndex < maxAttemptRetry; retryIndex += 1) {
         const abortController = new AbortController();
         const timer = setTimeout(() => abortController.abort(), timeoutMs);
@@ -533,15 +534,10 @@ export class AiAssistantService {
             err instanceof Error &&
             (err.name === 'AbortError' || err.message.includes('aborted'))
           ) {
-            if (retryIndex < maxAttemptRetry - 1) {
-              errors.push(
-                `[${attempt.kind}] ${attempt.url} -> timeout>${timeoutMs}ms, retrying`,
-              );
-              continue;
-            }
             errors.push(
               `[${attempt.kind}] ${attempt.url} -> timeout>${timeoutMs}ms`,
             );
+            stopAfterAttempt = true;
             break;
           }
           errors.push(
@@ -551,6 +547,9 @@ export class AiAssistantService {
         } finally {
           clearTimeout(timer);
         }
+      }
+      if (stopAfterAttempt) {
+        break;
       }
     }
 
@@ -2368,7 +2367,20 @@ export class AiAssistantService {
         createdAt: new Date().toISOString(),
       },
     ];
-    const reply = await this.callLLM(history);
+    let reply: string;
+    try {
+      reply = await this.callLLM(history);
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : '模型中转站调用失败';
+      reply = [
+        '⚠️ KubeNova 中台模型调用失败',
+        '',
+        reason,
+        '',
+        '请检查模型中转站配置（Base URL / API Key / Model）和网络连通性。',
+      ].join('\n');
+    }
     return {
       reply,
       category: 'model-transit',

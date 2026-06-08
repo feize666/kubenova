@@ -77,7 +77,9 @@ export class AiopsController {
     if (VALID_RANGES.includes(normalized as MonitoringRange)) {
       return normalized as MonitoringRange;
     }
-    throw new BadRequestException('Invalid range. Supported values: 15m, 1h, 6h, 24h, 7d');
+    throw new BadRequestException(
+      'Invalid range. Supported values: 15m, 1h, 6h, 24h, 7d',
+    );
   }
 
   private parseDate(raw: string, field: 'from' | 'to'): Date {

@@ -2,13 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Alert, Empty, Skeleton, Space, message } from "antd";
+import { Alert, Empty, Space, message } from "antd";
 import { useAuth } from "@/components/auth-context";
 import { downloadClusterKubeconfig, getClusterDetail } from "@/lib/api/clusters";
 import type { ClusterTableRecord } from "@/app/clusters/page";
 import { DetailDescriptions, DetailSection } from "./resource-detail/section-primitives";
 import { StatusTag } from "./status-tag";
-import { OpsDrawerShell, OpsIconActionButton, openOpsConfirm } from "@/components/ops";
+import { OpsDegradedState, OpsDrawerShell, OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState, openOpsConfirm } from "@/components/ops";
 
 type ClusterDetailDrawerProps = {
   open: boolean;
@@ -182,18 +182,13 @@ export function ClusterDetailDrawer({
     >
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 24 }}>
         {!cluster ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未选择集群" />
+          <OpsEmptyState title="未选择集群" description="从集群列表选择一条记录后查看详情。" />
         ) : isOfflineView ? (
           renderOfflineClusterNotice(fallbackOfflineMode ? "offline-mode" : "offline")
         ) : query.isLoading && !query.data && !detailTimedOut ? (
-          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <Skeleton active paragraph={{ rows: 3 }} />
-            <Skeleton active paragraph={{ rows: 5 }} />
-          </Space>
+          <OpsLoadingState title="正在加载集群详情" description="正在读取集群基础信息、节点概览与健康状态。" />
         ) : query.error instanceof Error ? (
-          <Alert
-            type="error"
-            showIcon
+          <OpsErrorState
             title="集群详情加载失败"
             description={query.error.message}
             action={
@@ -224,9 +219,7 @@ export function ClusterDetailDrawer({
             >
               <Space orientation="vertical" size={12} style={{ width: "100%" }}>
                 {nodeSummaryDegraded ? (
-                  <Alert
-                    type="warning"
-                    showIcon
+                  <OpsDegradedState
                     title="节点清单暂不可用"
                     description={nodeSummaryDegradationReason ?? "当前集群节点清单读取失败"}
                     action={

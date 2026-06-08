@@ -113,10 +113,12 @@ describe('NetworkService list online gate', () => {
       clustersService,
       k8sClientService,
     } = build();
-    (clusterHealthService.assertClusterOnlineForRead as jest.Mock).mockResolvedValue(
-      undefined,
+    (
+      clusterHealthService.assertClusterOnlineForRead as jest.Mock
+    ).mockResolvedValue(undefined);
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
     );
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
     (k8sClientService.getNetworkingApi as jest.Mock).mockReturnValue({
       listNetworkPolicyForAllNamespaces: jest.fn().mockResolvedValue({
         items: [
@@ -171,10 +173,12 @@ describe('NetworkService list online gate', () => {
       clustersService,
       k8sClientService,
     } = build();
-    (clusterHealthService.assertClusterOnlineForRead as jest.Mock).mockResolvedValue(
-      undefined,
+    (
+      clusterHealthService.assertClusterOnlineForRead as jest.Mock
+    ).mockResolvedValue(undefined);
+    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue(
+      'kubeconfig',
     );
-    (clustersService.getKubeconfig as jest.Mock).mockResolvedValue('kubeconfig');
     const deleteNamespacedNetworkPolicy = jest.fn().mockResolvedValue({});
     (k8sClientService.getNetworkingApi as jest.Mock).mockReturnValue({
       listNamespacedNetworkPolicy: jest.fn().mockResolvedValue({
@@ -203,7 +207,9 @@ describe('NetworkService list online gate', () => {
       name: 'allow-web',
       namespace: 'default',
     });
-    expect((networkRepository as unknown as { setState: jest.Mock }).setState).not.toHaveBeenCalled();
+    expect(
+      (networkRepository as unknown as { setState: jest.Mock }).setState,
+    ).not.toHaveBeenCalled();
     expect(result.item).toEqual(
       expect.objectContaining({
         id: 'live:c-1:NetworkPolicy:default:allow-web',

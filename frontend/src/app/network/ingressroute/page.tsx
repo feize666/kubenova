@@ -3,10 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Card,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Typography,
@@ -24,6 +22,8 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { OpsModalShell, OpsSurface } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
@@ -40,7 +40,7 @@ import {
   type CreateNetworkResourcePayload,
   type NetworkResource,
 } from "@/lib/api/network";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
@@ -96,6 +96,10 @@ export default function IngressRoutePage() {
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [editingItem, setEditingItem] = useState<IngressRouteResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<IngressRouteFormValues>();
@@ -173,6 +177,28 @@ export default function IngressRoutePage() {
     },
     onError: (err) => {
       void message.error(err instanceof Error ? err.message : "创建失败，请重试");
+    },
+  });
+
+  const applyYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setModalOpen(false);
+      setCreateYaml("");
+      await queryClient.invalidateQueries({ queryKey: ["network", "IngressRoute"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "YAML 创建失败");
     },
   });
 
@@ -264,8 +290,20 @@ export default function IngressRoutePage() {
 
   const handleOpenCreate = () => {
     setEditingItem(null);
+    const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+    const nextNamespace = namespace || "default";
     form.resetFields();
-    form.setFieldsValue({ entryPoints: "web", match: "Host(`example.local`)", servicePort: 80 });
+    form.setFieldsValue({
+      clusterId: nextClusterId,
+      namespace: nextNamespace,
+      entryPoints: "web",
+      match: "Host(`example.local`)",
+      servicePort: 80,
+    });
+    setCreateMode("form");
+    setCreateYaml("");
+    setCreateYamlClusterId(nextClusterId);
+    setCreateYamlNamespace(nextNamespace);
     setModalOpen(true);
   };
 
@@ -288,6 +326,18 @@ export default function IngressRoutePage() {
   };
 
   const handleModalSubmit = async () => {
+    if (!editingItem && createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyYamlMutation.mutate();
+      return;
+    }
     let values: IngressRouteFormValues;
     try {
       values = await form.validateFields();
@@ -330,6 +380,7 @@ export default function IngressRoutePage() {
   };
 
   const clusterOptions = (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id }));
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
   const clusterMap = Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]));
   const knownNamespaces = useMemo(
     () => Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean))),
@@ -460,7 +511,7 @@ export default function IngressRoutePage() {
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/network/ingressroute"
           embedded
@@ -507,6 +558,7 @@ export default function IngressRoutePage() {
         <ResourceTable<IngressRouteResource>
           rowKey="id"
           columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           tableKey="network.ingressroute"
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -527,23 +579,73 @@ export default function IngressRoutePage() {
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
         />
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title={editingItem ? "编辑 IngressRoute" : "添加 IngressRoute"}
+        description="配置 Traefik IngressRoute 匹配规则、入口点和后端 Service。"
+        identity={editingItem?.name ?? "IngressRoute"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
           setEditingItem(null);
+          setCreateYaml("");
           form.resetFields();
         }}
         okText={editingItem ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending || updateMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || applyYamlMutation.isPending}
         destroyOnHidden
+        width={720}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+        {editingItem ? (
+          <Form form={form} layout="vertical">
+            <Form.Item label="路由名称" name="name" rules={[{ required: true, message: "请输入 IngressRoute 名称" }]}>
+              <Input disabled placeholder="例如：web-route" />
+            </Form.Item>
+            <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
+              <Input disabled placeholder="例如：default" />
+            </Form.Item>
+            <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
+              <Select disabled placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} />
+            </Form.Item>
+            <Form.Item label="EntryPoints" name="entryPoints" rules={[{ required: true, message: "请输入入口点" }]}>
+              <Input placeholder="例如：web,websecure" />
+            </Form.Item>
+            <Form.Item label="匹配规则" name="match" rules={[{ required: true, message: "请输入匹配规则" }]}>
+              <Input placeholder="例如：Host(`example.com`) && PathPrefix(`/api`)" />
+            </Form.Item>
+            <Form.Item label="后端服务名称" name="serviceName" rules={[{ required: true, message: "请输入后端服务名称" }]}>
+              <Input placeholder="例如：my-service" />
+            </Form.Item>
+            <Form.Item label="后端服务端口" name="servicePort" rules={[{ required: true, message: "请输入后端服务端口" }]}>
+              <Input type="number" min={1} placeholder="例如：80" />
+            </Form.Item>
+            <Form.Item label="中间件（逗号分隔）" name="middlewares">
+              <Input placeholder="例如：auth-chain,strip-api-prefix" />
+            </Form.Item>
+            <Form.Item label="TLS Secret" name="tlsSecretName">
+              <Input placeholder="例如：example-com-tls" />
+            </Form.Item>
+          </Form>
+        ) : (
+          <ResourceCreateMethodTabs
+            mode={createMode}
+            onModeChange={setCreateMode}
+            yaml={createYaml}
+            onYamlChange={setCreateYaml}
+            clusterId={createYamlClusterId}
+            onClusterIdChange={setCreateYamlClusterId}
+            namespace={createYamlNamespace}
+            onNamespaceChange={setCreateYamlNamespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            clusterUnavailable={clusterUnavailable}
+            kindHint="IngressRoute"
+            disabled={createMutation.isPending || applyYamlMutation.isPending}
+            formContent={(
+              <Form form={form} layout="vertical">
           <Form.Item label="路由名称" name="name" rules={[{ required: true, message: "请输入 IngressRoute 名称" }]}>
             <Input disabled={Boolean(editingItem)} placeholder="例如：web-route" />
           </Form.Item>
@@ -552,10 +654,11 @@ export default function IngressRoutePage() {
           </Form.Item>
           <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
             <Select
-              disabled={Boolean(editingItem)}
-              placeholder="请选择集群"
+              placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
               options={clusterOptions}
               loading={clustersQuery.isLoading}
+              disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+              notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
               showSearch
               filterOption={(input, option) => (option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
             />
@@ -578,8 +681,11 @@ export default function IngressRoutePage() {
           <Form.Item label="TLS Secret" name="tlsSecretName">
             <Input placeholder="例如：example-com-tls" />
           </Form.Item>
-        </Form>
-      </Modal>
+              </Form>
+            )}
+          />
+        )}
+      </OpsModalShell>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}

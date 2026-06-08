@@ -5,11 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Button,
-  Card,
   Col,
   Form,
   Input,
-  Modal,
   Row,
   Select,
   Space,
@@ -32,6 +30,8 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceRowActions } from "@/components/resource-row-actions";
+import { OpsModalShell, OpsSurface } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
@@ -41,7 +41,7 @@ import {
   updateConfig,
   type ConfigResourceItem,
 } from "@/lib/api/configs";
-import { getDynamicResourceDetail, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, getDynamicResourceDetail, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -157,6 +157,10 @@ export default function SecretsPage() {
     });
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [editingTarget, setEditingTarget] = useState<ConfigResourceItem | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [secretValuesVisible, setSecretValuesVisible] = useState(false);
@@ -222,6 +226,28 @@ export default function SecretsPage() {
     },
   });
 
+  const applyYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken!,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setModalOpen(false);
+      setCreateYaml("");
+      await queryClient.invalidateQueries({ queryKey: ["configs", "secrets"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "YAML 创建失败");
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteConfig(id, accessToken!),
     onSuccess: async () => {
@@ -252,6 +278,18 @@ export default function SecretsPage() {
   });
 
   const handleModalSubmit = async () => {
+    if (!editingTarget && createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyYamlMutation.mutate();
+      return;
+    }
     let values: SecretFormValues;
     try {
       values = await form.validateFields();
@@ -294,8 +332,20 @@ export default function SecretsPage() {
   const handleOpenCreate = () => {
     setEditingTarget(null);
     setSecretValuesVisible(false);
+    const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+    const nextNamespace = namespace || "default";
     form.resetFields();
-    form.setFieldValue("type", "Opaque");
+    form.setFieldsValue({
+      clusterId: nextClusterId,
+      namespace: nextNamespace,
+      type: "Opaque",
+      entries: [{ key: "", value: "" }],
+      labelEntries: [{ key: "", value: "" }],
+    });
+    setCreateMode("form");
+    setCreateYaml("");
+    setCreateYamlClusterId(nextClusterId);
+    setCreateYamlNamespace(nextNamespace);
     setModalOpen(true);
   };
 
@@ -347,6 +397,7 @@ export default function SecretsPage() {
     label: c.name,
     value: c.id,
   }));
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
 
   const clusterMap = Object.fromEntries(
     (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
@@ -491,7 +542,7 @@ export default function SecretsPage() {
         titleSuffix={<ResourceAddButton title="创建Secret" onClick={handleOpenCreate} />}
       />
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <div style={{ marginBottom: 12 }}>
           <ResourceScopeFilterButton
             clusterId={clusterId}
@@ -531,6 +582,7 @@ export default function SecretsPage() {
           tableKey="configs.secrets"
           rowKey="id"
           columns={columns as ColumnsType<ConfigResourceItem>}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           dataSource={tableData}
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -554,25 +606,171 @@ export default function SecretsPage() {
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
         />
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title={editingTarget ? "编辑 Secret" : "添加 Secret"}
+        description="配置 Secret 的作用域、类型、标签和敏感键值对。"
+        identity={editingTarget?.name ?? "Secret"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
           setEditingTarget(null);
           setSecretValuesVisible(false);
+          setCreateYaml("");
           form.resetFields();
         }}
         okText={editingTarget ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending || updateMutation.isPending || editLoading}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || editLoading || applyYamlMutation.isPending}
         destroyOnHidden
-        width={600}
+        width={720}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+        {editingTarget ? (
+          <Form form={form} layout="vertical">
+            <Form.Item
+              label="名称"
+              name="name"
+              rules={[{ required: true, message: "请输入 Secret 名称" }]}
+            >
+              <Input disabled placeholder="例如：my-secret" />
+            </Form.Item>
+            <Form.Item
+              label="名称空间"
+              name="namespace"
+              rules={[{ required: true, message: "请输入名称空间" }]}
+            >
+              <Input disabled placeholder="例如：default" />
+            </Form.Item>
+            <Form.Item
+              label="所属集群"
+              name="clusterId"
+              rules={[{ required: true, message: "请选择集群" }]}
+            >
+              <Select placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} disabled />
+            </Form.Item>
+            <Form.Item
+              label="Secret 类型"
+              name="type"
+              initialValue="Opaque"
+              rules={[{ required: true, message: "请选择 Secret 类型" }]}
+            >
+              <Select options={SECRET_TYPE_OPTIONS} placeholder="请选择类型" disabled />
+            </Form.Item>
+            <Form.Item label="标签">
+              <Form.List name="labelEntries" initialValue={[{ key: "", value: "" }]}>
+                {(fields, { add, remove }) => (
+                  <>
+                    {fields.map(({ key, name, ...restField }) => (
+                      <Row key={key} gutter={8} style={{ marginBottom: 8 }}>
+                        <Col flex="1">
+                          <Form.Item {...restField} name={[name, "key"]} style={{ marginBottom: 0 }}>
+                            <Input placeholder="标签键（Key）" />
+                          </Form.Item>
+                        </Col>
+                        <Col flex="1">
+                          <Form.Item {...restField} name={[name, "value"]} style={{ marginBottom: 0 }}>
+                            <Input placeholder="标签值（Value）" />
+                          </Form.Item>
+                        </Col>
+                        <Col>
+                          <Button
+                            type="text"
+                            danger
+                            icon={<MinusCircleOutlined />}
+                            onClick={() => remove(name)}
+                            disabled={fields.length === 1}
+                          />
+                        </Col>
+                      </Row>
+                    ))}
+                    <Button
+                      type="dashed"
+                      onClick={() => add({ key: "", value: "" })}
+                      icon={<PlusOutlined />}
+                      style={{ width: "100%" }}
+                    >
+                      添加标签
+                    </Button>
+                  </>
+                )}
+              </Form.List>
+            </Form.Item>
+            <Form.Item label="Secret 现值显示">
+              <Switch
+                checked={secretValuesVisible}
+                checkedChildren="显示"
+                unCheckedChildren="遮蔽"
+                onChange={setSecretValuesVisible}
+              />
+            </Form.Item>
+            <Form.Item label="键值对数据">
+              <Form.List name="entries" initialValue={[{ key: "", value: "" }]}>
+                {(fields, { add, remove }) => (
+                  <>
+                    {fields.map(({ key, name, ...restField }) => (
+                      <Row key={key} gutter={8} style={{ marginBottom: 8 }}>
+                        <Col flex="1">
+                          <Form.Item
+                            {...restField}
+                            name={[name, "key"]}
+                            style={{ marginBottom: 0 }}
+                            rules={[{ required: true, message: "请输入键名" }]}
+                          >
+                            <Input placeholder="键（Key）" />
+                          </Form.Item>
+                        </Col>
+                        <Col flex="1">
+                          <Form.Item {...restField} name={[name, "value"]} style={{ marginBottom: 0 }}>
+                            {secretValuesVisible ? (
+                              <Input placeholder="值（Value）" />
+                            ) : (
+                              <Input.Password placeholder="值（Value）" visibilityToggle={false} />
+                            )}
+                          </Form.Item>
+                        </Col>
+                        <Col>
+                          <Button
+                            type="text"
+                            danger
+                            icon={<MinusCircleOutlined />}
+                            onClick={() => remove(name)}
+                            disabled={fields.length === 1}
+                          />
+                        </Col>
+                      </Row>
+                    ))}
+                    <Button
+                      type="dashed"
+                      onClick={() => add({ key: "", value: "" })}
+                      icon={<PlusOutlined />}
+                      style={{ width: "100%" }}
+                    >
+                      添加键值对
+                    </Button>
+                  </>
+                )}
+              </Form.List>
+            </Form.Item>
+          </Form>
+        ) : (
+          <ResourceCreateMethodTabs
+            mode={createMode}
+            onModeChange={setCreateMode}
+            yaml={createYaml}
+            onYamlChange={setCreateYaml}
+            clusterId={createYamlClusterId}
+            onClusterIdChange={setCreateYamlClusterId}
+            namespace={createYamlNamespace}
+            onNamespaceChange={setCreateYamlNamespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            clusterUnavailable={clusterUnavailable}
+            kindHint="Secret"
+            disabled={createMutation.isPending || applyYamlMutation.isPending}
+            formContent={(
+              <Form form={form} layout="vertical">
           <Form.Item
             label="名称"
             name="name"
@@ -593,10 +791,11 @@ export default function SecretsPage() {
             rules={[{ required: true, message: "请选择集群" }]}
           >
             <Select
-              placeholder="请选择集群"
+              placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
               options={clusterOptions}
               loading={clustersQuery.isLoading}
-              disabled={Boolean(editingTarget)}
+              disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+              notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
               showSearch
               filterOption={(input, option) =>
                 (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
@@ -609,9 +808,9 @@ export default function SecretsPage() {
             initialValue="Opaque"
             rules={[{ required: true, message: "请选择 Secret 类型" }]}
           >
-            <Select options={SECRET_TYPE_OPTIONS} placeholder="请选择类型" disabled={Boolean(editingTarget)} />
+            <Select options={SECRET_TYPE_OPTIONS} placeholder="请选择类型" />
           </Form.Item>
-          <Form.Item label="标签">
+                <Form.Item label="标签">
             <Form.List name="labelEntries" initialValue={[{ key: "", value: "" }]}>
               {(fields, { add, remove }) => (
                 <>
@@ -650,16 +849,6 @@ export default function SecretsPage() {
               )}
             </Form.List>
           </Form.Item>
-          {editingTarget ? (
-            <Form.Item label="Secret 现值显示">
-              <Switch
-                checked={secretValuesVisible}
-                checkedChildren="显示"
-                unCheckedChildren="遮蔽"
-                onChange={setSecretValuesVisible}
-              />
-            </Form.Item>
-          ) : null}
           <Form.Item label="键值对数据">
             <Form.List name="entries" initialValue={[{ key: "", value: "" }]}>
               {(fields, { add, remove }) => (
@@ -682,15 +871,7 @@ export default function SecretsPage() {
                           name={[name, "value"]}
                           style={{ marginBottom: 0 }}
                         >
-                          {editingTarget ? (
-                            secretValuesVisible ? (
-                              <Input placeholder="值（Value）" />
-                            ) : (
-                              <Input.Password placeholder="值（Value）" visibilityToggle={false} />
-                            )
-                          ) : (
-                            <Input.Password placeholder="值（Value）" />
-                          )}
+                          <Input.Password placeholder="值（Value）" />
                         </Form.Item>
                       </Col>
                       <Col>
@@ -716,8 +897,11 @@ export default function SecretsPage() {
               )}
             </Form.List>
           </Form.Item>
-        </Form>
-      </Modal>
+              </Form>
+            )}
+          />
+        )}
+      </OpsModalShell>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}

@@ -48,7 +48,7 @@ import ReactFlow, {
   type NodeTypes,
 } from "reactflow";
 import { useAuth } from "@/components/auth-context";
-import { OpsIconActionButton } from "@/components/ops";
+import { OpsIconActionButton, OpsPageHeader } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { listAutoscalingPolicies, type AutoscalingPolicyItem } from "@/lib/api/autoscaling";
@@ -1706,17 +1706,19 @@ export default function NetworkTopologyPage() {
 
   return (
     <section className="resource-map-shell">
-      <div className="resource-map-header">
-        <div>
-          <span>网络</span>
-          <h1>资源拓扑</h1>
-        </div>
-        <div className="resource-map-header__stats">
+      <OpsPageHeader
+        className="resource-map-header"
+        title="资源拓扑"
+        subtitle="网络资源关系、工作负载依赖与异常影响路径"
+        scope={<span>网络</span>}
+        actions={(
+          <div className="resource-map-header__stats">
           <span><strong>{model.entities.length}</strong> 资源</span>
           <span><strong>{model.relations.length}</strong> 关系</span>
           <span><strong>{model.statusCounts.error + model.statusCounts.warning}</strong> 告警</span>
-        </div>
-      </div>
+          </div>
+        )}
+      />
 
       <div className="resource-map-toolbar">
         <div className="resource-map-toolbar__scope">
@@ -1808,9 +1810,10 @@ export default function NetworkTopologyPage() {
           --map-edge: var(--ops-text-faint);
           --map-edge-filter: drop-shadow(0 0 5px rgba(34,211,238,.38));
         }
-        .resource-map-header { display: flex; align-items: center; justify-content: space-between; min-height: 52px; }
-        .resource-map-header span { color: var(--map-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
-        .resource-map-header h1 { margin: 0; font-size: 26px; line-height: 1.1; font-weight: 780; color: var(--map-heading); }
+        .resource-map-header.ops-page-header { min-height: 52px; background: var(--map-panel-bg); border-color: var(--map-border); box-shadow: var(--map-shadow); }
+        .resource-map-header .ops-page-header__scope { color: var(--map-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
+        .resource-map-header .ops-page-header__title { font-size: 24px; line-height: 1.1; font-weight: 780; color: var(--map-heading); }
+        .resource-map-header .ops-page-header__subtitle { color: var(--map-muted); }
         .resource-map-header__stats { display: flex; gap: 8px; }
         .resource-map-header__stats span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); background: var(--map-panel-bg); border-radius: 8px; padding: 7px 10px; color: var(--map-muted); text-transform: none; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
         .resource-map-header__stats strong { color: var(--map-heading); }

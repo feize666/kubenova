@@ -6,7 +6,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
   Button,
-  Card,
   DatePicker,
   Input,
   Popover,
@@ -33,7 +32,9 @@ import { useAuth } from "@/components/auth-context";
 import {
   OpsFilterChip,
   OpsFrameShell,
+  OpsIconActionButton,
   OpsStatusTag,
+  OpsSurface,
   type OpsFrameShellState,
   type OpsStatusTone,
 } from "@/components/ops";
@@ -463,6 +464,34 @@ function formatRelativeTimeLabel(seconds: number): string {
   return `最近 ${input.amount} ${unitLabels[input.unit]}`;
 }
 
+function readCssVar(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+function readOpsTerminalTheme() {
+  return {
+    background: readCssVar("--ops-terminal-bg", readCssVar("--kn-surface", "#ffffff")),
+    foreground: readCssVar("--ops-terminal-fg", readCssVar("--kn-text", "#151922")),
+    cursor: readCssVar("--ops-log-info", "#67e8f9"),
+    selectionBackground: readCssVar("--ops-terminal-selection", readCssVar("--kn-primary-subtle", "rgba(35, 92, 255, 0.14)")),
+    black: "#0f172a",
+    brightBlack: "#64748b",
+    blue: "#60a5fa",
+    brightBlue: "#93c5fd",
+    cyan: "#22d3ee",
+    brightCyan: "#67e8f9",
+    green: "#34d399",
+    brightGreen: "#86efac",
+    red: "#fb7185",
+    brightRed: "#fda4af",
+    yellow: "#fbbf24",
+    brightYellow: "#fde68a",
+    white: "#e5edf7",
+    brightWhite: "#ffffff",
+  };
+}
+
 export default function LogsPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -647,26 +676,7 @@ export default function LogsPage() {
 
     const terminal = new Terminal({
       ...FALLBACK_TERMINAL_OPTIONS,
-      theme: {
-        background: "#061120",
-        foreground: "#eef6ff",
-        cursor: "#67e8f9",
-        selectionBackground: "rgba(56, 189, 248, 0.45)",
-        black: "#0f172a",
-        brightBlack: "#64748b",
-        blue: "#60a5fa",
-        brightBlue: "#93c5fd",
-        cyan: "#22d3ee",
-        brightCyan: "#67e8f9",
-        green: "#34d399",
-        brightGreen: "#86efac",
-        red: "#fb7185",
-        brightRed: "#fda4af",
-        yellow: "#fbbf24",
-        brightYellow: "#fde68a",
-        white: "#e5edf7",
-        brightWhite: "#ffffff",
-      },
+      theme: readOpsTerminalTheme(),
     });
     const fitAddon = new FitAddon();
     const searchAddon = new SearchAddon();
@@ -679,10 +689,36 @@ export default function LogsPage() {
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
 
-    const onResize = () => fitAddon.fit();
+    let rafId = 0;
+    const fitTerminal = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => fitAddon.fit());
+    };
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => {
+            fitTerminal();
+          })
+        : null;
+    resizeObserver?.observe(terminalHostRef.current);
+    const onResize = () => fitTerminal();
     window.addEventListener("resize", onResize);
+    const themeObserver =
+      typeof MutationObserver !== "undefined"
+        ? new MutationObserver(() => {
+            terminal.options.theme = readOpsTerminalTheme();
+            fitTerminal();
+          })
+        : null;
+    themeObserver?.observe(document.documentElement, {
+      attributeFilter: ["data-theme"],
+      attributes: true,
+    });
 
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      themeObserver?.disconnect();
+      resizeObserver?.disconnect();
       window.removeEventListener("resize", onResize);
       terminalRef.current?.dispose();
       terminalRef.current = null;
@@ -1119,11 +1155,28 @@ export default function LogsPage() {
         const socket = new RuntimeLogsSocket({
           url: candidates[0],
           candidates,
-          onStatusChange: setStreamStatus,
-          onError: setStreamError,
-          onReconnectStateChange: setReconnectState,
-          onOpen: () => setStreamError(""),
+          onStatusChange: (status) => {
+            if (currentGeneration !== streamGenerationRef.current) return;
+            setStreamStatus(status);
+            if (status === "已连接") {
+              setStreamError("");
+            }
+          },
+          onError: (error) => {
+            if (currentGeneration !== streamGenerationRef.current) return;
+            setStreamError(error);
+          },
+          onReconnectStateChange: (state) => {
+            if (currentGeneration !== streamGenerationRef.current) return;
+            setReconnectState(state.stopped || state.attempt === 0 ? null : state);
+          },
+          onOpen: () => {
+            if (currentGeneration !== streamGenerationRef.current) return;
+            setStreamError("");
+            setReconnectState(null);
+          },
           onLogs: (items) => {
+            if (currentGeneration !== streamGenerationRef.current) return;
             if (items.length === 0) return;
             setRawLines((current) => {
               const next = [...current, ...items].slice(-6000);
@@ -1310,19 +1363,19 @@ export default function LogsPage() {
       state={logsFrameState}
       status={<OpsStatusTag tone={connectionMeta.tone}>{connectionMeta.text}</OpsStatusTag>}
       toolbar={
-        <Space wrap>
+        <Space wrap size={8} className="logs-workbench-top-actions">
           <Tooltip title="重新加载日志">
-            <Button icon={<ReloadOutlined />} onClick={hardRefresh} loading={isConnecting}>
+            <OpsIconActionButton icon={<ReloadOutlined />} onClick={hardRefresh} loading={isConnecting}>
               刷新
-            </Button>
+            </OpsIconActionButton>
           </Tooltip>
-          <Button icon={<ArrowLeftOutlined />} danger onClick={exitBack}>
+          <OpsIconActionButton icon={<ArrowLeftOutlined />} opsTone="danger" opsVariant="danger" onClick={exitBack}>
             退出
-          </Button>
+          </OpsIconActionButton>
         </Space>
       }
       chips={
-        <Space wrap size={8}>
+        <Space wrap size={8} className="logs-workbench-chips">
           <OpsFilterChip tone={effectivePrevious ? "neutral" : "info"}>
             {effectivePrevious ? "上一个实例" : follow ? "实时跟随" : "跟随已暂停"}
           </OpsFilterChip>
@@ -1355,12 +1408,13 @@ export default function LogsPage() {
         ) : undefined
       }
     >
-      <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-        <Card
+      <Space orientation="vertical" size={12} className="logs-workbench-stack" style={{ width: "100%" }}>
+        <OpsSurface
+          variant="toolbar"
+          padding="sm"
           className="logs-toolbar-card"
-          styles={{ body: { padding: 16 } }}
         >
-          <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <Space orientation="vertical" size={10} style={{ width: "100%" }}>
             <div className="headlamp-log-toolbar">
               <div className="headlamp-log-group headlamp-log-group-main">
                 <div className="headlamp-log-control">
@@ -1508,9 +1562,10 @@ export default function LogsPage() {
 
               <div className="headlamp-log-group headlamp-log-group-mode">
                 <div className="headlamp-log-switch">
-                  <Switch
-                    checked={previous}
-                    onChange={(checked) => {
+	                  <Switch
+	                    checked={previous}
+                      aria-label="显示上一个实例日志"
+	                    onChange={(checked) => {
                       setPreviousUnavailable(false);
                       setPrevious(checked);
                       syncRuntimeQueryToUrl({ previous: checked });
@@ -1521,9 +1576,10 @@ export default function LogsPage() {
                 </div>
 
                 <div className="headlamp-log-switch">
-                  <Switch
-                    checked={timestamps}
-                    onChange={(checked) => {
+	                  <Switch
+	                    checked={timestamps}
+                      aria-label="显示时间戳"
+	                    onChange={(checked) => {
                       setTimestamps(checked);
                       syncRuntimeQueryToUrl({ timestamps: checked });
                     }}
@@ -1533,10 +1589,11 @@ export default function LogsPage() {
                 </div>
 
                 <div className="headlamp-log-switch">
-	                  <Switch
-	                    checked={follow}
-	                    disabled={!isFollowingNow}
-	                    onChange={(checked) => {
+		                  <Switch
+		                    checked={follow}
+		                    disabled={!isFollowingNow}
+                        aria-label="实时跟随日志"
+		                    onChange={(checked) => {
 	                      if (!isFollowingNow) return;
 	                      setFollow(checked);
 	                      syncRuntimeQueryToUrl({ follow: checked });
@@ -1547,18 +1604,20 @@ export default function LogsPage() {
                 </div>
 
                 <div className="headlamp-log-switch">
-                  <Switch
-                    checked={beautifyEnabled}
-                    onChange={setBeautifyEnabled}
+	                  <Switch
+	                    checked={beautifyEnabled}
+                      aria-label="启用日志美化"
+	                    onChange={setBeautifyEnabled}
                     size="small"
                   />
                   <span>美化</span>
                 </div>
 
                 <div className="headlamp-log-switch">
-                  <Switch
-                    checked={formatEnabled}
-                    onChange={setFormatEnabled}
+	                  <Switch
+	                    checked={formatEnabled}
+                      aria-label="启用日志格式化"
+	                    onChange={setFormatEnabled}
                     size="small"
                   />
                   <span>格式化</span>
@@ -1599,58 +1658,64 @@ export default function LogsPage() {
                           onPressEnter={() => runSearch("next")}
                         />
                         <Tooltip title="区分大小写">
-                          <button
-                            type="button"
-                            className={`headlamp-search-flag${searchCaseSensitive ? " active" : ""}`}
-                            onClick={() => setSearchCaseSensitive((value) => !value)}
+	                          <button
+	                            type="button"
+	                            className={`headlamp-search-flag${searchCaseSensitive ? " active" : ""}`}
+                              aria-label="区分大小写"
+                              aria-pressed={searchCaseSensitive}
+	                            onClick={() => setSearchCaseSensitive((value) => !value)}
                           >
                             Aa
                           </button>
                         </Tooltip>
                         <Tooltip title="使用正则表达式">
-                          <button
-                            type="button"
-                            className={`headlamp-search-flag${searchRegex ? " active" : ""}`}
-                            onClick={() => setSearchRegex((value) => !value)}
+	                          <button
+	                            type="button"
+	                            className={`headlamp-search-flag${searchRegex ? " active" : ""}`}
+                              aria-label="使用正则表达式"
+                              aria-pressed={searchRegex}
+	                            onClick={() => setSearchRegex((value) => !value)}
                           >
                             .*
                           </button>
                         </Tooltip>
-                        <Tooltip title="上一个匹配">
-                          <button type="button" className="headlamp-search-icon" onClick={() => runSearch("prev")}>
-                            ↑
-                          </button>
-                        </Tooltip>
-                        <Tooltip title="下一个匹配">
-                          <button type="button" className="headlamp-search-icon" onClick={() => runSearch("next")}>
-                            ↓
-                          </button>
-                        </Tooltip>
-                        <Tooltip title="关闭查找">
-                          <button type="button" className="headlamp-search-icon" onClick={() => setSearchVisible(false)}>
-                            ×
-                          </button>
+	                        <Tooltip title="上一个匹配">
+	                          <button type="button" className="headlamp-search-icon" aria-label="上一个匹配" onClick={() => runSearch("prev")}>
+	                            ↑
+	                          </button>
+	                        </Tooltip>
+	                        <Tooltip title="下一个匹配">
+	                          <button type="button" className="headlamp-search-icon" aria-label="下一个匹配" onClick={() => runSearch("next")}>
+	                            ↓
+	                          </button>
+	                        </Tooltip>
+	                        <Tooltip title="关闭查找">
+	                          <button type="button" className="headlamp-search-icon" aria-label="关闭查找" onClick={() => setSearchVisible(false)}>
+	                            ×
+	                          </button>
                         </Tooltip>
                         <span className="headlamp-search-status">{searchResultText}</span>
                       </div>
                     }
                   >
-                    <Button
-                      type="text"
+                    <OpsIconActionButton
+                      opsVariant="icon"
                       icon={<SearchOutlined />}
+                      aria-label="查找日志"
                     />
                   </Popover>
                 </Tooltip>
                 <Tooltip title="清除">
-                  <Button type="text" icon={<ClearOutlined />} onClick={clearAll} />
+                  <OpsIconActionButton opsVariant="icon" icon={<ClearOutlined />} aria-label="清除日志" onClick={clearAll} />
                 </Tooltip>
                 <Tooltip title="下载">
-                  <Button type="text" icon={<DownloadOutlined />} onClick={downloadLogs} />
+                  <OpsIconActionButton opsVariant="icon" icon={<DownloadOutlined />} aria-label="下载日志" onClick={downloadLogs} />
                 </Tooltip>
                 <Tooltip title="重新接入">
-                  <Button
-                    type="text"
+                  <OpsIconActionButton
+                    opsVariant="icon"
                     icon={<ReloadOutlined />}
+                    aria-label="重新接入日志"
                     onClick={reconnectNow}
                     loading={isConnecting}
                   />
@@ -1659,13 +1724,14 @@ export default function LogsPage() {
               </div>
             </div>
           </Space>
-        </Card>
+        </OpsSurface>
 
-        <Card
+        <OpsSurface
+          variant="code"
+          padding="none"
           className="logs-terminal-card"
-          styles={{ body: { padding: 0 } }}
         >
-          <div className="logs-terminal-frame">
+          <div className={`logs-terminal-frame logs-terminal-frame--${logsFrameState}`}>
             <div className="logs-terminal-titlebar">
               <div className="logs-terminal-dots">
                 <span />
@@ -1675,7 +1741,7 @@ export default function LogsPage() {
               <div className="logs-terminal-title">
                 {clusterDisplayName} · {pod || "pod"}.{namespace || "default"}
               </div>
-              <div className="logs-terminal-state">{connectionMeta.text}</div>
+              <div className={`logs-terminal-state logs-terminal-state--${connectionMeta.tone}`}>{connectionMeta.text}</div>
             </div>
 	            <div className="logs-terminal-host" ref={terminalHostRef} />
 	            {emptyStateHint.visible ? (
@@ -1688,60 +1754,190 @@ export default function LogsPage() {
           {streamStatus === "连接异常" ? (
             <Button
               type="primary"
-              style={{ width: "100%", borderRadius: 0, height: 40 }}
+              className="logs-reconnect-button"
               onClick={reconnectNow}
               loading={isConnecting}
             >
               重新连接
             </Button>
           ) : null}
-        </Card>
+        </OpsSurface>
       </Space>
 
       <style jsx>{`
-	        .logs-terminal-frame {
-	          position: relative;
-	          border-radius: 10px 10px 0 0;
-          overflow: hidden;
-          border: 1px solid var(--ops-frame-border);
-          background:
-            linear-gradient(90deg, transparent 0 18px, color-mix(in srgb, var(--ops-log-info) 7%, transparent) 18px 19px, transparent 19px 38px),
-            linear-gradient(180deg, #07111f 0%, var(--ops-terminal-bg) 100%);
+        :global(html[data-theme="light"]) {
+          --ops-terminal-bg: #ffffff;
+          --ops-terminal-fg: #172033;
+          --ops-terminal-selection: rgba(35, 92, 255, 0.18);
         }
 
-        :global(.logs-toolbar-card.ant-card),
-        :global(.logs-terminal-card.ant-card) {
-          border-radius: 10px;
-          border-color: var(--ops-frame-border);
-          background: var(--ops-frame-header-bg);
+        :global(.logs-workbench-shell.ops-frame-shell) {
+          --logs-console-frame-bg: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+          --logs-console-header-bg: rgba(255, 255, 255, 0.92);
+          --logs-console-chip-bg: rgba(248, 250, 252, 0.9);
+          --logs-console-border: rgba(35, 92, 255, 0.16);
+          --logs-console-divider: rgba(100, 116, 139, 0.16);
+          --logs-console-text: var(--kn-text, #151922);
+          --logs-console-muted: var(--kn-text-secondary, #5d6675);
+          --logs-toolbar-bg: #ffffff;
+          --logs-toolbar-panel-bg: linear-gradient(180deg, #ffffff, #f9fbff);
+          --logs-toolbar-border: rgba(148, 163, 184, 0.26);
+          --logs-control-bg: #ffffff;
+          --logs-control-border: rgba(148, 163, 184, 0.34);
+          --logs-control-text: var(--kn-text, #151922);
+          --logs-control-muted: var(--kn-text-secondary, #5d6675);
+          --logs-terminal-frame-bg: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+          --logs-terminal-frame-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+          --logs-terminal-titlebar-bg: linear-gradient(180deg, #ffffff, #f8fafc);
+          --logs-terminal-titlebar-border: rgba(148, 163, 184, 0.22);
+          --logs-terminal-bg: var(--ops-terminal-bg, #ffffff);
+          --logs-terminal-fg: var(--ops-terminal-fg, #172033);
+          --logs-empty-bg: rgba(255, 255, 255, 0.96);
+          --logs-empty-border: rgba(35, 92, 255, 0.18);
+          --logs-empty-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+          min-height: calc(100vh - 112px);
+          border-color: var(--logs-console-border);
+          background: var(--logs-console-frame-bg);
+          box-shadow: var(--kn-shadow-subtle, 0 8px 20px rgba(15, 23, 42, 0.06));
+        }
+
+        :global(html[data-theme="dark"]) :global(.logs-workbench-shell.ops-frame-shell) {
+          --logs-console-frame-bg: linear-gradient(180deg, rgba(8, 18, 31, 0.98), rgba(3, 10, 20, 0.98));
+          --logs-console-header-bg: rgba(8, 18, 31, 0.92);
+          --logs-console-chip-bg: rgba(12, 25, 42, 0.86);
+          --logs-console-border: rgba(56, 189, 248, 0.22);
+          --logs-console-divider: rgba(56, 189, 248, 0.14);
+          --logs-console-text: #edf6ff;
+          --logs-console-muted: rgba(203, 213, 225, 0.72);
+          --logs-toolbar-bg: rgba(9, 18, 31, 0.92);
+          --logs-toolbar-panel-bg: linear-gradient(180deg, rgba(12, 25, 42, 0.96), rgba(8, 17, 31, 0.96));
+          --logs-toolbar-border: rgba(148, 163, 184, 0.18);
+          --logs-control-bg: rgba(2, 8, 23, 0.34);
+          --logs-control-border: rgba(148, 163, 184, 0.22);
+          --logs-control-text: rgba(248, 250, 252, 0.92);
+          --logs-control-muted: rgba(226, 232, 240, 0.74);
+          --logs-terminal-frame-bg:
+            linear-gradient(90deg, transparent 0 23px, rgba(56, 189, 248, 0.055) 23px 24px, transparent 24px 48px),
+            linear-gradient(180deg, #081525 0%, var(--ops-terminal-bg) 100%);
+          --logs-terminal-frame-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+          --logs-terminal-titlebar-bg: rgba(8, 18, 31, 0.96);
+          --logs-terminal-titlebar-border: rgba(56, 189, 248, 0.16);
+          --logs-terminal-bg: var(--ops-terminal-bg, #061120);
+          --logs-terminal-fg: var(--ops-terminal-fg, #eef6ff);
+          --logs-empty-bg: rgba(8, 18, 31, 0.94);
+          --logs-empty-border: rgba(56, 189, 248, 0.2);
+          --logs-empty-shadow: 0 18px 34px rgba(2, 8, 23, 0.34);
+          border-color: var(--logs-console-border);
+          background: var(--logs-console-frame-bg);
+          box-shadow: 0 18px 36px rgba(2, 8, 23, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+        }
+
+        :global(.logs-workbench-shell .ops-frame-shell__header) {
+          border-bottom-color: var(--logs-console-divider);
+          background: var(--logs-console-header-bg);
+        }
+
+        :global(.logs-workbench-shell .ops-frame-shell__title) {
+          color: var(--logs-console-text);
+        }
+
+        :global(.logs-workbench-shell .ops-frame-shell__subtitle) {
+          color: var(--logs-console-muted);
+        }
+
+        :global(.logs-workbench-shell .ops-frame-shell__chips) {
+          border-bottom-color: var(--logs-console-divider);
+          background: var(--logs-console-chip-bg);
+        }
+
+        :global(.logs-workbench-shell .ops-frame-shell__body) {
+          background: transparent;
+        }
+
+        :global(.logs-workbench-shell .ops-frame-shell__title) {
+          letter-spacing: 0;
+        }
+
+        :global(.logs-workbench-top-actions.ant-space) {
+          align-items: center;
+          row-gap: 6px;
+        }
+
+        :global(.logs-workbench-chips.ant-space) {
+          width: 100%;
+        }
+
+        :global(.logs-workbench-stack.ant-space) {
+          display: flex;
+        }
+
+        .logs-terminal-frame {
+          position: relative;
+          border-radius: 8px 8px 0 0;
           overflow: hidden;
+          border: 1px solid rgba(35, 92, 255, 0.16);
+          background: var(--logs-terminal-frame-bg);
+          box-shadow: var(--logs-terminal-frame-shadow);
+        }
+
+        .logs-terminal-frame--error,
+        .logs-terminal-frame--expired {
+          border-color: rgba(248, 113, 113, 0.38);
+        }
+
+        .logs-terminal-frame--reconnecting,
+        .logs-terminal-frame--connecting {
+          border-color: rgba(251, 191, 36, 0.34);
+        }
+
+        .logs-terminal-frame--streaming {
+          border-color: rgba(34, 211, 238, 0.36);
+        }
+
+        :global(.logs-toolbar-card.ops-surface),
+        :global(.logs-terminal-card.ops-surface) {
+          border-radius: 8px;
+          border-color: var(--logs-toolbar-border);
+          background: var(--logs-toolbar-bg);
+          overflow: hidden;
+        }
+
+        :global(.logs-toolbar-card.ops-surface) {
+          border-color: var(--logs-toolbar-border);
+          background: var(--logs-toolbar-panel-bg);
+        }
+
+        :global(.logs-terminal-card.ops-surface) {
+          border-color: var(--logs-console-border);
+          background: var(--logs-terminal-bg);
+          color: var(--logs-terminal-fg);
         }
 
         .headlamp-log-toolbar {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) 306px;
+          grid-template-columns: minmax(0, 1fr) 290px;
           grid-template-areas:
             "main actions"
             "mode actions";
           justify-content: space-between;
-          gap: 10px;
+          gap: 8px;
           width: 100%;
           align-items: stretch;
           overflow: visible;
-          padding: 2px 0;
+          padding: 0;
         }
 
         .headlamp-log-group {
           display: flex;
           align-items: end;
-          gap: 10px;
+          gap: 8px;
           flex-wrap: wrap;
           min-width: 0;
-          min-height: 64px;
-          padding: 8px;
-          border: 1px solid var(--ops-border-subtle);
+          min-height: 58px;
+          padding: 8px 10px;
+          border: 1px solid var(--logs-toolbar-border);
           border-radius: 8px;
-          background: var(--ops-subtle-bg);
+          background: color-mix(in srgb, var(--logs-toolbar-bg) 88%, #eef4ff);
         }
 
         .headlamp-log-group-main {
@@ -1753,7 +1949,7 @@ export default function LogsPage() {
           grid-area: mode;
           align-content: end;
           justify-content: flex-start;
-          min-height: 48px;
+          min-height: 42px;
         }
 
         .headlamp-log-group-actions {
@@ -1764,14 +1960,15 @@ export default function LogsPage() {
           align-self: stretch;
           flex-wrap: wrap;
           width: 100%;
+          background: color-mix(in srgb, var(--logs-toolbar-bg) 92%, #eaf2ff);
         }
 
         .headlamp-log-control {
           display: inline-grid;
-          gap: 6px;
+          gap: 5px;
           flex: 0 0 auto;
-          color: var(--ant-color-text-secondary);
-          font-size: 12px;
+          color: var(--logs-control-muted);
+          font-size: 11px;
           line-height: 1.2;
         }
 
@@ -1779,6 +1976,8 @@ export default function LogsPage() {
           height: 16px;
           display: inline-flex;
           align-items: center;
+          text-transform: uppercase;
+          letter-spacing: 0;
         }
 
         .headlamp-log-switch {
@@ -1788,7 +1987,7 @@ export default function LogsPage() {
           height: 32px;
           flex: 0 0 auto;
           white-space: nowrap;
-          color: var(--ops-text-muted);
+          color: var(--logs-control-text);
           font-size: 12px;
           font-weight: 650;
         }
@@ -1797,10 +1996,39 @@ export default function LogsPage() {
           display: inline-flex;
           align-items: center;
           justify-content: flex-end;
-          gap: 2px;
+          gap: 4px;
           height: 32px;
           flex: 0 0 auto;
           width: 100%;
+        }
+
+        .headlamp-log-toolbar :global(.ant-select-selector),
+        .headlamp-log-toolbar :global(.ant-input),
+        .headlamp-log-toolbar :global(.ant-btn),
+        .headlamp-log-toolbar :global(.ant-picker) {
+          border-color: var(--logs-control-border) !important;
+          background: var(--logs-control-bg) !important;
+          color: var(--logs-control-text) !important;
+        }
+
+        .headlamp-log-toolbar :global(.ant-select-arrow),
+        .headlamp-log-toolbar :global(.ant-select-selection-placeholder),
+        .headlamp-log-toolbar :global(.ant-select-selection-item),
+        .headlamp-log-toolbar :global(.ant-btn .anticon) {
+          color: var(--logs-control-muted) !important;
+        }
+
+        .headlamp-log-toolbar :global(.ant-select:hover .ant-select-selector),
+        .headlamp-log-toolbar :global(.ant-select-focused .ant-select-selector),
+        .headlamp-log-toolbar :global(.ant-input:hover),
+        .headlamp-log-toolbar :global(.ant-input:focus),
+        .headlamp-log-toolbar :global(.ant-picker:hover),
+        .headlamp-log-toolbar :global(.ant-picker-focused),
+        .headlamp-log-toolbar :global(.ant-btn:hover),
+        .headlamp-log-toolbar :global(.ant-btn:focus-visible) {
+          border-color: var(--ant-color-primary) !important;
+          color: var(--ant-color-primary) !important;
+          background: color-mix(in srgb, var(--logs-control-bg) 88%, var(--kn-primary-subtle, rgba(35, 92, 255, 0.1))) !important;
         }
 
         .headlamp-time-trigger {
@@ -1842,11 +2070,11 @@ export default function LogsPage() {
           align-items: center;
           gap: 8px;
           min-width: 520px;
-          color: var(--surface-text);
+          color: var(--logs-control-text);
         }
 
         .headlamp-search-status {
-          color: var(--surface-text);
+          color: var(--logs-control-muted);
           font-size: 13px;
           white-space: nowrap;
           margin-left: 8px;
@@ -1855,44 +2083,53 @@ export default function LogsPage() {
         .headlamp-search-flag,
         .headlamp-search-icon {
           border: 0;
-          background: transparent;
-          color: var(--surface-text);
+          border-radius: 6px;
+          background: color-mix(in srgb, var(--logs-control-bg) 92%, var(--kn-primary-subtle, rgba(35, 92, 255, 0.1)));
+          color: var(--logs-control-text);
           cursor: pointer;
           font: inherit;
-          padding: 0 4px;
+          min-width: 28px;
+          height: 28px;
+          padding: 0 6px;
         }
 
         .headlamp-search-flag:hover,
-        .headlamp-search-flag:focus,
         .headlamp-search-flag.active,
         .headlamp-search-icon:hover,
-        .headlamp-search-icon:focus,
         .headlamp-search-icon:active {
           color: var(--ant-color-primary);
         }
 
+        .headlamp-search-flag:focus-visible,
+        .headlamp-search-icon:focus-visible {
+          outline: none;
+          border-radius: 6px;
+          box-shadow: var(--kn-focus-ring);
+          color: var(--ant-color-primary);
+        }
+
         .headlamp-search-popover :global(.headlamp-log-search-input .ant-input) {
-          color: var(--surface-text);
+          color: var(--logs-control-text);
         }
 
         .headlamp-search-popover :global(.headlamp-log-search-input .ant-input::placeholder) {
-          color: #475569;
+          color: var(--logs-control-muted);
         }
 
         .headlamp-search-popover :global(.headlamp-log-search-input .ant-input-prefix),
         .headlamp-search-popover :global(.headlamp-log-search-input .ant-input-clear-icon) {
-          color: #475569;
+          color: var(--logs-control-muted);
         }
 
         .logs-terminal-titlebar {
-          height: 46px;
-          padding: 0 14px;
+          height: 40px;
+          padding: 0 12px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          background: var(--ops-frame-header-bg);
-          border-bottom: 1px solid var(--ops-frame-divider);
-          color: var(--ops-terminal-fg);
+          background: var(--logs-terminal-titlebar-bg);
+          border-bottom: 1px solid var(--logs-terminal-titlebar-border);
+          color: var(--logs-terminal-fg);
           font-size: 12px;
         }
 
@@ -1903,10 +2140,11 @@ export default function LogsPage() {
         }
 
         .logs-terminal-dots span {
-          width: 10px;
-          height: 10px;
-          border-radius: 999px;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
           display: inline-block;
+          box-shadow: 0 0 0 1px color-mix(in srgb, var(--logs-terminal-fg) 12%, transparent);
         }
 
         .logs-terminal-dots span:nth-child(1) {
@@ -1921,7 +2159,7 @@ export default function LogsPage() {
 
         .logs-terminal-title {
           font-weight: 600;
-          color: var(--ops-terminal-fg);
+          color: var(--logs-terminal-fg);
           text-align: center;
           flex: 1;
           margin: 0 12px;
@@ -1932,40 +2170,66 @@ export default function LogsPage() {
 
         .logs-terminal-state {
           color: var(--ops-log-info);
+          font-family: var(--kn-font-mono);
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: uppercase;
         }
 
-	        .logs-terminal-host {
-	          width: 100%;
-	          min-height: 58vh;
-	          max-height: 72vh;
-	          background: var(--ops-terminal-bg);
-	          overflow: hidden;
-	          padding: 12px;
-	        }
+        .logs-terminal-state--success {
+          color: var(--ops-status-success-text);
+        }
 
-	        .logs-empty-hint {
-	          position: absolute;
-	          left: 50%;
-	          top: 52%;
-	          transform: translate(-50%, -50%);
-	          display: grid;
-	          gap: 6px;
-	          min-width: min(360px, calc(100% - 32px));
-	          padding: 16px 18px;
-	          border: 1px solid var(--ops-frame-border);
-	          border-radius: 10px;
-	          background: var(--ops-frame-header-bg);
-	          box-shadow: var(--ops-shadow-overlay);
-	          text-align: center;
-	          pointer-events: none;
-	        }
+        .logs-terminal-state--warning,
+        .logs-terminal-state--processing {
+          color: var(--ops-status-warning-text);
+        }
+
+        .logs-terminal-state--danger {
+          color: var(--ops-status-danger-text);
+        }
+
+        .logs-terminal-host {
+          width: 100%;
+          min-height: 58vh;
+          max-height: 72vh;
+          background: var(--logs-terminal-bg);
+          overflow: hidden;
+          padding: 14px;
+        }
+
+        .logs-empty-hint {
+          position: absolute;
+          left: 50%;
+          top: 52%;
+          transform: translate(-50%, -50%);
+          display: grid;
+          gap: 6px;
+          min-width: min(360px, calc(100% - 32px));
+          padding: 16px 18px;
+          border: 1px solid var(--logs-empty-border);
+          border-radius: 8px;
+          background: var(--logs-empty-bg);
+          box-shadow: var(--logs-empty-shadow);
+          text-align: center;
+          pointer-events: none;
+        }
+
+        :global(.logs-reconnect-button.ant-btn) {
+          width: 100%;
+          height: 40px;
+          border-radius: 0;
+          border-inline: 0;
+          border-bottom: 0;
+          background: var(--ant-color-primary);
+        }
 
         .logs-empty-hint :global(.ant-typography) {
-          color: var(--ops-terminal-fg);
+          color: var(--logs-terminal-fg);
         }
 
         .logs-empty-hint :global(.ant-typography-secondary) {
-          color: color-mix(in srgb, var(--ops-terminal-fg) 70%, transparent) !important;
+          color: color-mix(in srgb, var(--logs-terminal-fg) 68%, transparent) !important;
         }
 
         :global(.logs-workbench-body) :global(.xterm) {
@@ -1977,8 +2241,8 @@ export default function LogsPage() {
         }
 
         :global(.logs-workbench-body) :global(.xterm-rows) {
-          color: var(--ops-terminal-fg);
-          text-shadow: 0 0 1px rgba(255, 255, 255, 0.18);
+          color: var(--logs-terminal-fg);
+          text-shadow: none;
         }
 
         @media (max-width: 1440px) {

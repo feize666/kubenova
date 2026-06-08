@@ -27,11 +27,21 @@ cp .env.example .env
 - `RUNTIME_TOKEN_SECRET`: runtime-gateway token 密钥（生产必须强随机）
 - `RUNTIME_GATEWAY_INTERNAL_SECRET`: gateway 调 control-api 内部接口共享密钥
 - `RUNTIME_GATEWAY_PUBLIC_BASE_URL`: control-api 返回给浏览器的公网 WS 基址
+- `KUBENOVA_HELM_REPOSITORY_CONFIGS`: 容器内 Helm 仓库配置路径，多个路径用 `:` 分隔
 
 ## 2) 卷（Volumes）
 
 - `kubenova_postgres_data`: PostgreSQL 持久化数据
 - `kubenova_redis_data`: Redis AOF 持久化数据
+
+control-api 镜像已内置 Helm CLI。若要自动导入宿主机 `helm repo list` 中的仓库，把宿主仓库配置挂载到容器内，再设置 `KUBENOVA_HELM_REPOSITORY_CONFIGS`：
+
+```yaml
+services:
+  control-api:
+    volumes:
+      - /root/.config/helm/repositories.yaml:/etc/kubenova/helm/repositories.yaml:ro
+```
 
 查看：
 

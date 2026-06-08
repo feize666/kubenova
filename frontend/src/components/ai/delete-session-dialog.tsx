@@ -25,6 +25,7 @@ export function AiDeleteSessionDialog({
 }) {
   return (
     <OpsConfirmModal
+      className="ai-delete-session-dialog"
       title="删除会话"
       open={open}
       onCancel={onCancel}

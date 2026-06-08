@@ -15,6 +15,7 @@ import {
   type DynamicResourceQuery,
   ResourcesService,
   type ResourceIdentity,
+  type ResourceYamlApplyRequest,
   type ResourceYamlUpdateRequest,
 } from './resources.service';
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
@@ -231,6 +232,29 @@ export class ResourcesController {
       dryRun: Boolean(body?.dryRun),
     };
     const result = await this.resourcesService.updateYaml(req);
+    if (!req.dryRun) {
+      this.triggerClusterSync(result.clusterId);
+    }
+    return result;
+  }
+
+  @Post('yaml/apply')
+  async applyYaml(
+    @Body()
+    body?: {
+      clusterId?: string;
+      namespace?: string;
+      yaml?: string;
+      dryRun?: boolean;
+    },
+  ) {
+    const req: ResourceYamlApplyRequest = {
+      clusterId: body?.clusterId?.trim() ?? '',
+      namespace: body?.namespace?.trim() || undefined,
+      yaml: body?.yaml?.trim() ?? '',
+      dryRun: Boolean(body?.dryRun),
+    };
+    const result = await this.resourcesService.applyYaml(req);
     if (!req.dryRun) {
       this.triggerClusterSync(result.clusterId);
     }

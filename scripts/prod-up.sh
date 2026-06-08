@@ -46,6 +46,7 @@ check_dep curl "curl"
 check_dep psql "PostgreSQL client"
 check_dep redis-cli "Redis client"
 check_dep go "Go"
+check_dep helm "Helm CLI"
 
 if [[ ! -d "$RELEASE_ROOT" ]]; then
   echo "[错误] 发布目录不存在：$RELEASE_ROOT" >&2

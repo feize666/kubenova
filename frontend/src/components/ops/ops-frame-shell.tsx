@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
+import { OpsState } from "./ops-state";
 
 export type OpsFrameShellState =
   | "idle"
@@ -63,8 +64,12 @@ export function OpsFrameShell({
         </header>
       ) : null}
       {chips ? <div className="ops-frame-shell__chips">{chips}</div> : null}
-      {warning ? <div className="ops-frame-shell__notice ops-frame-shell__notice--warning">{warning}</div> : null}
-      {error ? <div className="ops-frame-shell__notice ops-frame-shell__notice--error">{error}</div> : null}
+      {warning ? (
+        <OpsState className="ops-frame-shell__notice" compact kind="degraded" title={warning} />
+      ) : null}
+      {error ? (
+        <OpsState className="ops-frame-shell__notice" compact kind="error" title={error} />
+      ) : null}
       <div className={["ops-frame-shell__body", bodyClassName].filter(Boolean).join(" ")}>
         {children}
       </div>

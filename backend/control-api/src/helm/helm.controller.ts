@@ -17,6 +17,7 @@ import type {
   HelmChartQuery,
   HelmListQuery,
   HelmRepositoryCreateRequest,
+  HelmRepositoryImportHostRequest,
   HelmRepositoryImportPresetsRequest,
   HelmRepositoryQuery,
   HelmRepositoryUpdateRequest,
@@ -42,7 +43,7 @@ export class HelmController {
   constructor(private readonly helmService: HelmService) {}
 
   @Get('repository-presets')
-  listRepositoryPresets(): Promise<unknown> {
+  listRepositoryPresets(): unknown {
     return this.helmService.listRepositoryPresets();
   }
 
@@ -59,6 +60,16 @@ export class HelmController {
     const actor = req.user?.user;
     assertWritePermission(actor);
     return this.helmService.importRepositoryPresets(body);
+  }
+
+  @Post('repositories/import-host')
+  importHostRepositories(
+    @Req() req: ActorRequest,
+    @Body() body: HelmRepositoryImportHostRequest,
+  ): Promise<unknown> {
+    const actor = req.user?.user;
+    assertWritePermission(actor);
+    return this.helmService.importHostRepositories(body);
   }
 
   @Post('repositories')

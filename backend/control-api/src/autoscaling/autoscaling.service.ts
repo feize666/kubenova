@@ -231,8 +231,7 @@ export class AutoscalingService {
       if (!current) {
         throw new NotFoundException('HPA 策略不存在');
       }
-      const workloadName =
-        current.spec?.scaleTargetRef?.name ?? identity.name;
+      const workloadName = current.spec?.scaleTargetRef?.name ?? identity.name;
       const config = this.buildHpaConfig(
         {
           minReplicas:
@@ -276,8 +275,7 @@ export class AutoscalingService {
     if (!current) {
       throw new NotFoundException('VPA 策略不存在');
     }
-    const workloadName =
-      current.spec?.targetRef?.name ?? identity.name;
+    const workloadName = current.spec?.targetRef?.name ?? identity.name;
     const config = this.buildVpaConfig(
       {
         updateMode:
@@ -761,7 +759,7 @@ export class AutoscalingService {
         group: VPA_GROUP,
         version: VPA_VERSION,
         namespace: identity.namespace,
-      plural: VPA_PLURAL,
+        plural: VPA_PLURAL,
         name: body.metadata.name,
         body: body as any,
       });
@@ -1090,7 +1088,9 @@ export class AutoscalingService {
     return metrics as HpaPolicyConfig['metrics'];
   }
 
-  private normalizeHpaMetrics(metrics: HpaPolicyConfig['metrics']): K8sObject[] {
+  private normalizeHpaMetrics(
+    metrics: HpaPolicyConfig['metrics'],
+  ): K8sObject[] {
     if (!Array.isArray(metrics)) {
       return [];
     }
@@ -1118,7 +1118,9 @@ export class AutoscalingService {
               target: {
                 type: targetType,
                 averageUtilization:
-                  targetType === 'Utilization' ? Number(targetValue) : undefined,
+                  targetType === 'Utilization'
+                    ? Number(targetValue)
+                    : undefined,
                 averageValue:
                   targetType === 'AverageValue' ? targetValue : undefined,
                 value: targetType === 'Value' ? targetValue : undefined,
@@ -1212,7 +1214,9 @@ export class AutoscalingService {
         const resource = raw.resource as Record<string, unknown> | undefined;
         return this.normalizeSingleHpaMetric({
           sourceType: 'Resource',
-          name: (raw.name as string | undefined) ?? (resource?.name as string | undefined),
+          name:
+            (raw.name as string | undefined) ??
+            (resource?.name as string | undefined),
           targetType: raw.targetType,
           targetValue: raw.targetValue,
         });
@@ -1256,7 +1260,8 @@ export class AutoscalingService {
           ...(selector ? { selector } : {}),
           target: {
             type: targetType,
-            averageValue: targetType === 'AverageValue' ? targetValue : undefined,
+            averageValue:
+              targetType === 'AverageValue' ? targetValue : undefined,
             value: targetType === 'Value' ? targetValue : undefined,
           },
         },
@@ -1626,9 +1631,14 @@ export class AutoscalingService {
     });
   }
 
-  private resolveAutoscalingResourceName(name: string, suffix: '-hpa' | '-vpa'): string {
+  private resolveAutoscalingResourceName(
+    name: string,
+    suffix: '-hpa' | '-vpa',
+  ): string {
     const trimmedName = name.trim();
-    return trimmedName.endsWith(suffix) ? trimmedName : `${trimmedName}${suffix}`;
+    return trimmedName.endsWith(suffix)
+      ? trimmedName
+      : `${trimmedName}${suffix}`;
   }
 
   private getErrorStatusCode(error: unknown): number | undefined {

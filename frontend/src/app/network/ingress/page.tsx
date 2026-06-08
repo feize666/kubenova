@@ -3,10 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
-  Card,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Typography,
@@ -24,6 +22,8 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { OpsModalShell, OpsSurface } from "@/components/ops";
+import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
 import {
@@ -36,7 +36,7 @@ import {
 } from "@/lib/api/network";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
@@ -106,6 +106,10 @@ export default function IngressPage() {
   });
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
+  const [createYaml, setCreateYaml] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [editingItem, setEditingItem] = useState<IngressResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<IngressFormValues>();
@@ -187,6 +191,28 @@ export default function IngressPage() {
     },
     onError: (err) => {
       void message.error(err instanceof Error ? err.message : "创建失败，请重试");
+    },
+  });
+
+  const applyYamlMutation = useMutation({
+    mutationFn: () =>
+      applyResourceYaml(
+        {
+          clusterId: createYamlClusterId.trim(),
+          namespace: createYamlNamespace.trim() || undefined,
+          yaml: createYaml.trim(),
+        },
+        accessToken || undefined,
+      ),
+    onSuccess: async (result) => {
+      void message.success(result.message || "YAML 已应用");
+      setModalOpen(false);
+      setCreateYaml("");
+      await queryClient.invalidateQueries({ queryKey: ["network", "Ingress"] });
+      await refetch();
+    },
+    onError: (err) => {
+      void message.error(err instanceof Error ? err.message : "YAML 创建失败");
     },
   });
 
@@ -275,8 +301,14 @@ export default function IngressPage() {
 
   const handleOpenCreate = () => {
     setEditingItem(null);
+    const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+    const nextNamespace = namespace || "default";
     form.resetFields();
-    form.setFieldsValue({ path: "/" });
+    form.setFieldsValue({ clusterId: nextClusterId, namespace: nextNamespace, path: "/" });
+    setCreateMode("form");
+    setCreateYaml("");
+    setCreateYamlClusterId(nextClusterId);
+    setCreateYamlNamespace(nextNamespace);
     setModalOpen(true);
   };
 
@@ -296,6 +328,18 @@ export default function IngressPage() {
   };
 
   const handleModalSubmit = async () => {
+    if (!editingItem && createMode === "yaml") {
+      if (!createYamlClusterId.trim()) {
+        void message.warning("请选择集群");
+        return;
+      }
+      if (!createYaml.trim()) {
+        void message.warning("请输入或上传 YAML");
+        return;
+      }
+      applyYamlMutation.mutate();
+      return;
+    }
     let values: IngressFormValues;
     try {
       values = await form.validateFields();
@@ -333,6 +377,7 @@ export default function IngressPage() {
     label: c.name,
     value: c.id,
   }));
+  const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
 
   const clusterMap = Object.fromEntries(
     (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
@@ -457,7 +502,7 @@ export default function IngressPage() {
 
   return (
     <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-      <Card className="cyber-panel">
+      <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/network/ingress"
           embedded
@@ -509,6 +554,7 @@ export default function IngressPage() {
         <ResourceTable<IngressResource>
           rowKey="id"
           columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
           tableKey="network.ingress"
           preferencesClient={createTablePreferencesClient(accessToken || undefined)}
           globalSearch={{
@@ -529,23 +575,64 @@ export default function IngressPage() {
           }
           pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
         />
-      </Card>
+      </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title={editingItem ? "编辑 Ingress" : "添加 Ingress"}
+        description="配置 Ingress 域名、路径和后端 Service。"
+        identity={editingItem?.name ?? "Ingress"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
         onCancel={() => {
           setModalOpen(false);
           setEditingItem(null);
+          setCreateYaml("");
           form.resetFields();
         }}
         okText={editingItem ? "保存" : "创建"}
         cancelText="取消"
-        confirmLoading={createMutation.isPending || updateMutation.isPending}
+        confirmLoading={createMutation.isPending || updateMutation.isPending || applyYamlMutation.isPending}
         destroyOnHidden
+        width={720}
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+        {editingItem ? (
+          <Form form={form} layout="vertical">
+            <Form.Item label="入口名称" name="name" rules={[{ required: true, message: "请输入 Ingress 名称" }]}>
+              <Input disabled placeholder="例如：my-ingress" />
+            </Form.Item>
+            <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
+              <Input disabled placeholder="例如：default" />
+            </Form.Item>
+            <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
+              <Select disabled placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} />
+            </Form.Item>
+            <Form.Item label="域名（Host）" name="host" rules={[{ required: true, message: "请输入域名" }]}>
+              <Input placeholder="例如：example.com" />
+            </Form.Item>
+            <Form.Item label="路径（Path）" name="path" rules={[{ required: true, message: "请输入路径" }]} initialValue="/">
+              <Input placeholder="例如：/" />
+            </Form.Item>
+            <Form.Item label="后端服务名称" name="serviceName" rules={[{ required: true, message: "请输入后端服务名称" }]}>
+              <Input placeholder="例如：my-service" />
+            </Form.Item>
+          </Form>
+        ) : (
+          <ResourceCreateMethodTabs
+            mode={createMode}
+            onModeChange={setCreateMode}
+            yaml={createYaml}
+            onYamlChange={setCreateYaml}
+            clusterId={createYamlClusterId}
+            onClusterIdChange={setCreateYamlClusterId}
+            namespace={createYamlNamespace}
+            onNamespaceChange={setCreateYamlNamespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            clusterUnavailable={clusterUnavailable}
+            kindHint="Ingress"
+            disabled={createMutation.isPending || applyYamlMutation.isPending}
+            formContent={(
+              <Form form={form} layout="vertical">
           <Form.Item
             label="入口名称"
             name="name"
@@ -566,10 +653,11 @@ export default function IngressPage() {
             rules={[{ required: true, message: "请选择集群" }]}
           >
             <Select
-              disabled={Boolean(editingItem)}
-              placeholder="请选择集群"
+              placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
               options={clusterOptions}
               loading={clustersQuery.isLoading}
+              disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
+              notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
               showSearch
               filterOption={(input, option) =>
                 (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
@@ -598,8 +686,11 @@ export default function IngressPage() {
           >
             <Input placeholder="例如：my-service" />
           </Form.Item>
-        </Form>
-      </Modal>
+              </Form>
+            )}
+          />
+        )}
+      </OpsModalShell>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
