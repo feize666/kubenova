@@ -960,6 +960,76 @@ function getRelationSummaries(node: Node<TopologyNodeData> | null, model: GraphM
   });
 }
 
+function getTopDensityKinds(model: GraphModel) {
+  const counts = new Map<string, number>();
+  model.entities.forEach((entity) => {
+    if (!["storage", "configuration", "network", "gateway"].includes(entity.source)) return;
+    counts.set(entity.kind, (counts.get(entity.kind) ?? 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 6);
+}
+
+function DensityOverview({ model }: { model: GraphModel }) {
+  const densitySources = (["network", "storage", "configuration", "gateway"] as SourceKey[])
+    .map((source) => {
+      const entities = model.entities.filter((entity) => entity.source === source);
+      return {
+        source,
+        count: entities.length,
+        status: countByStatus(entities),
+      };
+    });
+  const relationRows = (["network", "storage", "config", "gateway"] as GraphRelation["role"][])
+    .map((role) => ({
+      role,
+      count: model.relations.filter((relation) => relation.role === role).length,
+    }));
+  const topKinds = getTopDensityKinds(model);
+  return (
+    <div className="resource-map-density">
+      <div className="resource-map-density__hero">
+        <span>资源密度</span>
+        <strong>{model.entities.length}</strong>
+        <small>{model.relations.length} 条关系 / {model.statusCounts.error + model.statusCounts.warning} 个风险</small>
+      </div>
+      <div className="resource-map-density-grid">
+        {densitySources.map((item) => (
+          <div key={item.source} className="resource-map-density-card" style={{ "--density-color": SOURCE_META[item.source].color } as React.CSSProperties}>
+            <span className="resource-map-density-card__icon">{SOURCE_META[item.source].icon}</span>
+            <div>
+              <strong>{SOURCE_META[item.source].label}</strong>
+              <small>{item.count} 资源</small>
+            </div>
+            <em>{item.status.error ? `${item.status.error} 异常` : item.status.warning ? `${item.status.warning} 告警` : "稳定"}</em>
+          </div>
+        ))}
+      </div>
+      <div className="resource-map-density-panel">
+        <div className="resource-map-section-title">关系分布</div>
+        {relationRows.map((row) => (
+          <div key={row.role} className="resource-map-density-row">
+            <span>{RELATION_ROLE_LABEL[row.role]}</span>
+            <i style={{ "--density-scale": `${Math.min(100, Math.max(4, row.count * 10))}%` } as React.CSSProperties} />
+            <strong>{row.count}</strong>
+          </div>
+        ))}
+      </div>
+      {topKinds.length ? (
+        <div className="resource-map-density-panel">
+          <div className="resource-map-section-title">高频类型</div>
+          <div className="resource-map-kind-strip">
+            {topKinds.map(([kind, count]) => (
+              <span key={kind}>{KIND_LABEL[kind] ?? kind}<strong>{count}</strong></span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function getCopyValue(node: Node<TopologyNodeData>) {
   if (node.data.kind === "Group") return node.data.label;
   return [node.data.namespace, node.data.label].filter(Boolean).join("/");
@@ -1491,7 +1561,19 @@ function DetailRail({
             )}
           </div>
         </>
-      ) : <Empty description="选择节点查看资源详情" />}
+      ) : (
+        <>
+          <div className="resource-map-rail__head">
+            <div className="resource-map-rail__title">
+              <span>Topology / Storage / Config</span>
+              <strong>资源密度摘要</strong>
+            </div>
+          </div>
+          <div className="resource-map-rail__body">
+            <DensityOverview model={model} />
+          </div>
+        </>
+      )}
     </aside>
   );
 }
@@ -1935,6 +2017,25 @@ export default function NetworkTopologyPage() {
         .resource-map-list__item.is-error { border-color: color-mix(in srgb, #fb7185 42%, var(--map-border)); }
         .resource-map-list__item.is-warning { border-color: color-mix(in srgb, #f59e0b 38%, var(--map-border)); }
         .resource-map-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .resource-map-density { display: grid; gap: 12px; }
+        .resource-map-density__hero { display: grid; gap: 4px; border: 1px solid var(--map-border); border-radius: 10px; padding: 14px; background: linear-gradient(180deg, color-mix(in srgb, var(--map-card-bg-soft) 74%, transparent), var(--map-card-bg)); }
+        .resource-map-density__hero span { color: var(--map-muted); font-size: 12px; }
+        .resource-map-density__hero strong { color: var(--map-heading); font-size: 30px; line-height: 1; }
+        .resource-map-density__hero small { color: var(--map-muted); font-size: 12px; line-height: 1.35; }
+        .resource-map-density-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .resource-map-density-card { min-width: 0; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--density-color) 24%, var(--map-border)); border-radius: 9px; padding: 9px; background: color-mix(in srgb, var(--density-color) 7%, var(--map-card-bg)); }
+        .resource-map-density-card__icon { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: var(--density-color); background: color-mix(in srgb, var(--density-color) 12%, transparent); }
+        .resource-map-density-card div { min-width: 0; display: grid; gap: 2px; }
+        .resource-map-density-card strong,
+        .resource-map-density-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .resource-map-density-card strong { color: var(--map-heading); font-size: 13px; }
+        .resource-map-density-card small { color: var(--map-muted); font-size: 11px; }
+        .resource-map-density-card em { grid-column: 1 / -1; color: var(--density-color); font-size: 11px; font-style: normal; font-weight: 700; }
+        .resource-map-density-panel { border: 1px solid var(--map-border); border-radius: 9px; padding: 10px; background: var(--map-card-bg-soft); }
+        .resource-map-density-row { display: grid; grid-template-columns: 58px minmax(0, 1fr) 30px; align-items: center; gap: 8px; min-height: 26px; color: var(--map-muted); font-size: 12px; }
+        .resource-map-density-row i { position: relative; height: 5px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--map-border) 74%, transparent); }
+        .resource-map-density-row i::before { content: ""; position: absolute; inset-block: 0; left: 0; width: var(--density-scale); border-radius: inherit; background: var(--map-edge-network); }
+        .resource-map-density-row strong { color: var(--map-heading); text-align: right; }
         .resource-map-canvas .react-flow__controls { box-shadow: var(--map-shadow); }
         .resource-map-canvas .react-flow__controls-button { background: var(--map-panel-bg); border-color: var(--map-border); color: var(--map-text); }
         .resource-map-canvas .react-flow__background { color: var(--map-dot); }

@@ -574,7 +574,7 @@ export default function PvcPage() {
         titleSuffix={<ResourceAddButton title="创建PVC" onClick={handleOpenCreate} />}
       />
 
-      <OpsSurface variant="panel" padding="sm">
+      <OpsSurface variant="toolbar" padding="sm">
         <ResourceClusterNamespaceFilters
           clusterId={clusterId}
           namespace={namespace}
@@ -584,6 +584,7 @@ export default function PvcPage() {
           knownNamespaces={knownNamespaces}
           namespaceDisabled={namespaceDisabled}
           namespacePlaceholder={namespacePlaceholder}
+          marginBottom={0}
           onClusterChange={(value) => {
             onClusterChange(value);
             resetPage();
@@ -596,21 +597,22 @@ export default function PvcPage() {
           onSearch={handleSearch}
           keywordPlaceholder="按名称/标签搜索（示例：pvc-a app=web env=prod）"
         />
+      </OpsSurface>
 
-        {!isInitializing && !accessToken ? (
-          <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" style={{ marginBottom: 16 }} />
-        ) : null}
+      {!isInitializing && !accessToken ? (
+        <Alert type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+      ) : null}
 
-        {isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="持久卷声明加载失败"
-            description={error instanceof Error ? error.message : "请求失败"}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
+      {isError ? (
+        <Alert
+          type="error"
+          showIcon
+          title="持久卷声明加载失败"
+          description={error instanceof Error ? error.message : "请求失败"}
+        />
+      ) : null}
 
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<StorageResource>
           rowKey="id"
           columns={columns}
@@ -629,6 +631,7 @@ export default function PvcPage() {
           }}
           sort={{ sortBy, sortOrder }}
           dataSource={tableData}
+          bordered={false}
           layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 }, actionWidth: 110 }}
           loading={isLoading && !data}
           onChange={(nextPagination, filters, sorter, extra) =>

@@ -3,7 +3,16 @@
 import { Table, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType, ColumnType } from "antd/es/table";
-import { isValidElement, useCallback, useMemo, useState, type Key, type ReactNode } from "react";
+import {
+  Children,
+  isValidElement,
+  useCallback,
+  useMemo,
+  useState,
+  type Key,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import {
   getStandardResourceTableScrollX,
   normalizeResourceTableColumns,
@@ -109,6 +118,12 @@ function getColumnIdentity<T extends object>(column: ColumnsType<T>[number]): st
   return "";
 }
 
+function getColumnTitleIdentity<T extends object>(column: ColumnsType<T>[number]): string {
+  if (!column || typeof column !== "object") return "";
+  const title = "title" in column ? column.title : undefined;
+  return typeof title === "string" || typeof title === "number" ? String(title) : "";
+}
+
 function normalizeNavigationColumnKey(columnKey: string): string {
   const normalized = columnKey.trim().toLowerCase().replace(/[\s_-]+/g, "");
   const aliases: Record<string, string> = {
@@ -148,6 +163,15 @@ function getCellValueFromColumn<T extends object>(column: ColumnType<T>, record:
     }, record);
   }
   return undefined;
+}
+
+function getNavigationCellValue<T extends object>(navigationKey: string, record: T, rawValue: unknown): unknown {
+  if (shouldLinkValue(rawValue)) return rawValue;
+  if (navigationKey === "cluster") return getRecordString(record, ["clusterId", "cluster", "clusterName"]);
+  if (navigationKey === "namespace") return getRecordString(record, ["namespace", "namespaceName"]);
+  if (navigationKey === "node") return getRecordString(record, ["nodeName", "node"]);
+  if (navigationKey === "name") return getRecordString(record, ["name", "resourceName"]);
+  return rawValue;
 }
 
 function shouldLinkValue(value: unknown): boolean {
@@ -263,13 +287,32 @@ function renderNavigableCell(input: {
   );
 }
 
-function isInteractiveResourceCell(content: ReactNode): boolean {
+function isRenderedCellLike(content: unknown): content is { children?: ReactNode } {
+  return Boolean(content && typeof content === "object" && !isValidElement(content) && "children" in content);
+}
+
+function isInteractiveResourceCell(content: ReactNode, depth = 0): boolean {
+  if (depth > 8 || content == null || typeof content === "boolean") return false;
+  if (Array.isArray(content)) {
+    return content.some((child) => isInteractiveResourceCell(child, depth + 1));
+  }
+  if (isRenderedCellLike(content)) {
+    return isInteractiveResourceCell(content.children, depth + 1);
+  }
   if (!isValidElement(content)) return false;
-  const props = content.props as { onClick?: unknown; className?: unknown };
+  const props = content.props as { children?: ReactNode; href?: unknown; onClick?: unknown; className?: unknown; role?: unknown };
   return (
+    typeof props.href === "string" ||
     typeof props.onClick === "function" ||
-    (typeof props.className === "string" && props.className.includes("resource-table-resource-link"))
+    props.role === "button" ||
+    (typeof props.className === "string" && props.className.includes("resource-table-resource-link")) ||
+    Children.toArray(props.children).some((child) => isInteractiveResourceCell(child, depth + 1))
   );
+}
+
+function isInteractiveEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("a,button,input,textarea,select,[role='button'],[role='menuitem'],[data-resource-table-stop-navigation='true']"));
 }
 
 function enhanceResourceNavigationColumns<T extends object>(
@@ -287,25 +330,29 @@ function enhanceResourceNavigationColumns<T extends object>(
     }
 
     const columnKey = getColumnIdentity(column);
-    const navigationColumnKey = normalizeNavigationColumnKey(columnKey);
+    const titleKey = getColumnTitleIdentity(column);
+    const navigationColumnKey = normalizeNavigationColumnKey(columnKey) || normalizeNavigationColumnKey(titleKey);
     if (!navigationColumnKey) {
       return column;
     }
 
     const baseColumn = column as ColumnType<T>;
     const previousRender = baseColumn.render;
+    const previousOnCell = baseColumn.onCell;
+    const navigationIdentity = columnKey || titleKey;
     return {
       ...baseColumn,
       render: (value: unknown, record: T, index: number) => {
         const rawValue = value ?? getCellValueFromColumn(baseColumn, record);
+        const navigationValue = getNavigationCellValue(navigationColumnKey, record, rawValue);
         const content = previousRender
           ? previousRender(value as never, record, index)
-          : toStringCellValue(rawValue) || "—";
-        if (navigationColumnKey === "name" && previousRender && isInteractiveResourceCell(content as ReactNode)) {
+          : toStringCellValue(navigationValue) || "—";
+        if (previousRender && isInteractiveResourceCell(content as ReactNode)) {
           return content;
         }
-        const request = buildColumnNavigationRequest(columnKey, record, rawValue);
-        const linkValue = rawValue ?? request?.label ?? request?.name ?? request?.id;
+        const request = buildColumnNavigationRequest(navigationIdentity, record, navigationValue);
+        const linkValue = navigationValue ?? request?.label ?? request?.name ?? request?.id;
         return renderNavigableCell({
           children: content as ReactNode,
           disabled: !request || !shouldLinkValue(linkValue),
@@ -313,6 +360,25 @@ function enhanceResourceNavigationColumns<T extends object>(
             if (request) onResourceNavigate(request);
           },
         });
+      },
+      onCell: (record: T, index?: number) => {
+        const previousCellProps = previousOnCell?.(record, index) ?? {};
+        const rawValue = getCellValueFromColumn(baseColumn, record);
+        const navigationValue = getNavigationCellValue(navigationColumnKey, record, rawValue);
+        const request = buildColumnNavigationRequest(navigationIdentity, record, navigationValue);
+        if (!request || !shouldLinkValue(navigationValue ?? request.label ?? request.name ?? request.id)) {
+          return previousCellProps;
+        }
+        const previousClick = previousCellProps?.onClick;
+        return {
+          ...previousCellProps,
+          className: [previousCellProps?.className, "resource-table-navigable-cell"].filter(Boolean).join(" "),
+          onClick: (event: ReactMouseEvent<HTMLElement>) => {
+            previousClick?.(event);
+            if (event.defaultPrevented || isInteractiveEventTarget(event.target)) return;
+            onResourceNavigate(request);
+          },
+        };
       },
     };
   });
