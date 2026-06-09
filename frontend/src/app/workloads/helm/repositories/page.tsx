@@ -750,8 +750,6 @@ export default function HelmRepositoriesPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/workloads/helm/repositories"
-        embedded
-        style={{ marginBottom: 12 }}
         description="管理 Helm 仓库、同步状态与模板导入。"
         titleSuffix={
           <ResourceAddButton
@@ -776,38 +774,38 @@ export default function HelmRepositoriesPage() {
         }
       />
 
+      <OpsSurface variant="toolbar" padding="sm">
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          clusterOptions={repositoryClusterOptions}
+          namespaceVisible={false}
+          onApply={({ clusterId: nextClusterId }) => {
+            setClusterId(nextClusterId);
+            resetPage();
+          }}
+        />
+      </OpsSurface>
+
+      {!isInitializing && !accessToken ? (
+        <Alert
+          className="workload-resource-state-alert"
+          type="warning"
+          showIcon
+          title="未检测到登录状态，请先登录后再操作。"
+        />
+      ) : null}
+
+      {repositoriesQuery.isError ? (
+        <Alert
+          className="workload-resource-state-alert"
+          type="error"
+          showIcon
+          title="Helm 仓库列表加载失败"
+          description={repositoriesQuery.error instanceof Error ? repositoriesQuery.error.message : "请求失败"}
+        />
+      ) : null}
+
       <OpsSurface variant="panel" padding="sm">
-        <div style={{ marginBottom: 12 }}>
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            clusterOptions={repositoryClusterOptions}
-            namespaceVisible={false}
-            onApply={({ clusterId: nextClusterId }) => {
-              setClusterId(nextClusterId);
-              resetPage();
-            }}
-          />
-        </div>
-
-        {!isInitializing && !accessToken ? (
-          <Alert
-            type="warning"
-            showIcon
-            message="未检测到登录状态，请先登录后再操作。"
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
-
-        {repositoriesQuery.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="Helm 仓库列表加载失败"
-            description={repositoriesQuery.error instanceof Error ? repositoriesQuery.error.message : "请求失败"}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
-
         <ResourceTable<HelmRepositoryItem>
           bordered
           rowKey={(row) => `${row.clusterId}/${row.name}`}
@@ -1127,9 +1125,10 @@ export default function HelmRepositoriesPage() {
           </Space>
           {presetsQuery.isError ? (
             <Alert
+              className="workload-resource-state-alert"
               type="error"
               showIcon
-              message="模板仓库列表加载失败"
+              title="模板仓库列表加载失败"
               description={presetsQuery.error instanceof Error ? presetsQuery.error.message : "请求失败"}
             />
           ) : null}

@@ -17,7 +17,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Button,
-  Card,
   Col,
   Descriptions,
   Form,
@@ -908,34 +907,34 @@ export default function ClustersPage() {
 
       <Row gutter={[12, 12]}>
         <Col xs={24} md={6} xl={4}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="集群总数" value={healthStats.total} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6} xl={4}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="运行中" value={healthStats.running} styles={{ content: { color: "#389e0d" } }} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6} xl={4}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="离线" value={healthStats.offline} styles={{ content: { color: "#cf1322" } }} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6} xl={4}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="探测中" value={healthStats.checking} styles={{ content: { color: "#1677ff" } }} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6} xl={4}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="离线模式" value={healthStats["offline-mode"]} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6} xl={4}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="已停用" value={healthStats.disabled} />
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
@@ -955,19 +954,20 @@ export default function ClustersPage() {
       </OpsSurface>
 
       {!isInitializing && !accessToken ? (
-        <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再查看集群信息。" />
+        <Alert className="cluster-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看集群信息。" />
       ) : null}
 
       {query.isError ? (
         <Alert
+          className="cluster-resource-state-alert"
           type="error"
           showIcon
-          message="加载失败"
+          title="加载失败"
           description={query.error instanceof Error ? query.error.message : "获取集群数据时发生错误"}
         />
       ) : null}
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<ClusterTableRecord>
           rowKey="key"
           tableKey={CLUSTERS_TABLE_KEY}
@@ -991,7 +991,7 @@ export default function ClustersPage() {
           pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, isTableBusy)}
           emptyDescription="暂无符合条件的集群数据"
         />
-      </Card>
+      </OpsSurface>
 
       <ClusterDetailDrawer
         open={detailOpen}
@@ -1024,9 +1024,10 @@ export default function ClustersPage() {
         {healthDetailQuery.isLoading ? <Typography.Text>加载中...</Typography.Text> : null}
         {healthDetailQuery.isError ? (
           <Alert
+            className="cluster-resource-state-alert"
             type="error"
             showIcon
-            message="健康详情加载失败"
+            title="健康详情加载失败"
             description={
               healthDetailQuery.error instanceof Error ? healthDetailQuery.error.message : "请求失败，请稍后重试"
             }
@@ -1052,7 +1053,7 @@ export default function ClustersPage() {
                 {healthDetailQuery.data.detail.failureCount ?? "-"}
               </Descriptions.Item>
             </Descriptions>
-            <Card size="small" title="诊断详情">
+            <OpsSurface variant="raised" padding="sm" title="诊断详情">
               <Typography.Paragraph
                 style={{
                   marginBottom: 0,
@@ -1064,7 +1065,7 @@ export default function ClustersPage() {
               >
                 {JSON.stringify(healthDetailQuery.data.detail.payload ?? {}, null, 2)}
               </Typography.Paragraph>
-            </Card>
+            </OpsSurface>
           </Space>
         ) : null}
       </OpsDrawerShell>

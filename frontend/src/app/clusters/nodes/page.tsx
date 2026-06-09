@@ -320,12 +320,7 @@ export default function ClusterNodesPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
-        <ResourcePageHeader
-          path="/clusters/nodes"
-          embedded
-          style={{ marginBottom: 12 }}
-        />
-
+        <ResourcePageHeader path="/clusters/nodes" embedded style={{ marginBottom: 12 }} />
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
           <ResourceFilterToolbar>
             <ResourceFilterToolbarItem width="auto">
@@ -344,11 +339,12 @@ export default function ClusterNodesPage() {
           </ResourceFilterToolbar>
 
           {!isInitializing && !accessToken ? (
-            <Alert type="warning" showIcon title="未检测到登录状态，请先登录后再查看工作节点。" />
+            <Alert className="cluster-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看工作节点。" />
           ) : null}
 
           {!clustersQuery.isLoading && clusterOptions.length === 0 ? (
             <Alert
+              className="cluster-resource-state-alert"
               type="info"
               showIcon
               title="暂无可读集群"
@@ -358,6 +354,7 @@ export default function ClusterNodesPage() {
 
           {nodesQuery.data?.degraded ? (
             <Alert
+              className="cluster-resource-state-alert"
               type="warning"
               showIcon
               title="节点数据处于降级状态"
@@ -367,6 +364,7 @@ export default function ClusterNodesPage() {
 
           {nodesQuery.isError ? (
             <Alert
+              className="cluster-resource-state-alert"
               type="error"
               showIcon
               title="工作节点加载失败"

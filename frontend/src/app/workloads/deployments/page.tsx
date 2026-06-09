@@ -865,17 +865,21 @@ export default function DeploymentsPage() {
               resetPage();
             }}
           />
-          {!isInitializing && !accessToken ? <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" /> : null}
+          {!isInitializing && !accessToken ? (
+            <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+          ) : null}
           {query.isError ? (
             <Alert
+              className="workload-resource-state-alert"
               type="error"
               showIcon
-              message="Deployments 加载失败"
+              title="Deployments 加载失败"
               description={query.error instanceof Error ? query.error.message : "请求失败"}
             />
           ) : null}
           {scaleConvergence ? (
             <Alert
+              className="workload-resource-state-alert"
               type={
                 scaleConvergence.round.status === "stable"
                   ? "success"
@@ -886,7 +890,7 @@ export default function DeploymentsPage() {
               showIcon
               closable
               onClose={() => setScaleConvergence(null)}
-              message={
+              title={
                 scaleConvergence.round.status === "accepted"
                   ? `${scaleConvergence.workloadName} 扩缩容请求已受理`
                   : scaleConvergence.round.status === "converging"
@@ -902,6 +906,7 @@ export default function DeploymentsPage() {
               }
             />
           ) : null}
+
           <ResourceTable<DeploymentRow>
             bordered
             rowKey="key"

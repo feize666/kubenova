@@ -675,68 +675,67 @@ export default function DaemonSetsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsSurface variant="panel" padding="sm">
-        <ResourcePageHeader
-          path="/workloads/daemonsets"
-          embedded
-          style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=DaemonSet")} aria-label="创建DaemonSet" />}
+      <ResourcePageHeader
+        path="/workloads/daemonsets"
+        titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=DaemonSet")} aria-label="创建DaemonSet" />}
+      />
+
+      <OpsSurface variant="toolbar" padding="sm">
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          namespace={namespace}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+            onScopeChange(nextClusterId, nextNamespace);
+            resetPage();
+          }}
         />
+      </OpsSurface>
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            namespace={namespace}
-            clusterOptions={clusterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-              onScopeChange(nextClusterId, nextNamespace);
-              resetPage();
-            }}
-          />
+      {!isInitializing && !accessToken ? (
+        <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+      ) : null}
 
-          {!isInitializing && !accessToken ? (
-            <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" />
-          ) : null}
+      {isError ? (
+        <Alert
+          className="workload-resource-state-alert"
+          type="error"
+          showIcon
+          title="守护进程集加载失败"
+          description={error instanceof Error ? error.message : "请求失败"}
+        />
+      ) : null}
 
-          {isError ? (
-            <Alert
-              type="error"
-              showIcon
-              message="守护进程集加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
-
-          <ResourceTable<WorkloadListItem>
-            bordered
-            rowKey="id"
-            tableKey="workloads.daemonsets"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            dataSource={filteredTableData}
-            loading={(isLoading && !data) || actionMutation.isPending}
-            onChange={(paginationInfo, filters, sorter, extra) =>
-              handleTableChange(paginationInfo, filters, sorter, extra, (isLoading && !data) || actionMutation.isPending)
-            }
-            pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
-          />
-        </Space>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourceTable<WorkloadListItem>
+          bordered
+          rowKey="id"
+          tableKey="workloads.daemonsets"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
+          columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
+          dataSource={filteredTableData}
+          loading={(isLoading && !data) || actionMutation.isPending}
+          onChange={(paginationInfo, filters, sorter, extra) =>
+            handleTableChange(paginationInfo, filters, sorter, extra, (isLoading && !data) || actionMutation.isPending)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
+        />
       </OpsSurface>
 
       <Modal
@@ -803,7 +802,7 @@ export default function DaemonSetsPage() {
               </Typography.Text>
               <Form.List name={["scheduling", "nodeSelector"]}>
                 {(fields, { add, remove }) => (
-                  <div style={{ padding: 12, border: "1px solid rgba(59,130,246,0.12)", borderRadius: 8, marginBottom: 12 }}>
+                  <div className="workload-form-subsection">
                     <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
                       Node Selector
                     </Typography.Text>
@@ -835,7 +834,7 @@ export default function DaemonSetsPage() {
 
               <Form.List name={["scheduling", "tolerations"]}>
                 {(fields, { add, remove }) => (
-                  <div style={{ padding: 12, border: "1px solid rgba(59,130,246,0.12)", borderRadius: 8, marginBottom: 12 }}>
+                  <div className="workload-form-subsection">
                     <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
                       Tolerations
                     </Typography.Text>
@@ -892,7 +891,7 @@ export default function DaemonSetsPage() {
                 )}
               </Form.List>
 
-              <div style={{ padding: 12, border: "1px solid rgba(59,130,246,0.12)", borderRadius: 8, marginBottom: 12 }}>
+              <div className="workload-form-subsection">
                 <Form.Item name={["scheduling", "podAntiAffinityEnabled"]} valuePropName="checked" style={{ marginBottom: 8 }}>
                   <Switch checkedChildren="启用 Pod 反亲和性" unCheckedChildren="关闭 Pod 反亲和性" />
                 </Form.Item>
@@ -931,7 +930,7 @@ export default function DaemonSetsPage() {
               {(["liveness", "readiness", "startup"] as const).map((probeKey) => (
                 <div
                   key={probeKey}
-                  style={{ padding: 12, border: "1px solid rgba(59,130,246,0.12)", borderRadius: 8, marginBottom: 12 }}
+                  className="workload-form-subsection"
                 >
                   <Row gutter={8} align="middle" style={{ marginBottom: 8 }}>
                     <Col flex="auto">

@@ -510,15 +510,14 @@ export default function IngressRoutePage() {
   ];
 
   return (
-    <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-      <OpsSurface variant="panel" padding="sm">
-        <ResourcePageHeader
-          path="/network/ingressroute"
-          embedded
-          description="管理 Traefik IngressRoute 入口规则、匹配表达式与中间件。"
-          style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建IngressRoute" onClick={handleOpenCreate} />}
-        />
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      <ResourcePageHeader
+        path="/network/ingressroute"
+        description="管理 Traefik IngressRoute 入口规则、匹配表达式与中间件。"
+        titleSuffix={<ResourceAddButton title="创建IngressRoute" onClick={handleOpenCreate} />}
+      />
+
+      <OpsSurface variant="toolbar" padding="sm">
         <NetworkResourcePageFilters
           clusterId={clusterId}
           namespace={namespace}
@@ -539,22 +538,25 @@ export default function IngressRoutePage() {
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
           keywordPlaceholder="按名称/标签搜索（示例：ir-a app=web env=prod）"
+          marginBottom={0}
         />
+      </OpsSurface>
 
-        {!isInitializing && !accessToken ? (
-          <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" style={{ marginBottom: 16 }} />
-        ) : null}
+      {!isInitializing && !accessToken ? (
+        <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+      ) : null}
 
-        {isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="IngressRoute 加载失败"
-            description={error instanceof Error ? error.message : "请求失败"}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
+      {isError ? (
+        <Alert
+          className="network-resource-state-alert"
+          type="error"
+          showIcon
+          title="IngressRoute 加载失败"
+          description={error instanceof Error ? error.message : "请求失败"}
+        />
+      ) : null}
 
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<IngressRouteResource>
           rowKey="id"
           columns={columns}

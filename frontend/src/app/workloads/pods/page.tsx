@@ -889,7 +889,7 @@ export default function PodsPage() {
   );
 
   return (
-    <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path={POD_PATH}
@@ -916,14 +916,15 @@ export default function PodsPage() {
           />
 
           {!isInitializing && !accessToken ? (
-            <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再查看 Pod 信息。" />
+            <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看 Pod 信息。" />
           ) : null}
 
           {podsQuery.isError ? (
             <Alert
+              className="workload-resource-state-alert"
               type="error"
               showIcon
-              message="加载失败"
+              title="加载失败"
               description={
                 podsQuery.error instanceof Error ? podsQuery.error.message : "获取 Pod 数据时发生错误"
               }

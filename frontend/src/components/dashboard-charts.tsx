@@ -688,8 +688,8 @@ export function DashboardChartsV2({ stats }: { stats?: DashboardStats }) {
               {liveSnapshot ? (
                 <Row gutter={[12, 12]}>
                   <Col xs={24} md={12}>
-                    <div style={{ padding: 12, border: `1px solid ${t.innerBorder}`, borderRadius: 6 }}>
-                      <div style={{ fontSize: 11, color: t.titleColor, marginBottom: 8 }}>CPU</div>
+                    <div className="dashboard-live-metric-tile">
+                      <div className="dashboard-live-metric-tile__title">CPU</div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <MetricRingVisual
                         value={MetricUnitFormatter({ kind: "cpu", value: liveSnapshot.cpuUsage })}
@@ -705,8 +705,8 @@ export function DashboardChartsV2({ stats }: { stats?: DashboardStats }) {
                     </div>
                   </Col>
                   <Col xs={24} md={12}>
-                    <div style={{ padding: 12, border: `1px solid ${t.innerBorder}`, borderRadius: 6 }}>
-                      <div style={{ fontSize: 11, color: t.titleColor, marginBottom: 8 }}>Memory</div>
+                    <div className="dashboard-live-metric-tile">
+                      <div className="dashboard-live-metric-tile__title">Memory</div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                       <MetricRingVisual
                         value={MetricUnitFormatter({ kind: "memory", value: liveSnapshot.memoryUsage })}

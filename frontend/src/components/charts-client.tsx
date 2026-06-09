@@ -1,12 +1,12 @@
 "use client";
 
 import { InfoCircleOutlined } from "@ant-design/icons";
-import { Card, Col, Empty, Row, Segmented, Space, Timeline, Tooltip, theme } from "antd";
+import { Col, Empty, Row, Segmented, Space, Timeline, Tooltip, theme } from "antd";
 import type { EChartsOption } from "echarts";
 import * as echarts from "echarts/core";
 import { useMemo, useState } from "react";
 import ECharts from "@/components/echarts";
-import { OpsFilterChip } from "@/components/ops";
+import { OpsFilterChip, OpsSurface } from "@/components/ops";
 import { useThemeMode } from "@/components/theme-context";
 import type { DashboardStats } from "@/lib/api/dashboard";
 
@@ -490,7 +490,6 @@ function ActivityTimeline({ isDark }: { isDark: boolean }) {
 export function DashboardCharts({ stats }: { stats?: DashboardStats }) {
   const { mode } = useThemeMode();
   const isDark = mode === "dark";
-  const { token } = theme.useToken();
   const [healthMetric, setHealthMetric] = useState<"综合健康" | "服务可用性" | "变更风险">("综合健康");
 
   // 健康评分仪表盘
@@ -566,52 +565,44 @@ export function DashboardCharts({ stats }: { stats?: DashboardStats }) {
     animationDuration: 600,
   }), [healthScore, isDark, healthMetric, gaugeColor, gaugeGradStart, gaugeGradEnd]);
 
-  const cardBg = isDark
-    ? { background: "#111827", border: "1px solid rgba(59,130,246,0.12)" }
-    : { background: "#fff", border: "1px solid rgba(59,130,246,0.15)" };
-
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       {/* 中部：趋势图 + 集群健康 */}
       <Row gutter={[16, 16]}>
         {/* CPU/内存趋势 */}
         <Col xs={24} xl={14}>
-          <Card
-            className="cyber-panel"
-            title={
-              <span style={{ color: token.colorText, fontWeight: 600 }}>
-                CPU / 内存趋势
-              </span>
-            }
-            extra={
+          <OpsSurface
+            className="observability-chart-panel"
+            variant="panel"
+            padding="sm"
+            title="CPU / 内存趋势"
+            actions={
               <OpsFilterChip tone="info" style={{ fontSize: 11 }}>
                 最近 24h
               </OpsFilterChip>
             }
-            styles={{ body: { paddingTop: 8 } }}
           >
             <TrendChart isDark={isDark} />
-          </Card>
+          </OpsSurface>
         </Col>
 
         {/* 集群健康 — 三色大数字 */}
         <Col xs={24} xl={10}>
-          <Card
-            className="cyber-panel"
-            title={
+          <OpsSurface
+            className="observability-chart-panel"
+            variant="panel"
+            padding="sm"
+            title="集群健康"
+            actions={
               <Space>
-                <span style={{ color: token.colorText, fontWeight: 600 }}>
-                  集群健康
-                </span>
                 <Tooltip title="健康=正常运行，告警=有告警但未中断，故障=无法访问">
                   <InfoCircleOutlined style={{ color: "#64748b", fontSize: 13 }} />
                 </Tooltip>
               </Space>
             }
-            styles={{ body: { paddingTop: 8 } }}
           >
             <ClusterHealthNumbers isDark={isDark} stats={stats} />
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
@@ -619,72 +610,57 @@ export function DashboardCharts({ stats }: { stats?: DashboardStats }) {
       <Row gutter={[16, 16]}>
         {/* 告警分布 — 横向 Progress bar */}
         <Col xs={24} xl={10}>
-          <Card
-            className="cyber-panel"
-            title={
-              <span style={{ color: token.colorText, fontWeight: 600 }}>
-                告警分布
-              </span>
-            }
-            extra={
+          <OpsSurface
+            className="observability-chart-panel"
+            variant="panel"
+            padding="sm"
+            title="告警分布"
+            actions={
               <OpsFilterChip tone="warning" style={{ fontSize: 11 }}>
                 最近 7 天
               </OpsFilterChip>
             }
-            styles={{ body: { paddingTop: 12 } }}
           >
             <AlertProgressList isDark={isDark} />
-          </Card>
+          </OpsSurface>
         </Col>
 
         {/* 近期活动 — Timeline */}
         <Col xs={24} xl={14}>
-          <Card
-            className="cyber-panel"
-            title={
-              <span style={{ color: token.colorText, fontWeight: 600 }}>
-                近期活动
-              </span>
-            }
-            extra={
+          <OpsSurface
+            className="observability-chart-panel observability-chart-panel--scroll"
+            variant="panel"
+            padding="sm"
+            title="近期活动"
+            actions={
               <span style={{ fontSize: 11, color: "#64748b" }}>
                 最新 {ACTIVITY_ITEMS.length} 条
               </span>
             }
-            styles={{
-              body: {
-                maxHeight: 340,
-                overflowY: "auto",
-                paddingTop: 16,
-                scrollbarWidth: "thin",
-              },
-            }}
           >
             <ActivityTimeline isDark={isDark} />
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
       {/* 集群健康评分仪表盘 */}
-      <Card
-        className="cyber-panel"
-        title={
-          <Space>
-            <span style={{ color: token.colorText, fontWeight: 600 }}>
-              集群健康评分
-            </span>
+      <OpsSurface
+        className="observability-chart-panel"
+        variant="panel"
+        padding="sm"
+        title="集群健康评分"
+        actions={
+          <Space size={8} wrap>
             <Tooltip title="综合资源利用率、可用性、告警密度与近期变更风险计算">
               <InfoCircleOutlined style={{ color: "#64748b", fontSize: 13 }} />
             </Tooltip>
+            <Segmented
+              size="small"
+              value={healthMetric}
+              options={["综合健康", "服务可用性", "变更风险"]}
+              onChange={(v) => setHealthMetric(v as typeof healthMetric)}
+            />
           </Space>
-        }
-        extra={
-          <Segmented
-            size="small"
-            value={healthMetric}
-            options={["综合健康", "服务可用性", "变更风险"]}
-            onChange={(v) => setHealthMetric(v as typeof healthMetric)}
-          />
         }
       >
         <Row gutter={[16, 0]} align="middle">
@@ -694,76 +670,43 @@ export function DashboardCharts({ stats }: { stats?: DashboardStats }) {
           <Col xs={24} md={16}>
             <Row gutter={[12, 12]}>
               {[
-                { label: "在线节点", value: "42", unit: "个", color: "#3b82f6", glow: "rgba(59,130,246,0.4)" },
-                { label: "运行 Pod", value: "1,286", unit: "个", color: "#10b981", glow: "rgba(16,185,129,0.4)" },
-                { label: "高优告警", value: stats?.alerts.critical?.toString() ?? "0", unit: "条", color: "#ef4444", glow: "rgba(239,68,68,0.4)" },
-                { label: "SLA 达成", value: "99.94", unit: "%", color: "#a855f7", glow: "rgba(168,85,247,0.4)" },
-              ].map(({ label, value, unit, color, glow }) => (
+                { label: "在线节点", value: "42", unit: "个", color: "#3b82f6" },
+                { label: "运行 Pod", value: "1,286", unit: "个", color: "#10b981" },
+                { label: "高优告警", value: stats?.alerts.critical?.toString() ?? "0", unit: "条", color: "#ef4444" },
+                { label: "SLA 达成", value: "99.94", unit: "%", color: "#6d28d9" },
+              ].map(({ label, value, unit, color }) => (
                 <Col xs={12} key={label}>
                   <div
-                    style={{
-                      ...cardBg,
-                      borderRadius: 10,
-                      padding: "12px 14px",
-                      position: "relative",
-                      overflow: "hidden",
-                    }}
+                    className="observability-score-card"
+                    style={{ ["--observability-score-color" as string]: color }}
                   >
-                    {/* 顶部色条 */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: 2,
-                        background: `linear-gradient(90deg, transparent, ${color}${isDark ? "aa" : "66"}, transparent)`,
-                      }}
-                    />
-                    <div style={{ fontSize: 11, color: token.colorTextTertiary, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    <div className="observability-score-card__label">
                       {label}
                     </div>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
-                      <span
-                        style={{
-                          fontSize: 24,
-                          fontWeight: 800,
-                          color,
-                          fontVariantNumeric: "tabular-nums",
-                          filter: isDark ? `drop-shadow(0 0 8px ${glow})` : "none",
-                        }}
-                      >
-                        {value}
-                      </span>
-                      <span style={{ fontSize: 12, color: token.colorTextSecondary }}>{unit}</span>
+                    <div className="observability-score-card__value-row">
+                      <span className="observability-score-card__value">{value}</span>
+                      <span className="observability-score-card__unit">{unit}</span>
                     </div>
                   </div>
                 </Col>
               ))}
             </Row>
             {/* 稳定性进度条 */}
-            <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, ...cardBg }}>
-              <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 8 }}>当前稳定性</div>
-              <div style={{ position: "relative", height: 8, borderRadius: 4, background: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.06)", overflow: "hidden" }}>
+            <div className="observability-stability-card">
+              <div className="observability-stability-card__label">当前稳定性</div>
+              <div className="observability-stability-card__track">
                 <div
                   style={{
-                    position: "absolute",
-                    left: 0,
-                    top: 0,
-                    height: "100%",
                     width: `${healthScore}%`,
-                    borderRadius: 4,
                     background: healthScore >= 80
                       ? `linear-gradient(90deg, ${gaugeGradStart}, ${gaugeGradEnd})`
                       : healthScore >= 60
                       ? "linear-gradient(90deg, #f59e0b, #fcd34d)"
                       : "linear-gradient(90deg, #ef4444, #f87171)",
-                    boxShadow: `0 0 10px ${gaugeColor}60`,
-                    transition: "width 0.6s ease",
                   }}
                 />
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, fontSize: 11, color: token.colorTextTertiary }}>
+              <div className="observability-stability-card__scale">
                 <span>0</span>
                 <span style={{ fontWeight: 700, color: gaugeColor }}>{healthScore} / 100</span>
                 <span>100</span>
@@ -771,7 +714,7 @@ export function DashboardCharts({ stats }: { stats?: DashboardStats }) {
             </div>
           </Col>
         </Row>
-      </Card>
+      </OpsSurface>
     </Space>
   );
 }

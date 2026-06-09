@@ -5,7 +5,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Alert,
   Button,
-  Card,
   Col,
   DatePicker,
   Descriptions,
@@ -714,33 +713,34 @@ export default function InspectionPage() {
         </ResourceFilterToolbar>
       </OpsSurface>
 
-      {!enabled ? <Alert type="warning" showIcon message="请先登录后再执行资源巡检。" /> : null}
+      {!enabled ? <Alert className="inspection-resource-state-alert" type="warning" showIcon title="请先登录后再执行资源巡检。" /> : null}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} md={6}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="巡检评分" value={reportQuery.data?.summary.score ?? 0} suffix="/ 100" />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="资源总数" value={reportQuery.data?.summary.totalResources ?? 0} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="严重问题" value={reportQuery.data?.summary.critical ?? 0} styles={{ content: { color: "#cf1322" } }} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={24} md={6}>
-          <Card>
+          <OpsSurface variant="panel" padding="sm">
             <Statistic title="警告问题" value={reportQuery.data?.summary.warning ?? 0} styles={{ content: { color: "#d48806" } }} />
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
       {capabilityQuery.isError ? (
         <Alert
+          className="inspection-resource-state-alert"
           type="warning"
           showIcon
           title="能力基线矩阵加载失败"
@@ -750,6 +750,7 @@ export default function InspectionPage() {
 
       {capabilityQuery.data?.integrityIssues.length ? (
         <Alert
+          className="inspection-resource-state-alert"
           type="warning"
           showIcon
           title="能力基线存在数据完整性问题"
@@ -807,6 +808,7 @@ export default function InspectionPage() {
 
       {reportQuery.isError ? (
         <Alert
+          className="inspection-resource-state-alert"
           type="error"
           showIcon
           title="巡检失败"
@@ -883,7 +885,7 @@ export default function InspectionPage() {
       >
         {activeResult ? (
           <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-            <Alert type={activeResult.success ? "success" : "error"} showIcon message={activeResult.message} />
+            <Alert className="inspection-resource-state-alert" type={activeResult.success ? "success" : "error"} showIcon title={activeResult.message} />
             <Descriptions size="small" bordered column={1}>
               <Descriptions.Item label="问题编号">{activeResult.issueId}</Descriptions.Item>
               <Descriptions.Item label="处理方式">{inspectionActionLabel(activeResult.action)}</Descriptions.Item>
@@ -893,11 +895,11 @@ export default function InspectionPage() {
                   : "-"}
               </Descriptions.Item>
             </Descriptions>
-            <Card size="small" title="生成结果">
+            <OpsSurface variant="raised" padding="sm" title="生成结果">
               <pre style={{ margin: 0, overflowX: "auto", whiteSpace: "pre-wrap" }}>
                 {activeResult.generatedYaml || "(无返回内容)"}
               </pre>
-            </Card>
+            </OpsSurface>
           </Space>
         ) : null}
       </OpsModalShell>

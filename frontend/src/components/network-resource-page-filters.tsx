@@ -23,6 +23,7 @@ type NetworkResourcePageFiltersProps = {
   onSearch: () => void;
   extraFilters?: ReactNode;
   keywordPlaceholder?: string;
+  marginBottom?: number;
   showKeywordSearch?: boolean;
 };
 
@@ -44,6 +45,7 @@ export function NetworkResourcePageFilters({
   onSearch,
   extraFilters,
   keywordPlaceholder = "按名称/标签搜索",
+  marginBottom,
   showKeywordSearch = false,
 }: NetworkResourcePageFiltersProps) {
   return (
@@ -65,6 +67,7 @@ export function NetworkResourcePageFilters({
       onSearch={onSearch}
       extraFilters={extraFilters}
       keywordPlaceholder={keywordPlaceholder}
+      marginBottom={marginBottom}
       showKeywordSearch={showKeywordSearch}
     />
   );

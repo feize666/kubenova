@@ -631,8 +631,6 @@ export default function HelmPage() {
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path="/workloads/helm"
-        embedded
-        style={{ marginBottom: 12 }}
         description="安装、升级、回滚与卸载 Helm Release。"
         titleSuffix={
           <ResourceAddButton
@@ -647,7 +645,7 @@ export default function HelmPage() {
         }
       />
 
-      <OpsSurface variant="panel" padding="sm">
+      <OpsSurface variant="toolbar" padding="sm">
         <ResourceFilterToolbar className="resource-filter-toolbar--section">
           <ResourceFilterToolbarItem width="auto">
             <ResourceScopeFilterButton
@@ -667,36 +665,38 @@ export default function HelmPage() {
             />
           </ResourceFilterToolbarItem>
         </ResourceFilterToolbar>
+      </OpsSurface>
 
-        {!isInitializing && !accessToken ? (
-          <Alert
-            type="warning"
-            showIcon
-            title="未检测到登录状态，请先登录后再操作。"
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
+      {!isInitializing && !accessToken ? (
+        <Alert
+          className="workload-resource-state-alert"
+          type="warning"
+          showIcon
+          title="未检测到登录状态，请先登录后再操作。"
+        />
+      ) : null}
 
-        {releasesQuery.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            title="Helm Release 列表加载失败"
-            description={releasesQuery.error instanceof Error ? releasesQuery.error.message : "请求失败"}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
+      {releasesQuery.isError ? (
+        <Alert
+          className="workload-resource-state-alert"
+          type="error"
+          showIcon
+          title="Helm Release 列表加载失败"
+          description={releasesQuery.error instanceof Error ? releasesQuery.error.message : "请求失败"}
+        />
+      ) : null}
 
-        {!releasesQuery.isError && selectedCluster && selectedCluster.hasKubeconfig === false ? (
-          <Alert
-            type="warning"
-            showIcon
-            title="当前集群暂不可读取 Helm 数据。"
-            description="请先确认该集群已完成接入后再执行 Helm 查询与操作。"
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
+      {!releasesQuery.isError && selectedCluster && selectedCluster.hasKubeconfig === false ? (
+        <Alert
+          className="workload-resource-state-alert"
+          type="warning"
+          showIcon
+          title="当前集群暂不可读取 Helm 数据。"
+          description="请先确认该集群已完成接入后再执行 Helm 查询与操作。"
+        />
+      ) : null}
 
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<HelmReleaseItem>
           bordered
           rowKey="id"

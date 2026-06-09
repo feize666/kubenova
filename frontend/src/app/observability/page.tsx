@@ -5,7 +5,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Card, Col, Descriptions, Empty, Row, Select, Space, Statistic, Typography } from "antd";
+import { Alert, Col, Descriptions, Empty, Row, Select, Space, Statistic, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
@@ -200,30 +200,28 @@ export default function ObservabilityCenterPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsSurface variant="panel" padding="none">
-        <ResourcePageHeader
-          path={OBSERVABILITY_PATH}
-          embedded
-          freshness={summary ? { label: "采集时间", value: summary.timestamp, color: "blue" } : undefined}
-          extra={
-            <Space wrap>
-              <Select
-                value={range}
-                style={{ width: 120 }}
-                onChange={setRange}
-                options={OBSERVABILITY_RANGE_OPTIONS}
-              />
-              <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
-                刷新
-              </OpsIconActionButton>
-            </Space>
-          }
-        />
-      </OpsSurface>
+      <ResourcePageHeader
+        path={OBSERVABILITY_PATH}
+        freshness={summary ? { label: "采集时间", value: summary.timestamp, color: "blue" } : undefined}
+        extra={
+          <Space wrap>
+            <Select
+              value={range}
+              style={{ width: 120 }}
+              onChange={setRange}
+              options={OBSERVABILITY_RANGE_OPTIONS}
+            />
+            <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
+              刷新
+            </OpsIconActionButton>
+          </Space>
+        }
+      />
 
-      {!enabled ? <Alert type="warning" showIcon title="未检测到登录状态，请先登录后查看可观测性中心。" /> : null}
+      {!enabled ? <Alert className="ops-center-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后查看可观测性中心。" /> : null}
       {summaryQuery.isError ? (
         <Alert
+          className="ops-center-state-alert"
           type="error"
           showIcon
           title="可观测性汇总加载失败"
@@ -349,7 +347,7 @@ export default function ObservabilityCenterPage() {
               </Descriptions.Item>
             </Descriptions>
 
-            <Card size="small" title="信号关联">
+            <OpsSurface variant="raised" padding="sm" title="信号关联">
               <Space wrap>
                 {Object.entries(selectedEntity.signals).map(([key, value]) => (
                   <OpsStatusTag key={key} tone={value === "available" ? "success" : value === "degraded" ? "warning" : "danger"}>
@@ -357,9 +355,9 @@ export default function ObservabilityCenterPage() {
                   </OpsStatusTag>
                 ))}
               </Space>
-            </Card>
+            </OpsSurface>
 
-            <Card size="small" title="外部深链">
+            <OpsSurface variant="raised" padding="sm" title="外部深链">
               <Space wrap>
                 {selectedEntity.deepLinks.map((item) =>
                   item.available && item.url ? (
@@ -371,15 +369,15 @@ export default function ObservabilityCenterPage() {
                   ),
                 )}
               </Space>
-            </Card>
+            </OpsSurface>
 
-            <Card size="small" title="路由入口">
+            <OpsSurface variant="raised" padding="sm" title="路由入口">
               {selectedEntity.detailPath ? (
                 <Link href={selectedEntity.detailPath}>打开资源视图</Link>
               ) : (
                 <Typography.Text type="secondary">暂无资源视图入口</Typography.Text>
               )}
-            </Card>
+            </OpsSurface>
           </Space>
         ) : null}
       </OpsDrawerShell>

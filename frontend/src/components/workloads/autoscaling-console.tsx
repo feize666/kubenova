@@ -6,7 +6,6 @@ import {
   Alert,
   App,
   Button,
-  Card,
   Col,
   Dropdown,
   Form,
@@ -68,7 +67,7 @@ import {
 } from "@/components/resource-action-bar";
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
-import { OpsModalShell } from "@/components/ops/ops-modal-shell";
+import { OpsFormSection, OpsModalShell } from "@/components/ops/ops-modal-shell";
 import { OpsSurface } from "@/components/ops/ops-surface";
 import { OpsStatusTag } from "@/components/ops/ops-status";
 
@@ -942,17 +941,17 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
 
       <Row gutter={[12, 12]}>
         <Col xs={12} md={6}>
-          <Card>
+          <OpsSurface variant="raised" padding="sm">
             <Statistic title="策略总数" value={policiesQuery.data?.overview.totalPolicies ?? 0} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={12} md={6}>
-          <Card>
+          <OpsSurface variant="raised" padding="sm">
             <Statistic title="HPA / VPA" value={`${policiesQuery.data?.overview.hpaPolicies ?? 0} / ${policiesQuery.data?.overview.vpaPolicies ?? 0}`} />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={12} md={6}>
-          <Card>
+          <OpsSurface variant="raised" padding="sm">
             <Statistic
               title="未覆盖资源"
               value={policiesQuery.data?.overview.uncoveredWorkloads ?? 0}
@@ -965,12 +964,12 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                 },
               }}
             />
-          </Card>
+          </OpsSurface>
         </Col>
         <Col xs={12} md={6}>
-          <Card>
+          <OpsSurface variant="raised" padding="sm">
             <Statistic title="资源总数" value={policiesQuery.data?.overview.coveredWorkloads ?? 0} />
-          </Card>
+          </OpsSurface>
         </Col>
       </Row>
 
@@ -1263,10 +1262,11 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                       </Col>
                     </Row>
 
-                    <Card
-                      size="small"
+                    <OpsFormSection
                       title="高级指标 (metrics)"
-                      extra={
+                      description="可选添加 Resource / Pods / External 指标；未填写时沿用 CPU / 内存目标。"
+                    >
+                      <Space orientation="vertical" size={12} style={{ width: "100%" }}>
                         <Button
                           type="dashed"
                           onClick={() => {
@@ -1284,132 +1284,134 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                         >
                           添加指标
                         </Button>
-                      }
-                      style={{ marginBottom: 12 }}
-                    >
-                      <Form.List name="hpaMetrics">
-                        {(fields, { remove }) => (
-                          <Space orientation="vertical" style={{ width: "100%" }} size={12}>
-                            {fields.length === 0 ? (
-                              <Typography.Text type="secondary">
-                                未配置高级指标。可选添加 Resource/Pods/External 指标。
-                              </Typography.Text>
-                            ) : null}
-                            {fields.map((field) => {
-                              const sourceType = form.getFieldValue([
-                                "hpaMetrics",
-                                field.name,
-                                "sourceType",
-                              ]) as HpaMetricSpec["sourceType"] | undefined;
+                        <Form.List name="hpaMetrics">
+                          {(fields, { remove }) => (
+                            <Space orientation="vertical" style={{ width: "100%" }} size={12}>
+                              {fields.length === 0 ? (
+                                <Typography.Text type="secondary">
+                                  未配置高级指标。可选添加 Resource/Pods/External 指标。
+                                </Typography.Text>
+                              ) : null}
+                              {fields.map((field) => {
+                                const sourceType = form.getFieldValue([
+                                  "hpaMetrics",
+                                  field.name,
+                                  "sourceType",
+                                ]) as HpaMetricSpec["sourceType"] | undefined;
 
-                              const targetTypeOptions =
-                                sourceType === "Resource"
-                                  ? [
-                                      { label: "Utilization", value: "Utilization" },
-                                      { label: "AverageValue", value: "AverageValue" },
-                                      { label: "Value", value: "Value" },
-                                    ]
-                                  : [
-                                      { label: "AverageValue", value: "AverageValue" },
-                                      { label: "Value", value: "Value" },
-                                    ];
+                                const targetTypeOptions =
+                                  sourceType === "Resource"
+                                    ? [
+                                        { label: "Utilization", value: "Utilization" },
+                                        { label: "AverageValue", value: "AverageValue" },
+                                        { label: "Value", value: "Value" },
+                                      ]
+                                    : [
+                                        { label: "AverageValue", value: "AverageValue" },
+                                        { label: "Value", value: "Value" },
+                                      ];
 
-                              return (
-                                <Card
-                                  key={field.key}
-                                  size="small"
-                                  title={`指标 #${field.name + 1}`}
-                                  extra={
-                                    <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)}>
-                                      删除
-                                    </Button>
-                                  }
-                                >
-                                  <Row gutter={12}>
-                                    <Col span={6}>
-                                      <Form.Item
-                                        name={[field.name, "sourceType"]}
-                                        label="指标来源"
-                                        rules={[{ required: true, message: "请选择来源" }]}
-                                      >
-                                        <Select
-                                          options={[
-                                            { label: "Resource", value: "Resource" },
-                                            { label: "Pods", value: "Pods" },
-                                            { label: "External", value: "External" },
-                                          ]}
-                                        />
-                                      </Form.Item>
-                                    </Col>
-                                    <Col span={6}>
-                                      <Form.Item
-                                        name={[field.name, "name"]}
-                                        label={sourceType === "Resource" ? "资源名称" : "指标名称"}
-                                        rules={[{ required: true, message: "请输入名称" }]}
-                                      >
-                                        <Input placeholder={sourceType === "Resource" ? "cpu / memory" : "qps"} />
-                                      </Form.Item>
-                                    </Col>
-                                    <Col span={6}>
-                                      <Form.Item
-                                        name={[field.name, "targetType"]}
-                                        label="目标类型"
-                                        rules={[{ required: true, message: "请选择目标类型" }]}
-                                      >
-                                        <Select options={targetTypeOptions} />
-                                      </Form.Item>
-                                    </Col>
-                                    <Col span={6}>
-                                      <Form.Item
-                                        name={[field.name, "targetValue"]}
-                                        label="目标值"
-                                        rules={[{ required: true, message: "请输入目标值" }]}
-                                      >
-                                        <Input placeholder="70 / 500m / 10" />
-                                      </Form.Item>
-                                    </Col>
-                                    {sourceType === "Pods" || sourceType === "External" ? (
-                                      <Col span={24}>
+                                return (
+                                  <OpsSurface
+                                    key={field.key}
+                                    variant="flat"
+                                    padding="sm"
+                                    title={`指标 #${field.name + 1}`}
+                                    actions={
+                                      <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)}>
+                                        删除
+                                      </Button>
+                                    }
+                                  >
+                                    <Row gutter={12}>
+                                      <Col span={6}>
                                         <Form.Item
-                                          name={[field.name, "selector"]}
-                                          label="Selector (可选)"
-                                          tooltip="格式：key=value，支持逗号或换行分隔多个条件"
-                                          rules={[
-                                            {
-                                              validator(_, value: string | undefined) {
-                                                try {
-                                                  parseSelectorText(value);
-                                                  return Promise.resolve();
-                                                } catch (error) {
-                                                  return Promise.reject(
-                                                    error instanceof Error ? error : new Error("selector 格式不合法"),
-                                                  );
-                                                }
-                                              },
-                                            },
-                                          ]}
+                                          name={[field.name, "sourceType"]}
+                                          label="指标来源"
+                                          rules={[{ required: true, message: "请选择来源" }]}
                                         >
-                                          <Input.TextArea rows={2} placeholder={"app=api\nenv=prod"} />
+                                          <Select
+                                            options={[
+                                              { label: "Resource", value: "Resource" },
+                                              { label: "Pods", value: "Pods" },
+                                              { label: "External", value: "External" },
+                                            ]}
+                                          />
                                         </Form.Item>
                                       </Col>
-                                    ) : null}
-                                  </Row>
-                                </Card>
-                              );
-                            })}
-                          </Space>
-                        )}
-                      </Form.List>
-                    </Card>
+                                      <Col span={6}>
+                                        <Form.Item
+                                          name={[field.name, "name"]}
+                                          label={sourceType === "Resource" ? "资源名称" : "指标名称"}
+                                          rules={[{ required: true, message: "请输入名称" }]}
+                                        >
+                                          <Input placeholder={sourceType === "Resource" ? "cpu / memory" : "qps"} />
+                                        </Form.Item>
+                                      </Col>
+                                      <Col span={6}>
+                                        <Form.Item
+                                          name={[field.name, "targetType"]}
+                                          label="目标类型"
+                                          rules={[{ required: true, message: "请选择目标类型" }]}
+                                        >
+                                          <Select options={targetTypeOptions} />
+                                        </Form.Item>
+                                      </Col>
+                                      <Col span={6}>
+                                        <Form.Item
+                                          name={[field.name, "targetValue"]}
+                                          label="目标值"
+                                          rules={[{ required: true, message: "请输入目标值" }]}
+                                        >
+                                          <Input placeholder="70 / 500m / 10" />
+                                        </Form.Item>
+                                      </Col>
+                                      {sourceType === "Pods" || sourceType === "External" ? (
+                                        <Col span={24}>
+                                          <Form.Item
+                                            name={[field.name, "selector"]}
+                                            label="Selector (可选)"
+                                            tooltip="格式：key=value，支持逗号或换行分隔多个条件"
+                                            rules={[
+                                              {
+                                                validator(_, value: string | undefined) {
+                                                  try {
+                                                    parseSelectorText(value);
+                                                    return Promise.resolve();
+                                                  } catch (error) {
+                                                    return Promise.reject(
+                                                      error instanceof Error ? error : new Error("selector 格式不合法"),
+                                                    );
+                                                  }
+                                                },
+                                              },
+                                            ]}
+                                          >
+                                            <Input.TextArea rows={2} placeholder={"app=api\nenv=prod"} />
+                                          </Form.Item>
+                                        </Col>
+                                      ) : null}
+                                    </Row>
+                                  </OpsSurface>
+                                );
+                              })}
+                            </Space>
+                          )}
+                        </Form.List>
+                      </Space>
+                    </OpsFormSection>
 
-                    <Card size="small" title="扩缩容策略 (behavior)" style={{ marginBottom: 12 }}>
+                    <OpsFormSection
+                      title="扩缩容策略 (behavior)"
+                      description="分别配置 Scale Up / Scale Down 的稳定窗口、选择策略和 policy 条目。"
+                    >
                       <Space orientation="vertical" size={12} style={{ width: "100%" }}>
                         {(["scaleUp", "scaleDown"] as const).map((ruleKey) => (
-                          <Card
+                          <OpsSurface
                             key={ruleKey}
-                            size="small"
+                            variant="flat"
+                            padding="sm"
                             title={ruleKey === "scaleUp" ? "Scale Up" : "Scale Down"}
-                            style={{ background: "rgba(15,23,42,0.02)" }}
                           >
                             <Row gutter={12}>
                             <Col span={12}>
@@ -1489,10 +1491,10 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                               </Space>
                             )}
                           </Form.List>
-                        </Card>
+                        </OpsSurface>
                       ))}
                       </Space>
-                    </Card>
+                    </OpsFormSection>
 
                     <Row gutter={12}>
                       <Col span={24}>

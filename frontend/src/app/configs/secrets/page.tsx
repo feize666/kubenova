@@ -542,42 +542,42 @@ export default function SecretsPage() {
         titleSuffix={<ResourceAddButton title="创建Secret" onClick={handleOpenCreate} />}
       />
 
+      <OpsSurface variant="toolbar" padding="sm">
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          namespace={namespace}
+          clusterOptions={clusterFilterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+            onScopeChange(nextClusterId, nextNamespace);
+            resetPage();
+          }}
+        />
+      </OpsSurface>
+
+      {!isInitializing && !accessToken ? (
+        <Alert
+          className="config-resource-state-alert"
+          type="warning"
+          showIcon
+          title="未检测到登录状态，请先登录后再操作。"
+        />
+      ) : null}
+
+      {isError ? (
+        <Alert
+          className="config-resource-state-alert"
+          type="error"
+          showIcon
+          title="Secret 加载失败"
+          description={error instanceof Error ? error.message : "请求失败"}
+        />
+      ) : null}
+
       <OpsSurface variant="panel" padding="sm">
-        <div style={{ marginBottom: 12 }}>
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            namespace={namespace}
-            clusterOptions={clusterFilterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-              onScopeChange(nextClusterId, nextNamespace);
-              resetPage();
-            }}
-          />
-        </div>
-
-        {!isInitializing && !accessToken ? (
-          <Alert
-            type="warning"
-            showIcon
-            message="未检测到登录状态，请先登录后再操作。"
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
-
-        {isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="Secret 加载失败"
-            description={error instanceof Error ? error.message : "请求失败"}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
-
         <ResourceTable<ConfigResourceItem>
           tableKey="configs.secrets"
           rowKey="id"
@@ -628,7 +628,7 @@ export default function SecretsPage() {
         width={720}
       >
         {editingTarget ? (
-          <Form form={form} layout="vertical">
+          <Form className="config-resource-form" form={form} layout="vertical">
             <Form.Item
               label="名称"
               name="name"
@@ -770,7 +770,7 @@ export default function SecretsPage() {
             kindHint="Secret"
             disabled={createMutation.isPending || applyYamlMutation.isPending}
             formContent={(
-              <Form form={form} layout="vertical">
+              <Form className="config-resource-form" form={form} layout="vertical">
           <Form.Item
             label="名称"
             name="name"

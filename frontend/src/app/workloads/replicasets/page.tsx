@@ -512,97 +512,97 @@ export default function ReplicaSetsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsSurface variant="panel" padding="sm">
-        <ResourcePageHeader
-          path="/workloads/replicasets"
-          embedded
-          style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=ReplicaSet")} aria-label="创建ReplicaSet" />}
+      <ResourcePageHeader
+        path="/workloads/replicasets"
+        titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=ReplicaSet")} aria-label="创建ReplicaSet" />}
+      />
+
+      <OpsSurface variant="toolbar" padding="sm">
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          namespace={namespace}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+            onScopeChange(nextClusterId, nextNamespace);
+            resetPage();
+          }}
         />
+      </OpsSurface>
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            namespace={namespace}
-            clusterOptions={clusterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-              onScopeChange(nextClusterId, nextNamespace);
-              resetPage();
-            }}
-          />
+      {!isInitializing && !accessToken ? (
+        <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+      ) : null}
 
-          {!isInitializing && !accessToken ? (
-            <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" />
-          ) : null}
+      {isError ? (
+        <Alert
+          className="workload-resource-state-alert"
+          type="error"
+          showIcon
+          title="副本集加载失败"
+          description={error instanceof Error ? error.message : "请求失败"}
+        />
+      ) : null}
 
-          {isError ? (
-            <Alert
-              type="error"
-              showIcon
-              message="副本集加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+      {scaleConvergence ? (
+        <Alert
+          className="workload-resource-state-alert"
+          type={
+            scaleConvergence.round.status === "stable"
+              ? "success"
+              : scaleConvergence.round.status === "timeout"
+                ? "warning"
+                : "info"
+          }
+          showIcon
+          closable
+          onClose={() => setScaleConvergence(null)}
+          title={
+            scaleConvergence.round.status === "accepted"
+              ? `${scaleConvergence.workloadName} 扩缩容请求已受理`
+              : scaleConvergence.round.status === "converging"
+                ? `${scaleConvergence.workloadName} 正在收敛到目标副本`
+                : scaleConvergence.round.status === "stable"
+                  ? `${scaleConvergence.workloadName} 副本已稳定`
+                  : `${scaleConvergence.workloadName} 收敛超时，持续显示最新观测值`
+          }
+          description={
+            scaleConvergence.round.status === "accepted"
+              ? `期望副本 ${scaleConvergence.round.observed.desiredReplicas}，当前副本 ${scaleConvergence.round.observed.observedReplicas ?? "-"}，就绪副本 ${scaleConvergence.round.observed.readyReplicas ?? "-"}`
+              : `第 ${scaleConvergence.round.attempt}/${scaleConvergence.round.maxAttempts} 轮确认：期望副本 ${scaleConvergence.round.observed.desiredReplicas}，当前副本 ${scaleConvergence.round.observed.observedReplicas ?? "-"}，就绪副本 ${scaleConvergence.round.observed.readyReplicas ?? "-"}`
+          }
+        />
+      ) : null}
 
-          {scaleConvergence ? (
-            <Alert
-              type={
-                scaleConvergence.round.status === "stable"
-                  ? "success"
-                  : scaleConvergence.round.status === "timeout"
-                    ? "warning"
-                    : "info"
-              }
-              showIcon
-              closable
-              onClose={() => setScaleConvergence(null)}
-              message={
-                scaleConvergence.round.status === "accepted"
-                  ? `${scaleConvergence.workloadName} 扩缩容请求已受理`
-                  : scaleConvergence.round.status === "converging"
-                    ? `${scaleConvergence.workloadName} 正在收敛到目标副本`
-                    : scaleConvergence.round.status === "stable"
-                      ? `${scaleConvergence.workloadName} 副本已稳定`
-                      : `${scaleConvergence.workloadName} 收敛超时，持续显示最新观测值`
-              }
-              description={
-                scaleConvergence.round.status === "accepted"
-                  ? `期望副本 ${scaleConvergence.round.observed.desiredReplicas}，当前副本 ${scaleConvergence.round.observed.observedReplicas ?? "-"}，就绪副本 ${scaleConvergence.round.observed.readyReplicas ?? "-"}`
-                  : `第 ${scaleConvergence.round.attempt}/${scaleConvergence.round.maxAttempts} 轮确认：期望副本 ${scaleConvergence.round.observed.desiredReplicas}，当前副本 ${scaleConvergence.round.observed.observedReplicas ?? "-"}，就绪副本 ${scaleConvergence.round.observed.readyReplicas ?? "-"}`
-              }
-            />
-          ) : null}
-
-          <ResourceTable<WorkloadListItem>
-            bordered
-            rowKey="id"
-            tableKey="workloads.replicasets"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            dataSource={filteredTableData}
-            loading={(isLoading && !data) || actionMutation.isPending}
-            onChange={(paginationInfo, filters, sorter, extra) =>
-              handleTableChange(paginationInfo, filters, sorter, extra, (isLoading && !data) || actionMutation.isPending)
-            }
-            pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
-          />
-        </Space>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourceTable<WorkloadListItem>
+          bordered
+          rowKey="id"
+          tableKey="workloads.replicasets"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
+          columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
+          dataSource={filteredTableData}
+          loading={(isLoading && !data) || actionMutation.isPending}
+          onChange={(paginationInfo, filters, sorter, extra) =>
+            handleTableChange(paginationInfo, filters, sorter, extra, (isLoading && !data) || actionMutation.isPending)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
+        />
       </OpsSurface>
 
       <Modal

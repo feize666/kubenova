@@ -479,68 +479,67 @@ export default function CronJobsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsSurface variant="panel" padding="sm">
-        <ResourcePageHeader
-          path="/workloads/cronjobs"
-          embedded
-          style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton onClick={openAddModal} aria-label="创建CronJob" />}
+      <ResourcePageHeader
+        path="/workloads/cronjobs"
+        titleSuffix={<ResourceAddButton onClick={openAddModal} aria-label="创建CronJob" />}
+      />
+
+      <OpsSurface variant="toolbar" padding="sm">
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          namespace={namespace}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+            onScopeChange(nextClusterId, nextNamespace);
+            resetPage();
+          }}
         />
+      </OpsSurface>
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            namespace={namespace}
-            clusterOptions={clusterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-              onScopeChange(nextClusterId, nextNamespace);
-              resetPage();
-            }}
-          />
+      {!isInitializing && !accessToken ? (
+        <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+      ) : null}
 
-          {!isInitializing && !accessToken ? (
-            <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再操作。" />
-          ) : null}
+      {isError ? (
+        <Alert
+          className="workload-resource-state-alert"
+          type="error"
+          showIcon
+          title="定时任务加载失败"
+          description={error instanceof Error ? error.message : "请求失败"}
+        />
+      ) : null}
 
-          {isError ? (
-            <Alert
-              type="error"
-              showIcon
-              message="定时任务加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
-
-          <ResourceTable<CronJobItem>
-            bordered
-            rowKey="id"
-            tableKey="workloads.cronjobs"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            dataSource={filteredTableData}
-            loading={isLoading && !data}
-            onChange={(paginationInfo, filters, sorter, extra) =>
-              handleTableChange(paginationInfo, filters, sorter, extra, isLoading && !data)
-            }
-            pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          />
-        </Space>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourceTable<CronJobItem>
+          bordered
+          rowKey="id"
+          tableKey="workloads.cronjobs"
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keywordInput,
+            onChange: handleGlobalSearchChange,
+            placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            resetPage();
+          }}
+          sort={{ sortBy, sortOrder }}
+          columns={columns}
+          onResourceNavigate={(request) => setDetailTarget(request)}
+          dataSource={filteredTableData}
+          loading={isLoading && !data}
+          onChange={(paginationInfo, filters, sorter, extra) =>
+            handleTableChange(paginationInfo, filters, sorter, extra, isLoading && !data)
+          }
+          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+        />
       </OpsSurface>
 
       <Modal

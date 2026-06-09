@@ -2,7 +2,7 @@
 
 import { ReloadOutlined, RobotOutlined, SafetyOutlined, WarningOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, App, Card, Col, Descriptions, Empty, Row, Select, Space, Statistic, Typography } from "antd";
+import { Alert, App, Col, Descriptions, Empty, Row, Select, Space, Statistic, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -202,30 +202,28 @@ export default function AiopsCenterPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsSurface variant="panel" padding="none">
-        <ResourcePageHeader
-          path={AIOPS_PATH}
-          embedded
-          freshness={summary ? { label: "分析时间", value: summary.timestamp, color: "purple" } : undefined}
-          extra={
-            <Space wrap>
-              <Select
-                value={range}
-                style={{ width: 120 }}
-                onChange={setRange}
-                options={AIOPS_RANGE_OPTIONS}
-              />
-              <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
-                刷新
-              </OpsIconActionButton>
-            </Space>
-          }
-        />
-      </OpsSurface>
+      <ResourcePageHeader
+        path={AIOPS_PATH}
+        freshness={summary ? { label: "分析时间", value: summary.timestamp, color: "purple" } : undefined}
+        extra={
+          <Space wrap>
+            <Select
+              value={range}
+              style={{ width: 120 }}
+              onChange={setRange}
+              options={AIOPS_RANGE_OPTIONS}
+            />
+            <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
+              刷新
+            </OpsIconActionButton>
+          </Space>
+        }
+      />
 
-      {!enabled ? <Alert type="warning" showIcon title="未检测到登录状态，请先登录后查看 KubeNova 中台。" /> : null}
+      {!enabled ? <Alert className="ops-center-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后查看 KubeNova 中台。" /> : null}
       {summaryQuery.isError ? (
         <Alert
+          className="ops-center-state-alert"
           type="error"
           showIcon
           title="KubeNova 汇总加载失败"
@@ -233,7 +231,7 @@ export default function AiopsCenterPage() {
         />
       ) : null}
       {summary?.degraded ? (
-        <Alert type="warning" showIcon title="分析数据降级" description={summary.note || "当前事故队列可能来自派生信号。"} />
+        <Alert className="ops-center-state-alert" type="warning" showIcon title="分析数据降级" description={summary.note || "当前事故队列可能来自派生信号。"} />
       ) : null}
 
       <Row gutter={[12, 12]}>
@@ -276,7 +274,7 @@ export default function AiopsCenterPage() {
           <OpsSurface variant="panel" padding="sm" title="根因候选">
             <Space orientation="vertical" size={10} style={{ width: "100%" }}>
               {rootCauseCandidates.map((item) => (
-                <Card size="small" key={item.incidentId}>
+                <OpsSurface variant="raised" padding="sm" key={item.incidentId}>
                   <Space orientation="vertical" size={4}>
                     <Space>
                       <Typography.Text strong>{item.title}</Typography.Text>
@@ -285,7 +283,7 @@ export default function AiopsCenterPage() {
                     </Space>
                     <Typography.Text type="secondary">{item.evidence.join(" / ")}</Typography.Text>
                   </Space>
-                </Card>
+                </OpsSurface>
               ))}
               {summary && rootCauseCandidates.length === 0 ? (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无根因候选" />
@@ -327,7 +325,7 @@ export default function AiopsCenterPage() {
               <Descriptions.Item label="来源">{selectedIncident.source}</Descriptions.Item>
             </Descriptions>
 
-            <Card size="small" title="证据时间线">
+            <OpsSurface variant="raised" padding="sm" title="证据时间线">
               <Space orientation="vertical" size={10} style={{ width: "100%" }}>
                 {[
                   {
@@ -354,9 +352,9 @@ export default function AiopsCenterPage() {
                   </Space>
                 ))}
               </Space>
-            </Card>
+            </OpsSurface>
 
-            <Card size="small" title="关联分组">
+            <OpsSurface variant="raised" padding="sm" title="关联分组">
               {selectedCorrelationGroup ? (
                 <Space orientation="vertical" size={6}>
                   <Space>
@@ -369,9 +367,9 @@ export default function AiopsCenterPage() {
               ) : (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无关联分组" />
               )}
-            </Card>
+            </OpsSurface>
 
-            <Card size="small" title="根因候选">
+            <OpsSurface variant="raised" padding="sm" title="根因候选">
               {selectedRootCause ? (
                 <Space orientation="vertical" size={6}>
                   <Space>
@@ -385,9 +383,9 @@ export default function AiopsCenterPage() {
               ) : (
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无根因候选" />
               )}
-            </Card>
+            </OpsSurface>
 
-            <Card size="small" title="推荐与审批">
+            <OpsSurface variant="raised" padding="sm" title="推荐与审批">
               <ResourceTable
                 rowKey="id"
                 size="small"
@@ -449,7 +447,7 @@ export default function AiopsCenterPage() {
                   },
                 }}
               />
-            </Card>
+            </OpsSurface>
           </Space>
         ) : null}
       </OpsDrawerShell>

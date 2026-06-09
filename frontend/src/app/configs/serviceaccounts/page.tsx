@@ -14,7 +14,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
 import { OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
@@ -76,6 +76,11 @@ type SecretTokenRow = {
   tokenRaw: string | undefined;
   createdAt: string | undefined;
 };
+
+function isServiceAccountRowInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("a,button,input,textarea,select,[role='button'],[role='menuitem'],[data-resource-table-stop-navigation='true']"));
+}
 
 function parseNameLines(value?: string): Array<{ name: string }> {
   return (value ?? "")
@@ -663,7 +668,7 @@ export default function ServiceAccountsPage() {
         }
       />
 
-      <OpsSurface variant="panel" padding="sm">
+      <OpsSurface variant="toolbar" padding="sm">
         <NetworkResourcePageFilters
           clusterId={clusterId}
           namespace={namespace}
@@ -684,22 +689,25 @@ export default function ServiceAccountsPage() {
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
           keywordPlaceholder="输入关键字，或 label 过滤（如 env=prod team=platform）"
+          marginBottom={0}
         />
+      </OpsSurface>
 
-        {!isInitializing && !accessToken ? (
-          <Alert type="warning" showIcon message="未登录或登录初始化中，请稍后重试。" style={{ marginBottom: 16 }} />
-        ) : null}
+      {!isInitializing && !accessToken ? (
+        <Alert className="config-resource-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
+      ) : null}
 
-        {listQuery.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="ServiceAccount 列表加载失败"
-            description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
+      {listQuery.isError ? (
+        <Alert
+          className="config-resource-state-alert"
+          type="error"
+          showIcon
+          title="ServiceAccount 列表加载失败"
+          description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
+        />
+      ) : null}
 
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<ServiceAccountRecord>
           rowKey="id"
           columns={columns}
@@ -724,7 +732,8 @@ export default function ServiceAccountsPage() {
             handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
           }
           onRow={(record) => ({
-            onClick: () => {
+            onClick: (event: ReactMouseEvent<HTMLElement>) => {
+              if (isServiceAccountRowInteractiveTarget(event.target)) return;
               if (record.id) {
                 setDetailTarget({
                   kind: "ServiceAccount",
@@ -744,6 +753,7 @@ export default function ServiceAccountsPage() {
       </OpsSurface>
 
       <Modal
+        className="config-resource-utility-modal"
         title="YAML"
         open={yamlOpen}
         onCancel={() => setYamlOpen(false)}
@@ -771,6 +781,7 @@ export default function ServiceAccountsPage() {
         )}
       >
         <Input.TextArea
+          className="config-resource-yaml-editor"
           value={yamlValue}
           onChange={(event) => setYamlValue(event.target.value)}
           autoSize={{ minRows: 18, maxRows: 28 }}
@@ -824,7 +835,7 @@ export default function ServiceAccountsPage() {
           kindHint="ServiceAccount"
           disabled={createMutation.isPending || applyCreateYamlMutation.isPending}
           formContent={(
-            <Form form={createForm} layout="vertical" requiredMark>
+            <Form className="config-resource-form" form={createForm} layout="vertical" requiredMark>
               <Form.Item
                 name="clusterId"
                 label="集群"
@@ -896,6 +907,7 @@ export default function ServiceAccountsPage() {
       </OpsModalShell>
 
       <Modal
+        className="config-resource-utility-modal config-resource-token-modal"
         title={`关联 Secret/Token · ${tokenTitle}`}
         open={tokenModalOpen}
         onCancel={() => setTokenModalOpen(false)}

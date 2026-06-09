@@ -501,15 +501,14 @@ export default function IngressPage() {
   ];
 
   return (
-    <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-      <OpsSurface variant="panel" padding="sm">
-        <ResourcePageHeader
-          path="/network/ingress"
-          embedded
-          description="管理集群 Ingress 入口规则与域名路由。"
-          style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建Ingress" onClick={handleOpenCreate} />}
-        />
+    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      <ResourcePageHeader
+        path="/network/ingress"
+        description="管理集群 Ingress 入口规则与域名路由。"
+        titleSuffix={<ResourceAddButton title="创建Ingress" onClick={handleOpenCreate} />}
+      />
+
+      <OpsSurface variant="toolbar" padding="sm">
         <NetworkResourcePageFilters
           clusterId={clusterId}
           namespace={namespace}
@@ -530,27 +529,25 @@ export default function IngressPage() {
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
           keywordPlaceholder="按名称/标签搜索（示例：ingress-a app=web env=prod）"
+          marginBottom={0}
         />
+      </OpsSurface>
 
-        {!isInitializing && !accessToken ? (
-          <Alert
-            type="warning"
-            showIcon
-            message="未检测到登录状态，请先登录后再操作。"
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
+      {!isInitializing && !accessToken ? (
+        <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+      ) : null}
 
-        {isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="网络入口加载失败"
-            description={error instanceof Error ? error.message : "请求失败"}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
+      {isError ? (
+        <Alert
+          className="network-resource-state-alert"
+          type="error"
+          showIcon
+          title="网络入口加载失败"
+          description={error instanceof Error ? error.message : "请求失败"}
+        />
+      ) : null}
 
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<IngressResource>
           rowKey="id"
           columns={columns}

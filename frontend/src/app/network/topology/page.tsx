@@ -65,6 +65,7 @@ import {
 import { getStorageResources, type StorageResource } from "@/lib/api/storage";
 import { getTopologyNamespaceSummaries, type TopologyNamespaceSummaryItem } from "@/lib/api/topology-summary";
 import { getWorkloadsByKind, type WorkloadListItem } from "@/lib/api/workloads";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
 
 const ALL_NAMESPACE = "__all__";
 const QUERY_STALE_MS = 30_000;
@@ -1448,6 +1449,7 @@ function FlowCanvas({
 function DetailRail({
   node,
   model,
+  clusterMap,
   onClose,
   onOpenDetail,
   onOpenYaml,
@@ -1457,6 +1459,7 @@ function DetailRail({
 }: {
   node: Node<TopologyNodeData> | null;
   model: GraphModel;
+  clusterMap: Record<string, string>;
   onClose: () => void;
   onOpenDetail: () => void;
   onOpenYaml: () => void;
@@ -1470,6 +1473,7 @@ function DetailRail({
   const topKindCounts = getTopKindCounts(children);
   const relationSummaries = getRelationSummaries(node, model);
   const yamlDisabledReason = node ? getYamlDisabledReason(node) : null;
+  const clusterDisplayName = node?.data.clusterId ? getClusterDisplayName(clusterMap, node.data.clusterId) : "-";
   return (
     <aside className={`resource-map-rail ${node ? "is-open" : ""}`}>
       {node ? (
@@ -1487,12 +1491,12 @@ function DetailRail({
               <strong>{node.data.kind === "Group" ? `${children.length} 个资源` : KIND_LABEL[String(node.data.kind)] ?? node.data.kind}</strong>
             </div>
             <div className="resource-map-facts">
-              <div><span>类型</span><strong>{KIND_LABEL[String(node.data.kind)] ?? node.data.kind}</strong></div>
-              <div><span>状态</span><strong>{STATUS_LABEL[node.data.status]}</strong></div>
-              <div><span>名称空间</span><strong>{node.data.namespace ?? "-"}</strong></div>
-              <div><span>集群</span><strong>{node.data.clusterId ?? "-"}</strong></div>
-              {node.data.instance ? <div><span>实例</span><strong>{node.data.instance}</strong></div> : null}
-              {node.data.nodeName ? <div><span>节点</span><strong>{node.data.nodeName}</strong></div> : null}
+              <RailFact label="类型" value={KIND_LABEL[String(node.data.kind)] ?? String(node.data.kind)} />
+              <RailFact label="状态" value={STATUS_LABEL[node.data.status]} />
+              <RailFact label="名称空间" value={node.data.namespace ?? "-"} />
+              <RailFact label="集群" value={clusterDisplayName} />
+              {node.data.instance ? <RailFact label="实例" value={node.data.instance} /> : null}
+              {node.data.nodeName ? <RailFact label="节点" value={node.data.nodeName} /> : null}
             </div>
             <div className="resource-map-actions">
               <OpsIconActionButton icon={<InfoCircleOutlined />} onClick={onOpenDetail} disabled={!node.data.detail || Boolean(children.length)}>
@@ -1578,6 +1582,17 @@ function DetailRail({
   );
 }
 
+function RailFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span>{label}</span>
+      <Tooltip title={value} placement="topLeft">
+        <strong>{value}</strong>
+      </Tooltip>
+    </div>
+  );
+}
+
 export default function NetworkTopologyPage() {
   const router = useRouter();
   const { accessToken: token } = useAuth();
@@ -1602,6 +1617,10 @@ export default function NetworkTopologyPage() {
     staleTime: QUERY_STALE_MS,
   });
   const clusters = useMemo(() => clusterQuery.data?.items ?? [], [clusterQuery.data?.items]);
+  const clusterMap = useMemo(
+    () => Object.fromEntries(clusters.map((cluster) => [cluster.id, cluster.name])),
+    [clusters],
+  );
   const selectedCluster = useMemo(
     () => clusters.find((cluster) => cluster.id === selectedClusterId) ?? clusters[0] ?? null,
     [clusters, selectedClusterId],
@@ -1851,7 +1870,7 @@ export default function NetworkTopologyPage() {
             {motionEnabled ? "流动连线" : "性能降级"}
           </div>
         </div>
-        <DetailRail node={selectedNode} model={model} onClose={() => setSelectedNodeId(null)} onOpenDetail={openDetail} onOpenYaml={openYaml} onJump={jumpToResource} onOpenEntity={openEntity} onCopy={copyText} />
+        <DetailRail node={selectedNode} model={model} clusterMap={clusterMap} onClose={() => setSelectedNodeId(null)} onOpenDetail={openDetail} onOpenYaml={openYaml} onJump={jumpToResource} onOpenEntity={openEntity} onCopy={copyText} />
       </div>
 
       <ResourceDetailDrawer open={Boolean(detailRequest)} onClose={() => setDetailRequest(null)} token={token} request={detailRequest} onNavigateRequest={(request) => setDetailRequest(request)} />
@@ -1862,7 +1881,7 @@ export default function NetworkTopologyPage() {
         .resource-map-shell {
           --map-page-bg: var(--ops-bg);
           --map-panel-bg: var(--ops-surface-overlay);
-          --map-canvas-bg: linear-gradient(180deg, var(--ops-surface-overlay), color-mix(in srgb, var(--ops-bg) 88%, var(--ops-surface-overlay)));
+          --map-canvas-bg: var(--ops-surface-overlay);
           --map-card-bg: var(--ops-surface-overlay);
           --map-card-bg-soft: var(--ops-subtle-bg);
           --map-text: var(--ops-text);
@@ -1873,33 +1892,22 @@ export default function NetworkTopologyPage() {
           --map-shadow: var(--ops-shadow-subtle);
           --map-grid: rgba(100,116,139,.08);
           --map-edge: var(--ops-text-faint);
-          --map-edge-filter: none;
           height: calc(100dvh - 104px); min-height: 640px; display: flex; flex-direction: column; gap: 12px; padding: 14px; color: var(--map-text); background: var(--map-page-bg);
         }
         [data-theme="dark"] .resource-map-shell {
-          --map-page-bg: var(--ops-bg);
           --map-panel-bg: color-mix(in srgb, var(--ops-surface) 88%, transparent);
-          --map-canvas-bg: linear-gradient(180deg, rgba(15,23,42,.96), var(--ops-bg));
+          --map-canvas-bg: var(--ops-bg);
           --map-card-bg: var(--ops-surface);
-          --map-card-bg-soft: var(--ops-subtle-bg);
-          --map-text: var(--ops-text);
-          --map-heading: var(--ops-text);
-          --map-muted: var(--ops-text-muted);
-          --map-border: var(--ops-border-subtle);
-          --map-border-strong: var(--ops-border-strong);
-          --map-shadow: var(--ops-shadow-subtle);
           --map-grid: rgba(148,163,184,.07);
-          --map-edge: var(--ops-text-faint);
-          --map-edge-filter: drop-shadow(0 0 5px rgba(34,211,238,.38));
         }
         .resource-map-header.ops-page-header { min-height: 52px; background: var(--map-panel-bg); border-color: var(--map-border); box-shadow: var(--map-shadow); }
         .resource-map-header .ops-page-header__scope { color: var(--map-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
         .resource-map-header .ops-page-header__title { font-size: 24px; line-height: 1.1; font-weight: 780; color: var(--map-heading); }
         .resource-map-header .ops-page-header__subtitle { color: var(--map-muted); }
         .resource-map-header__stats { display: flex; gap: 8px; }
-        .resource-map-header__stats span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); background: var(--map-panel-bg); border-radius: 8px; padding: 7px 10px; color: var(--map-muted); text-transform: none; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+        .resource-map-header__stats span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); background: var(--map-panel-bg); border-radius: 8px; padding: 7px 10px; color: var(--map-muted); text-transform: none; }
         .resource-map-header__stats strong { color: var(--map-heading); }
-        .resource-map-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid var(--map-border); background: var(--map-panel-bg); box-shadow: var(--map-shadow); border-radius: 10px; padding: 8px; backdrop-filter: blur(8px); }
+        .resource-map-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid var(--map-border); background: var(--map-panel-bg); box-shadow: var(--map-shadow); border-radius: 8px; padding: 8px; }
         .resource-map-toolbar__scope,
         .resource-map-toolbar__filters,
         .resource-map-toolbar__actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1924,19 +1932,19 @@ export default function NetworkTopologyPage() {
         .resource-map-source-chips button.is-active { box-shadow: inset 0 -2px 0 var(--source-color); }
         .resource-map-source-chips strong { color: var(--source-color); font-variant-numeric: tabular-nums; }
         .resource-map-workbench { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 12px; }
-        .resource-map-canvas { position: relative; overflow: hidden; border-radius: 10px; border: 1px solid var(--map-border); background: var(--map-canvas-bg); box-shadow: inset 0 1px 0 rgba(255,255,255,.12); }
+        .resource-map-canvas { position: relative; overflow: hidden; border-radius: 8px; border: 1px solid var(--map-border); background: var(--map-canvas-bg); box-shadow: none; }
         .resource-map-canvas::before { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(var(--map-grid) 1px, transparent 1px), linear-gradient(90deg, var(--map-grid) 1px, transparent 1px); background-size: 40px 40px; mask-image: linear-gradient(180deg, #000 0 72%, transparent 100%); }
         .resource-map-flow-host { position: relative; width: 100%; height: 100%; min-height: 420px; }
         .resource-map-canvas .react-flow { width: 100%; height: 100%; background: transparent; }
         .resource-map-canvas .react-flow__pane { cursor: grab; }
         .resource-map-canvas .react-flow__pane:active { cursor: grabbing; }
         .resource-map-loading { max-width: 760px; margin: 80px auto; padding: 32px; }
-        .resource-map-node { width: 100%; height: 100%; position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 8px; color: var(--map-text); background: var(--map-card-bg); border: 1px solid var(--map-border); box-shadow: 0 1px 3px rgba(15,23,42,.08); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+        .resource-map-node { width: 100%; height: 100%; position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 8px; color: var(--map-text); background: var(--map-card-bg); border: 1px solid var(--map-border); box-shadow: none; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
         .resource-map-node::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(90deg, var(--node-accent), transparent 34%); opacity: .1; }
         .resource-map-node::after { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 0 999px 999px 0; background: var(--node-accent); opacity: .8; }
-        .resource-map-node:hover, .resource-map-node.is-selected { border-color: var(--node-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--node-accent) 34%, transparent), 0 8px 18px rgba(15,23,42,.1); transform: translateY(-1px); }
+        .resource-map-node:hover, .resource-map-node.is-selected { border-color: var(--node-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--node-accent) 30%, transparent); transform: translateY(-1px); }
         .resource-map-node__handle { opacity: 0; }
-        .resource-map-node__icon { width: 40px; height: 40px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 13%, var(--map-card-bg)); border: 1px solid color-mix(in srgb, var(--node-accent) 22%, transparent); }
+        .resource-map-node__icon { width: 40px; height: 40px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 13%, var(--map-card-bg)); border: 1px solid color-mix(in srgb, var(--node-accent) 22%, transparent); }
         .resource-map-node__text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
         .resource-map-node__text span { color: var(--map-muted); font-size: 12px; }
         .resource-map-node__text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-heading); font-size: 15px; }
@@ -1944,7 +1952,7 @@ export default function NetworkTopologyPage() {
         .resource-map-node.is-error .resource-map-node__status { color: #fb7185; }
         .resource-map-node.is-warning .resource-map-node__status { color: #fbbf24; }
         .resource-map-node.is-success .resource-map-node__status { color: #34d399; }
-        .resource-map-node--group { display: block; padding: 0; background: color-mix(in srgb, var(--map-card-bg-soft) 84%, transparent); border-style: solid; box-shadow: inset 0 1px 0 rgba(255,255,255,.65), 0 14px 34px rgba(15,23,42,.08); }
+        .resource-map-node--group { display: block; padding: 0; background: color-mix(in srgb, var(--map-card-bg-soft) 84%, transparent); border-style: solid; box-shadow: none; }
         .resource-map-node--group::after { display: none; }
         .resource-map-node__group-head { height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--map-border); background: color-mix(in srgb, var(--node-accent) 6%, transparent); }
         .resource-map-node__group-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; color: var(--map-heading); }
@@ -1952,21 +1960,21 @@ export default function NetworkTopologyPage() {
         .resource-map-node__collapse { height: 26px; border-radius: 999px; border: 1px solid var(--map-border); background: var(--map-panel-bg); color: var(--map-muted); padding: 0 9px; font-size: 12px; cursor: pointer; }
         .resource-map-node__collapse:hover { border-color: var(--node-accent); color: var(--map-heading); }
         .resource-map-node__stack-grid { position: absolute; inset: 56px 24px 22px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-        .resource-map-stack-card { position: relative; min-width: 0; height: 86px; display: flex; align-items: center; gap: 14px; border: 1px solid var(--map-border); border-radius: 10px; background: var(--map-card-bg); color: var(--map-text); padding: 12px 14px; text-align: left; cursor: pointer; box-shadow: 8px 8px 0 color-mix(in srgb, var(--map-card-bg-soft) 78%, transparent), 15px 15px 0 color-mix(in srgb, var(--map-card-bg-soft) 45%, transparent); transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
+        .resource-map-stack-card { position: relative; min-width: 0; height: 86px; display: flex; align-items: center; gap: 14px; border: 1px solid var(--map-border); border-radius: 8px; background: var(--map-card-bg); color: var(--map-text); padding: 12px 14px; text-align: left; cursor: pointer; box-shadow: none; transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
         .resource-map-stack-card:hover { border-color: var(--node-accent); transform: translateY(-1px); }
-        .resource-map-stack-card__icon { width: 46px; height: 46px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 14%, var(--map-card-bg)); }
+        .resource-map-stack-card__icon { width: 46px; height: 46px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 14%, var(--map-card-bg)); }
         .resource-map-stack-card__copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
         .resource-map-stack-card__copy small { color: var(--map-muted); font-size: 13px; }
         .resource-map-stack-card__copy strong { color: var(--map-heading); font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
-        .resource-map-stack-card__badge { position: absolute; right: -14px; top: -14px; min-width: 34px; height: 34px; padding: 0 8px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: var(--map-panel-bg); border: 1px solid var(--map-border); color: var(--map-heading); box-shadow: var(--map-shadow); font-size: 14px; font-weight: 760; }
-        .resource-map-edge .react-flow__edge-path { stroke: var(--map-edge); stroke-opacity: .72; transition: stroke-opacity .15s ease, stroke-width .15s ease, filter .15s ease; }
+        .resource-map-stack-card__badge { position: absolute; right: -14px; top: -14px; min-width: 34px; height: 34px; padding: 0 8px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: var(--map-panel-bg); border: 1px solid var(--map-border); color: var(--map-heading); font-size: 14px; font-weight: 760; }
+        .resource-map-edge .react-flow__edge-path { stroke: var(--map-edge); stroke-opacity: .72; transition: stroke-opacity .15s ease, stroke-width .15s ease; }
         .resource-map-edge--owner .react-flow__edge-path { stroke: var(--map-edge-owner); }
         .resource-map-edge--network .react-flow__edge-path, .resource-map-edge--gateway .react-flow__edge-path { stroke: var(--map-edge-network); }
         .resource-map-edge--config .react-flow__edge-path { stroke: var(--map-edge-config); }
         .resource-map-edge--storage .react-flow__edge-path { stroke: var(--map-edge-storage); }
         .resource-map-edge.is-related .react-flow__edge-path,
-        .resource-map-edge:hover .react-flow__edge-path { stroke-opacity: .96; filter: var(--map-edge-filter); }
-        .has-motion .resource-map-edge .react-flow__edge-path { stroke-dasharray: 10 11; animation: resource-map-flow 1.9s linear infinite; filter: var(--map-edge-filter); }
+        .resource-map-edge:hover .react-flow__edge-path { stroke-opacity: .96; }
+        .has-motion .resource-map-edge .react-flow__edge-path { stroke-dasharray: 10 11; animation: resource-map-flow 1.9s linear infinite; }
         .is-static .resource-map-edge .react-flow__edge-path { stroke-dasharray: none; animation: none; }
         @keyframes resource-map-flow { to { stroke-dashoffset: -30; } }
         @media (prefers-reduced-motion: reduce) { .has-motion .resource-map-edge .react-flow__edge-path { animation: none; stroke-dasharray: none; } }
@@ -1976,8 +1984,8 @@ export default function NetworkTopologyPage() {
         .resource-map-breadcrumbs button:hover { border-color: var(--map-edge-network); color: var(--map-heading); }
         .resource-map-motion-state { position: absolute; right: 12px; bottom: 12px; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 6px 10px; background: var(--map-panel-bg); border: 1px solid var(--map-border); color: var(--map-muted); font-size: 12px; pointer-events: none; }
         .resource-map-motion-state span { width: 7px; height: 7px; border-radius: 999px; background: #64748b; }
-        .resource-map-motion-state span.is-on { background: #22c55e; box-shadow: 0 0 10px rgba(34,197,94,.8); }
-        .resource-map-rail { min-width: 0; overflow: hidden; border-radius: 10px; border: 1px solid var(--map-border); background: var(--map-panel-bg); display: flex; flex-direction: column; box-shadow: var(--map-shadow); backdrop-filter: blur(8px); }
+        .resource-map-motion-state span.is-on { background: #22c55e; }
+        .resource-map-rail { min-width: 0; overflow: hidden; border-radius: 8px; border: 1px solid var(--map-border); background: var(--map-panel-bg); display: flex; flex-direction: column; box-shadow: var(--map-shadow); }
         .resource-map-rail > .ant-empty { margin: auto; color: var(--map-muted); }
         .resource-map-rail__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px; border-bottom: 1px solid var(--map-border); }
         .resource-map-rail__title { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -2018,12 +2026,12 @@ export default function NetworkTopologyPage() {
         .resource-map-list__item.is-warning { border-color: color-mix(in srgb, #f59e0b 38%, var(--map-border)); }
         .resource-map-actions { display: flex; gap: 8px; flex-wrap: wrap; }
         .resource-map-density { display: grid; gap: 12px; }
-        .resource-map-density__hero { display: grid; gap: 4px; border: 1px solid var(--map-border); border-radius: 10px; padding: 14px; background: linear-gradient(180deg, color-mix(in srgb, var(--map-card-bg-soft) 74%, transparent), var(--map-card-bg)); }
+        .resource-map-density__hero { display: grid; gap: 4px; border: 1px solid var(--map-border); border-radius: 8px; padding: 14px; background: var(--map-card-bg); }
         .resource-map-density__hero span { color: var(--map-muted); font-size: 12px; }
         .resource-map-density__hero strong { color: var(--map-heading); font-size: 30px; line-height: 1; }
         .resource-map-density__hero small { color: var(--map-muted); font-size: 12px; line-height: 1.35; }
         .resource-map-density-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-        .resource-map-density-card { min-width: 0; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--density-color) 24%, var(--map-border)); border-radius: 9px; padding: 9px; background: color-mix(in srgb, var(--density-color) 7%, var(--map-card-bg)); }
+        .resource-map-density-card { min-width: 0; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--density-color) 24%, var(--map-border)); border-radius: 8px; padding: 9px; background: color-mix(in srgb, var(--density-color) 7%, var(--map-card-bg)); }
         .resource-map-density-card__icon { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: var(--density-color); background: color-mix(in srgb, var(--density-color) 12%, transparent); }
         .resource-map-density-card div { min-width: 0; display: grid; gap: 2px; }
         .resource-map-density-card strong,
@@ -2031,7 +2039,7 @@ export default function NetworkTopologyPage() {
         .resource-map-density-card strong { color: var(--map-heading); font-size: 13px; }
         .resource-map-density-card small { color: var(--map-muted); font-size: 11px; }
         .resource-map-density-card em { grid-column: 1 / -1; color: var(--density-color); font-size: 11px; font-style: normal; font-weight: 700; }
-        .resource-map-density-panel { border: 1px solid var(--map-border); border-radius: 9px; padding: 10px; background: var(--map-card-bg-soft); }
+        .resource-map-density-panel { border: 1px solid var(--map-border); border-radius: 8px; padding: 10px; background: var(--map-card-bg-soft); }
         .resource-map-density-row { display: grid; grid-template-columns: 58px minmax(0, 1fr) 30px; align-items: center; gap: 8px; min-height: 26px; color: var(--map-muted); font-size: 12px; }
         .resource-map-density-row i { position: relative; height: 5px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--map-border) 74%, transparent); }
         .resource-map-density-row i::before { content: ""; position: absolute; inset-block: 0; left: 0; width: var(--density-scale); border-radius: inherit; background: var(--map-edge-network); }
