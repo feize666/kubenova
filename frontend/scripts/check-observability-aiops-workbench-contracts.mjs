@@ -79,8 +79,9 @@ for (const contract of contracts) {
 const allowedLegacyRoutes = [
   {
     path: "src/app/login/page.tsx",
-    required: ["<Card", "控制面服务暂不可达", "KubeNova"],
-    reason: "Login form keeps the AntD form container because authentication behavior and API probe warning are unchanged",
+    required: ["OpsSurface", "login-card", "控制面服务暂不可达", "KubeNova"],
+    forbidden: ["<Card"],
+    reason: "Login form now uses the shared OpsSurface container while authentication behavior and API probe warning are unchanged",
   },
 ];
 
@@ -89,6 +90,11 @@ for (const item of allowedLegacyRoutes) {
   for (const token of item.required) {
     if (!content.includes(token)) {
       failures.push(`${item.path}: deferred whitelist stale; missing ${token} (${item.reason})`);
+    }
+  }
+  for (const token of item.forbidden ?? []) {
+    if (content.includes(token)) {
+      failures.push(`${item.path}: forbidden legacy token ${token}`);
     }
   }
   if (content.includes("cyber-panel")) {

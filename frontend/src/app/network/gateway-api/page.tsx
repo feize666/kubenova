@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Typography, message } from "antd";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
@@ -43,6 +43,11 @@ import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } fro
 
 type GatewayKindKey = string;
 type DetailTarget = NonNullable<ResourceDetailDrawerProps["request"]>;
+
+function isGatewayRowInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("a,button,input,textarea,select,[role='button'],[role='menuitem'],[data-resource-table-stop-navigation='true']"));
+}
 
 function readGatewayKindFromSearchParams(searchParams: ReturnType<typeof useSearchParams>): GatewayKindKey {
   const value = searchParams.get("kind")?.trim().toLowerCase();
@@ -1067,8 +1072,8 @@ export default function GatewayApiPage() {
         }
       />
 
-      <OpsSurface variant="panel" padding="sm">
-        <Row gutter={[12, 12]} style={{ marginBottom: 14 }}>
+      <OpsSurface className="network-gateway-toolbar" variant="toolbar" padding="sm">
+        <Row gutter={[12, 12]}>
           <Col span={24}>
             <Select
               value={kind}
@@ -1104,22 +1109,25 @@ export default function GatewayApiPage() {
           onKeywordInputChange={setKeywordInput}
           onSearch={handleSearch}
           keywordPlaceholder="按名称/标签搜索"
+          marginBottom={0}
         />
+      </OpsSurface>
 
-        {!isInitializing && !accessToken ? (
-          <Alert type="warning" showIcon message="未登录或登录初始化中，请稍后重试。" style={{ marginBottom: 16 }} />
-        ) : null}
+      {!isInitializing && !accessToken ? (
+        <Alert className="network-resource-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
+      ) : null}
 
-        {listQuery.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message={`${kindMeta.title} 列表加载失败`}
-            description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
-            style={{ marginBottom: 16 }}
-          />
-        ) : null}
+      {listQuery.isError ? (
+        <Alert
+          className="network-resource-state-alert"
+          type="error"
+          showIcon
+          title={`${kindMeta.title} 列表加载失败`}
+          description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
+        />
+      ) : null}
 
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<GatewayRow>
           rowKey="id"
           columns={columns}
@@ -1144,7 +1152,8 @@ export default function GatewayApiPage() {
           }
           pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading)}
           onRow={(record) => ({
-            onClick: () => {
+            onClick: (event: ReactMouseEvent<HTMLElement>) => {
+              if (isGatewayRowInteractiveTarget(event.target)) return;
               if (record.id) {
                 setDetailTarget(buildGatewayDynamicDetailTarget(kindMeta, record));
               }

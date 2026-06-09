@@ -1530,6 +1530,212 @@ body {
   border-radius: 8px;
 }
 
+.config-resource-state-alert.ant-alert {
+  margin-bottom: 0;
+  border-radius: 8px;
+}
+
+.network-resource-state-alert.ant-alert {
+  margin-bottom: 0;
+  border-radius: 8px;
+}
+
+.storage-resource-state-alert.ant-alert,
+.namespace-resource-state-alert.ant-alert,
+.workload-resource-state-alert.ant-alert,
+.cluster-resource-state-alert.ant-alert,
+.identity-resource-state-alert.ant-alert,
+.ops-center-state-alert.ant-alert,
+.inspection-resource-state-alert.ant-alert,
+.system-resource-state-alert.ant-alert,
+.module-resource-state-alert.ant-alert,
+.login-state-alert.ant-alert {
+  margin-bottom: 0;
+  border-radius: 8px;
+}
+
+.login-page {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 20px;
+  background: var(--kn-bg);
+}
+
+.login-page__content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: min(1120px, calc(100vw - 40px));
+  align-items: stretch;
+  gap: 24px;
+}
+
+.login-page__intro {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 38px 34px;
+  border: 1px solid var(--kn-border);
+  border-radius: 8px;
+  background: var(--kn-surface);
+  box-shadow: var(--kn-shadow-subtle);
+}
+
+.login-card.ops-surface {
+  border-radius: 8px;
+  border-color: var(--kn-border);
+  background: var(--kn-surface);
+  box-shadow: var(--kn-shadow-subtle);
+}
+
+.login-card.ops-surface > .ops-surface__body {
+  padding: 30px 28px;
+}
+
+.bootstrap-screen {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--kn-bg);
+}
+
+.bootstrap-screen__panel {
+  width: min(560px, 100%);
+  padding: 28px;
+  border: 1px solid var(--kn-border);
+  border-radius: 8px;
+  background: var(--kn-surface);
+  box-shadow: var(--kn-shadow-subtle);
+}
+
+.rbac-role-guide .ops-surface__body {
+  display: grid;
+  gap: 12px;
+}
+
+.rbac-role-guide__icon {
+  color: var(--ops-text-muted);
+}
+
+.rbac-role-card.ops-surface {
+  height: 100%;
+  border-top: 3px solid var(--rbac-role-color, var(--ops-accent));
+}
+
+.rbac-role-card .ops-surface__body {
+  display: grid;
+  gap: 10px;
+}
+
+.rbac-role-card .ops-surface__title,
+.rbac-role-card__icon {
+  color: var(--rbac-role-color, var(--ops-accent)) !important;
+}
+
+.rbac-role-card__icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.rbac-role-card__description.ant-typography {
+  display: block;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.rbac-role-card__permissions.ant-descriptions {
+  margin-bottom: 0;
+}
+
+.rbac-role-card__permissions .ant-descriptions-item {
+  padding-bottom: 2px;
+}
+
+.rbac-role-card__check {
+  color: var(--rbac-role-color, var(--ops-accent));
+  font-size: 11px;
+}
+
+.rbac-role-card__bindings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding-top: 2px;
+}
+
+.resource-detail-section.ops-surface {
+  border-color: var(--ops-border-subtle);
+  background: var(--ops-surface-raised);
+  box-shadow: var(--ops-shadow-subtle);
+}
+
+.resource-detail-section.ops-surface > .ops-surface__header {
+  padding: 14px 18px;
+}
+
+.resource-detail-section.ops-surface > .ops-surface__body {
+  padding: 16px;
+}
+
+.resource-detail-section .ops-surface__title {
+  font-size: 15px;
+}
+
+.resource-detail-section .ops-surface__subtitle {
+  font-size: 12px;
+}
+
+.resource-detail-overview.ops-surface {
+  border-color: var(--ops-border-subtle);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--ops-surface-raised) 96%, transparent) 0%,
+      var(--ops-surface-raised) 62%,
+      color-mix(in srgb, var(--ops-accent) 8%, var(--ops-surface-raised)) 100%
+    );
+  box-shadow: var(--ops-shadow-subtle);
+}
+
+.resource-detail-overview.ops-surface > .ops-surface__body {
+  padding: 20px;
+}
+
+.resource-detail-overview__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 12px;
+}
+
+.resource-detail-overview__metric {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ops-border-subtle);
+  border-radius: 8px;
+  background: var(--ops-surface-muted);
+}
+
+.network-gateway-toolbar .ops-surface__body {
+  display: grid;
+  gap: 12px;
+}
+
+.security-events-filter-toolbar.ops-surface {
+  margin-bottom: 12px;
+}
+
+.workload-create-state-alert.ant-alert,
+.ops-confirm-state-alert.ant-alert {
+  margin-bottom: 12px;
+}
+
 .dynamic-config-create-form.ant-form {
   display: grid;
   gap: 0;
@@ -1566,6 +1772,93 @@ body {
   font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.config-resource-form.ant-form {
+  display: grid;
+  gap: 0;
+}
+
+.config-resource-form .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.config-resource-form .ant-form-item-label {
+  padding-bottom: 4px;
+}
+
+.config-resource-form .ant-row {
+  align-items: flex-start;
+  row-gap: 8px;
+}
+
+.config-resource-form .ant-input,
+.config-resource-form .ant-input-affix-wrapper,
+.config-resource-form .ant-select-selector {
+  min-height: 32px;
+}
+
+.config-resource-form textarea.ant-input {
+  min-height: 68px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.config-resource-form .ant-row .ant-col:last-child .ant-btn {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+}
+
+.config-resource-form .ant-btn-dashed {
+  height: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+}
+
+.config-resource-utility-modal .ant-modal-content {
+  overflow: hidden;
+  border: 1px solid var(--kn-border);
+  border-radius: 10px;
+  background: var(--kn-surface);
+  box-shadow: var(--kn-shadow-overlay);
+}
+
+.config-resource-utility-modal .ant-modal-header {
+  margin: 0;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--kn-border);
+  background: var(--kn-surface);
+}
+
+.config-resource-utility-modal .ant-modal-body {
+  padding: 16px 18px;
+  background: var(--kn-surface);
+}
+
+.config-resource-utility-modal .ant-modal-footer {
+  margin-top: 0;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--kn-border);
+  background: var(--kn-surface);
+}
+
+.config-resource-utility-modal .ant-modal-title {
+  color: var(--kn-text);
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.config-resource-yaml-editor.ant-input {
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.config-resource-token-modal .resource-table-shell {
+  margin: 0;
 }
 
 .resource-add-button.ant-btn {
@@ -3652,11 +3945,22 @@ body {
   min-width: 116px;
 }
 
-.workload-create-workspace__surface .ant-card {
-  border-color: var(--ops-border-subtle);
-  border-radius: var(--kn-radius-md);
-  background: var(--ops-surface-muted) !important;
-  box-shadow: none;
+.workload-create-workspace__subsurface.ops-surface {
+  margin-bottom: 12px;
+  background: var(--ops-surface-muted);
+}
+
+.workload-create-workspace__subsurface .ops-surface__body {
+  min-width: 0;
+}
+
+.workload-form-subsection {
+  min-width: 0;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--ops-border-subtle);
+  border-radius: 8px;
+  background: var(--ops-surface-muted);
 }
 
 .workload-create-workspace__preview-grid {
@@ -4943,35 +5247,6 @@ body.kubenova-route-transitioning .resource-table * {
 }
 
 /* ============================================================
-   深色主题：Ant Design 卡片发光边框
-   ============================================================ */
-[data-theme="dark"] .ant-card {
-  border: 1px solid rgba(59, 130, 246, 0.12) !important;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
-  backdrop-filter: blur(2px);
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-[data-theme="dark"] .ant-card:hover {
-  border-color: rgba(59, 130, 246, 0.3) !important;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(59, 130, 246, 0.15), 0 0 20px rgba(59, 130, 246, 0.08) !important;
-}
-
-/* ============================================================
-   浅色主题：卡片阴影
-   ============================================================ */
-[data-theme="light"] .ant-card {
-  border-color: rgba(59, 130, 246, 0.15) !important;
-  box-shadow: 0 1px 8px rgba(37, 99, 235, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04) !important;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-[data-theme="light"] .ant-card:hover {
-  border-color: rgba(37, 99, 235, 0.25) !important;
-  box-shadow: 0 4px 20px rgba(37, 99, 235, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06) !important;
-}
-
-/* ============================================================
    深色主题：侧边栏菜单选中项（左侧渐变发光线）
    ============================================================ */
 [data-theme="dark"] .ant-menu-item-selected {
@@ -5045,9 +5320,7 @@ body.kubenova-route-transitioning .resource-table * {
    Topology Overview (Enterprise light canvas)
    ============================================================ */
 :root {
-  --topology-overview-bg:
-    radial-gradient(circle at 18% 10%, rgba(37, 99, 235, 0.08), transparent 28%),
-    linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
+  --topology-overview-bg: #f7f8fa;
   --topology-overview-panel: rgba(255, 255, 255, 0.92);
   --topology-overview-border: rgba(148, 163, 184, 0.24);
   --topology-overview-text: #111827;
@@ -5058,17 +5331,17 @@ body.kubenova-route-transitioning .resource-table * {
   --topology-overview-edge: rgba(75, 85, 99, 0.66);
   --topology-overview-grid: rgba(100, 116, 139, 0.18);
   --topology-overview-mask: rgba(226, 232, 240, 0.54);
-  --topology-overview-hero: linear-gradient(135deg, rgba(255, 255, 255, 0.94) 0%, rgba(239, 246, 255, 0.96) 48%, rgba(248, 250, 252, 0.92) 100%);
+  --topology-overview-hero: #ffffff;
   --topology-detail-card: rgba(255, 255, 255, 0.9);
   --topology-detail-muted-bg: rgba(241, 245, 249, 0.9);
-  --topology-toolbar-glow: 0 18px 44px rgba(15, 23, 42, 0.08);
+  --topology-toolbar-glow: 0 1px 2px rgba(15, 23, 42, 0.06);
   --topology-chip-bg: rgba(255, 255, 255, 0.84);
   --topology-chip-border: rgba(148, 163, 184, 0.2);
-  --topology-chip-active-bg: linear-gradient(135deg, rgba(219, 234, 254, 0.96) 0%, rgba(255, 255, 255, 0.98) 100%);
+  --topology-chip-active-bg: rgba(239, 246, 255, 0.98);
   --topology-chip-active-border: rgba(37, 99, 235, 0.3);
-  --topology-chip-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-  --topology-dropdown-shadow: 0 20px 50px rgba(15, 23, 42, 0.14);
-  --topology-toolbar-strip-bg: linear-gradient(180deg, rgba(248, 250, 252, 0.9) 0%, rgba(241, 245, 249, 0.84) 100%);
+  --topology-chip-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --topology-dropdown-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  --topology-toolbar-strip-bg: rgba(248, 250, 252, 0.92);
   --topology-toolbar-strip-border: rgba(148, 163, 184, 0.18);
   --topology-popover-width-base: min(360px, calc(100vw - 24px));
   --topology-popover-width-resource: min(420px, calc(100vw - 24px));
@@ -5078,11 +5351,11 @@ body.kubenova-route-transitioning .resource-table * {
   --topology-detail-panel-gap: 12px;
   --topology-group-panel-bg: rgba(248, 250, 252, 0.32);
   --topology-group-panel-border: rgba(148, 163, 184, 0.28);
-  --topology-group-panel-shadow: inset 0 0 0 1px rgba(255,255,255,0.6);
+  --topology-group-panel-shadow: none;
   --topology-lane-bg: rgba(255,255,255,0.7);
-  --topology-lane-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
-  --topology-node-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
-  --topology-node-selected-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14), 0 8px 18px rgba(37, 99, 235, 0.12);
+  --topology-lane-shadow: none;
+  --topology-node-shadow: none;
+  --topology-node-selected-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14);
   --topology-chip-mini-border: rgba(148, 163, 184, 0.22);
   --topology-chip-mini-ok-bg: rgba(34, 197, 94, 0.09);
   --topology-chip-mini-ok-border: rgba(34, 197, 94, 0.24);
@@ -5096,18 +5369,16 @@ body.kubenova-route-transitioning .resource-table * {
   --topology-chip-mini-muted-bg: rgba(100, 116, 139, 0.08);
   --topology-chip-mini-muted-text: #475569;
   --topology-toolbar-shell-border: rgba(203, 213, 225, 0.42);
-  --topology-toolbar-shell-bg: linear-gradient(180deg, rgba(255,255,255,0.78) 0%, rgba(248,250,252,0.66) 100%);
-  --topology-toolbar-shell-shadow: 0 10px 26px rgba(15, 23, 42, 0.045), inset 0 1px 0 rgba(255,255,255,0.68);
+  --topology-toolbar-shell-bg: rgba(255, 255, 255, 0.94);
+  --topology-toolbar-shell-shadow: none;
   --topology-toolbar-pill-border: rgba(191, 219, 254, 0.7);
-  --topology-toolbar-pill-bg: linear-gradient(180deg, rgba(255,255,255,0.84) 0%, rgba(239,246,255,0.74) 100%);
-  --topology-toolbar-pill-shadow: 0 8px 18px rgba(37, 99, 235, 0.06), inset 0 1px 0 rgba(255,255,255,0.84);
-  --topology-toolbar-toggle-bg: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.9) 100%);
+  --topology-toolbar-pill-bg: rgba(255, 255, 255, 0.94);
+  --topology-toolbar-pill-shadow: none;
+  --topology-toolbar-toggle-bg: rgba(255, 255, 255, 0.96);
 }
 
 [data-theme="dark"] {
-  --topology-overview-bg:
-    radial-gradient(circle at 18% 10%, rgba(59, 130, 246, 0.12), transparent 28%),
-    linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
+  --topology-overview-bg: #0b0f17;
   --topology-overview-panel: rgba(13, 20, 36, 0.9);
   --topology-overview-border: rgba(59, 130, 246, 0.16);
   --topology-overview-text: #e6edf3;
@@ -5118,25 +5389,25 @@ body.kubenova-route-transitioning .resource-table * {
   --topology-overview-edge: rgba(203, 213, 225, 0.64);
   --topology-overview-grid: rgba(148, 163, 184, 0.16);
   --topology-overview-mask: rgba(15, 23, 42, 0.56);
-  --topology-overview-hero: linear-gradient(135deg, rgba(17, 24, 39, 0.94) 0%, rgba(15, 23, 42, 0.96) 48%, rgba(30, 41, 59, 0.92) 100%);
+  --topology-overview-hero: rgba(15, 23, 42, 0.94);
   --topology-detail-card: rgba(15, 23, 42, 0.88);
   --topology-detail-muted-bg: rgba(15, 23, 42, 0.72);
-  --topology-toolbar-glow: 0 18px 44px rgba(2, 6, 23, 0.28);
+  --topology-toolbar-glow: none;
   --topology-chip-bg: rgba(15, 23, 42, 0.82);
   --topology-chip-border: rgba(59, 130, 246, 0.14);
-  --topology-chip-active-bg: linear-gradient(135deg, rgba(30, 41, 59, 0.96) 0%, rgba(17, 24, 39, 0.98) 100%);
+  --topology-chip-active-bg: rgba(30, 41, 59, 0.96);
   --topology-chip-active-border: rgba(96, 165, 250, 0.3);
-  --topology-chip-shadow: 0 10px 24px rgba(2, 6, 23, 0.22);
-  --topology-dropdown-shadow: 0 20px 50px rgba(2, 6, 23, 0.34);
-  --topology-toolbar-strip-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.86) 0%, rgba(15, 23, 42, 0.76) 100%);
+  --topology-chip-shadow: none;
+  --topology-dropdown-shadow: 0 10px 24px rgba(2, 6, 23, 0.32);
+  --topology-toolbar-strip-bg: rgba(15, 23, 42, 0.86);
   --topology-toolbar-strip-border: rgba(59, 130, 246, 0.14);
   --topology-group-panel-bg: rgba(15,23,42,0.3);
   --topology-group-panel-border: rgba(96, 165, 250, 0.22);
   --topology-group-panel-shadow: inset 0 0 0 1px rgba(148,163,184,0.08);
   --topology-lane-bg: rgba(15,23,42,0.68);
-  --topology-lane-shadow: inset 0 1px 0 rgba(148,163,184,0.12);
-  --topology-node-shadow: 0 6px 14px rgba(2, 6, 23, 0.2);
-  --topology-node-selected-shadow: 0 0 0 2px rgba(96, 165, 250, 0.22), 0 12px 24px rgba(2, 6, 23, 0.34);
+  --topology-lane-shadow: none;
+  --topology-node-shadow: none;
+  --topology-node-selected-shadow: 0 0 0 2px rgba(96, 165, 250, 0.22);
   --topology-chip-mini-border: rgba(148, 163, 184, 0.18);
   --topology-chip-mini-ok-bg: rgba(34, 197, 94, 0.13);
   --topology-chip-mini-ok-border: rgba(74, 222, 128, 0.28);
@@ -5150,12 +5421,12 @@ body.kubenova-route-transitioning .resource-table * {
   --topology-chip-mini-muted-bg: rgba(100, 116, 139, 0.14);
   --topology-chip-mini-muted-text: #cbd5e1;
   --topology-toolbar-shell-border: rgba(59, 130, 246, 0.14);
-  --topology-toolbar-shell-bg: linear-gradient(180deg, rgba(15,23,42,0.88) 0%, rgba(15,23,42,0.76) 100%);
-  --topology-toolbar-shell-shadow: 0 12px 28px rgba(2, 6, 23, 0.24), inset 0 1px 0 rgba(148,163,184,0.08);
+  --topology-toolbar-shell-bg: rgba(15, 23, 42, 0.88);
+  --topology-toolbar-shell-shadow: none;
   --topology-toolbar-pill-border: rgba(59, 130, 246, 0.2);
-  --topology-toolbar-pill-bg: linear-gradient(180deg, rgba(17,24,39,0.94) 0%, rgba(15,23,42,0.86) 100%);
-  --topology-toolbar-pill-shadow: 0 10px 20px rgba(2, 6, 23, 0.22), inset 0 1px 0 rgba(148,163,184,0.08);
-  --topology-toolbar-toggle-bg: linear-gradient(180deg, rgba(30,41,59,0.98) 0%, rgba(15,23,42,0.92) 100%);
+  --topology-toolbar-pill-bg: rgba(17, 24, 39, 0.94);
+  --topology-toolbar-pill-shadow: none;
+  --topology-toolbar-toggle-bg: rgba(30, 41, 59, 0.94);
 }
 
 .topology-overview-page {
@@ -5180,28 +5451,14 @@ body.kubenova-route-transitioning .resource-table * {
   gap: 4px;
   padding: 6px 8px;
   margin-bottom: -1px;
-  border-radius: 18px;
+  border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.12);
-  background:
-    radial-gradient(circle at 10% 0%, rgba(37, 99, 235, 0.045), transparent 22%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(248, 250, 252, 0.62) 100%);
-  backdrop-filter: blur(18px) saturate(126%);
-  -webkit-backdrop-filter: blur(18px) saturate(126%);
-  box-shadow:
-    0 10px 22px rgba(15, 23, 42, 0.045),
-    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  background: var(--topology-toolbar-shell-bg);
+  box-shadow: var(--topology-toolbar-shell-shadow);
 }
 
 .topology-toolbar-stack::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    linear-gradient(90deg, rgba(59, 130, 246, 0.025) 0%, transparent 16%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.26) 0%, transparent 44%);
-  opacity: 0.45;
+  display: none;
 }
 
 .topology-toolbar-head {
@@ -5290,13 +5547,11 @@ body.kubenova-route-transitioning .resource-table * {
 
 .topology-toolbar-section--compact {
   padding: 4px;
-  border-radius: 999px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.1);
   background: rgba(248, 250, 252, 0.58);
   justify-content: flex-end;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.78),
-    0 8px 20px rgba(15, 23, 42, 0.035);
+  box-shadow: none;
 }
 
 .topology-toolbar-label {
@@ -5319,12 +5574,12 @@ body.kubenova-route-transitioning .resource-table * {
 }
 
 .topology-toolbar-stack .ant-select .ant-select-selector {
-  border-radius: 999px !important;
+  border-radius: 8px !important;
   border: 1px solid var(--topology-chip-border) !important;
   background: var(--topology-chip-bg) !important;
   min-height: 42px !important;
   padding-inline: 14px 40px !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  box-shadow: none;
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
@@ -5337,9 +5592,7 @@ body.kubenova-route-transitioning .resource-table * {
 .topology-toolbar-stack .ant-select.ant-select-focused .ant-select-selector,
 .topology-toolbar-stack .ant-select.ant-select-open .ant-select-selector {
   border-color: rgba(59, 130, 246, 0.28) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    0 8px 18px rgba(37, 99, 235, 0.08) !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1) !important;
 }
 
 .topology-toolbar-stack .ant-select .ant-select-selection-item,
@@ -5391,34 +5644,28 @@ body.kubenova-route-transitioning .resource-table * {
 .topology-toolbar-row:first-child .topology-toolbar-section > .ant-select:nth-of-type(3) .ant-select-selector {
   border-color: var(--topology-chip-active-border) !important;
   background: var(--topology-chip-active-bg) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    0 12px 24px rgba(37, 99, 235, 0.12) !important;
+  box-shadow: none !important;
 }
 
 .topology-toolbar-row:first-child .topology-toolbar-section > .ant-select:nth-of-type(3):hover .ant-select-selector,
 .topology-toolbar-row:first-child .topology-toolbar-section > .ant-select:nth-of-type(3).ant-select-open .ant-select-selector,
 .topology-toolbar-row:first-child .topology-toolbar-section > .ant-select:nth-of-type(3).ant-select-focused .ant-select-selector {
-  transform: translateY(-1px);
   border-color: rgba(37, 99, 235, 0.42) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.98),
-    0 14px 30px rgba(37, 99, 235, 0.16) !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12) !important;
 }
 
 body.topology-overview-active .ant-select-dropdown {
   padding: 8px;
-  border-radius: 20px;
+  border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(22px);
+  background: rgba(255, 255, 255, 0.98);
   box-shadow: var(--topology-dropdown-shadow);
   max-width: min(calc(100vw - 20px), 420px);
 }
 
 body.topology-overview-active .ant-select-dropdown .ant-select-item {
   min-height: 38px;
-  border-radius: 12px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
 }
@@ -5428,7 +5675,7 @@ body.topology-overview-active .ant-select-dropdown .ant-select-item-option-activ
 }
 
 body.topology-overview-active .ant-select-dropdown .ant-select-item-option-selected {
-  background: linear-gradient(135deg, rgba(219, 234, 254, 0.92) 0%, rgba(239, 246, 255, 0.94) 100%);
+  background: rgba(239, 246, 255, 0.96);
   color: #1d4ed8;
 }
 
@@ -5448,11 +5695,10 @@ body.topology-overview-active .ant-popover .ant-popover-inner {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--topology-dropdown-shadow);
 }
 
 body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
@@ -5486,12 +5732,12 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
 
 .topology-source-chip:hover {
   border-color: rgba(59, 130, 246, 0.28);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  box-shadow: none;
 }
 
 .topology-source-chip.is-active {
   border-color: rgba(37, 99, 235, 0.34);
-  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96) 0%, rgba(248, 250, 252, 0.94) 100%);
+  background: var(--topology-chip-active-bg);
 }
 
 .topology-source-chip.is-reserved {
@@ -5544,13 +5790,10 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
   padding: 9px 14px;
   border-radius: var(--ops-control-radius);
   border: 1px solid rgba(148, 163, 184, 0.18);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(244, 247, 251, 0.84) 100%);
+  background: var(--topology-card-bg);
   color: var(--topology-overview-text);
   cursor: pointer;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.86),
-    0 12px 24px rgba(15, 23, 42, 0.055);
+  box-shadow: none;
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease,
@@ -5561,24 +5804,16 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
 }
 
 .topology-filter-pill:hover {
-  transform: translateY(-1px);
   border-color: rgba(37, 99, 235, 0.34);
-  background:
-    linear-gradient(180deg, rgba(239, 246, 255, 0.94) 0%, rgba(226, 239, 255, 0.9) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.94),
-    0 16px 30px rgba(37, 99, 235, 0.12);
-  filter: saturate(1.06);
+  background: color-mix(in srgb, var(--topology-chip-active-bg) 78%, var(--topology-card-bg));
+  box-shadow: none;
+  filter: none;
 }
 
 .topology-filter-pill.is-active {
   border-color: rgba(37, 99, 235, 0.42);
-  background:
-    linear-gradient(135deg, rgba(219, 234, 254, 0.94) 0%, rgba(239, 246, 255, 0.92) 52%, rgba(224, 242, 254, 0.88) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.94),
-    inset 0 0 0 1px rgba(59, 130, 246, 0.12),
-    0 16px 32px rgba(37, 99, 235, 0.14);
+  background: var(--topology-chip-active-bg);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.12);
 }
 
 .topology-filter-pill:active {
@@ -5588,9 +5823,7 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
 .topology-filter-pill:focus-visible {
   outline: none;
   border-color: rgba(29, 78, 216, 0.52);
-  box-shadow:
-    0 0 0 3px rgba(37, 99, 235, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.98);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
 }
 
 .topology-filter-pill strong {
@@ -5602,20 +5835,14 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
   min-width: 164px;
   max-width: 268px;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.86) 0%, rgba(243, 247, 252, 0.84) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.88),
-    0 12px 24px rgba(15, 23, 42, 0.05);
+  background: var(--topology-card-bg);
+  box-shadow: none;
 }
 
 .topology-filter-pill--interactive:hover {
   color: #1d4ed8;
-  background:
-    linear-gradient(180deg, rgba(239, 246, 255, 0.92) 0%, rgba(222, 236, 254, 0.9) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.94),
-    0 16px 28px rgba(37, 99, 235, 0.12);
+  background: color-mix(in srgb, var(--topology-chip-active-bg) 78%, var(--topology-card-bg));
+  box-shadow: none;
 }
 
 .topology-filter-pill--interactive:disabled {
@@ -5646,22 +5873,16 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
   width: 30px;
   height: 30px;
   border-radius: var(--ops-control-radius);
-  background:
-    linear-gradient(180deg, rgba(219, 234, 254, 0.96) 0%, rgba(239, 246, 255, 0.9) 100%);
+  background: rgba(219, 234, 254, 0.72);
   color: #1d4ed8;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    0 6px 14px rgba(37, 99, 235, 0.12);
+  box-shadow: none;
   font-size: 14px;
 }
 
 .topology-filter-pill__icon--warning {
   color: #b45309;
-  background:
-    linear-gradient(180deg, rgba(254, 243, 199, 0.96) 0%, rgba(255, 247, 237, 0.9) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.92),
-    0 6px 14px rgba(245, 158, 11, 0.12);
+  background: rgba(254, 243, 199, 0.82);
+  box-shadow: none;
 }
 
 .topology-filter-pill__label {
@@ -6068,9 +6289,9 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
   width: 100%;
   height: 100%;
   border: 1px solid var(--topology-overview-border);
-  border-radius: 12px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--topology-overview-panel) 72%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  box-shadow: none;
 }
 
 .topology-lane-node {
@@ -6093,7 +6314,7 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
   border-radius: 10px;
   background: var(--topology-card-bg);
   color: var(--topology-overview-text);
-  box-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--topology-node-shadow);
   cursor: pointer;
   transition:
     border-color 0.15s ease,
@@ -6104,12 +6325,12 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
 .topology-node-card--headlamp:hover,
 .topology-node-card--headlamp:focus-within {
   border-color: color-mix(in srgb, var(--topology-node-accent) 32%, var(--topology-overview-border));
-  box-shadow: 4px 4px 6px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--topology-node-accent) 18%, transparent);
 }
 
 .topology-node-card--headlamp.is-selected {
   border-color: var(--topology-overview-text);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--topology-node-accent) 20%, transparent), 0 8px 18px rgba(15, 23, 42, 0.1);
+  box-shadow: var(--topology-node-selected-shadow);
 }
 
 .topology-node-card--headlamp.is-group::before,
@@ -6191,9 +6412,9 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
   width: 32px;
   height: 32px;
   border: 1px solid var(--topology-overview-border);
-  border-radius: 50%;
+  border-radius: 8px;
   background: var(--topology-card-bg);
-  box-shadow: 1px 1px 5px rgba(15, 23, 42, 0.1);
+  box-shadow: none;
   color: var(--topology-overview-subtle);
   font-size: 13px;
   font-weight: 800;
@@ -6336,9 +6557,9 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
 .topology-breadcrumbs .ant-btn-primary:hover,
 .topology-breadcrumbs .ant-btn-primary:focus {
   border-color: rgba(37, 99, 235, 0.32);
-  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  background: #2563eb;
   color: #eff6ff;
-  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.2);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .topology-toolbar-stack {
@@ -6363,21 +6584,17 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
 [data-theme="dark"] .topology-toolbar-section--compact {
   border-color: rgba(59, 130, 246, 0.12);
   background: rgba(15, 23, 42, 0.54);
-  box-shadow:
-    inset 0 1px 0 rgba(148, 163, 184, 0.08),
-    0 8px 20px rgba(2, 6, 23, 0.2);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .topology-toolbar-stack .ant-select .ant-select-selector {
-  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .topology-toolbar-stack .ant-select:hover .ant-select-selector,
 [data-theme="dark"] .topology-toolbar-stack .ant-select.ant-select-focused .ant-select-selector,
 [data-theme="dark"] .topology-toolbar-stack .ant-select.ant-select-open .ant-select-selector {
-  box-shadow:
-    inset 0 1px 0 rgba(191, 219, 254, 0.1),
-    0 8px 18px rgba(37, 99, 235, 0.16) !important;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.16) !important;
 }
 
 [data-theme="dark"] body.topology-overview-active .ant-select-dropdown {
@@ -6397,7 +6614,7 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
 [data-theme="dark"] body.topology-overview-active .ant-popover .ant-popover-inner {
   border-color: var(--topology-overview-border);
   background: rgba(15, 23, 42, 0.96);
-  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.32);
+  box-shadow: var(--topology-dropdown-shadow);
 }
 
 [data-theme="dark"] .topology-source-chip,
@@ -6425,43 +6642,32 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
 [data-theme="dark"] .topology-filter-pill,
 [data-theme="dark"] .topology-filter-pill--interactive {
   border-color: rgba(59, 130, 246, 0.14);
-  background: linear-gradient(180deg, rgba(17, 24, 39, 0.94) 0%, rgba(15, 23, 42, 0.86) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(148, 163, 184, 0.08),
-    0 12px 24px rgba(2, 6, 23, 0.22);
+  background: var(--topology-card-bg);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .topology-filter-pill:hover,
 [data-theme="dark"] .topology-filter-pill--interactive:hover {
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96) 0%, rgba(17, 24, 39, 0.9) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(191, 219, 254, 0.08),
-    0 16px 30px rgba(37, 99, 235, 0.18);
+  background: color-mix(in srgb, var(--topology-chip-active-bg) 78%, var(--topology-card-bg));
+  box-shadow: none;
 }
 
 [data-theme="dark"] .topology-filter-pill.is-active {
   border-color: rgba(96, 165, 250, 0.3);
   background: var(--topology-chip-active-bg);
-  box-shadow:
-    inset 0 1px 0 rgba(191, 219, 254, 0.08),
-    inset 0 0 0 1px rgba(59, 130, 246, 0.14),
-    0 16px 32px rgba(37, 99, 235, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.14);
 }
 
 [data-theme="dark"] .topology-filter-pill__icon {
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.94) 0%, rgba(15, 23, 42, 0.9) 100%);
+  background: rgba(30, 41, 59, 0.92);
   color: #93c5fd;
-  box-shadow:
-    inset 0 1px 0 rgba(191, 219, 254, 0.08),
-    0 6px 14px rgba(37, 99, 235, 0.16);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .topology-filter-pill__icon--warning {
   color: #fbbf24;
-  background: linear-gradient(180deg, rgba(120, 53, 15, 0.42) 0%, rgba(69, 26, 3, 0.46) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(253, 230, 138, 0.06),
-    0 6px 14px rgba(245, 158, 11, 0.14);
+  background: rgba(120, 53, 15, 0.38);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .topology-filter-pill__count {
@@ -6560,11 +6766,10 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
   gap: 6px;
   max-width: 100%;
   padding: 10px 11px;
-  border-radius: 14px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.13);
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(18px);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  background: var(--topology-card-bg);
+  box-shadow: none;
 }
 
 .topology-floating-card--compact {
@@ -6574,8 +6779,7 @@ body.topology-overview-active .ant-popover .ant-popover-inner-content > div {
 .topology-floating-card--mode {
   min-width: 280px;
   max-width: min(520px, calc(100vw - 32px));
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(239, 246, 255, 0.9) 52%, rgba(248, 250, 252, 0.94) 100%);
+  background: var(--topology-card-bg);
 }
 
 .topology-floating-card__title {
@@ -6707,12 +6911,9 @@ button.topology-detail-list__item {
   padding-inline: 12px;
   border-radius: 7px;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(243, 246, 251, 0.8) 100%);
+  background: var(--topology-card-bg);
   color: var(--topology-overview-text);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.88),
-    0 10px 22px rgba(15, 23, 42, 0.05);
+  box-shadow: none;
   font-weight: 700;
   will-change: transform;
   transition:
@@ -6727,12 +6928,9 @@ button.topology-detail-list__item {
 .topology-toolbar-section--compact .ant-btn:focus {
   color: #1d4ed8;
   border-color: rgba(37, 99, 235, 0.3);
-  background:
-    linear-gradient(180deg, rgba(239, 246, 255, 0.98) 0%, rgba(219, 234, 254, 0.92) 100%);
-  transform: translateY(-1px) scale(1.01);
-  box-shadow:
-    inset 0 0 0 1px rgba(59, 130, 246, 0.16),
-    0 12px 28px rgba(37, 99, 235, 0.14);
+  background: var(--topology-chip-active-bg);
+  transform: none;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.16);
 }
 
 .topology-control-group .ant-btn:hover,
@@ -6740,27 +6938,21 @@ button.topology-detail-list__item {
   color: var(--topology-overview-panel);
   border-color: transparent;
   background: color-mix(in srgb, var(--topology-overview-text) 92%, var(--topology-node-accent, #2563eb));
-  transform: translateY(-1px) scale(1.01);
-  box-shadow:
-    0 10px 22px rgba(15, 23, 42, 0.16);
+  transform: none;
+  box-shadow: none;
 }
 
 .topology-toolbar-section--compact .ant-btn:active,
 .topology-control-group .ant-btn:active {
   transform: translateY(0) scale(0.985);
-  box-shadow:
-    inset 0 0 0 1px rgba(59, 130, 246, 0.14),
-    0 6px 16px rgba(37, 99, 235, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.14);
 }
 
 .topology-toolbar-section--compact > .ant-btn:first-child {
   color: #1d4ed8;
   border-color: rgba(37, 99, 235, 0.34);
-  background:
-    linear-gradient(135deg, rgba(219, 234, 254, 0.98) 0%, rgba(239, 246, 255, 0.96) 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.98),
-    0 14px 32px rgba(37, 99, 235, 0.14);
+  background: var(--topology-chip-active-bg);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.14);
 }
 
 .topology-canvas-overlay {
@@ -6793,15 +6985,10 @@ button.topology-detail-list__item {
   gap: 9px;
   padding: 10px;
   overflow: auto;
-  border-radius: 12px;
+  border-radius: 10px;
   border-color: color-mix(in srgb, var(--topology-overview-border) 76%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--topology-overview-panel) 96%, #ffffff 4%) 0%, var(--topology-overview-panel) 100%);
-  box-shadow:
-    0 18px 38px rgba(15, 23, 42, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.34);
-  backdrop-filter: blur(10px) saturate(125%);
-  -webkit-backdrop-filter: blur(10px) saturate(125%);
+  background: var(--topology-overview-panel);
+  box-shadow: var(--topology-dropdown-shadow);
   scrollbar-gutter: stable;
 }
 
@@ -6817,10 +7004,7 @@ button.topology-detail-list__item {
   margin: -10px -10px 0;
   padding: 9px 10px 8px;
   border-bottom: 1px solid var(--topology-overview-border);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--topology-overview-panel) 98%, #ffffff 2%) 0%, var(--topology-overview-panel) 100%);
-  backdrop-filter: blur(12px) saturate(125%);
-  -webkit-backdrop-filter: blur(12px) saturate(125%);
+  background: var(--topology-overview-panel);
 }
 
 .topology-detail-panel__heading {
@@ -7445,7 +7629,6 @@ button.topology-source-matrix__name:focus-visible,
   transform-origin: center;
 }
 
-.topology-overview-page .react-flow__node .ant-card,
 .topology-overview-page .react-flow__node .topology-node-card,
 .topology-overview-page .react-flow__node .topology-floating-card {
   border-radius: 12px;
@@ -7656,20 +7839,123 @@ button.topology-source-matrix__name:focus-visible,
 }
 
 /* ============================================================
-   科技风工具类（可复用）
+   Dashboard chart utilities
    ============================================================ */
 
-/* 发光边框面板 */
-.cyber-panel {
+.observability-chart-panel {
   border: 1px solid var(--color-border);
   background: var(--color-card);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   border-radius: 8px;
 }
 
-[data-theme="dark"] .cyber-panel {
-  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(59, 130, 246, 0.08);
+.observability-chart-panel.ops-surface .ops-surface__title {
+  color: var(--kn-text);
+  font-weight: 680;
+}
+
+.observability-chart-panel.ops-surface .ops-surface__body {
+  min-width: 0;
+}
+
+.observability-chart-panel--scroll.ops-surface .ops-surface__body {
+  max-height: 340px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+[data-theme="dark"] .observability-chart-panel {
+  box-shadow: 0 1px 2px rgba(2, 8, 23, 0.24);
+}
+
+.observability-score-card,
+.observability-stability-card {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--ops-border-subtle);
+  border-radius: 8px;
+  background: var(--ops-surface-muted);
+}
+
+.observability-score-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.observability-score-card::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 3px;
+  background: var(--observability-score-color, var(--ops-accent));
+}
+
+.observability-score-card__label,
+.observability-stability-card__label {
+  margin-bottom: 6px;
+  color: var(--ops-text-faint);
+  font-size: 11px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.observability-score-card__value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.observability-score-card__value {
+  color: var(--observability-score-color, var(--ops-accent));
+  font-size: 24px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.observability-score-card__unit {
+  color: var(--ops-text-muted);
+  font-size: 12px;
+}
+
+.observability-stability-card {
+  margin-top: 12px;
+}
+
+.observability-stability-card__track {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ops-subtle-bg);
+}
+
+.observability-stability-card__track > div {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.6s ease;
+}
+
+.observability-stability-card__scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  color: var(--ops-text-faint);
+  font-size: 11px;
+}
+
+.dashboard-live-metric-tile {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--ops-border-subtle);
+  border-radius: 8px;
+  background: var(--ops-surface-muted);
+}
+
+.dashboard-live-metric-tile__title {
+  margin-bottom: 8px;
+  color: var(--ops-text-faint);
+  font-size: 11px;
 }
 
 /* 状态指示点 */
@@ -7683,17 +7969,14 @@ button.topology-source-matrix__name:focus-visible,
 
 .status-dot--running {
   background: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
 }
 
 .status-dot--warning {
   background: #f59e0b;
-  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
 }
 
 .status-dot--error {
   background: #ef4444;
-  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
 }
 
 .status-dot--pending {
@@ -7746,7 +8029,7 @@ button.topology-source-matrix__name:focus-visible,
 }
 
 /* ============================================================
-   仪表盘指标卡片：科技感彩色竖条
+   Dashboard metric cards
    ============================================================ */
 .stat-card {
   position: relative;
@@ -7762,7 +8045,6 @@ button.topology-source-matrix__name:focus-visible,
   width: 3px;
   border-radius: 3px 0 0 3px;
   background: var(--stat-accent, #3b82f6);
-  box-shadow: 0 0 8px var(--stat-accent, #3b82f6);
 }
 
 .stat-card-blue   { --stat-accent: #3b82f6; }
@@ -8286,20 +8568,6 @@ button.topology-source-matrix__name:focus-visible,
   border-color: var(--kn-border);
   border-radius: 8px;
   box-shadow: var(--kn-shadow-subtle);
-}
-
-[data-theme="light"] .ant-card,
-[data-theme="light"] .ant-card:hover {
-  border-color: #dfe6ef !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.045) !important;
-  backdrop-filter: none;
-}
-
-[data-theme="dark"] .ant-card,
-[data-theme="dark"] .ant-card:hover {
-  border-color: rgba(148, 163, 184, 0.16) !important;
-  box-shadow: 0 1px 2px rgba(2, 8, 23, 0.2) !important;
-  backdrop-filter: none;
 }
 
 .ops-page-header--surface {

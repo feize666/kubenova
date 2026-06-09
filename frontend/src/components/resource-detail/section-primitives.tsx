@@ -1,8 +1,8 @@
 "use client";
 
-import { Card, Descriptions, Empty, Space, Typography } from "antd";
+import { Descriptions, Empty, Space, Tooltip, Typography } from "antd";
 import type { ReactNode } from "react";
-import { OpsFilterChip, type OpsFilterChipProps, type OpsFilterChipTone } from "@/components/ops";
+import { OpsFilterChip, OpsSurface, type OpsFilterChipProps, type OpsFilterChipTone } from "@/components/ops";
 
 export function DetailSection({
   title,
@@ -16,35 +16,16 @@ export function DetailSection({
   children: ReactNode;
 }) {
   return (
-    <Card
-      size="small"
-      variant="borderless"
-      style={{
-        borderRadius: 8,
-        border: "1px solid var(--ops-border-subtle, var(--color-border, rgba(59, 130, 246, 0.15)))",
-        background: "var(--ops-surface-raised, var(--color-card, #111827))",
-        boxShadow: "var(--ops-shadow-subtle, 0 10px 28px rgba(2, 8, 23, 0.14))",
-      }}
-      styles={{
-        header: { paddingBlock: 14, paddingInline: 18 },
-        body: { padding: 16 },
-      }}
-      title={
-        <Space orientation="vertical" size={2} style={{ width: "100%" }}>
-          <Typography.Text strong style={{ fontSize: 15 }}>
-            {title}
-          </Typography.Text>
-          {subtitle ? (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {subtitle}
-            </Typography.Text>
-          ) : null}
-        </Space>
-      }
-      extra={extra}
+    <OpsSurface
+      className="resource-detail-section"
+      variant="raised"
+      padding="md"
+      title={title}
+      subtitle={subtitle}
+      actions={extra}
     >
       {children}
-    </Card>
+    </OpsSurface>
   );
 }
 
@@ -59,6 +40,29 @@ export function DetailDescriptions({
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />;
   }
 
+  const renderValue = (value: ReactNode) => {
+    if (typeof value !== "string" && typeof value !== "number") {
+      return value;
+    }
+
+    const text = String(value);
+    if (!text || text === "-") {
+      return text;
+    }
+
+    return (
+      <Tooltip title={text} placement="topLeft">
+        <Typography.Text
+          className="resource-detail-field-value"
+          ellipsis
+          style={{ display: "inline-block", maxWidth: "100%" }}
+        >
+          {text}
+        </Typography.Text>
+      </Tooltip>
+    );
+  };
+
   return (
     <Descriptions
       size="small"
@@ -71,7 +75,7 @@ export function DetailDescriptions({
       items={items.map((item) => ({
         key: item.key,
         label: item.label,
-        children: item.value,
+        children: renderValue(item.value),
       }))}
     />
   );

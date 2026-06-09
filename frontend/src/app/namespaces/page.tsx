@@ -371,11 +371,12 @@ export default function NamespacesPage() {
           />
 
           {!isInitializing && !accessToken ? (
-            <Alert type="warning" showIcon title="请先登录后访问 Namespace 管理。" />
+            <Alert className="namespace-resource-state-alert" type="warning" showIcon title="请先登录后访问 Namespace 管理。" />
           ) : null}
 
           {namespacesQuery.isError ? (
             <Alert
+              className="namespace-resource-state-alert"
               type="error"
               showIcon
               title="Namespace 加载失败"

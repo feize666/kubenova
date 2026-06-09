@@ -553,6 +553,7 @@ export default function PvPage() {
 
       {!isInitializing && !accessToken ? (
         <Alert
+          className="storage-resource-state-alert"
           type="warning"
           showIcon
           title="未检测到登录状态，请先登录后再操作。"
@@ -561,6 +562,7 @@ export default function PvPage() {
 
       {isError ? (
         <Alert
+          className="storage-resource-state-alert"
           type="error"
           showIcon
           title="持久卷加载失败"

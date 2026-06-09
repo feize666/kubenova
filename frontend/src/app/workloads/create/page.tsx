@@ -6,7 +6,6 @@ import {
   Alert,
   App,
   Button,
-  Card,
   Col,
   Form,
   Input,
@@ -967,7 +966,7 @@ export default function WorkloadCreateWorkspacePage() {
       />
 
       {!isInitializing && !accessToken ? (
-        <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再创建资源。" />
+        <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再创建资源。" />
       ) : null}
 
       {createMode === "yaml" ? (
@@ -1153,7 +1152,7 @@ export default function WorkloadCreateWorkspacePage() {
               </Form.Item>
 
               {mountPvc ? (
-                <Card size="small" style={{ background: "rgba(37,99,235,0.04)" }}>
+                <OpsSurface className="workload-create-workspace__subsurface" variant="raised" padding="sm">
                   <Form.Item name={["pvcMount", "useExistingPvc"]} valuePropName="checked">
                     <Switch checkedChildren="使用现有 PVC" unCheckedChildren="新建 PVC" />
                   </Form.Item>
@@ -1178,18 +1177,18 @@ export default function WorkloadCreateWorkspacePage() {
                       </Typography.Text>
                       {storageQueryErrorMessage ? (
                         <Alert
+                          className="workload-create-state-alert"
                           type="error"
                           showIcon
-                          style={{ marginBottom: 12 }}
-                          message={storageQueryErrorMessage}
+                          title={storageQueryErrorMessage}
                         />
                       ) : null}
                       {showPvcEmptyScopedState ? (
                         <Alert
+                          className="workload-create-state-alert"
                           type="info"
                           showIcon
-                          style={{ marginBottom: 12 }}
-                          message={
+                          title={
                             storageSourceType === "PVC"
                               ? `在 ${pvcScopeText.replace("当前作用域：", "")} 下未发现 PVC，可切换名称空间或改为新建 PVC。`
                               : storageSourceType === "PV"
@@ -1310,7 +1309,7 @@ export default function WorkloadCreateWorkspacePage() {
                   >
                     <Input placeholder="/data" />
                   </Form.Item>
-                </Card>
+                </OpsSurface>
               ) : null}
             </OpsFormSection>
           ) : null}
@@ -1322,7 +1321,7 @@ export default function WorkloadCreateWorkspacePage() {
               </Form.Item>
 
               {createService ? (
-                <Card size="small" style={{ background: "rgba(37,99,235,0.04)", marginBottom: 12 }}>
+                <OpsSurface className="workload-create-workspace__subsurface" variant="raised" padding="sm">
                   <Row gutter={[12, 12]}>
                     <Col xs={24} md={8}>
                       <Form.Item name={["service", "name"]} label="Service 名称" rules={[{ required: true, message: "请输入 Service 名称" }]}>
@@ -1351,7 +1350,7 @@ export default function WorkloadCreateWorkspacePage() {
                       </Form.Item>
                     </Col>
                   </Row>
-                </Card>
+                </OpsSurface>
               ) : null}
 
               <Form.Item name="createIngress" valuePropName="checked">
@@ -1359,7 +1358,7 @@ export default function WorkloadCreateWorkspacePage() {
               </Form.Item>
 
               {createIngress ? (
-                <Card size="small" style={{ background: "rgba(37,99,235,0.04)" }}>
+                <OpsSurface className="workload-create-workspace__subsurface" variant="raised" padding="sm">
                   <Form.Item name="networkMode" label="网络模式" rules={[{ required: true, message: "请选择网络模式" }]}>
                     <Select
                       options={[
@@ -1442,7 +1441,7 @@ export default function WorkloadCreateWorkspacePage() {
                     </Col>
                   </Row>
                   )}
-                </Card>
+                </OpsSurface>
               ) : null}
             </OpsFormSection>
           ) : null}
@@ -1453,7 +1452,7 @@ export default function WorkloadCreateWorkspacePage() {
                 {(fields, { add, remove }) => (
                   <Space orientation="vertical" size={12} style={{ width: "100%" }}>
                     {fields.map((field, index) => (
-                      <Card key={field.key} size="small">
+                      <OpsSurface key={field.key} className="workload-create-workspace__subsurface" variant="raised" padding="sm">
                         <Row gutter={[12, 12]}>
                           <Col xs={24} md={6}>
                             <Form.Item
@@ -1487,7 +1486,7 @@ export default function WorkloadCreateWorkspacePage() {
                         <Button danger onClick={() => remove(field.name)}>
                           删除初始化容器
                         </Button>
-                      </Card>
+                      </OpsSurface>
                     ))}
                     <Button icon={<PlusOutlined />} onClick={() => add({})}>
                       添加初始化容器
@@ -1500,7 +1499,7 @@ export default function WorkloadCreateWorkspacePage() {
 
           {currentStep === 5 ? (
             <OpsFormSection title="高级选项" description="配置调度策略、亲和性、容忍度和健康探针。">
-              <Card size="small" style={{ background: "rgba(37,99,235,0.04)", marginBottom: 12 }}>
+              <OpsSurface className="workload-create-workspace__subsurface" variant="raised" padding="sm">
                 <Typography.Title level={5} style={{ marginTop: 0 }}>
                   调度策略
                 </Typography.Title>
@@ -1539,7 +1538,7 @@ export default function WorkloadCreateWorkspacePage() {
                     </Form.Item>
                   </Col>
                 </Row>
-              </Card>
+              </OpsSurface>
 
               {(["liveness", "readiness", "startup"] as const).map((probeName) => {
                 const probeLabelMap = {
@@ -1551,7 +1550,7 @@ export default function WorkloadCreateWorkspacePage() {
                 const probeType = currentProbe?.type ?? "httpGet";
                 const enabled = currentProbe?.enabled ?? false;
                 return (
-                  <Card key={probeName} size="small" style={{ background: "rgba(37,99,235,0.04)", marginBottom: 12 }}>
+                  <OpsSurface key={probeName} className="workload-create-workspace__subsurface" variant="raised" padding="sm">
                     <Row gutter={[12, 12]} align="middle">
                       <Col xs={24} md={8}>
                         <Typography.Title level={5} style={{ margin: 0 }}>{probeLabelMap[probeName]}</Typography.Title>
@@ -1658,7 +1657,7 @@ export default function WorkloadCreateWorkspacePage() {
                         </Form.Item>
                       </Col>
                     </Row>
-                  </Card>
+                  </OpsSurface>
                 );
               })}
             </OpsFormSection>
@@ -1712,10 +1711,10 @@ export default function WorkloadCreateWorkspacePage() {
                   </div>
                   {previewYamlQuery.isError ? (
                     <Alert
+                      className="workload-create-state-alert"
                       type="error"
                       showIcon
-                      message={previewYamlQuery.error instanceof Error ? previewYamlQuery.error.message : "YAML 预览生成失败"}
-                      style={{ marginBottom: 12 }}
+                      title={previewYamlQuery.error instanceof Error ? previewYamlQuery.error.message : "YAML 预览生成失败"}
                     />
                   ) : null}
                   <pre className="workload-create-workspace__yaml">

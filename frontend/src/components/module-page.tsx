@@ -1,10 +1,10 @@
 "use client";
 
-import { Alert, Card, Col, Input, Row, Select, Space, Switch, Typography } from "antd";
+import { Alert, Col, Input, Row, Select, Space, Switch, Typography } from "antd";
 import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsStatusTag, type OpsStatusTone } from "@/components/ops";
+import { OpsSurface, OpsStatusTag, type OpsStatusTone } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTable } from "@/components/resource-table";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
@@ -176,14 +176,14 @@ export function ModulePage({
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <Typography.Title level={4} style={{ marginBottom: 8 }}>
           {title}
         </Typography.Title>
         <Typography.Text type="secondary">{description}</Typography.Text>
-      </Card>
+      </OpsSurface>
 
-      <Card>
+      <OpsSurface variant="toolbar" padding="sm">
         <Row gutter={[12, 12]} align="middle">
           <Col xs={24} sm={12} md={8} lg={8}>
             <Input
@@ -208,11 +208,11 @@ export function ModulePage({
             </Space>
           </Col>
         </Row>
-      </Card>
+      </OpsSurface>
 
-      {error ? <Alert type="error" showIcon message="数据加载失败" description={error} /> : null}
+      {error ? <Alert className="module-resource-state-alert" type="error" showIcon title="数据加载失败" description={error} /> : null}
 
-      <Card>
+      <OpsSurface variant="panel" padding="sm">
         <ResourceTable<ModuleRecord>
           rowKey="key"
           columns={normalizedColumns}
@@ -232,7 +232,7 @@ export function ModulePage({
           })}
           {...tableProps}
         />
-      </Card>
+      </OpsSurface>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}

@@ -12,7 +12,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Badge,
-  Card,
   Col,
   Descriptions,
   Form,
@@ -143,51 +142,49 @@ function roleChipTone(roleName: string): OpsFilterChipTone {
 
 function RoleCards() {
   return (
-    <Card
-      title={
-        <Space>
-          <UserOutlined />
-          <span>平台角色权限说明</span>
-        </Space>
-      }
-      style={{ marginBottom: 0 }}
+    <OpsSurface
+      className="rbac-role-guide"
+      variant="panel"
+      padding="md"
+      title="平台角色权限说明"
+      actions={<UserOutlined className="rbac-role-guide__icon" />}
     >
       <Row gutter={[16, 16]}>
         {ROLE_DEFINITIONS.map((role) => (
           <Col key={role.name} xs={24} md={8}>
-            <Card
-              size="small"
-              style={{ borderTop: `3px solid ${role.color}`, height: "100%" }}
-              title={
-                <Space>
-                  <span style={{ color: role.color, fontSize: 16 }}>{role.icon}</span>
-                  <Typography.Text strong style={{ color: role.color }}>
-                    {role.label}
-                  </Typography.Text>
+            <OpsSurface
+              className="rbac-role-card"
+              variant="raised"
+              padding="sm"
+              style={{ ["--rbac-role-color" as string]: role.color }}
+              title={role.label}
+              actions={
+                <Space size={8} wrap>
+                  <span className="rbac-role-card__icon">{role.icon}</span>
                   <OpsFilterChip tone={roleChipTone(role.name)} style={{ fontFamily: "monospace", fontSize: 11 }}>
                     {role.name}
                   </OpsFilterChip>
                 </Space>
               }
             >
-              <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 10 }}>
+              <Typography.Text type="secondary" className="rbac-role-card__description">
                 {role.description}
               </Typography.Text>
-              <Descriptions column={1} size="small" style={{ marginBottom: 8 }}>
+              <Descriptions className="rbac-role-card__permissions" column={1} size="small">
                 {role.permissions.map((perm, idx) => (
                   <Descriptions.Item key={idx} label={null} style={{ paddingBottom: 2 }}>
                     <Space size={4}>
-                      <CheckCircleOutlined style={{ color: role.color, fontSize: 11 }} />
+                      <CheckCircleOutlined className="rbac-role-card__check" />
                       <Typography.Text style={{ fontSize: 12 }}>{perm}</Typography.Text>
                     </Space>
                   </Descriptions.Item>
                 ))}
               </Descriptions>
-              <div style={{ marginTop: 8 }}>
+              <div className="rbac-role-card__bindings">
                 <Typography.Text type="secondary" style={{ fontSize: 11 }}>
                   支持绑定类型：
                 </Typography.Text>
-                <Space size={4} style={{ marginLeft: 4 }}>
+                <Space size={4} wrap>
                   {role.bindingKinds.map((kind) => (
                     <OpsFilterChip key={kind} tone="neutral" style={{ fontSize: 11, margin: 0 }}>
                       {kind}
@@ -195,11 +192,11 @@ function RoleCards() {
                   ))}
                 </Space>
               </div>
-            </Card>
+            </OpsSurface>
           </Col>
         ))}
       </Row>
-    </Card>
+    </OpsSurface>
   );
 }
 
@@ -356,11 +353,11 @@ function CreateRbacModal({ open, accessToken, onClose, onSuccess }: CreateRbacMo
     >
       {mutation.isError ? (
         <Alert
+          className="identity-resource-state-alert"
           type="error"
           showIcon
-          message="创建失败"
+          title="创建失败"
           description={mutation.error instanceof Error ? mutation.error.message : "创建 RBAC 绑定时发生错误"}
-          style={{ marginBottom: 16 }}
         />
       ) : null}
       <Form
@@ -901,32 +898,35 @@ export default function RbacPage() {
 
       {/* 错误提示 */}
       {!isInitializing && !accessToken ? (
-        <Alert type="warning" showIcon message="未检测到登录状态，请先登录。" />
+        <Alert className="identity-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录。" />
       ) : null}
 
       {query.isError ? (
         <Alert
+          className="identity-resource-state-alert"
           type="error"
           showIcon
-          message="加载失败"
+          title="加载失败"
           description={query.error instanceof Error ? query.error.message : "获取 RBAC 数据时发生错误"}
         />
       ) : null}
 
       {mutation.isError ? (
         <Alert
+          className="identity-resource-state-alert"
           type="error"
           showIcon
-          message="操作失败"
+          title="操作失败"
           description={mutation.error instanceof Error ? mutation.error.message : "RBAC 启停操作失败"}
         />
       ) : null}
 
       {deleteMutation.isError ? (
         <Alert
+          className="identity-resource-state-alert"
           type="error"
           showIcon
-          message="删除失败"
+          title="删除失败"
           description={deleteMutation.error instanceof Error ? deleteMutation.error.message : "删除 RBAC 绑定时发生错误"}
         />
       ) : null}

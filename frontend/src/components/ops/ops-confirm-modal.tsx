@@ -63,7 +63,7 @@ function OpsConfirmContent({
           />
         </div>
       ) : null}
-      {error ? <Alert type="error" showIcon message={error} /> : null}
+      {error ? <Alert className="ops-confirm-state-alert" type="error" showIcon title={error} /> : null}
     </div>
   );
 }

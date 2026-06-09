@@ -96,11 +96,11 @@ function CreateUserModal({ open, accessToken, onClose, onSuccess }: CreateUserMo
     >
       {mutation.isError ? (
         <Alert
+          className="identity-resource-state-alert"
           type="error"
           showIcon
-          message="创建失败"
+          title="创建失败"
           description={mutation.error instanceof Error ? mutation.error.message : "创建用户时发生错误"}
-          style={{ marginBottom: 16 }}
         />
       ) : null}
       <Form form={form} layout="vertical" requiredMark>
@@ -215,11 +215,11 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
     >
       {mutation.isError ? (
         <Alert
+          className="identity-resource-state-alert"
           type="error"
           showIcon
-          message="编辑失败"
+          title="编辑失败"
           description={mutation.error instanceof Error ? mutation.error.message : "编辑用户时发生错误"}
-          style={{ marginBottom: 16 }}
         />
       ) : null}
       <Form form={form} layout="vertical" requiredMark>
@@ -510,14 +510,15 @@ export default function UsersPage() {
       />
 
       {!isInitializing && !accessToken ? (
-        <Alert type="warning" showIcon message="未检测到登录状态，请先登录。" />
+        <Alert className="identity-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录。" />
       ) : null}
 
       {query.isError ? (
         <Alert
+          className="identity-resource-state-alert"
           type="error"
           showIcon
-          message="加载失败"
+          title="加载失败"
           description={query.error instanceof Error ? query.error.message : "获取用户数据时发生错误"}
         />
       ) : null}

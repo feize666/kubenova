@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, Empty, Space, Tooltip, Typography } from "antd";
+import { Empty, Space, Tooltip, Typography } from "antd";
 import { Fragment, useMemo } from "react";
 import type { ReactNode } from "react";
 import type {
@@ -10,6 +10,7 @@ import type {
   ResourceDetailSection,
 } from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { OpsSurface } from "@/components/ops";
 import { StatusTag } from "@/components/status-tag";
 import {
   DetailTag,
@@ -1099,18 +1100,7 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
   ].filter(Boolean) as Array<{ label: string; value: ReactNode }>;
 
   return (
-    <Card
-      size="small"
-      variant="borderless"
-      style={{
-        borderRadius: 18,
-        border: "1px solid var(--color-border, rgba(59, 130, 246, 0.15))",
-        background:
-          "linear-gradient(135deg, color-mix(in srgb, var(--color-card-high, #1a2234) 88%, transparent) 0%, color-mix(in srgb, var(--color-card, #111827) 96%, transparent) 52%, color-mix(in srgb, var(--color-primary-glow, rgba(59, 130, 246, 0.25)) 32%, transparent) 100%)",
-        boxShadow: "0 18px 40px rgba(15, 23, 42, 0.22)",
-      }}
-      styles={{ body: { padding: 20 } }}
-    >
+    <OpsSurface className="resource-detail-overview" variant="raised" padding="lg">
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <Space wrap size={[8, 8]}>
           <DetailTag color="geekblue">{detail.overview.kind}</DetailTag>
@@ -1139,21 +1129,9 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
         </Space>
 
         <div
-          style={{
-            display: "grid",
-            gap: 12,
-            gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))",
-          }}
+          className="resource-detail-overview__metrics"
         >
-          <div
-            style={{
-              padding: "10px 12px",
-              borderRadius: 12,
-              background:
-                "color-mix(in srgb, var(--color-card-high, #1a2234) 82%, transparent)",
-              border: "1px solid var(--color-border, rgba(59, 130, 246, 0.15))",
-            }}
-          >
+          <div className="resource-detail-overview__metric">
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               创建时间
             </Typography.Text>
@@ -1163,15 +1141,7 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
               </Typography.Text>
             </div>
           </div>
-          <div
-            style={{
-              padding: "10px 12px",
-              borderRadius: 12,
-              background:
-                "color-mix(in srgb, var(--color-card-high, #1a2234) 82%, transparent)",
-              border: "1px solid var(--color-border, rgba(59, 130, 246, 0.15))",
-            }}
-          >
+          <div className="resource-detail-overview__metric">
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               更新时间
             </Typography.Text>
@@ -1184,14 +1154,7 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
           {runtimeHighlights.slice(0, 4).map((item) => (
             <div
               key={item.label}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 12,
-                background:
-                  "color-mix(in srgb, var(--color-card-high, #1a2234) 82%, transparent)",
-                border:
-                  "1px solid var(--color-border, rgba(59, 130, 246, 0.15))",
-              }}
+              className="resource-detail-overview__metric"
             >
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {item.label}
@@ -1228,7 +1191,7 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
           </Space>
         ) : null}
       </Space>
-    </Card>
+    </OpsSurface>
   );
 }
 

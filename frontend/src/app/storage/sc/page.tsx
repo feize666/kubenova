@@ -572,10 +572,11 @@ export default function StorageClassPage() {
       </OpsSurface>
 
       {!isInitializing && !accessToken ? (
-        <Alert type="warning" showIcon title="未检测到登录状态，请先登录后再查看 StorageClass 信息。" />
+        <Alert className="storage-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看 StorageClass 信息。" />
       ) : null}
       {isError ? (
         <Alert
+          className="storage-resource-state-alert"
           type="error"
           showIcon
           title="加载失败"

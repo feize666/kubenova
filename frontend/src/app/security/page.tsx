@@ -12,7 +12,6 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
-  Card,
   Col,
   Row,
   Skeleton,
@@ -506,7 +505,7 @@ function SecurityEventsTab() {
   return (
     <>
       {contextHolder}
-      <Card size="small" style={{ marginBottom: 16 }}>
+      <OpsSurface className="security-events-filter-toolbar" variant="toolbar" padding="sm">
         <ResourceFilterToolbar>
           <ResourceFilterToolbarItem width="auto">
             <ResourceScopeFilterButton
@@ -524,7 +523,7 @@ function SecurityEventsTab() {
             />
           </ResourceFilterToolbarItem>
         </ResourceFilterToolbar>
-      </Card>
+      </OpsSurface>
 
       <ResourceTable<SecurityEvent>
         rowKey="id"
@@ -1021,7 +1020,7 @@ export default function SecurityPage() {
       <Skeleton loading={statsLoading} active paragraph={{ rows: 1 }}>
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small">
+            <OpsSurface variant="panel" padding="sm">
               <Statistic
                 title="高危漏洞数"
                 value={stats?.criticalVulnerabilities ?? 0}
@@ -1039,10 +1038,10 @@ export default function SecurityPage() {
                   ) : null
                 }
               />
-            </Card>
+            </OpsSurface>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small">
+            <OpsSurface variant="panel" padding="sm">
               <Statistic
                 title="待处理事件"
                 value={stats?.openEvents ?? 0}
@@ -1053,10 +1052,10 @@ export default function SecurityPage() {
                 }}
                 prefix={<ExclamationCircleOutlined />}
               />
-            </Card>
+            </OpsSurface>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small">
+            <OpsSurface variant="panel" padding="sm">
               <Statistic
                 title="合规评分"
                 value={stats?.complianceScore ?? 0}
@@ -1064,16 +1063,16 @@ export default function SecurityPage() {
                 styles={{ content: { color: complianceColor } }}
                 prefix={<SafetyCertificateOutlined />}
               />
-            </Card>
+            </OpsSurface>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small">
+            <OpsSurface variant="panel" padding="sm">
               <Statistic
                 title="今日审计日志"
                 value={stats?.todayAuditLogs ?? 0}
                 prefix={<FileTextOutlined />}
               />
-            </Card>
+            </OpsSurface>
           </Col>
         </Row>
       </Skeleton>

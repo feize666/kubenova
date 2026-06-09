@@ -224,9 +224,10 @@ export default function SystemUpdatePage() {
       />
 
       <Alert
+        className="system-resource-state-alert"
         showIcon
         type="success"
-        message="更新策略：安装与激活分离"
+        title="更新策略：安装与激活分离"
         description="安装阶段只落盘新版本；重启阶段激活运行版本并异步触发发布后审计。回滚保持指针切换，目标秒级恢复。"
       />
 

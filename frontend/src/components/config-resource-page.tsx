@@ -105,7 +105,7 @@ export function ConfigResourcePage({ kind, title, description, keyCountTitle }: 
   );
 
   if (!isInitializing && !isAuthenticated) {
-    return <Alert type="warning" showIcon message="请先登录后查看配置资源。" />;
+    return <Alert className="config-resource-state-alert" type="warning" showIcon title="请先登录后查看配置资源。" />;
   }
 
   return (

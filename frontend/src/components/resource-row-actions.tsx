@@ -50,6 +50,12 @@ export function ResourceRowActions({
     },
   ];
   return (
-    <ResourceActionDropdown actions={actions} ariaLabel={ariaLabel} className={className} />
+    <span
+      data-resource-table-stop-navigation="true"
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <ResourceActionDropdown actions={actions} ariaLabel={ariaLabel} className={className} />
+    </span>
   );
 }

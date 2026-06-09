@@ -1,11 +1,12 @@
 "use client";
 
 import { LockOutlined, LoginOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Checkbox, Divider, Form, Input, Space, Typography } from "antd";
+import { Alert, App, Button, Checkbox, Divider, Form, Input, Space, Typography } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
+import { OpsSurface } from "@/components/ops/ops-surface";
 import { useThemeMode } from "@/components/theme-context";
 import { sanitizeInternalReturnTo } from "@/lib/login-return";
 
@@ -169,26 +170,6 @@ function LoginPageContent() {
   };
 
   // ── 主题相关样式变量 ──────────────────────────────────────
-  const pageBackground = isDark
-    ? "radial-gradient(ellipse at 20% 20%, rgba(22,119,255,0.15) 0%, transparent 50%), radial-gradient(ellipse at 80% 80%, rgba(0,180,120,0.1) 0%, transparent 50%), linear-gradient(135deg, #060e1f 0%, #091422 50%, #060e1f 100%)"
-    : "radial-gradient(ellipse at 20% 15%, rgba(37,99,235,0.08) 0%, transparent 55%), radial-gradient(ellipse at 80% 85%, rgba(14,165,233,0.06) 0%, transparent 55%), linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 50%, #f0f4ff 100%)";
-
-  const gridColor = isDark
-    ? "rgba(22,119,255,0.06)"
-    : "rgba(37,99,235,0.05)";
-
-  const cardBackground = isDark
-    ? "rgba(8,20,40,0.85)"
-    : "rgba(255,255,255,0.92)";
-
-  const cardBorder = isDark
-    ? "1px solid rgba(22,119,255,0.2)"
-    : "1px solid rgba(37,99,235,0.18)";
-
-  const cardShadow = isDark
-    ? "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)"
-    : "0 8px 32px rgba(37,99,235,0.1), 0 2px 8px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.8)";
-
   const subtitleColor = isDark
     ? "rgba(180,210,255,0.7)"
     : "#64748b";
@@ -236,14 +217,6 @@ function LoginPageContent() {
 
   const footerColor = isDark ? "rgba(100,140,200,0.35)" : "#94a3b8";
 
-  const orb1Background = isDark
-    ? "radial-gradient(circle, rgba(22,119,255,0.12) 0%, transparent 70%)"
-    : "radial-gradient(circle, rgba(37,99,235,0.07) 0%, transparent 70%)";
-
-  const orb2Background = isDark
-    ? "radial-gradient(circle, rgba(0,180,120,0.08) 0%, transparent 70%)"
-    : "radial-gradient(circle, rgba(14,165,233,0.06) 0%, transparent 70%)";
-
   const brandSubtitleColor = isDark
     ? "rgba(150,200,255,0.6)"
     : "#94a3b8";
@@ -251,87 +224,22 @@ function LoginPageContent() {
   const taglineColor = isDark
     ? "rgba(200,220,255,0.45)"
     : "#94a3b8";
-  const surfaceBackground = isDark ? "rgba(8,20,40,0.4)" : "rgba(255,255,255,0.66)";
-  const surfaceBorder = isDark ? "1px solid rgba(59,130,246,0.2)" : "1px solid rgba(37,99,235,0.15)";
   const shouldShowApiWarning =
     apiReachable === false &&
     apiProbeFailures >= 3 &&
     !submitting;
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: pageBackground,
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      {/* Background grid pattern */}
+    <div className="login-page">
       <div
+        className="login-page__content"
         style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage: `linear-gradient(${gridColor} 1px, transparent 1px), linear-gradient(90deg, ${gridColor} 1px, transparent 1px)`,
-          backgroundSize: "60px 60px",
-          pointerEvents: "none",
-        }}
-      />
-      {/* Glow orbs */}
-      <div
-        style={{
-          position: "absolute",
-          top: "15%",
-          left: "10%",
-          width: 300,
-          height: 300,
-          borderRadius: "50%",
-          background: orb1Background,
-          pointerEvents: "none",
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          bottom: "10%",
-          right: "8%",
-          width: 250,
-          height: 250,
-          borderRadius: "50%",
-          background: orb2Background,
-          pointerEvents: "none",
-        }}
-      />
-
-      <div
-        style={{
-          position: "relative",
-          zIndex: 1,
-          width: "min(1120px, calc(100vw - 40px))",
-          display: "flex",
-          gap: 24,
-          alignItems: "stretch",
           flexDirection: isCompact ? "column" : "row",
         }}
       >
         {!isCompact ? (
           <div
-            style={{
-              flex: "1 1 0",
-              borderRadius: 24,
-              border: surfaceBorder,
-              background: surfaceBackground,
-              backdropFilter: "blur(12px)",
-              WebkitBackdropFilter: "blur(12px)",
-              boxShadow: isDark ? "0 14px 38px rgba(2,6,23,0.42)" : "0 14px 38px rgba(15,23,42,0.1)",
-              padding: "38px 34px",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
-            }}
+            className="login-page__intro"
           >
             <div>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
@@ -407,16 +315,10 @@ function LoginPageContent() {
         )}
 
         <div style={{ width: isCompact ? "100%" : 430, flexShrink: 0 }}>
-          <Card
-            style={{
-              borderRadius: 16,
-              border: cardBorder,
-              background: cardBackground,
-              backdropFilter: "blur(20px)",
-              WebkitBackdropFilter: "blur(20px)",
-              boxShadow: cardShadow,
-            }}
-            styles={{ body: { padding: "30px 28px" } }}
+          <OpsSurface
+            className="login-card"
+            variant="raised"
+            padding="lg"
           >
             <Space orientation="vertical" size={0} style={{ width: "100%" }}>
               <Typography.Title
@@ -430,10 +332,10 @@ function LoginPageContent() {
               </Typography.Text>
               {shouldShowApiWarning ? (
                 <Alert
+                  className="login-state-alert"
                   type="warning"
                   showIcon
-                  style={{ marginBottom: 16 }}
-                  message="控制面服务暂不可达"
+                  title="控制面服务暂不可达"
                   description="当前无法连接控制面服务，请稍后重试。"
                 />
               ) : null}
@@ -519,7 +421,7 @@ function LoginPageContent() {
                 </Button>
               </Space>
             </Space>
-          </Card>
+          </OpsSurface>
 
           <div style={{ textAlign: "center", marginTop: 18, color: footerColor, fontSize: 12 }}>
             KubeNova v1.0 · 企业级容器云管理平台
