@@ -1455,10 +1455,10 @@ body {
   gap: 6px;
   min-width: 58px;
   height: 24px;
-  padding: 0 8px;
+  padding: 0 7px;
   border: 1px solid var(--ops-border-subtle);
-  border-radius: 999px;
-  background: var(--ops-subtle-bg);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--kn-surface) 86%, var(--ops-subtle-bg));
   color: var(--ops-text-muted);
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -1466,12 +1466,13 @@ body {
 }
 
 .config-count-cell.is-active {
-  border-color: var(--ops-status-info-border);
-  background: var(--ops-status-info-bg);
+  border-color: color-mix(in srgb, var(--ops-status-info-border) 72%, var(--ops-border-subtle));
+  background: color-mix(in srgb, var(--ops-status-info-bg) 46%, var(--kn-surface));
   color: var(--ops-status-info-text);
 }
 
 .config-count-cell.is-empty {
+  background: color-mix(in srgb, var(--kn-surface) 92%, var(--ops-subtle-bg));
   color: var(--ops-text-faint);
 }
 
@@ -1497,10 +1498,10 @@ body {
   gap: 2px;
   min-width: 38px;
   height: 24px;
-  padding: 0 8px;
+  padding: 0 7px;
   border: 1px solid var(--ops-border-subtle);
-  border-radius: 999px;
-  background: var(--ops-subtle-bg);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--kn-surface) 88%, var(--ops-subtle-bg));
   color: var(--ops-text);
   font-variant-numeric: tabular-nums;
   line-height: 22px;
@@ -1517,6 +1518,54 @@ body {
   font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
   font-weight: 700;
+}
+
+.dynamic-config-list-surface.ops-surface {
+  display: grid;
+  gap: 10px;
+}
+
+.dynamic-config-state-alert.ant-alert {
+  margin-bottom: 0;
+  border-radius: 8px;
+}
+
+.dynamic-config-create-form.ant-form {
+  display: grid;
+  gap: 0;
+}
+
+.dynamic-config-create-form .ops-form-section {
+  gap: 10px;
+}
+
+.dynamic-config-create-form .ops-form-section + .ops-form-section {
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.dynamic-config-create-form .ant-row {
+  row-gap: 0;
+}
+
+.dynamic-config-create-form .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.dynamic-config-create-form .ant-form-item-label {
+  padding-bottom: 4px;
+}
+
+.dynamic-config-create-form .ant-input,
+.dynamic-config-create-form .ant-select-selector {
+  min-height: 32px;
+}
+
+.dynamic-config-create-form textarea.ant-input {
+  min-height: 84px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .resource-add-button.ant-btn {
@@ -3482,23 +3531,24 @@ body {
   }
 }
 
-.ant-modal .ant-modal-content,
-.ant-drawer .ant-drawer-content,
-.ant-popover .ant-popover-inner,
-.ant-dropdown .ant-dropdown-menu {
+.ops-modal-shell .ant-modal-content,
+.ops-confirm-modal .ant-modal-content,
+.ops-drawer-shell .ant-drawer-content {
   border: 1px solid var(--ops-border-subtle);
   border-radius: var(--ops-control-radius);
   background: var(--ops-surface-overlay);
   box-shadow: var(--ops-shadow-overlay);
 }
 
-.ant-modal .ant-modal-header,
-.ant-drawer .ant-drawer-header {
+.ops-modal-shell .ant-modal-header,
+.ops-confirm-modal .ant-modal-header,
+.ops-drawer-shell .ant-drawer-header {
   border-bottom-color: var(--ops-border-subtle);
 }
 
-.ant-modal .ant-modal-footer,
-.ant-drawer .ant-drawer-footer {
+.ops-modal-shell .ant-modal-footer,
+.ops-confirm-modal .ant-modal-footer,
+.ops-drawer-shell .ant-drawer-footer {
   border-top-color: var(--ops-border-subtle);
 }
 
@@ -3859,6 +3909,16 @@ body {
 .resource-table .ant-table-tbody > tr > td .ant-space,
 .pod-table .ant-table-tbody > tr > td .ant-space {
   justify-content: flex-start;
+}
+
+.resource-table .ant-table-tbody > tr > td.resource-table-navigable-cell,
+.pod-table .ant-table-tbody > tr > td.resource-table-navigable-cell {
+  cursor: pointer;
+}
+
+.resource-table .ant-table-tbody > tr > td.resource-table-navigable-cell:hover,
+.pod-table .ant-table-tbody > tr > td.resource-table-navigable-cell:hover {
+  background: color-mix(in srgb, var(--kn-resource-link) 7%, transparent);
 }
 
 .resource-table .resource-table-resource-link.ant-typography,
@@ -8053,66 +8113,6 @@ button.topology-source-matrix__name:focus-visible,
   --sidebar-icon-system: #cbd5e1;
 }
 
-.app-sidebar-menu__section--section-overview > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-overview > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-overview);
-}
-
-.app-sidebar-menu__section--section-resource-panorama > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-resource-panorama > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-panorama);
-}
-
-.app-sidebar-menu__section--section-cluster-domain > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-cluster-domain > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-cluster);
-}
-
-.app-sidebar-menu__section--section-workloads > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-workloads > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-workloads);
-}
-
-.app-sidebar-menu__section--section-network > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-network > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-network);
-}
-
-.app-sidebar-menu__section--section-storage-config > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-storage-config > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-storage);
-}
-
-.app-sidebar-menu__section--section-configs > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-configs > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-config);
-}
-
-.app-sidebar-menu__section--section-app-delivery > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-app-delivery > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-delivery);
-}
-
-.app-sidebar-menu__section--section-observability > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-observability > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-observability);
-}
-
-.app-sidebar-menu__section--section-intelligence > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-intelligence > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-intelligence);
-}
-
-.app-sidebar-menu__section--section-iam-security > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-iam-security > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-security);
-}
-
-.app-sidebar-menu__section--section-system-management > .ant-menu-item-icon,
-.app-sidebar-menu__section--section-system-management > .ant-menu-submenu-title .ant-menu-item-icon {
-  color: var(--sidebar-icon-system);
-}
-
 .app-sidebar-menu__section--section-overview > :is(.ant-menu-item-icon, .anticon),
 .app-sidebar-menu__section--section-overview > .ant-menu-submenu-title :is(.ant-menu-item-icon, .anticon) {
   color: var(--sidebar-icon-overview) !important;
@@ -8212,7 +8212,7 @@ button.topology-source-matrix__name:focus-visible,
   display: none !important;
 }
 
-.app-sidebar-menu.ant-menu .ant-menu-item-selected .anticon,
+.app-sidebar-menu.ant-menu .ant-menu-item-selected:not(.app-sidebar-menu__section) .anticon,
 .app-sidebar-menu.ant-menu .ant-menu-item-selected .app-sidebar-menu__label {
   color: currentColor !important;
 }
@@ -8489,6 +8489,16 @@ button.topology-source-matrix__name:focus-visible,
 
 .ops-drawer-shell .ant-drawer-body {
   background: var(--kn-bg);
+}
+
+.ops-drawer-shell.ops-drawer-shell--editor .ant-drawer-body {
+  background: var(--ops-terminal-bg);
+}
+
+.ops-drawer-shell.ops-drawer-shell--workbench .ant-drawer-body {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--kn-surface-raised) 72%, transparent), color-mix(in srgb, var(--kn-bg) 94%, transparent)),
+    var(--kn-bg);
 }
 
 .ops-drawer-shell__footer.ant-drawer-footer {

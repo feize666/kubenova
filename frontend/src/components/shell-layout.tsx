@@ -5,7 +5,6 @@ import {
   AppstoreOutlined,
   BellOutlined,
   BranchesOutlined,
-  CodeOutlined,
   DatabaseOutlined,
   DeploymentUnitOutlined,
   HddOutlined,
@@ -17,7 +16,6 @@ import {
   PartitionOutlined,
   RadarChartOutlined,
   ReloadOutlined,
-  RobotOutlined,
   SearchOutlined,
   SunFilled,
   ToolOutlined,
@@ -381,12 +379,6 @@ const AppSider = memo(function AppSider({
           ),
           children: section.items.map((item) => ({
             key: item.path,
-            icon:
-              item.path === "/ai-assistant"
-                ? <RobotOutlined />
-                : item.path === "/terminal"
-                ? <CodeOutlined />
-                : undefined,
             // Link 包裹 label：鼠标悬停自动触发 Next.js prefetch，点击由 Link 接管导航
             label: (
               <Link

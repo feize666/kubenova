@@ -560,6 +560,7 @@ export default function StorageClassPage() {
           clusterOptions={clusterFilterOptions}
           clusterLoading={clustersQuery.isLoading}
           namespaceVisible={false}
+          marginBottom={0}
           onClusterChange={(value) => {
             onClusterChange(value);
             resetPage();
@@ -571,13 +572,13 @@ export default function StorageClassPage() {
       </OpsSurface>
 
       {!isInitializing && !accessToken ? (
-        <Alert type="warning" showIcon message="未检测到登录状态，请先登录后再查看 StorageClass 信息。" />
+        <Alert type="warning" showIcon title="未检测到登录状态，请先登录后再查看 StorageClass 信息。" />
       ) : null}
       {isError ? (
         <Alert
           type="error"
           showIcon
-          message="加载失败"
+          title="加载失败"
           description={error instanceof Error ? error.message : "获取 StorageClass 数据时发生错误"}
         />
       ) : null}

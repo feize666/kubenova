@@ -808,17 +808,17 @@ export function DynamicConfigResourcePage({
         />
       </OpsSurface>
 
-      <OpsSurface variant="panel" padding="sm">
+      <OpsSurface className="dynamic-config-list-surface" variant="panel" padding="sm">
         {!isInitializing && !accessToken ? (
-          <Alert type="warning" showIcon message="未登录或登录初始化中，请稍后重试。" style={{ marginBottom: 16 }} />
+          <Alert className="dynamic-config-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
         ) : null}
         {listQuery.isError ? (
           <Alert
+            className="dynamic-config-state-alert"
             type="error"
             showIcon
-            message={`${titleKind} 列表加载失败`}
+            title={`${titleKind} 列表加载失败`}
             description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
-            style={{ marginBottom: 16 }}
             action={
               clusterId ? (
                 <Typography.Link onClick={() => refreshDiscoveryMutation.mutate()}>
@@ -906,7 +906,7 @@ export function DynamicConfigResourcePage({
           kindHint={kind}
           disabled={createMutation.isPending || applyYamlMutation.isPending}
           formContent={(
-            <Form form={form} layout="vertical">
+            <Form className="dynamic-config-create-form" form={form} layout="vertical">
               <OpsFormSection title="作用范围" description="资源创建到指定集群和名称空间。">
                 <Row gutter={12}>
                   <Col xs={24} md={12}>
