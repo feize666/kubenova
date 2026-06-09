@@ -1,5 +1,5 @@
 'use client';
-import { Input, Space } from 'antd';
+import { Button, Input, Space } from 'antd';
 import { useState } from 'react';
 import { OpsFilterChip } from "@/components/ops";
 
@@ -11,11 +11,12 @@ interface LabelFilterProps {
 
 export function LabelFilter({ value, onChange }: LabelFilterProps) {
   const [inputValue, setInputValue] = useState('');
+  const trimmedValue = inputValue.trim();
+  const canAdd = Boolean(trimmedValue && !value.includes(trimmedValue));
 
   const handleAdd = () => {
-    const trimmed = inputValue.trim();
-    if (trimmed && !value.includes(trimmed)) {
-      onChange([...value, trimmed]);
+    if (canAdd) {
+      onChange([...value, trimmedValue]);
       setInputValue('');
     }
   };
@@ -33,16 +34,20 @@ export function LabelFilter({ value, onChange }: LabelFilterProps) {
         onChange={(e) => setInputValue(e.target.value)}
         onPressEnter={handleAdd}
         suffix={
-          <span
-            style={{ fontSize: 11, color: 'var(--surface-muted, var(--color-text-muted, #94a3b8))', cursor: 'pointer' }}
+          <Button
+            aria-label="添加标签筛选"
+            className="label-filter-control__add"
+            disabled={!canAdd}
             onClick={handleAdd}
+            size="small"
+            type="text"
           >
             添加
-          </span>
+          </Button>
         }
       />
       {value.map((label) => (
-        <OpsFilterChip key={label} closable onClose={() => handleRemove(label)} tone="info">
+        <OpsFilterChip key={label} closable closeLabel={`移除标签筛选 ${label}`} onClose={() => handleRemove(label)} tone="info">
           {label}
         </OpsFilterChip>
       ))}

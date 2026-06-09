@@ -48,6 +48,21 @@ requireTokens("src/app/globals.css", [
   ".ops-frame-shell__actions",
 ]);
 
+requireTokens("scripts/ui-tech-smoke.mjs", [
+  "UI_TECH_ARTIFACT_DIR",
+  "name: \"tablet\", width: 820, height: 1180",
+  "overlayChecks",
+  "assertOverlayVisible",
+  "scope-popover",
+  "search-popover",
+  "column-popover",
+  "create-modal",
+  "row-dropdown-yaml",
+  "yaml-drawer",
+  "ai-settings-drawer",
+  "ai-alert-drawer",
+]);
+
 requireTokens("src/components/shell-layout.tsx", [
   "shell-skip-link",
   "href=\"#kubenova-main-content\"",
