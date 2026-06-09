@@ -1419,11 +1419,11 @@ export default function AiAssistantPage() {
         overflow: "hidden",
       }}
     >
-      <OpsSurface variant="workbench" padding="sm" style={{ flex: "0 0 auto", minWidth: 0, overflow: "hidden" }}>
+      <OpsSurface className="ai-assistant-hero-surface" variant="workbench" padding="sm" style={{ flex: "0 0 auto", minWidth: 0, overflow: "hidden" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div>
             <Typography.Title level={3} style={{ margin: 0 }}>
-              KubeNova
+              KubeNova Assistant Workbench
             </Typography.Title>
             <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0" }}>
               通过告警接入、智能诊断、ChatOps 会话和可执行建议形成闭环运维。
@@ -1456,22 +1456,22 @@ export default function AiAssistantPage() {
 
         <Row gutter={[12, 12]} style={{ marginTop: 8 }}>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface variant="panel" padding="sm">
+            <OpsSurface className="ai-assistant-metric-card" variant="panel" padding="sm">
               <Statistic title="活跃告警" value={suggestions?.items.length ?? 0} prefix={<WarningOutlined />} />
             </OpsSurface>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface variant="panel" padding="sm">
+            <OpsSurface className="ai-assistant-metric-card" variant="panel" padding="sm">
               <Statistic title="严重告警" value={criticalCount} styles={{ content: { color: "#cf1322" } }} />
             </OpsSurface>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface variant="panel" padding="sm">
+            <OpsSurface className="ai-assistant-metric-card" variant="panel" padding="sm">
               <Statistic title="高风险告警" value={highCount} styles={{ content: { color: "#d46b08" } }} />
             </OpsSurface>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface variant="panel" padding="sm">
+            <OpsSurface className="ai-assistant-metric-card" variant="panel" padding="sm">
               <Space orientation="vertical" size={4} style={{ width: "100%" }}>
                 <Typography.Text type="secondary">模型中转站</Typography.Text>
                 <OpsStatusTag tone={pingData?.ok ? "success" : "danger"} className="ai-assistant-status-chip">

@@ -172,28 +172,7 @@ export function ResourceDetailDrawer({
   const activeRequestKey = getRequestKey(activeRequest);
 
   const normalizedKind = activeRequest?.kind ? normalizeKind(activeRequest.kind) : "";
-  const requestId = activeRequest?.id ?? "";
-
-  const emitNavigateRequest = useCallback((nextRequest: DetailRequest) => {
-    const kind = String(nextRequest.kind ?? "").trim();
-    const id = String(nextRequest.id ?? "").trim();
-    if (!kind || !id) return;
-    const next = { ...nextRequest, kind, id };
-    const nextKey = getRequestKey(next);
-    if (!nextKey || nextKey === activeRequestKey) return;
-
-    setNavigationState((current) => ({
-      baseKey: hasActiveNavigationState
-        ? current?.baseKey || requestKey
-        : requestKey,
-      activeRequest: next,
-      stack: [
-        ...(hasActiveNavigationState ? current?.stack ?? [] : []),
-        ...(activeRequest ? [activeRequest] : []),
-      ],
-    }));
-    onNavigateRequest?.(next);
-  }, [activeRequest, activeRequestKey, hasActiveNavigationState, onNavigateRequest, requestKey]);
+  const rawRequestId = activeRequest?.id ?? "";
 
   const handleBack = useCallback(() => {
     const previous = navigationStack.at(-1);
@@ -212,11 +191,6 @@ export function ResourceDetailDrawer({
     onClose();
   }, [onClose]);
 
-  const query = useQuery({
-    queryKey: ["resource-detail", normalizedKind, requestId, token],
-    queryFn: ({ signal }) => getResourceDetail({ kind: normalizedKind, id: requestId }, token, { signal }),
-    enabled: open && Boolean(normalizedKind && requestId),
-  });
   const clusterQuery = useQuery({
     queryKey: ["resource-detail", "clusters", token],
     queryFn: ({ signal }) => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, token!, { signal }),
@@ -226,6 +200,43 @@ export function ResourceDetailDrawer({
     () => Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name])),
     [clusterQuery.data?.items],
   );
+  const requestId = useMemo(() => {
+    if (normalizedKind !== "cluster") return rawRequestId;
+    const id = String(rawRequestId).trim();
+    if (!id || clusterMap[id] !== undefined) return id;
+    const matched = Object.entries(clusterMap).find(([, name]) => name === id);
+    return matched?.[0] ?? id;
+  }, [clusterMap, normalizedKind, rawRequestId]);
+  const query = useQuery({
+    queryKey: ["resource-detail", normalizedKind, requestId, token],
+    queryFn: ({ signal }) => getResourceDetail({ kind: normalizedKind, id: requestId }, token, { signal }),
+    enabled: open && Boolean(normalizedKind && requestId),
+  });
+  const emitNavigateRequest = useCallback((nextRequest: DetailRequest) => {
+    const kind = String(nextRequest.kind ?? "").trim();
+    const id = String(nextRequest.id ?? "").trim();
+    if (!kind || !id) return;
+    const nextNormalizedKind = normalizeKind(kind);
+    const nextId =
+      nextNormalizedKind === "cluster" && clusterMap[id] === undefined
+        ? Object.entries(clusterMap).find(([, name]) => name === id)?.[0] ?? id
+        : id;
+    const next = { ...nextRequest, kind, id: nextId };
+    const nextKey = getRequestKey(next);
+    if (!nextKey || nextKey === activeRequestKey) return;
+
+    setNavigationState((current) => ({
+      baseKey: hasActiveNavigationState
+        ? current?.baseKey || requestKey
+        : requestKey,
+      activeRequest: next,
+      stack: [
+        ...(hasActiveNavigationState ? current?.stack ?? [] : []),
+        ...(activeRequest ? [activeRequest] : []),
+      ],
+    }));
+    onNavigateRequest?.(next);
+  }, [activeRequest, activeRequestKey, clusterMap, hasActiveNavigationState, onNavigateRequest, requestKey]);
   const hasDetailData = Boolean(query.data);
   const yamlTarget = useMemo(() => buildDetailYamlTarget(query.data, activeRequest), [query.data, activeRequest]);
   const activeSnapshot = activeRequest?.snapshot;

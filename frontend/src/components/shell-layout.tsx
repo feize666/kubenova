@@ -1,22 +1,26 @@
 "use client";
 
 import {
+  ApartmentOutlined,
+  AppstoreOutlined,
   BellOutlined,
   BranchesOutlined,
   CodeOutlined,
   DatabaseOutlined,
   DeploymentUnitOutlined,
+  HddOutlined,
   HomeOutlined,
   SafetyOutlined,
   MonitorOutlined,
   MoonFilled,
   NodeIndexOutlined,
   PartitionOutlined,
+  RadarChartOutlined,
   ReloadOutlined,
   RobotOutlined,
   SearchOutlined,
-  SettingOutlined,
   SunFilled,
+  ToolOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Avatar, Breadcrumb, Dropdown, Input, Layout, Menu, Skeleton, Space } from "antd";
@@ -77,17 +81,17 @@ function logNavigationMetric(name: string, detail: Record<string, unknown>) {
 
 const sectionIconMap: Record<string, React.ReactNode> = {
   "section-overview": <HomeOutlined />,
-  "section-resource-panorama": <PartitionOutlined />,
+  "section-resource-panorama": <AppstoreOutlined />,
   "section-cluster-domain": <NodeIndexOutlined />,
   "section-workloads": <DeploymentUnitOutlined />,
-  "section-network": <PartitionOutlined />,
-  "section-storage-config": <DatabaseOutlined />,
-  "section-configs": <SettingOutlined />,
+  "section-network": <ApartmentOutlined />,
+  "section-storage-config": <HddOutlined />,
+  "section-configs": <DatabaseOutlined />,
   "section-app-delivery": <BranchesOutlined />,
   "section-observability": <MonitorOutlined />,
-  "section-intelligence": <BranchesOutlined />,
+  "section-intelligence": <RadarChartOutlined />,
   "section-iam-security": <SafetyOutlined />,
-  "section-system-management": <SettingOutlined />,
+  "section-system-management": <ToolOutlined />,
 };
 
 function getSectionOrder(key: string) {
@@ -339,11 +343,13 @@ const AppSider = memo(function AppSider({
     () =>
       visibleSections.map((section) => {
         const icon = sectionIconMap[section.key] ?? <PartitionOutlined />;
+        const sectionClassName = `app-sidebar-menu__section app-sidebar-menu__section--${section.key}`;
 
         // 顶级直跳 section（items 为空，有 path 字段）
         if (section.items.length === 0 && section.path) {
           return {
             key: section.path,
+            className: sectionClassName,
             icon,
             label: (
               <Link
@@ -362,6 +368,7 @@ const AppSider = memo(function AppSider({
         // 普通含子菜单的 section
         return {
           key: section.key,
+          className: sectionClassName,
           icon,
           label: (
             <span
@@ -498,7 +505,8 @@ const AppSider = memo(function AppSider({
 
   return (
     <Sider
-      width={260}
+      width={232}
+      className="app-sidebar"
       theme={mode as "dark" | "light"}
       style={{ borderRight: "1px solid var(--kn-border)" }}
     >
@@ -539,6 +547,7 @@ const AppSider = memo(function AppSider({
         </div>
         <div>
           <div
+            className="logo-wordmark"
             style={{
               fontWeight: 800,
               fontSize: 16,
@@ -549,7 +558,7 @@ const AppSider = memo(function AppSider({
           >
             KubeNova
           </div>
-          <div style={{ fontSize: 11, color: "var(--kn-text-muted)", letterSpacing: "0.16em" }}>
+          <div className="logo-caption" style={{ fontSize: 11, color: "var(--kn-text-muted)", letterSpacing: "0.16em" }}>
             CLOUD NATIVE OPS
           </div>
         </div>
@@ -795,7 +804,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               allowClear
               prefix={<SearchOutlined />}
               placeholder="搜索资源、日志或告警"
-              style={{ width: 280 }}
+              style={{ width: 340 }}
             />
             <OpsIconActionButton className="shell-topbar-action" icon={<BellOutlined />}>通知中心</OpsIconActionButton>
             <OpsIconActionButton className="shell-topbar-action" icon={<ReloadOutlined />} onClick={() => window.location.reload()}>

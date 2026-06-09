@@ -3,7 +3,7 @@
 import { Table, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType, ColumnType } from "antd/es/table";
-import { isValidElement, useCallback, useMemo, type Key, type ReactNode } from "react";
+import { isValidElement, useCallback, useMemo, useState, type Key, type ReactNode } from "react";
 import {
   getStandardResourceTableScrollX,
   normalizeResourceTableColumns,
@@ -19,9 +19,10 @@ import {
   type HeadlampTableSortState,
 } from "@/lib/table/headlamp-table";
 import type { TablePreferencesClient } from "@/lib/api/table-preferences";
-import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
+import { ResourceDetailDrawer, type ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceTableToolbar } from "@/components/resource-table-toolbar";
 import { OpsEmptyState, OpsErrorState, OpsFilteredEmptyState, OpsLoadingState, OpsPermissionState, OpsState } from "@/components/ops";
+import { useAuth } from "@/components/auth-context";
 
 export const RESOURCE_TABLE_CLASS_NAME = "resource-table";
 
@@ -66,9 +67,9 @@ const RESOURCE_RECORD_KEY_ALIASES: Record<string, string[]> = {
   type: ["type", "kind", "resourceKind", "资源类型"],
   name: ["name", "resourceName", "名称", "原始名称"],
   resourceName: ["resourceName", "name", "名称", "原始名称"],
-  clusterId: ["clusterId", "cluster", "clusterName", "集群"],
-  cluster: ["cluster", "clusterId", "clusterName", "集群"],
-  clusterName: ["clusterName", "clusterId", "cluster", "集群"],
+  clusterId: ["clusterId", "clusterID", "cluster_id", "targetClusterId", "clusterUid", "clusterUID", "cluster", "clusterName", "集群"],
+  cluster: ["cluster", "clusterId", "clusterID", "cluster_id", "targetClusterId", "clusterName", "集群"],
+  clusterName: ["clusterName", "clusterId", "clusterID", "cluster_id", "targetClusterId", "cluster", "集群"],
   namespace: ["namespace", "namespaceName", "名称空间", "命名空间"],
   namespaceName: ["namespaceName", "namespace", "名称空间", "命名空间"],
   node: ["node", "nodeName", "节点"],
@@ -375,9 +376,15 @@ export function ResourceTable<T extends object>({
   toolbarExtra,
   ...restProps
 }: ResourceTableProps<T>) {
-  if (tableKey) {
-    return (
-      <HeadlampResourceTable<T>
+  const { accessToken } = useAuth();
+  const [fallbackDetailTarget, setFallbackDetailTarget] = useState<ResourceTableNavigateRequest | null>(null);
+  const handleFallbackNavigate = useCallback((request: ResourceTableNavigateRequest) => {
+    setFallbackDetailTarget(request);
+  }, []);
+  const effectiveResourceNavigate = onResourceNavigate ?? handleFallbackNavigate;
+
+  const tableNode = tableKey ? (
+    <HeadlampResourceTable<T>
         {...restProps}
         bordered={bordered}
         className={className}
@@ -393,7 +400,7 @@ export function ResourceTable<T extends object>({
         locale={locale}
         onChange={onChange}
         onFiltersChange={onFiltersChange}
-        onResourceNavigate={onResourceNavigate}
+        onResourceNavigate={effectiveResourceNavigate}
         pagination={pagination}
         preferencesClient={preferencesClient}
         scroll={scroll}
@@ -407,10 +414,7 @@ export function ResourceTable<T extends object>({
         tableKey={tableKey}
         toolbarExtra={toolbarExtra}
       />
-    );
-  }
-
-  return (
+  ) : (
     <StandardResourceTable<T>
       {...restProps}
       bordered={bordered}
@@ -421,7 +425,7 @@ export function ResourceTable<T extends object>({
       loading={loading}
       loadingOptions={loadingOptions}
       locale={locale}
-      onResourceNavigate={onResourceNavigate}
+      onResourceNavigate={effectiveResourceNavigate}
       pagination={pagination}
       scroll={scroll}
       size={size}
@@ -430,6 +434,21 @@ export function ResourceTable<T extends object>({
       stateDescription={stateDescription}
       stateTitle={stateTitle}
     />
+  );
+
+  return (
+    <>
+      {tableNode}
+      {!onResourceNavigate ? (
+        <ResourceDetailDrawer
+          open={Boolean(fallbackDetailTarget)}
+          onClose={() => setFallbackDetailTarget(null)}
+          request={fallbackDetailTarget}
+          onNavigateRequest={setFallbackDetailTarget}
+          token={accessToken || undefined}
+        />
+      ) : null}
+    </>
   );
 }
 
