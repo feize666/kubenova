@@ -21,7 +21,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
-import { OpsFormSection, OpsPageHeader, OpsSurface } from "@/components/ops";
+import { OpsConfirmModal, OpsFilterChip, OpsFormSection, OpsPageHeader, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { getClusters } from "@/lib/api/clusters";
 import { getStorageResources } from "@/lib/api/storage";
@@ -485,6 +485,7 @@ export default function WorkloadCreateWorkspacePage() {
   const [createYamlNamespace, setCreateYamlNamespace] = useState("default");
   const [currentStep, setCurrentStep] = useState(0);
   const [isDirty, setIsDirty] = useState(false);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [form] = Form.useForm<WorkspaceFormValues>();
 
   const initialKind = useMemo(() => normalizeKind(searchParams.get("kind")), [searchParams]);
@@ -689,10 +690,11 @@ export default function WorkloadCreateWorkspacePage() {
   };
 
   const handleGoBack = () => {
-    if (typeof window !== "undefined" && isDirty && !window.confirm("当前工作区有未保存改动，确认离开吗？")) {
+    if (!isDirty) {
+      router.back();
       return;
     }
-    router.back();
+    setLeaveConfirmOpen(true);
   };
 
   const validateStep = async (step: number) => {
@@ -938,6 +940,7 @@ export default function WorkloadCreateWorkspacePage() {
   };
 
   return (
+    <>
     <Space className="workload-create-workspace" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsPageHeader
         title="统一创建工作区"
@@ -1743,5 +1746,26 @@ export default function WorkloadCreateWorkspacePage() {
       </OpsSurface>
       )}
     </Space>
+      <OpsConfirmModal
+        open={leaveConfirmOpen}
+        title="离开创建工作区？"
+        description="当前表单有未提交的配置。离开后页面状态会关闭，但本地草稿仍会保留，可再次进入继续编辑。"
+        okText="确认离开"
+        cancelText="继续编辑"
+        impact={
+          <Space wrap size={6}>
+            <OpsFilterChip tone="warning">未提交</OpsFilterChip>
+            <OpsFilterChip tone="neutral">{kind}</OpsFilterChip>
+            <OpsFilterChip tone="neutral">步骤 {currentStep + 1} / {WORKSPACE_STEPS.length}</OpsFilterChip>
+            <OpsFilterChip tone="neutral">{namespace || "default"}</OpsFilterChip>
+          </Space>
+        }
+        onCancel={() => setLeaveConfirmOpen(false)}
+        onOk={() => {
+          setLeaveConfirmOpen(false);
+          router.back();
+        }}
+      />
+    </>
   );
 }
