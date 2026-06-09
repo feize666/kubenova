@@ -67,12 +67,19 @@ requireTokens("../.codex/specs/full-site-ui-refresh/design.md", [
 
 requireTokens("scripts/ui-tech-smoke.mjs", [
   "UI_TECH_SAVE_ARTIFACTS",
+  "UI_TECH_ARTIFACT_DIR",
   "UI_TECH_THEMES",
   "--themes black,white",
+  "name: \"tablet\", width: 820, height: 1180",
   "screenshotFilename",
   "<route>__<theme>__<viewport>__<state>",
   "/case/temp/kubenova/ui-tech-smoke",
   "addInitScript",
+  "scope-popover",
+  "column-popover",
+  "create-modal",
+  "ai-settings-drawer",
+  "ai-alert-drawer",
 ]);
 
 if (failures.length > 0) {

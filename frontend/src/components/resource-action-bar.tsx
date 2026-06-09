@@ -459,7 +459,13 @@ export function ResourceActionBar({
   void primaryCount;
 
   return (
-    <Space size={size} wrap={wrap}>
+    <Space
+      aria-label="资源批量操作"
+      className="resource-action-bar"
+      role="toolbar"
+      size={size}
+      wrap={wrap}
+    >
       {resolvedActions.map((action, index) =>
         renderActionButton(action, index === 0 ? "primary" : "default"),
       )}

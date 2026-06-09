@@ -15,7 +15,8 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import process from "node:process";
 
-const ARTIFACT_ROOT = "/case/temp/kubenova/ui-tech-smoke";
+const DEFAULT_ARTIFACT_ROOT = "/case/temp/kubenova/ui-tech-smoke";
+const ARTIFACT_ROOT = process.env.UI_TECH_ARTIFACT_DIR || DEFAULT_ARTIFACT_ROOT;
 const DEFAULT_RUNTIME_QUERY =
   "clusterId=local&namespace=default&pod=smoke-pod&container=smoke-container&clusterName=local";
 const cliOptions = parseCliOptions(process.argv.slice(2));
@@ -31,6 +32,7 @@ const themes = selectThemes(cliOptions.themes || process.env.UI_TECH_THEMES || "
 
 const viewports = [
   { name: "desktop", width: 1440, height: 900 },
+  { name: "tablet", width: 820, height: 1180 },
   { name: "mobile", width: 390, height: 844 },
 ];
 
@@ -82,6 +84,7 @@ const allRoutes = [
     chipSelector: ".resource-scope-filter-button",
     statusSelector: ".resource-table-toolbar-actions",
     evidenceState: "table",
+    overlayChecks: ["row-dropdown-yaml"],
   },
   {
     id: "deployments",
@@ -92,6 +95,8 @@ const allRoutes = [
     chipSelector: ".resource-scope-filter-button",
     statusSelector: ".resource-table-toolbar-actions",
     evidenceState: "table",
+    createTriggerSelector: 'button[aria-label="创建Deployment"]',
+    overlayChecks: ["scope-popover", "table-search-popover", "table-column-popover", "create-route", "row-dropdown-yaml"],
   },
   {
     id: "namespaces",
@@ -102,6 +107,7 @@ const allRoutes = [
     chipSelector: ".resource-scope-filter-button",
     statusSelector: ".resource-table-toolbar-actions",
     evidenceState: "table",
+    overlayChecks: ["row-dropdown-yaml"],
   },
   {
     id: "nodes",
@@ -122,6 +128,19 @@ const allRoutes = [
     chipSelector: ".resource-filter-toolbar",
     statusSelector: ".resource-table-toolbar-actions",
     evidenceState: "table",
+    createTriggerSelector: 'button[aria-label="创建集群"]',
+    overlayChecks: ["table-search-popover", "table-column-popover", "create-modal"],
+  },
+  {
+    id: "ai-assistant",
+    path: "/ai-assistant",
+    texts: ["KubeNova", "ChatOps", "模型设置", "开始一条 ChatOps 会话"],
+    shellSelector: ".ops-workbench-shell--ai",
+    toolbarSelector: ".ai-assistant-chat-surface",
+    chipSelector: ".ai-assistant-status-chip, .ops-status-tag",
+    statusSelector: "#ai-assistant-input",
+    evidenceState: "workbench",
+    overlayChecks: ["ai-settings-drawer", "ai-alert-drawer"],
   },
 ];
 const routes = selectRoutes(allRoutes, cliOptions.routes);
@@ -378,7 +397,10 @@ async function ensureLoggedIn(page) {
 
 function isAllowedConsoleIssue(issue) {
   const brief = `${issue.text} ${issue.url || ""}`.toLowerCase();
-  if (/antd.*space.*deprecated|space.*deprecated.*antd|\[antd:\s*space\].*deprecated/i.test(issue.text)) {
+  if (
+    /antd.*space.*deprecated|space.*deprecated.*antd|\[antd:\s*space\].*deprecated/i.test(issue.text) ||
+    /\[antd:\s*Alert\].*message.*deprecated|Alert.*message.*deprecated/i.test(issue.text)
+  ) {
     return true;
   }
   const isResourceApiNotFound =
@@ -417,8 +439,13 @@ function installIssueCapture(page, viewportName) {
       return;
     }
     const text = message.text();
-    const isAntdSpaceWarning = type === "warning" && /antd.*space.*deprecated|space.*deprecated/i.test(text);
-    if (type !== "error" && !isAntdSpaceWarning) {
+    const isAllowedAntdWarning =
+      type === "warning" &&
+      (
+        /antd.*space.*deprecated|space.*deprecated/i.test(text) ||
+        /\[antd:\s*Alert\].*message.*deprecated|Alert.*message.*deprecated/i.test(text)
+      );
+    if (type !== "error" && !isAllowedAntdWarning) {
       return;
     }
     const location = message.location();
@@ -478,6 +505,200 @@ async function assertSelectorVisible(page, viewport, route, selector, label) {
     await locator.first().waitFor({ state: "visible", timeout: 3000 });
   } catch (error) {
     fail(`[${viewport.name}/${route.id}] ${label} 不可见: selector=${selector}`, error);
+  }
+}
+
+async function assertOverlayVisible(page, viewport, route, selector, label) {
+  const locator = page.locator(selector);
+  const deadline = Date.now() + 5000;
+  let lastVisibleBox = null;
+  while (Date.now() < deadline) {
+    const count = await locator.count();
+    if (count === 0) {
+      await page.waitForTimeout(100);
+      continue;
+    }
+    for (let index = 0; index < count; index += 1) {
+      const overlay = locator.nth(index);
+      if (!(await overlay.isVisible().catch(() => false))) {
+        continue;
+      }
+      const box = await overlay.boundingBox();
+      if (!box) {
+        continue;
+      }
+      lastVisibleBox = box;
+      if (box.width <= viewport.width + 2 && box.x >= -2 && box.x + box.width <= viewport.width + 2) {
+        return;
+      }
+    }
+    await page.waitForTimeout(100);
+  }
+
+  if (!lastVisibleBox) {
+    fail(`[${viewport.name}/${route.id}] 浮层缺失或不可见: ${label} selector=${selector}`);
+  }
+  fail(
+    `[${viewport.name}/${route.id}] 浮层横向越界: ${label} x=${Math.round(lastVisibleBox.x)} width=${Math.round(lastVisibleBox.width)} viewport=${viewport.width}`,
+  );
+}
+
+async function locatorUsable(locator) {
+  if ((await locator.count()) === 0) return false;
+  const first = locator.first();
+  try {
+    return (await first.isVisible()) && (await first.isEnabled());
+  } catch {
+    return false;
+  }
+}
+
+async function closeFloatingLayer(page) {
+  await page.keyboard.press("Escape");
+  if (settleMs > 0) {
+    await page.waitForTimeout(Math.min(settleMs, 250));
+  }
+}
+
+async function probePopover(page, viewport, route, theme, config) {
+  const trigger = page.locator(config.trigger).first();
+  if (!(await locatorUsable(trigger))) {
+    info(`${viewport.name}/${route.id} 跳过 ${config.state}: trigger 不可用`);
+    return false;
+  }
+  await trigger.click();
+  await assertOverlayVisible(page, viewport, route, config.overlay, config.state);
+  await saveRouteScreenshot(page, viewport.name, route.id, theme, config.state);
+  await closeFloatingLayer(page);
+  return true;
+}
+
+async function probeButtonOverlay(page, viewport, route, theme, config) {
+  const trigger = config.trigger
+    ? page.locator(config.trigger).first()
+    : page.getByRole("button", { name: config.roleName }).first();
+  if (!(await locatorUsable(trigger))) {
+    info(`${viewport.name}/${route.id} 跳过 ${config.state}: trigger 不可用`);
+    return false;
+  }
+  await trigger.click();
+  await assertOverlayVisible(page, viewport, route, config.overlay, config.state);
+  await saveRouteScreenshot(page, viewport.name, route.id, theme, config.state);
+  await closeFloatingLayer(page);
+  return true;
+}
+
+async function probeCreateRoute(page, viewport, route, theme) {
+  const trigger = route.createTriggerSelector
+    ? page.locator(route.createTriggerSelector).first()
+    : page.getByRole("button", { name: /创建/ }).first();
+  if (!(await locatorUsable(trigger))) {
+    info(`${viewport.name}/${route.id} 跳过 create-route: trigger 不可用`);
+    return false;
+  }
+  const beforeUrl = page.url();
+  await trigger.click();
+  try {
+    await page.waitForURL(/\/workloads\/create|\/create/, { timeout: 5000 });
+  } catch (error) {
+    fail(`[${viewport.name}/${route.id}] 创建入口未跳转到创建页`, error);
+  }
+  const bodyText = (await page.locator("body").innerText({ timeout })).replace(/\s+/g, " ");
+  for (const text of ["创建", "Deployment"]) {
+    if (!bodyText.includes(text)) {
+      fail(`[${viewport.name}/${route.id}] 创建页缺少关键文案: "${text}" body="${bodyText.slice(0, 500)}"`);
+    }
+  }
+  await saveRouteScreenshot(page, viewport.name, route.id, theme, "create-route");
+  await page.goto(beforeUrl, { waitUntil: "domcontentloaded", timeout });
+  await page.locator(route.shellSelector).first().waitFor({ state: "visible", timeout });
+  return true;
+}
+
+async function probeOptionalRowDropdownAndYaml(page, viewport, route, theme) {
+  const trigger = page.locator('button[aria-label="操作"], button[aria-label="更多操作"], button[aria-label$="更多操作"]').first();
+  if (!(await locatorUsable(trigger))) {
+    info(`${viewport.name}/${route.id} 跳过 row-dropdown-yaml: 无可用行操作`);
+    return false;
+  }
+  await trigger.click();
+  await assertOverlayVisible(page, viewport, route, ".ant-dropdown", "row-dropdown");
+  await saveRouteScreenshot(page, viewport.name, route.id, theme, "row-dropdown");
+
+  const yamlItem = page.getByRole("menuitem", { name: /YAML/i }).first();
+  if (!(await locatorUsable(yamlItem))) {
+    info(`${viewport.name}/${route.id} 跳过 yaml-drawer: 行菜单无 YAML 项`);
+    await closeFloatingLayer(page);
+    return true;
+  }
+  await yamlItem.click();
+  await assertOverlayVisible(page, viewport, route, ".ops-drawer-shell--editor, .ant-drawer-content", "yaml-drawer");
+  await saveRouteScreenshot(page, viewport.name, route.id, theme, "yaml-drawer");
+  await closeFloatingLayer(page);
+  return true;
+}
+
+async function assertOverlayChecks(page, route, viewport, theme) {
+  const checks = route.overlayChecks ?? [];
+  for (const check of checks) {
+    if (check === "scope-popover") {
+      await probePopover(page, viewport, route, theme, {
+        state: "scope-popover",
+        trigger: ".resource-scope-filter-button",
+        overlay: ".resource-scope-filter-popover",
+      });
+      continue;
+    }
+    if (check === "table-search-popover") {
+      await probePopover(page, viewport, route, theme, {
+        state: "search-popover",
+        trigger: 'button[aria-label="搜索"]',
+        overlay: ".resource-table-search-popover",
+      });
+      continue;
+    }
+    if (check === "table-column-popover") {
+      await probePopover(page, viewport, route, theme, {
+        state: "column-popover",
+        trigger: 'button[aria-label="列设置"]',
+        overlay: ".resource-table-column-popover",
+      });
+      continue;
+    }
+    if (check === "create-modal") {
+      await probeButtonOverlay(page, viewport, route, theme, {
+        state: "create-modal",
+        trigger: route.createTriggerSelector,
+        roleName: /创建/,
+        overlay: ".ops-modal-shell, .ant-modal-content, .ant-modal",
+      });
+      continue;
+    }
+    if (check === "create-route") {
+      await probeCreateRoute(page, viewport, route, theme);
+      continue;
+    }
+    if (check === "ai-settings-drawer") {
+      await probeButtonOverlay(page, viewport, route, theme, {
+        state: "ai-settings-drawer",
+        roleName: "模型设置",
+        overlay: ".ops-drawer-shell--business, .ant-drawer-content",
+      });
+      continue;
+    }
+    if (check === "ai-alert-drawer") {
+      await probeButtonOverlay(page, viewport, route, theme, {
+        state: "ai-alert-drawer",
+        roleName: "告警接入",
+        overlay: ".ops-drawer-shell--business, .ant-drawer-content",
+      });
+      continue;
+    }
+    if (check === "row-dropdown-yaml") {
+      await probeOptionalRowDropdownAndYaml(page, viewport, route, theme);
+      continue;
+    }
+    fail(`[${viewport.name}/${route.id}] 未知浮层验收项: ${check}`);
   }
 }
 
@@ -600,6 +821,7 @@ async function runViewport(browser, viewport, theme) {
     for (const route of routes) {
       try {
         await assertRoute(page, route, viewport);
+        await assertOverlayChecks(page, route, viewport, theme);
         await saveRouteScreenshot(page, viewport.name, route.id, theme, route.evidenceState ?? (route.requireOpsFrameShell ? route.id : "workbench"));
       } catch (error) {
         await saveRouteScreenshot(page, viewport.name, route.id, theme, "error", `-${Date.now()}`);
@@ -619,6 +841,7 @@ async function main() {
   info(`baseUrl=${baseUrl}`);
   info(`artifactRoot=${ARTIFACT_ROOT} saveArtifacts=${saveArtifacts}`);
   info(`themes=${themes.map(themeEvidenceName).join(",")}`);
+  info(`viewports=${viewports.map((viewport) => `${viewport.name}:${viewport.width}x${viewport.height}`).join(",")}`);
   const browser = await launchBrowser(chromium);
   const captures = [];
 

@@ -75,7 +75,7 @@ const knDark = {
   overlay: "#1a2230",
   overlayStrong: "#171e29",
   mask: "rgba(2, 6, 10, 0.62)",
-  shadow: "0 22px 48px rgba(2, 8, 23, 0.34)",
+  shadow: "0 18px 38px rgba(2, 8, 23, 0.34), 0 1px 0 rgba(255, 255, 255, 0.035) inset",
   focus: "0 0 0 3px rgba(79, 140, 255, 0.22)",
 };
 
@@ -114,7 +114,7 @@ const knLight = {
   overlay: "#ffffff",
   overlayStrong: "#f8fafc",
   mask: "rgba(15, 23, 42, 0.34)",
-  shadow: "0 18px 40px rgba(15, 23, 42, 0.14)",
+  shadow: "0 16px 34px rgba(15, 23, 42, 0.13), 0 1px 0 rgba(255, 255, 255, 0.78) inset",
   focus: "0 0 0 3px rgba(35, 92, 255, 0.16)",
 };
 

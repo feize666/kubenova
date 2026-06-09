@@ -16,7 +16,7 @@
   --kn-surface-subtle: rgba(148, 163, 184, 0.11);
   --kn-border: rgba(148, 163, 184, 0.18);
   --kn-border-strong: rgba(79, 140, 255, 0.34);
-  --kn-border-hover: rgba(34, 211, 238, 0.38);
+  --kn-border-hover: rgba(79, 140, 255, 0.4);
   --kn-text: #edf1f7;
   --kn-text-secondary: #a3adbc;
   --kn-text-muted: #6f7a8c;
@@ -26,8 +26,8 @@
   --kn-primary-subtle: rgba(79, 140, 255, 0.16);
   --kn-resource-link: #6da0ff;
   --kn-resource-link-hover: #8bb5ff;
-  --kn-accent: #22d3ee;
-  --kn-accent-subtle: rgba(34, 211, 238, 0.14);
+  --kn-accent: #56b6d7;
+  --kn-accent-subtle: rgba(86, 182, 215, 0.12);
   --kn-success: #3ddc97;
   --kn-warning: #f2b84b;
   --kn-danger: #ff6b6b;
@@ -36,8 +36,8 @@
   --kn-radius-md: 8px;
   --kn-radius-lg: 12px;
   --kn-control-height: 36px;
-  --kn-shadow-subtle: 0 10px 24px rgba(2, 8, 23, 0.18);
-  --kn-shadow-overlay: 0 22px 48px rgba(2, 8, 23, 0.34);
+  --kn-shadow-subtle: 0 1px 2px rgba(2, 8, 23, 0.22);
+  --kn-shadow-overlay: 0 18px 38px rgba(2, 8, 23, 0.34), 0 1px 0 rgba(255, 255, 255, 0.035) inset;
   --kn-focus-ring: 0 0 0 3px rgba(79, 140, 255, 0.22);
   --kn-focus-ring-danger: 0 0 0 3px rgba(255, 107, 107, 0.2);
   --kn-font-sans: "Geist", "IBM Plex Sans", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -135,13 +135,13 @@
   /* Ops console shared controls */
   --ops-control-height: var(--kn-control-height);
   --ops-control-radius: var(--kn-radius-md);
-  --ops-surface-raised: linear-gradient(180deg, color-mix(in srgb, var(--kn-surface-raised) 98%, transparent), color-mix(in srgb, var(--kn-surface) 98%, transparent));
-  --ops-surface-overlay: color-mix(in srgb, var(--kn-surface-overlay) 98%, transparent);
+  --ops-surface-raised: var(--kn-surface-raised);
+  --ops-surface-overlay: var(--kn-surface-overlay);
   --ops-border-subtle: var(--kn-border);
   --ops-border-strong: var(--kn-border-strong);
   --ops-subtle-bg: var(--kn-surface-subtle);
-  --ops-hover-bg: var(--kn-primary-subtle);
-  --ops-active-bg: color-mix(in srgb, var(--kn-primary) 22%, transparent);
+  --ops-hover-bg: color-mix(in srgb, var(--kn-primary) 11%, var(--kn-surface));
+  --ops-active-bg: color-mix(in srgb, var(--kn-primary) 16%, var(--kn-surface));
   --ops-on-primary: #ffffff;
   --ops-shadow-subtle: var(--kn-shadow-subtle);
   --ops-shadow-overlay: var(--kn-shadow-overlay);
@@ -152,9 +152,9 @@
   --ops-motion-slow: var(--kn-motion-slow);
   --ops-motion-ease: var(--kn-motion-ease);
   --ops-motion-ease-out: var(--kn-motion-ease-out);
-  --ops-frame-bg: linear-gradient(180deg, rgba(8, 13, 26, 0.98), rgba(2, 8, 23, 0.98));
-  --ops-frame-border: rgba(125, 211, 252, 0.2);
-  --ops-frame-header-bg: rgba(8, 13, 26, 0.72);
+  --ops-frame-bg: var(--kn-surface);
+  --ops-frame-border: var(--kn-border);
+  --ops-frame-header-bg: var(--kn-surface-raised);
   --ops-frame-divider: rgba(148, 163, 184, 0.16);
   --ops-terminal-bg: #061120;
   --ops-terminal-fg: #eef6ff;
@@ -203,6 +203,7 @@
   --ops-bg: var(--kn-bg);
   --ops-surface: var(--kn-surface);
   --ops-surface-raised-solid: var(--kn-surface-raised);
+  --ops-surface-muted: color-mix(in srgb, var(--kn-surface-subtle) 72%, transparent);
   --ops-text: var(--kn-text);
   --ops-text-muted: var(--kn-text-secondary);
   --ops-text-faint: var(--kn-text-muted);
@@ -259,8 +260,8 @@
   --kn-radius-md: 8px;
   --kn-radius-lg: 12px;
   --kn-control-height: 36px;
-  --kn-shadow-subtle: 0 8px 20px rgba(15, 23, 42, 0.06);
-  --kn-shadow-overlay: 0 18px 40px rgba(15, 23, 42, 0.14);
+  --kn-shadow-subtle: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --kn-shadow-overlay: 0 16px 34px rgba(15, 23, 42, 0.13), 0 1px 0 rgba(255, 255, 255, 0.78) inset;
   --kn-focus-ring: 0 0 0 3px rgba(35, 92, 255, 0.16);
   --kn-focus-ring-danger: 0 0 0 3px rgba(217, 45, 32, 0.14);
   --kn-font-sans: "Geist", "IBM Plex Sans", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -357,13 +358,13 @@
   /* Ops console shared controls */
   --ops-control-height: var(--kn-control-height);
   --ops-control-radius: var(--kn-radius-md);
-  --ops-surface-raised: linear-gradient(180deg, #ffffff, #f8faff);
+  --ops-surface-raised: #ffffff;
   --ops-surface-overlay: #ffffff;
   --ops-border-subtle: var(--kn-border);
   --ops-border-strong: var(--kn-border-strong);
   --ops-subtle-bg: var(--kn-surface-subtle);
-  --ops-hover-bg: var(--kn-primary-subtle);
-  --ops-active-bg: color-mix(in srgb, var(--kn-primary) 14%, transparent);
+  --ops-hover-bg: color-mix(in srgb, var(--kn-primary) 7%, #ffffff);
+  --ops-active-bg: color-mix(in srgb, var(--kn-primary) 11%, #ffffff);
   --ops-on-primary: #ffffff;
   --ops-shadow-subtle: var(--kn-shadow-subtle);
   --ops-shadow-overlay: var(--kn-shadow-overlay);
@@ -374,9 +375,9 @@
   --ops-motion-slow: var(--kn-motion-slow);
   --ops-motion-ease: var(--kn-motion-ease);
   --ops-motion-ease-out: var(--kn-motion-ease-out);
-  --ops-frame-bg: linear-gradient(180deg, #f8fbff, #eef6ff);
-  --ops-frame-border: rgba(37, 99, 235, 0.2);
-  --ops-frame-header-bg: rgba(255, 255, 255, 0.78);
+  --ops-frame-bg: #ffffff;
+  --ops-frame-border: #dde2ea;
+  --ops-frame-header-bg: #f8fafc;
   --ops-frame-divider: rgba(100, 116, 139, 0.18);
   --ops-terminal-bg: #fbfdff;
   --ops-terminal-fg: #182033;
@@ -425,6 +426,7 @@
   --ops-bg: var(--kn-bg);
   --ops-surface: var(--kn-surface);
   --ops-surface-raised-solid: var(--kn-surface-raised);
+  --ops-surface-muted: color-mix(in srgb, var(--kn-surface-subtle) 72%, transparent);
   --ops-text: var(--kn-text);
   --ops-text-muted: var(--kn-text-secondary);
   --ops-text-faint: var(--kn-text-muted);
@@ -654,8 +656,40 @@ body {
   background: var(--ops-hover-bg);
 }
 
+.ant-btn:not(.ant-btn-primary):not(.ant-btn-text):not(.ant-btn-link):active,
+.ant-btn:not(.ant-btn-primary):not(.ant-btn-text):not(.ant-btn-link).ant-btn-loading {
+  border-color: var(--ops-border-strong);
+  background: var(--ops-active-bg);
+}
+
+.ant-btn.ant-btn-loading {
+  cursor: progress;
+}
+
+.ant-btn:disabled,
+.ant-btn.ant-btn-disabled {
+  border-color: var(--ops-border-subtle) !important;
+  background: color-mix(in srgb, var(--kn-surface-subtle) 62%, transparent) !important;
+  color: var(--kn-text-faint) !important;
+  box-shadow: none !important;
+}
+
 .ant-btn-primary {
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--ant-color-primary) 22%, transparent);
+  border-color: var(--ant-color-primary);
+  background: var(--ant-color-primary);
+  box-shadow: none;
+}
+
+.ant-btn-primary:hover,
+.ant-btn-primary:focus-visible {
+  border-color: var(--ant-color-primary-hover);
+  background: var(--ant-color-primary-hover);
+}
+
+.ant-btn-primary:active,
+.ant-btn-primary.ant-btn-loading {
+  border-color: var(--ant-color-primary-active);
+  background: var(--ant-color-primary-active);
 }
 
 .ops-status-tag,
@@ -674,6 +708,10 @@ body {
   font-weight: 700;
   line-height: 18px;
   letter-spacing: 0;
+  transition:
+    border-color var(--ops-motion-fast) var(--ops-motion-ease),
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    color var(--ops-motion-fast) var(--ops-motion-ease);
 }
 
 .ops-status--success {
@@ -762,6 +800,12 @@ body {
   width: min(340px, calc(100vw - 48px));
 }
 
+.ops-popover-panel :where(.ant-input, .ant-input-affix-wrapper, .ant-select-selector, .ant-picker):focus,
+.ops-popover-panel :where(.ant-input-affix-wrapper-focused, .ant-select-focused .ant-select-selector, .ant-picker-focused) {
+  border-color: var(--ops-border-strong) !important;
+  box-shadow: var(--ops-focus-ring) !important;
+}
+
 .ops-popover-panel--narrow {
   width: min(280px, calc(100vw - 48px));
 }
@@ -804,6 +848,12 @@ body {
   font-size: 14px;
   font-weight: 650;
   box-shadow: none;
+  transition:
+    border-color var(--ops-motion-fast) var(--ops-motion-ease),
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    color var(--ops-motion-fast) var(--ops-motion-ease),
+    box-shadow var(--ops-motion-fast) var(--ops-motion-ease),
+    transform var(--ops-motion-fast) var(--ops-motion-ease);
 }
 
 .ops-icon-action-button__disabled-wrap {
@@ -871,6 +921,17 @@ body {
   background: var(--ops-hover-bg);
 }
 
+.ops-icon-action-button.ant-btn:focus-visible {
+  box-shadow: var(--ops-focus-ring);
+}
+
+.ops-icon-action-button.ant-btn:active,
+.ops-icon-action-button.ant-btn.ant-btn-loading {
+  border-color: var(--ops-border-strong);
+  background: var(--ops-active-bg);
+  transform: translateY(0);
+}
+
 .ops-icon-action-button--primary.ant-btn {
   border-color: color-mix(in srgb, var(--ant-color-primary) 42%, transparent);
   color: var(--ant-color-primary);
@@ -901,8 +962,14 @@ body {
 
 .ops-icon-action-button.ant-btn:disabled {
   border-color: var(--ops-border-subtle);
-  background: transparent;
+  background: color-mix(in srgb, var(--kn-surface-subtle) 62%, transparent);
   color: var(--ant-color-text-disabled);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.ops-icon-action-button__disabled-wrap {
+  cursor: not-allowed;
 }
 
 .resource-action-bar-button.ops-icon-action-button.ant-btn {
@@ -925,11 +992,15 @@ body {
 
 .shell-topbar-actions.ant-space {
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
 }
 
 .shell-topbar-actions .ant-space-item {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
 }
 
 .shell-status-band {
@@ -1007,16 +1078,16 @@ body {
 .shell-theme-toggle.ops-icon-action-button.ant-btn:not(.ant-btn-primary):not(.ant-btn-text):not(.ant-btn-link) {
   --shell-theme-sun: #f59e0b;
   --shell-theme-sun-strong: #d97706;
-  --shell-theme-sun-bg: linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(253, 186, 116, 0.58));
+  --shell-theme-sun-bg: #fff7ed;
   --shell-theme-sun-border: rgba(245, 158, 11, 0.46);
-  --shell-theme-sun-shadow: 0 7px 18px rgba(245, 158, 11, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  --shell-theme-moon: #6366f1;
-  --shell-theme-moon-strong: #4f46e5;
-  --shell-theme-moon-bg: linear-gradient(135deg, rgba(238, 242, 255, 0.98), rgba(165, 180, 252, 0.62));
-  --shell-theme-moon-border: rgba(99, 102, 241, 0.48);
-  --shell-theme-moon-shadow: 0 7px 18px rgba(99, 102, 241, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.68);
-  --shell-theme-toggle-bg: linear-gradient(180deg, color-mix(in srgb, var(--ops-surface-overlay) 92%, transparent), color-mix(in srgb, var(--ops-subtle-bg) 82%, transparent));
-  --shell-theme-toggle-shadow: 0 7px 18px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.54);
+  --shell-theme-sun-shadow: none;
+  --shell-theme-moon: var(--kn-primary);
+  --shell-theme-moon-strong: var(--kn-primary-hover);
+  --shell-theme-moon-bg: var(--ops-active-bg);
+  --shell-theme-moon-border: var(--ops-border-strong);
+  --shell-theme-moon-shadow: none;
+  --shell-theme-toggle-bg: var(--ops-surface-overlay);
+  --shell-theme-toggle-shadow: var(--ops-shadow-subtle);
   gap: 2px;
   min-width: 132px;
   height: 34px;
@@ -1031,12 +1102,12 @@ body {
 
 [data-theme="dark"] .shell-theme-toggle.ops-icon-action-button.ant-btn,
 [data-theme="dark"] .shell-theme-toggle.ops-icon-action-button.ant-btn:not(.ant-btn-primary):not(.ant-btn-text):not(.ant-btn-link) {
-  --shell-theme-sun-bg: linear-gradient(135deg, rgba(120, 53, 15, 0.92), rgba(245, 158, 11, 0.34));
-  --shell-theme-sun-shadow: 0 8px 20px rgba(245, 158, 11, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  --shell-theme-moon-bg: linear-gradient(135deg, rgba(49, 46, 129, 0.96), rgba(99, 102, 241, 0.42));
-  --shell-theme-moon-shadow: 0 8px 20px rgba(99, 102, 241, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  --shell-theme-toggle-bg: linear-gradient(180deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.82));
-  --shell-theme-toggle-shadow: 0 9px 22px rgba(2, 6, 23, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --shell-theme-sun-bg: color-mix(in srgb, var(--kn-warning) 16%, var(--kn-surface-overlay));
+  --shell-theme-sun-shadow: none;
+  --shell-theme-moon-bg: var(--ops-active-bg);
+  --shell-theme-moon-shadow: none;
+  --shell-theme-toggle-bg: var(--ops-surface-overlay);
+  --shell-theme-toggle-shadow: var(--ops-shadow-subtle);
 }
 
 .shell-theme-toggle.ops-icon-action-button.ant-btn:hover,
@@ -1498,6 +1569,15 @@ body {
   font-size: 12px;
   font-weight: 650;
   line-height: 18px;
+  transition:
+    border-color var(--ops-motion-fast) var(--ops-motion-ease),
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    color var(--ops-motion-fast) var(--ops-motion-ease);
+}
+
+.ops-filter-chip:hover {
+  border-color: var(--ops-border-strong);
+  background: var(--ops-hover-bg);
 }
 
 .ops-filter-chip--borderless {
@@ -1506,6 +1586,7 @@ body {
 
 .ops-filter-chip--disabled {
   opacity: 0.58;
+  cursor: not-allowed;
 }
 
 .ops-filter-chip__icon {
@@ -1528,10 +1609,23 @@ body {
   cursor: pointer;
   font-size: 10px;
   line-height: 1;
+  border-radius: 4px;
+  transition:
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    color var(--ops-motion-fast) var(--ops-motion-ease),
+    box-shadow var(--ops-motion-fast) var(--ops-motion-ease);
 }
 
 .ops-filter-chip__close:hover {
+  background: var(--ops-status-danger-bg);
   color: var(--ant-color-error);
+}
+
+.ops-filter-chip__close:focus-visible {
+  outline: none;
+  background: var(--ops-status-danger-bg);
+  color: var(--ant-color-error);
+  box-shadow: var(--ops-focus-ring-danger);
 }
 
 .ops-filter-chip__close:disabled {
@@ -1592,14 +1686,27 @@ body {
   background: var(--ant-color-bg-container);
   color: var(--ant-color-text-secondary);
   box-shadow: none;
+  transition:
+    border-color var(--ops-motion-fast) var(--ops-motion-ease),
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    color var(--ops-motion-fast) var(--ops-motion-ease),
+    box-shadow var(--ops-motion-fast) var(--ops-motion-ease);
 }
 
 .ops-action-trigger.ant-btn:hover,
-.ops-action-trigger.ant-btn:focus-visible {
+.ops-action-trigger.ant-btn:focus-visible,
+.ant-dropdown-open > .ops-action-trigger.ant-btn {
   border-color: var(--ops-border-strong);
   background: var(--ops-hover-bg);
   color: var(--ant-color-primary);
+}
+
+.ops-action-trigger.ant-btn:focus-visible {
   box-shadow: var(--ops-focus-ring);
+}
+
+.ops-action-trigger.ant-btn:active {
+  background: var(--ops-active-bg);
 }
 
 .ops-action-dropdown .ant-dropdown-menu,
@@ -1618,6 +1725,9 @@ body {
   border-radius: 6px;
   color: var(--ant-color-text);
   font-size: 13px;
+  transition:
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    color var(--ops-motion-fast) var(--ops-motion-ease);
 }
 
 .ops-action-dropdown .ant-dropdown-menu-item-group-title,
@@ -1648,13 +1758,23 @@ body {
 }
 
 .ops-action-dropdown .ant-dropdown-menu-item:hover,
+.ops-action-dropdown .ant-dropdown-menu-item-active,
+.ops-action-dropdown .ant-dropdown-menu-item-selected,
 .resource-action-menu .ant-dropdown-menu-item:hover {
   background: var(--ops-hover-bg);
 }
 
 .ops-action-dropdown .ant-dropdown-menu-item-danger:hover,
+.ops-action-dropdown .ant-dropdown-menu-item-danger.ant-dropdown-menu-item-active,
 .resource-action-menu .ant-dropdown-menu-item-danger:hover {
   background: var(--ops-status-danger-bg);
+  color: var(--ops-status-danger-text);
+}
+
+.ops-action-dropdown .ant-dropdown-menu-item-disabled,
+.resource-action-menu .ant-dropdown-menu-item-disabled {
+  color: var(--kn-text-faint) !important;
+  cursor: not-allowed;
 }
 
 .ops-drawer-shell .ant-drawer-extra .ant-space {
@@ -1668,13 +1788,13 @@ body {
 
 .ops-drawer-shell__header.ant-drawer-header {
   flex: 0 0 auto;
-  background: color-mix(in srgb, var(--ops-surface-overlay) 92%, transparent);
+  background: var(--ops-surface-overlay);
 }
 
 .ops-drawer-shell__footer.ant-drawer-footer {
   flex: 0 0 auto;
   padding: 10px 16px;
-  background: color-mix(in srgb, var(--ops-surface-overlay) 94%, transparent);
+  background: var(--ops-surface-overlay);
 }
 
 .ops-drawer-shell__footer-actions {
@@ -1723,6 +1843,10 @@ body {
   border-radius: var(--kn-radius-md);
   background: var(--kn-surface);
   color: var(--kn-text);
+  transition:
+    border-color var(--ops-motion-fast) var(--ops-motion-ease),
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    box-shadow var(--ops-motion-fast) var(--ops-motion-ease);
 }
 
 .ops-surface--panel {
@@ -1741,13 +1865,11 @@ body {
 }
 
 .ops-surface--toolbar {
-  background: color-mix(in srgb, var(--kn-surface-overlay) 74%, transparent);
+  background: var(--ops-surface-overlay);
 }
 
 .ops-surface--workbench {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--kn-surface-raised) 82%, transparent), color-mix(in srgb, var(--kn-surface) 96%, transparent)),
-    var(--kn-surface);
+  background: var(--ops-surface-raised);
   box-shadow: var(--kn-shadow-subtle);
 }
 
@@ -1792,7 +1914,7 @@ body {
   min-width: 0;
   padding: 12px 14px;
   border-bottom: 1px solid var(--kn-border);
-  background: color-mix(in srgb, var(--kn-surface-overlay) 58%, transparent);
+  background: var(--ops-surface-overlay);
 }
 
 .ops-surface__footer {
@@ -1934,6 +2056,18 @@ body {
   padding-top: 2px;
 }
 
+.ops-page-header__tabs :where(.ant-tabs-nav) {
+  margin-bottom: 0;
+}
+
+.ops-page-header__tabs :where(.ant-tabs-tab) {
+  padding-block: 8px;
+}
+
+.ops-page-header__tabs :where(.ant-tabs-tab-active) {
+  font-weight: 700;
+}
+
 .resource-page-header__title-suffix {
   display: inline-flex;
   align-items: center;
@@ -1954,6 +2088,10 @@ body {
   background: var(--ops-status-neutral-bg);
   color: var(--ops-status-neutral-text);
   text-align: left;
+  transition:
+    border-color var(--ops-motion-fast) var(--ops-motion-ease),
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    color var(--ops-motion-fast) var(--ops-motion-ease);
 }
 
 .ops-state--compact {
@@ -2049,7 +2187,7 @@ body {
   border: 1px solid var(--surface-border);
   border-radius: var(--ops-control-radius);
   background: var(--surface-bg);
-  box-shadow: var(--ops-shadow-subtle);
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -2100,6 +2238,9 @@ body {
   background: var(--ops-frame-bg);
   box-shadow: var(--ops-shadow-subtle);
   overflow: hidden;
+  transition:
+    border-color var(--ops-motion-base) var(--ops-motion-ease),
+    background-color var(--ops-motion-base) var(--ops-motion-ease);
 }
 
 .logs-workbench-shell.ops-frame-shell,
@@ -2352,9 +2493,20 @@ body {
   border-color: var(--ops-status-info-border);
 }
 
+.ops-frame-shell--connecting .ops-frame-shell__header,
+.ops-frame-shell--reconnecting .ops-frame-shell__header,
+.ops-frame-shell--streaming .ops-frame-shell__header {
+  box-shadow: inset 3px 0 0 var(--ops-status-info-text);
+}
+
 .ops-frame-shell--error,
 .ops-frame-shell--expired {
   border-color: var(--ops-status-danger-border);
+}
+
+.ops-frame-shell--error .ops-frame-shell__header,
+.ops-frame-shell--expired .ops-frame-shell__header {
+  box-shadow: inset 3px 0 0 var(--ops-status-danger-text);
 }
 
 .ops-overview-shell {
@@ -3830,7 +3982,25 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
   width: 100%;
+}
+
+.resource-table-shell .ant-table-wrapper,
+.resource-table-shell .ant-spin-nested-loading,
+.resource-table-shell .ant-spin-container,
+.resource-table-shell .ant-table,
+.resource-table-shell .ant-table-container {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.resource-table-shell .ant-table-content {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .resource-table--state-error .ant-table,
@@ -3994,6 +4164,10 @@ body {
   color: var(--ant-color-text);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
   font-weight: 600;
+  transition:
+    border-color var(--ops-motion-fast) var(--ops-motion-ease),
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    box-shadow var(--ops-motion-fast) var(--ops-motion-ease);
 }
 
 .resource-facet-filter-button {
@@ -4004,24 +4178,33 @@ body {
 .resource-scope-filter-button:focus-visible,
 .resource-scope-filter-button.is-active {
   border-color: var(--ops-border-strong);
-  background: var(--ant-color-bg-container);
+  background: var(--ops-hover-bg);
   color: var(--ant-color-text);
+}
+
+.resource-scope-filter-button:focus-visible {
   box-shadow: var(--ops-focus-ring);
+}
+
+.resource-scope-filter-button.is-active {
+  background: var(--ops-active-bg);
 }
 
 .resource-scope-filter-button::after,
 .resource-table-icon-action.ant-btn::after {
   position: absolute;
-  right: 10px;
-  bottom: -1px;
-  left: 10px;
-  height: 1px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent, var(--ant-color-primary), transparent);
+  top: 9px;
+  bottom: 9px;
+  left: -1px;
+  width: 2px;
+  border-radius: 0 999px 999px 0;
+  background: var(--ant-color-primary);
   content: "";
   opacity: 0;
-  transform: scaleX(0.72);
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transform: scaleY(0.72);
+  transition:
+    opacity var(--ops-motion-fast) var(--ops-motion-ease),
+    transform var(--ops-motion-fast) var(--ops-motion-ease);
 }
 
 .resource-scope-filter-button:hover::after,
@@ -4031,7 +4214,7 @@ body {
 .resource-table-icon-action.ant-btn:focus-visible::after,
 .resource-table-icon-action.ant-btn.is-active::after {
   opacity: 1;
-  transform: scaleX(1);
+  transform: scaleY(1);
 }
 
 .resource-scope-filter-icon {
@@ -4094,6 +4277,16 @@ body {
   border-radius: 7px;
   color: var(--ant-color-text-secondary);
   background: var(--ops-subtle-bg);
+  transition:
+    background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    color var(--ops-motion-fast) var(--ops-motion-ease);
+}
+
+.resource-scope-filter-button:hover .resource-scope-filter-affordance,
+.resource-scope-filter-button:focus-visible .resource-scope-filter-affordance,
+.resource-scope-filter-button.is-active .resource-scope-filter-affordance {
+  color: var(--ant-color-primary);
+  background: var(--ops-active-bg);
 }
 
 .resource-scope-filter-caret {
@@ -4112,6 +4305,12 @@ body {
   border-color: var(--ops-border-subtle);
   background: var(--ant-color-bg-container);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+[data-theme="dark"] .resource-scope-filter-button:hover,
+[data-theme="dark"] .resource-scope-filter-button:focus-visible,
+[data-theme="dark"] .resource-scope-filter-button.is-active {
+  background: var(--ops-hover-bg);
 }
 
 [data-theme="dark"] .resource-scope-filter-affordance {
@@ -4483,9 +4682,32 @@ body {
    主内容区
    ============================================================ */
 .app-content {
+  min-width: 0;
+  max-width: 100%;
   padding: 24px;
+  overflow-x: clip;
   overflow-y: auto;
   contain: layout paint;
+}
+
+.ant-layout,
+.ant-layout-content {
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .app-header {
+    padding-inline: 16px !important;
+  }
+
+  .shell-topbar-actions.ant-space {
+    flex-shrink: 1;
+  }
+
+  .shell-topbar-actions > .ant-space-item:first-child,
+  .app-header .shell-topbar-action {
+    display: none !important;
+  }
 }
 
 @media (max-width: 640px) {
@@ -4705,7 +4927,7 @@ body.kubenova-route-transitioning .resource-table * {
   top: 0;
   bottom: 0;
   width: 3px;
-  background: linear-gradient(180deg, #3b82f6, #8b5cf6);
+  background: var(--kn-primary);
   border-radius: 0 2px 2px 0;
 }
 
@@ -4954,7 +5176,7 @@ body.kubenova-route-transitioning .resource-table * {
   color: var(--topology-overview-text);
   font-size: 16px;
   line-height: 1.1;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .topology-toolbar-head__summary {
@@ -7422,7 +7644,7 @@ button.topology-source-matrix__name:focus-visible,
 .metric-value {
   font-size: 28px;
   font-weight: 700;
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
 }
@@ -7441,28 +7663,26 @@ button.topology-source-matrix__name:focus-visible,
 }
 
 /* ============================================================
-   深色主题：Statistic 数值大字渐变色
+   深色主题：Statistic 数值
    ============================================================ */
 [data-theme="dark"] .ant-statistic-content-value {
-  background: linear-gradient(135deg, #60a5fa, #a78bfa);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--kn-primary);
   font-weight: 700;
 }
 
 /* ============================================================
-   深色主题：Button primary 渐变
+   深色主题：Button primary
    ============================================================ */
 [data-theme="dark"] .ant-btn-primary {
-  background: linear-gradient(135deg, #2563eb, #4f46e5) !important;
-  border: none !important;
-  box-shadow: 0 2px 12px rgba(59, 130, 246, 0.3) !important;
+  border-color: var(--kn-primary) !important;
+  background: var(--kn-primary) !important;
+  box-shadow: none !important;
 }
 
 [data-theme="dark"] .ant-btn-primary:hover {
-  background: linear-gradient(135deg, #3b82f6, #6366f1) !important;
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.45) !important;
+  border-color: var(--kn-primary-hover) !important;
+  background: var(--kn-primary-hover) !important;
+  box-shadow: none !important;
 }
 
 /* ============================================================
