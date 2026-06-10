@@ -14,7 +14,6 @@ import {
   Row,
   Select,
   Space,
-  Statistic,
   Tabs,
   Typography,
   Upload,
@@ -68,6 +67,7 @@ import {
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
 import { OpsFormSection, OpsModalShell } from "@/components/ops/ops-modal-shell";
+import { OpsMetricTile } from "@/components/ops/ops-metric-tile";
 import { OpsSurface } from "@/components/ops/ops-surface";
 import { OpsStatusTag } from "@/components/ops/ops-status";
 
@@ -882,125 +882,111 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path={defaultType === "VPA" ? "/workloads/autoscaling/vpa" : "/workloads/autoscaling/hpa"}
-        titleSuffix={<ResourceAddButton onClick={openCreatePolicyModal} aria-label="创建伸缩策略" />}
-        description={pageDescription}
-      />
+      <OpsSurface variant="panel" padding="sm">
+        <ResourcePageHeader
+          path={defaultType === "VPA" ? "/workloads/autoscaling/vpa" : "/workloads/autoscaling/hpa"}
+          titleSuffix={<ResourceAddButton onClick={openCreatePolicyModal} aria-label="创建伸缩策略" />}
+          description={pageDescription}
+          style={{ marginBottom: 12 }}
+        />
 
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceFilterToolbar>
-          <ResourceFilterToolbarItem width="auto">
-            <ResourceScopeFilterButton
-              clusterId={clusterId}
-              namespace={namespace}
-              clusterOptions={clusterOptions}
-              clusterLoading={clustersQuery.isLoading}
-              knownNamespaces={knownNamespaces}
-              namespaceDisabled={namespaceDisabled}
-              namespacePlaceholder={namespacePlaceholder}
-              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-                onScopeChange(nextClusterId, nextNamespace);
-                resetPage();
-              }}
-            />
-          </ResourceFilterToolbarItem>
-          <ResourceFilterToolbarItem width="sm">
-            <ResourceFacetFilterButton
-              label="类型"
-              value={kind}
-              allLabel="全部类型"
-              options={[{ label: "全部类型", value: "" }, ...kindOptions]}
-              onChange={(value) => {
-                setKind(value);
-                resetPage();
-              }}
-            />
-          </ResourceFilterToolbarItem>
-          {!defaultType ? (
-            <ResourceFilterToolbarItem width="sm">
-              <ResourceFacetFilterButton
-                label="策略"
-                value={typeFilter}
-                allLabel="全部策略"
-                options={[
-                  { label: "全部策略", value: "" },
-                  { label: "HPA", value: "HPA" },
-                  { label: "VPA", value: "VPA" },
-                ]}
-                onChange={(value) => {
-                  setTypeFilter(value as AutoscalingType | "");
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceFilterToolbar>
+            <ResourceFilterToolbarItem width="auto">
+              <ResourceScopeFilterButton
+                clusterId={clusterId}
+                namespace={namespace}
+                clusterOptions={clusterOptions}
+                clusterLoading={clustersQuery.isLoading}
+                knownNamespaces={knownNamespaces}
+                namespaceDisabled={namespaceDisabled}
+                namespacePlaceholder={namespacePlaceholder}
+                onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                  onScopeChange(nextClusterId, nextNamespace);
                   resetPage();
                 }}
               />
             </ResourceFilterToolbarItem>
-          ) : null}
-        </ResourceFilterToolbar>
-        
-      </OpsSurface>
+            <ResourceFilterToolbarItem width="sm">
+              <ResourceFacetFilterButton
+                label="类型"
+                value={kind}
+                allLabel="全部类型"
+                options={[{ label: "全部类型", value: "" }, ...kindOptions]}
+                onChange={(value) => {
+                  setKind(value);
+                  resetPage();
+                }}
+              />
+            </ResourceFilterToolbarItem>
+            {!defaultType ? (
+              <ResourceFilterToolbarItem width="sm">
+                <ResourceFacetFilterButton
+                  label="策略"
+                  value={typeFilter}
+                  allLabel="全部策略"
+                  options={[
+                    { label: "全部策略", value: "" },
+                    { label: "HPA", value: "HPA" },
+                    { label: "VPA", value: "VPA" },
+                  ]}
+                  onChange={(value) => {
+                    setTypeFilter(value as AutoscalingType | "");
+                    resetPage();
+                  }}
+                />
+              </ResourceFilterToolbarItem>
+            ) : null}
+          </ResourceFilterToolbar>
 
-      <Row gutter={[12, 12]}>
-        <Col xs={12} md={6}>
-          <OpsSurface variant="raised" padding="sm">
-            <Statistic title="策略总数" value={policiesQuery.data?.overview.totalPolicies ?? 0} />
-          </OpsSurface>
-        </Col>
-        <Col xs={12} md={6}>
-          <OpsSurface variant="raised" padding="sm">
-            <Statistic title="HPA / VPA" value={`${policiesQuery.data?.overview.hpaPolicies ?? 0} / ${policiesQuery.data?.overview.vpaPolicies ?? 0}`} />
-          </OpsSurface>
-        </Col>
-        <Col xs={12} md={6}>
-          <OpsSurface variant="raised" padding="sm">
-            <Statistic
-              title="未覆盖资源"
-              value={policiesQuery.data?.overview.uncoveredWorkloads ?? 0}
-              styles={{
-                content: {
-                  color:
-                    (policiesQuery.data?.overview.uncoveredWorkloads ?? 0) > 0
-                      ? "#fa8c16"
-                      : undefined,
-                },
-              }}
-            />
-          </OpsSurface>
-        </Col>
-        <Col xs={12} md={6}>
-          <OpsSurface variant="raised" padding="sm">
-            <Statistic title="资源总数" value={policiesQuery.data?.overview.coveredWorkloads ?? 0} />
-          </OpsSurface>
-        </Col>
-      </Row>
+          <Row gutter={[12, 12]}>
+            <Col xs={12} md={6}>
+              <OpsMetricTile label="策略总数" tone="neutral" value={policiesQuery.data?.overview.totalPolicies ?? 0} />
+            </Col>
+            <Col xs={12} md={6}>
+              <OpsMetricTile label="HPA / VPA" tone="info" value={`${policiesQuery.data?.overview.hpaPolicies ?? 0} / ${policiesQuery.data?.overview.vpaPolicies ?? 0}`} />
+            </Col>
+            <Col xs={12} md={6}>
+              <OpsMetricTile
+                label="未覆盖资源"
+                tone={(policiesQuery.data?.overview.uncoveredWorkloads ?? 0) > 0 ? "warning" : "success"}
+                value={policiesQuery.data?.overview.uncoveredWorkloads ?? 0}
+              />
+            </Col>
+            <Col xs={12} md={6}>
+              <OpsMetricTile label="资源总数" tone="success" value={policiesQuery.data?.overview.coveredWorkloads ?? 0} />
+            </Col>
+          </Row>
 
-      <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<AutoscalingPolicyItem>
-          tableKey="workloads.autoscaling.policies"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按资源名称搜索",
-          }}
-          sort={{ sortBy, sortOrder }}
-          rowKey="id"
-          columns={columns}
-          onResourceNavigate={(request) => setDetailRequest(request)}
-          dataSource={visiblePolicies}
-          onChange={(nextPagination, filters, sorter, extra) =>
-            handleTableChange(nextPagination, filters, sorter, extra, queryEnabled && !policiesQuery.data && policiesQuery.isLoading)
-          }
-          onRow={(record) => ({
-            onClick: () => setSelectedRowId(record.id),
-          })}
-          loading={queryEnabled && !policiesQuery.data && policiesQuery.isLoading}
-          pagination={getPaginationConfig(
-            policiesQuery.data?.total ?? policiesQuery.data?.items?.length ?? 0,
-            queryEnabled && !policiesQuery.data && policiesQuery.isLoading,
-          )}
-          locale={{ emptyText: policiesEmptyText }}
-          scroll={{ x: getTableScrollX(columns) }}
-        />
+          <ResourceTable<AutoscalingPolicyItem>
+            tableKey="workloads.autoscaling.policies"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按资源名称搜索",
+            }}
+            sort={{ sortBy, sortOrder }}
+            rowKey="id"
+            columns={columns}
+            onResourceNavigate={(request) => setDetailRequest(request)}
+            dataSource={visiblePolicies}
+            bordered
+            onChange={(nextPagination, filters, sorter, extra) =>
+              handleTableChange(nextPagination, filters, sorter, extra, queryEnabled && !policiesQuery.data && policiesQuery.isLoading)
+            }
+            onRow={(record) => ({
+              onClick: () => setSelectedRowId(record.id),
+            })}
+            loading={queryEnabled && !policiesQuery.data && policiesQuery.isLoading}
+            pagination={getPaginationConfig(
+              policiesQuery.data?.total ?? policiesQuery.data?.items?.length ?? 0,
+              queryEnabled && !policiesQuery.data && policiesQuery.isLoading,
+            )}
+            locale={{ emptyText: policiesEmptyText }}
+            scroll={{ x: getTableScrollX(columns) }}
+          />
+        </Space>
       </OpsSurface>
 
       <OpsSurface variant="panel" padding="sm" title="选中资源摘要">
@@ -1040,6 +1026,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             columns={eventColumns}
             onResourceNavigate={(request) => setDetailRequest(request)}
             dataSource={selectedItem ? eventsQuery.data?.items ?? [] : []}
+            bordered
             loading={queryEnabled && Boolean(selectedItem) && !eventsQuery.data && eventsQuery.isLoading}
             pagination={false}
             locale={{ emptyText: eventsEmptyText }}

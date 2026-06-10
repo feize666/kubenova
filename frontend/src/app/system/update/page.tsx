@@ -210,6 +210,7 @@ export default function SystemUpdatePage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsPageHeader
+        className="resource-page-header"
         title="更新管理"
         subtitle="系统管理 / 更新管理"
         scope={(

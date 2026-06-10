@@ -16,7 +16,7 @@ const contracts = [
   },
   {
     path: "src/app/aiops/page.tsx",
-    required: ["OpsSurface", "OpsDrawerShell", "ResourcePageHeader", "ResourceTable", "OpsIconActionButton"],
+    required: ["OpsSurface", "OpsDrawerShell", "ResourcePageHeader", "ResourceTable", "OpsIconActionButton", "OpsCommandPreview"],
     forbidden: ["cyber-panel", "<Drawer"],
   },
   {
@@ -47,8 +47,8 @@ const contracts = [
   },
   {
     path: "src/app/ai-assistant/page.tsx",
-    required: ["OpsSurface", "OpsDrawerShell", "OpsIconActionButton", "Modal.confirm", "HIGH_RISK_ACTIONS"],
-    forbidden: ["cyber-panel", "<Card", "<Drawer"],
+    required: ["OpsSurface", "OpsDrawerShell", "OpsIconActionButton", "OpsCommandPreview", "Modal.confirm", "HIGH_RISK_ACTIONS"],
+    forbidden: ["cyber-panel", "<Card", "<Drawer", "<pre"],
   },
   {
     path: "src/app/dashboard/page.tsx",

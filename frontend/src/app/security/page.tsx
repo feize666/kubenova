@@ -16,7 +16,6 @@ import {
   Row,
   Skeleton,
   Space,
-  Statistic,
   Tabs,
   Tooltip,
   Typography,
@@ -27,7 +26,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsPageHeader, OpsStatusTag, OpsSurface, type OpsFilterChipTone, type OpsStatusTone } from "@/components/ops";
+import { OpsFilterChip, OpsMetricTile, OpsPageHeader, OpsStatusTag, OpsSurface, type OpsFilterChipTone, type OpsStatusTone } from "@/components/ops";
 import {
   ResourceActionDropdown,
   type ResourceActionItem,
@@ -505,7 +504,7 @@ function SecurityEventsTab() {
   return (
     <>
       {contextHolder}
-      <OpsSurface className="security-events-filter-toolbar" variant="toolbar" padding="sm">
+      <Space orientation="vertical" size={12} style={{ width: "100%" }}>
         <ResourceFilterToolbar>
           <ResourceFilterToolbarItem width="auto">
             <ResourceScopeFilterButton
@@ -523,67 +522,68 @@ function SecurityEventsTab() {
             />
           </ResourceFilterToolbarItem>
         </ResourceFilterToolbar>
-      </OpsSurface>
 
-      <ResourceTable<SecurityEvent>
-        rowKey="id"
-        tableKey="business.security.events"
-        columns={columns as ColumnsType<SecurityEvent>}
-        onResourceNavigate={(request) => setResourceDetailTarget(request)}
-        dataSource={tableRows}
-        preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-        globalSearch={{
-          value: keyword,
-          onChange: (value) => {
-            setKeyword(value);
-            setPage(1);
-          },
-          placeholder: "搜索标题 / 类型 / 资源 / 集群",
-        }}
-        filters={tableFilters}
-        onFiltersChange={(nextFilters) => {
-          setTableFilters(nextFilters);
-          setSeverityFilter(typeof nextFilters.severity === "string" ? nextFilters.severity : undefined);
-          setStatusFilter(typeof nextFilters.status === "string" ? nextFilters.status : undefined);
-          setPage(1);
-        }}
-        toolbarExtra={
-          <Button
-            icon={<ReloadOutlined />}
-            loading={refreshingEvents}
-            onClick={() => void handleRefreshEvents()}
-          >
-            刷新
-          </Button>
-        }
-        loading={isLoading}
-        size="small"
-        scroll={{ x: 1000 }}
-        onChange={(pagination, filters, sorter, extra) => {
-          handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
-          if (extra.action === "sort") {
-            setPage(1);
-          }
-        }}
-        pagination={buildTablePagination({
-          current: page,
-          pageSize,
-          total: sortedItems.length,
-          onChange: (nextPage, nextPageSize) => {
-            if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
-              setPageSize(nextPageSize);
+        <ResourceTable<SecurityEvent>
+          rowKey="id"
+          tableKey="business.security.events"
+          columns={columns as ColumnsType<SecurityEvent>}
+          onResourceNavigate={(request) => setResourceDetailTarget(request)}
+          dataSource={tableRows}
+          bordered
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keyword,
+            onChange: (value) => {
+              setKeyword(value);
               setPage(1);
-              return;
+            },
+            placeholder: "搜索标题 / 类型 / 资源 / 集群",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            setSeverityFilter(typeof nextFilters.severity === "string" ? nextFilters.severity : undefined);
+            setStatusFilter(typeof nextFilters.status === "string" ? nextFilters.status : undefined);
+            setPage(1);
+          }}
+          toolbarExtra={
+            <Button
+              icon={<ReloadOutlined />}
+              loading={refreshingEvents}
+              onClick={() => void handleRefreshEvents()}
+            >
+              刷新
+            </Button>
+          }
+          loading={isLoading}
+          size="small"
+          scroll={{ x: 1000 }}
+          onChange={(pagination, filters, sorter, extra) => {
+            handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
+            if (extra.action === "sort") {
+              setPage(1);
             }
-            setPage(nextPage);
-          },
-        })}
-        rowClassName={(record) =>
-          record.severity === "critical" && record.status === "open"
-            ? "ant-table-row-danger"
-            : ""
-        }
-      />
+          }}
+          pagination={buildTablePagination({
+            current: page,
+            pageSize,
+            total: sortedItems.length,
+            onChange: (nextPage, nextPageSize) => {
+              if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+                return;
+              }
+              setPage(nextPage);
+            },
+          })}
+          rowClassName={(record) =>
+            record.severity === "critical" && record.status === "open"
+              ? "ant-table-row-danger"
+              : ""
+          }
+        />
+      </Space>
       <BusinessDetailDrawer
         open={Boolean(detailRecord)}
         title={detailRecord ? `安全事件 · ${detailRecord.title}` : "安全事件"}
@@ -971,12 +971,12 @@ export default function SecurityPage() {
     refetchInterval: 60_000,
   });
 
-  const complianceColor =
+  const complianceTone =
     (stats?.complianceScore ?? 0) >= 90
-      ? "#52c41a"
+      ? "success"
       : (stats?.complianceScore ?? 0) >= 70
-        ? "#faad14"
-        : "#ff4d4f";
+        ? "warning"
+        : "danger";
 
   const tabItems = [
     {
@@ -1012,6 +1012,7 @@ export default function SecurityPage() {
   return (
     <div>
       <OpsPageHeader
+        className="resource-page-header"
         title="安全审计"
         subtitle="聚合漏洞扫描、安全事件与操作审计日志，全面掌握集群安全态势。"
       />
@@ -1020,59 +1021,38 @@ export default function SecurityPage() {
       <Skeleton loading={statsLoading} active paragraph={{ rows: 1 }}>
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface variant="panel" padding="sm">
-              <Statistic
-                title="高危漏洞数"
-                value={stats?.criticalVulnerabilities ?? 0}
-                styles={{
-                  content: {
-                    color: (stats?.criticalVulnerabilities ?? 0) > 0 ? "#ff4d4f" : undefined,
-                  },
-                }}
-                prefix={<LockOutlined />}
-                suffix={
-                  (stats?.criticalVulnerabilities ?? 0) > 0 ? (
-                    <Typography.Text type="danger" style={{ fontSize: 12 }}>
-                      需立即处理
-                    </Typography.Text>
-                  ) : null
-                }
-              />
-            </OpsSurface>
+            <OpsMetricTile
+              icon={<LockOutlined />}
+              label="高危漏洞数"
+              meta={(stats?.criticalVulnerabilities ?? 0) > 0 ? "需立即处理" : undefined}
+              tone={(stats?.criticalVulnerabilities ?? 0) > 0 ? "danger" : "success"}
+              value={stats?.criticalVulnerabilities ?? 0}
+            />
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface variant="panel" padding="sm">
-              <Statistic
-                title="待处理事件"
-                value={stats?.openEvents ?? 0}
-                styles={{
-                  content: {
-                    color: (stats?.openEvents ?? 0) > 0 ? "#faad14" : undefined,
-                  },
-                }}
-                prefix={<ExclamationCircleOutlined />}
-              />
-            </OpsSurface>
+            <OpsMetricTile
+              icon={<ExclamationCircleOutlined />}
+              label="待处理事件"
+              tone={(stats?.openEvents ?? 0) > 0 ? "warning" : "success"}
+              value={stats?.openEvents ?? 0}
+            />
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface variant="panel" padding="sm">
-              <Statistic
-                title="合规评分"
-                value={stats?.complianceScore ?? 0}
-                suffix="%"
-                styles={{ content: { color: complianceColor } }}
-                prefix={<SafetyCertificateOutlined />}
-              />
-            </OpsSurface>
+            <OpsMetricTile
+              icon={<SafetyCertificateOutlined />}
+              label="合规评分"
+              suffix="%"
+              tone={complianceTone}
+              value={stats?.complianceScore ?? 0}
+            />
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface variant="panel" padding="sm">
-              <Statistic
-                title="今日审计日志"
-                value={stats?.todayAuditLogs ?? 0}
-                prefix={<FileTextOutlined />}
-              />
-            </OpsSurface>
+            <OpsMetricTile
+              icon={<FileTextOutlined />}
+              label="今日审计日志"
+              tone="info"
+              value={stats?.todayAuditLogs ?? 0}
+            />
           </Col>
         </Row>
       </Skeleton>

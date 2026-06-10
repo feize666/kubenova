@@ -71,7 +71,7 @@ bash scripts/service.sh build runtime-gateway
 bash scripts/service.sh build all
 ```
 
-兼容旧入口说明见 [scripts/README.md](../scripts/README.md)。
+兼容旧入口说明见 [README.md](../README.md)。
 
 ## 配置与环境变量
 

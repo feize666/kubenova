@@ -29,6 +29,7 @@ export type ResourceKeywordSearchProps = {
   value: string;
   onChange: (value: string) => void;
   onSearch: () => void;
+  onClearSearch?: () => void;
   placeholder?: string;
   width?: ResourceFilterToolbarItemWidth;
 };
@@ -44,10 +45,17 @@ const widthClassMap: Record<ResourceFilterToolbarItemWidth, string> = {
 };
 
 export function ResourceFilterToolbar({ activeFilters, children, actions, className }: ResourceFilterToolbarProps) {
+  const activeFilterCount = activeFilters?.length ?? 0;
   return (
     <OpsFilterBar
       activeFilters={activeFilters}
-      className={["resource-filter-toolbar", className].filter(Boolean).join(" ")}
+      className={[
+        "resource-filter-toolbar",
+        activeFilterCount > 0 ? "resource-filter-toolbar--has-active-filters" : undefined,
+        className,
+      ].filter(Boolean).join(" ")}
+      data-active-filter-count={activeFilterCount}
+      data-resource-filter-toolbar=""
       actions={actions ? (
         <Space className="resource-filter-toolbar-actions" size={8} wrap>
           {actions}
@@ -70,6 +78,8 @@ export function ResourceFilterToolbarItem({
       label={label}
       width={width}
       className={["resource-filter-toolbar-item", widthClassMap[width], className].filter(Boolean).join(" ")}
+      data-resource-filter-item=""
+      data-width={width}
     >
       {children}
     </OpsFilterBarItem>
@@ -80,17 +90,26 @@ export function ResourceKeywordSearch({
   value,
   onChange,
   onSearch,
+  onClearSearch,
   placeholder = "按名称/标签搜索",
   width = "lg",
 }: ResourceKeywordSearchProps) {
   return (
     <ResourceFilterToolbarItem width={width}>
       <Input
+        aria-label="关键词搜索"
+        className="resource-keyword-search"
         prefix={<SearchOutlined />}
         allowClear
         placeholder={placeholder}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          onChange(nextValue);
+          if (!nextValue) {
+            onClearSearch?.();
+          }
+        }}
         onPressEnter={onSearch}
       />
     </ResourceFilterToolbarItem>

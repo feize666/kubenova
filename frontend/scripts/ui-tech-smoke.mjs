@@ -132,6 +132,41 @@ const allRoutes = [
     overlayChecks: ["table-search-popover", "table-column-popover", "create-modal"],
   },
   {
+    id: "helm-releases",
+    path: "/workloads/helm?clusterId=local&namespace=default",
+    texts: ["Helm Release", "安装、升级、回滚与卸载 Helm Release", "资源范围"],
+    shellSelector: ".resource-table-shell",
+    toolbarSelector: ".resource-table-toolbar",
+    chipSelector: ".resource-scope-filter-button",
+    statusSelector: ".resource-table-toolbar-actions",
+    evidenceState: "table",
+    createTriggerSelector: 'button[aria-label="安装 Helm Release"]',
+    overlayChecks: ["scope-popover", "table-search-popover", "table-column-popover", "create-modal"],
+  },
+  {
+    id: "helm-repositories",
+    path: "/workloads/helm/repositories?clusterId=local",
+    texts: ["Helm Repository", "管理 Helm 仓库", "资源范围"],
+    shellSelector: ".resource-table-shell",
+    toolbarSelector: ".resource-table-toolbar",
+    chipSelector: ".resource-scope-filter-button",
+    statusSelector: ".resource-table-toolbar-actions",
+    evidenceState: "table",
+    createTriggerSelector: 'button[aria-label="创建 Helm 仓库"]',
+    overlayChecks: ["scope-popover", "table-search-popover", "table-column-popover", "create-modal"],
+  },
+  {
+    id: "topology",
+    path: "/network/topology?clusterId=local&namespace=default",
+    texts: ["资源拓扑", "网络资源关系", "资源密度摘要"],
+    shellSelector: ".resource-map-shell",
+    toolbarSelector: ".resource-map-toolbar",
+    chipSelector: ".resource-map-source-chips button",
+    statusSelector: ".resource-map-motion-state",
+    canvasStateSelector: ".resource-map-canvas-state",
+    evidenceState: "workbench",
+  },
+  {
     id: "ai-assistant",
     path: "/ai-assistant",
     texts: ["KubeNova", "ChatOps", "模型设置", "开始一条 ChatOps 会话"],
@@ -141,6 +176,16 @@ const allRoutes = [
     statusSelector: "#ai-assistant-input",
     evidenceState: "workbench",
     overlayChecks: ["ai-settings-drawer", "ai-alert-drawer"],
+  },
+  {
+    id: "aiops",
+    path: "/aiops",
+    texts: ["事故中台", "事故队列", "推荐动作"],
+    shellSelector: ".resource-page-header",
+    toolbarSelector: ".resource-page-header",
+    chipSelector: ".ant-select",
+    statusSelector: ".resource-table-shell, .ops-surface",
+    evidenceState: "workbench",
   },
 ];
 const routes = selectRoutes(allRoutes, cliOptions.routes);
@@ -197,7 +242,10 @@ function selectRoutes(candidateRoutes, raw) {
     logs: new Set(["logs"]),
     "resource-surfaces": new Set(["pods", "deployments", "namespaces", "nodes"]),
     workloads: new Set(["pods", "deployments"]),
+    helm: new Set(["helm-releases", "helm-repositories"]),
     clusters: new Set(["cluster-management", "namespaces", "nodes"]),
+    topology: new Set(["topology"]),
+    ai: new Set(["ai-assistant", "aiops"]),
   };
   const requested = new Set();
   for (const item of raw.split(",")) {
@@ -408,7 +456,8 @@ function isAllowedConsoleIssue(issue) {
     (
       brief.includes("/api/workloads") ||
       brief.includes("/api/namespaces") ||
-      brief.includes("/api/clusters")
+      brief.includes("/api/clusters") ||
+      brief.includes("/api/helm")
     );
   if (isResourceApiNotFound) {
     return true;
@@ -555,6 +604,7 @@ async function locatorUsable(locator) {
 
 async function closeFloatingLayer(page) {
   await page.keyboard.press("Escape");
+  await page.mouse.click(4, 4);
   if (settleMs > 0) {
     await page.waitForTimeout(Math.min(settleMs, 250));
   }

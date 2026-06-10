@@ -11,4 +11,4 @@ Subdirectories are stable placeholders for task 1.1.
 - [binary/README.md](binary/README.md)
 - [docker/README.md](docker/README.md)
 - [systemd/README.md](systemd/README.md)
-- [scripts/README.md](../scripts/README.md)
+- [README.md](../README.md)

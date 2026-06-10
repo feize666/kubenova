@@ -18,12 +18,14 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Space,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/lib/table";
+import type {
+  HeadlampResourceTableColumn,
+  HeadlampTableFilters,
+} from "@/lib/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
@@ -34,6 +36,7 @@ import {
   parseResourceSearchInput,
   POD_ACTION_MENU_CLASS,
   POD_ACTION_TRIGGER_CLASS,
+  ResourceActionIsolation,
   buildResourceActionMenuItems,
   renderResourceActionTriggerButton,
   renderPodLikeResourceActionStyles,
@@ -43,6 +46,7 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsFormSection, OpsModalShell } from "@/components/ops";
 import { OpsSurface } from "@/components/ops/ops-surface";
 import {
   applyWorkloadActionById,
@@ -60,21 +64,33 @@ import {
   type WorkloadState,
   type WorkloadStatus,
 } from "@/lib/api/workloads";
-import { type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
+import {
+  type ResourceDetailRequest,
+  type ResourceIdentity,
+} from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
+import {
+  TABLE_COL_WIDTH,
+  getAdaptiveNameWidth,
+} from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
-import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
+import {
+  readResourceFilterFromSearchParams,
+  useSyncResourceFilterUrlState,
+} from "@/hooks/use-resource-filter-url-state";
 import {
   runScaleConvergence,
   type ScaleConvergenceRound,
 } from "@/lib/workloads/scale-convergence";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { WorkloadReplicaCell, WorkloadStateTag } from "@/components/workloads/workload-table-cells";
+import {
+  WorkloadReplicaCell,
+  WorkloadStateTag,
+} from "@/components/workloads/workload-table-cells";
 
 type WorkloadAction =
   | "scale"
@@ -140,7 +156,12 @@ function getTextFilter(filters: HeadlampTableFilters, key: string) {
 }
 
 function textMatches(value: unknown, filterValue: string) {
-  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+  return (
+    !filterValue ||
+    String(value ?? "")
+      .toLowerCase()
+      .includes(filterValue)
+  );
 }
 
 function selectMatches(value: unknown, filterValue: unknown) {
@@ -200,7 +221,10 @@ type DeploymentEditFormValues = Required<
 > &
   Pick<WorkloadSafeEditValues, "replicas">;
 
-function extractScaleSnapshot(item: WorkloadItem): { observedReplicas: number; readyReplicas: number } {
+function extractScaleSnapshot(item: WorkloadItem): {
+  observedReplicas: number;
+  readyReplicas: number;
+} {
   const { current, desired } = parseReplicaPair(item.replicas);
   return {
     observedReplicas: desired,
@@ -212,13 +236,21 @@ export default function DeploymentsPage() {
   const { message } = App.useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
-    readResourceFilterFromSearchParams(searchParams);
+  const {
+    clusterId: initialClusterId,
+    namespace: initialNamespace,
+    keyword: initialKeyword,
+  } = readResourceFilterFromSearchParams(searchParams);
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
-    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const {
+    clusterId,
+    namespace,
+    namespaceDisabled,
+    namespacePlaceholder,
+    onScopeChange,
+  } = useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [关键字, set关键字] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
@@ -250,10 +282,12 @@ export default function DeploymentsPage() {
       "createdAt",
     ],
   });
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget] =
+    useState<ResourceDetailRequest | null>(null);
   const [扩缩容行, set扩缩容行] = useState<DeploymentRow | null>(null);
   const [目标副本, set目标副本] = useState<number>(1);
-  const [scaleConvergence, setScaleConvergence] = useState<ScaleConvergenceViewState | null>(null);
+  const [scaleConvergence, setScaleConvergence] =
+    useState<ScaleConvergenceViewState | null>(null);
   const [yaml目标, setYaml目标] = useState<ResourceIdentity | null>(null);
   const [editTarget, setEditTarget] = useState<WorkloadItem | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -299,16 +333,24 @@ export default function DeploymentsPage() {
   // 集群列表（供筛选下拉和 Modal clusterId 选择）
   const clustersQuery = useQuery({
     queryKey: ["clusters", "list", accessToken],
-    queryFn: () => getClusters({ state: "active", selectableOnly: true }, accessToken!),
+    queryFn: () =>
+      getClusters({ state: "active", selectableOnly: true }, accessToken!),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
   const clusterOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
+    () =>
+      (clustersQuery.data?.items ?? []).map((c) => ({
+        label: c.name,
+        value: c.id,
+      })),
     [clustersQuery.data],
   );
   const clusterMap = useMemo(
-    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name])),
+    () =>
+      Object.fromEntries(
+        (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
+      ),
     [clustersQuery.data],
   );
 
@@ -324,12 +366,19 @@ export default function DeploymentsPage() {
         },
       });
     }
-    await queryClient.invalidateQueries({ queryKey: ["workloads", "deployments"] });
+    await queryClient.invalidateQueries({
+      queryKey: ["workloads", "deployments"],
+    });
     await queryClient.invalidateQueries({ queryKey: ["workloads", "pods"] });
   };
 
   const actionMutation = useMutation({
-    mutationFn: async (payload: WorkloadMutationTarget & { action: WorkloadAction; replicas?: number }) => {
+    mutationFn: async (
+      payload: WorkloadMutationTarget & {
+        action: WorkloadAction;
+        replicas?: number;
+      },
+    ) => {
       if (payload.action === "disable" || payload.action === "enable") {
         if (payload.action === "disable") {
           return disableWorkload("deployments", payload.name, accessToken!, {
@@ -350,16 +399,22 @@ export default function DeploymentsPage() {
           accessToken!,
         );
       }
-      return applyWorkloadAction("deployments", payload.name, {
-        action: payload.action,
-        replicas: payload.action === "scale" ? payload.replicas : undefined,
-        clusterId: payload.clusterId,
-        namespace: payload.namespace,
-      }, accessToken!);
+      return applyWorkloadAction(
+        "deployments",
+        payload.name,
+        {
+          action: payload.action,
+          replicas: payload.action === "scale" ? payload.replicas : undefined,
+          clusterId: payload.clusterId,
+          namespace: payload.namespace,
+        },
+        accessToken!,
+      );
     },
     onMutate: async (payload) => {
       await queryClient.cancelQueries({ queryKey: workloadsKey });
-      const previous = queryClient.getQueryData<WorkloadsListResponse>(workloadsKey);
+      const previous =
+        queryClient.getQueryData<WorkloadsListResponse>(workloadsKey);
 
       queryClient.setQueryData<WorkloadsListResponse>(workloadsKey, (old) => {
         if (!old) {
@@ -376,7 +431,12 @@ export default function DeploymentsPage() {
               return item;
             }
             if (payload.action === "delete") {
-              return { ...item, state: "deleted" as const, status: "Failed" as const, version: item.version + 1 };
+              return {
+                ...item,
+                state: "deleted" as const,
+                status: "Failed" as const,
+                version: item.version + 1,
+              };
             }
             if (payload.action === "scale") {
               const nextReplicas = Math.max(0, payload.replicas ?? 0);
@@ -389,13 +449,25 @@ export default function DeploymentsPage() {
               };
             }
             if (payload.action === "restart" || payload.action === "rollback") {
-              return { ...item, status: "Pending" as const, version: item.version + 1 };
+              return {
+                ...item,
+                status: "Pending" as const,
+                version: item.version + 1,
+              };
             }
             if (payload.action === "disable") {
-              return { ...item, state: "disabled" as const, version: item.version + 1 };
+              return {
+                ...item,
+                state: "disabled" as const,
+                version: item.version + 1,
+              };
             }
             if (payload.action === "enable") {
-              return { ...item, state: "active" as const, version: item.version + 1 };
+              return {
+                ...item,
+                state: "active" as const,
+                version: item.version + 1,
+              };
             }
             return { ...item, version: item.version + 1 };
           })
@@ -414,12 +486,21 @@ export default function DeploymentsPage() {
     },
     onSuccess: (data, payload) => {
       if (payload.action === "scale") {
-        if (data && typeof data === "object" && "accepted" in data && data.accepted === false) {
+        if (
+          data &&
+          typeof data === "object" &&
+          "accepted" in data &&
+          data.accepted === false
+        ) {
           message.error("扩缩容请求未被受理");
           return;
         }
         const scaleResult =
-          data && typeof data === "object" && "scaleResult" in data && data.scaleResult && typeof data.scaleResult === "object"
+          data &&
+          typeof data === "object" &&
+          "scaleResult" in data &&
+          data.scaleResult &&
+          typeof data.scaleResult === "object"
             ? (data.scaleResult as {
                 desiredReplicas?: number;
                 observedReplicas?: number | null;
@@ -429,12 +510,22 @@ export default function DeploymentsPage() {
                 observedAt?: string;
               })
             : null;
-        const desired = typeof scaleResult?.desiredReplicas === "number" ? scaleResult.desiredReplicas : payload.replicas ?? 0;
+        const desired =
+          typeof scaleResult?.desiredReplicas === "number"
+            ? scaleResult.desiredReplicas
+            : (payload.replicas ?? 0);
         const observed =
-          typeof scaleResult?.observedReplicas === "number" ? scaleResult.observedReplicas : payload.replicas ?? null;
-        const ready = typeof scaleResult?.readyReplicas === "number" ? scaleResult.readyReplicas : null;
+          typeof scaleResult?.observedReplicas === "number"
+            ? scaleResult.observedReplicas
+            : (payload.replicas ?? null);
+        const ready =
+          typeof scaleResult?.readyReplicas === "number"
+            ? scaleResult.readyReplicas
+            : null;
         const available =
-          typeof scaleResult?.availableReplicas === "number" ? scaleResult.availableReplicas : null;
+          typeof scaleResult?.availableReplicas === "number"
+            ? scaleResult.availableReplicas
+            : null;
 
         message.success(`${payload.name} 扩缩容请求已受理`);
         void runScaleConvergence({
@@ -454,7 +545,10 @@ export default function DeploymentsPage() {
                 : undefined,
           },
           onBeforeRefetch: () => {
-            void queryClient.invalidateQueries({ queryKey: workloadsKey, exact: true });
+            void queryClient.invalidateQueries({
+              queryKey: workloadsKey,
+              exact: true,
+            });
           },
           refetch: query.refetch,
           resolveObservedState: (payloadData) => {
@@ -484,7 +578,9 @@ export default function DeploymentsPage() {
           },
           timeoutMs: 60_000,
         }).catch((error: unknown) => {
-          message.error(error instanceof Error ? error.message : "收敛状态刷新失败");
+          message.error(
+            error instanceof Error ? error.message : "收敛状态刷新失败",
+          );
         });
         return;
       }
@@ -503,13 +599,16 @@ export default function DeploymentsPage() {
 
   // Extract known namespaces from loaded data for NamespaceSelect suggestions
   const knownNamespaces = useMemo(
-    () => Array.from(new Set(sourceItems.map((i) => i.namespace).filter(Boolean))),
+    () =>
+      Array.from(new Set(sourceItems.map((i) => i.namespace).filter(Boolean))),
     [sourceItems],
   );
 
   const 表格前数据 = useMemo(
     () =>
-      全量数据.filter((row) => matchLabelExpressions(row.labels, mergedFilters)),
+      全量数据.filter((row) =>
+        matchLabelExpressions(row.labels, mergedFilters),
+      ),
     [全量数据, mergedFilters],
   );
 
@@ -526,23 +625,31 @@ export default function DeploymentsPage() {
     const statusFilter = tableFilters.status;
     const stateFilter = tableFilters.state;
 
-    return 表格前数据.filter((row) => (
-      textMatches(row.名称, nameFilter) &&
-      textMatches(`${row.集群} ${getClusterDisplayName(clusterMap, row.集群)}`, clusterFilter) &&
-      textMatches(row.名称空间, namespaceFilter) &&
-      selectMatches(row.状态, statusFilter) &&
-      selectMatches(row.启用状态, stateFilter) &&
-      textMatches(row.副本数, replicasFilter) &&
-      textMatches(row.就绪数, readyFilter) &&
-      textMatches(row.可用数, availableFilter) &&
-      textMatches(row.策略, strategyFilter) &&
-      textMatches(row.修订版本, revisionFilter) &&
-      textMatches(row.创建时间, createdAtFilter)
-    ));
+    return 表格前数据.filter(
+      (row) =>
+        textMatches(row.名称, nameFilter) &&
+        textMatches(
+          `${row.集群} ${getClusterDisplayName(clusterMap, row.集群)}`,
+          clusterFilter,
+        ) &&
+        textMatches(row.名称空间, namespaceFilter) &&
+        selectMatches(row.状态, statusFilter) &&
+        selectMatches(row.启用状态, stateFilter) &&
+        textMatches(row.副本数, replicasFilter) &&
+        textMatches(row.就绪数, readyFilter) &&
+        textMatches(row.可用数, availableFilter) &&
+        textMatches(row.策略, strategyFilter) &&
+        textMatches(row.修订版本, revisionFilter) &&
+        textMatches(row.创建时间, createdAtFilter),
+    );
   }, [clusterMap, tableFilters, 表格前数据]);
 
   const 名称列宽度 = useMemo(
-    () => getAdaptiveNameWidth(表格数据.map((row) => row.名称), { max: 340 }),
+    () =>
+      getAdaptiveNameWidth(
+        表格数据.map((row) => row.名称),
+        { max: 340 },
+      ),
     [表格数据],
   );
   const handleGlobalSearchChange = (value: string) => {
@@ -608,7 +715,9 @@ export default function DeploymentsPage() {
       void message.success(`${row.名称} 删除成功`);
       void refreshDeploymentSnapshots(row.id);
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "删除失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "删除失败，请重试",
+      );
     }
   };
 
@@ -622,7 +731,11 @@ export default function DeploymentsPage() {
       if (row.id && candidate.id) {
         return candidate.id === row.id;
       }
-      return candidate.name === row.原始名称 && candidate.clusterId === row.集群 && candidate.namespace === row.名称空间;
+      return (
+        candidate.name === row.原始名称 &&
+        candidate.clusterId === row.集群 &&
+        candidate.namespace === row.名称空间
+      );
     });
     if (!item?.id) {
       void message.warning("缺少资源 ID，无法打开结构化编辑");
@@ -655,16 +768,23 @@ export default function DeploymentsPage() {
     }
     setEditSubmitting(true);
     try {
-      const patch = buildWorkloadSafeEditPatch(editTarget, "Deployment", values, {
-        includeReplicas: true,
-        includeImage: true,
-      });
+      const patch = buildWorkloadSafeEditPatch(
+        editTarget,
+        "Deployment",
+        values,
+        {
+          includeReplicas: true,
+          includeImage: true,
+        },
+      );
       await patchWorkloadById(editTarget.id, patch, accessToken!);
       void message.success(`${editTarget.name} 更新成功`);
       closeEditModal();
       await refreshDeploymentSnapshots(editTarget.id);
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "更新失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "更新失败，请重试",
+      );
     } finally {
       setEditSubmitting(false);
     }
@@ -677,9 +797,23 @@ export default function DeploymentsPage() {
       { key: "edit", icon: <EditOutlined />, label: "编辑", disabled: !row.id },
       { key: "scale", icon: <RetweetOutlined />, label: "扩缩容" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
-      { key: "restart", icon: <ReloadOutlined />, label: "重启", disabled: !active },
-      { key: "rollback", icon: <RollbackOutlined />, label: "回滚", disabled: !active },
-      { key: active ? "disable" : "enable", icon: <StopOutlined />, label: active ? "禁用" : "启用" },
+      {
+        key: "restart",
+        icon: <ReloadOutlined />,
+        label: "重启",
+        disabled: !active,
+      },
+      {
+        key: "rollback",
+        icon: <RollbackOutlined />,
+        label: "回滚",
+        disabled: !active,
+      },
+      {
+        key: active ? "disable" : "enable",
+        icon: <StopOutlined />,
+        label: active ? "禁用" : "启用",
+      },
       { type: "divider" },
       { key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除" },
     ]);
@@ -702,7 +836,12 @@ export default function DeploymentsPage() {
       setYaml目标(解析资源标识(row));
       return;
     }
-    if (key === "restart" || key === "rollback" || key === "disable" || key === "enable") {
+    if (
+      key === "restart" ||
+      key === "rollback" ||
+      key === "disable" ||
+      key === "enable"
+    ) {
       void 执行动作(row, key as WorkloadAction);
       return;
     }
@@ -730,7 +869,9 @@ export default function DeploymentsPage() {
       ellipsis: true,
       render: (name: string, row: DeploymentRow) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "Deployment", id: row.id })}>
+          <Typography.Link
+            onClick={() => setDetailTarget({ kind: "Deployment", id: row.id })}
+          >
             {name}
           </Typography.Link>
         ) : (
@@ -738,25 +879,54 @@ export default function DeploymentsPage() {
         ),
       ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "集群", key: "clusterId", filter: { type: "text", placeholder: "以集群过滤" }, width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: DeploymentRow) => getClusterDisplayName(clusterMap, row.集群), ...getSortableColumnProps("clusterId") },
-    { title: "名称空间", dataIndex: "名称空间", key: "namespace", filter: { type: "text", placeholder: "以命名空间过滤" }, width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
+    {
+      title: "集群",
+      dataIndex: "集群",
+      key: "clusterId",
+      filter: { type: "text", placeholder: "以集群过滤" },
+      width: TABLE_COL_WIDTH.cluster,
+      render: (_: unknown, row: DeploymentRow) =>
+        getClusterDisplayName(clusterMap, row.集群),
+      ...getSortableColumnProps("clusterId"),
+    },
+    {
+      title: "名称空间",
+      dataIndex: "名称空间",
+      key: "namespace",
+      filter: { type: "text", placeholder: "以命名空间过滤" },
+      width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace"),
+    },
     {
       title: "状态",
       dataIndex: "状态",
       key: "status",
-      filter: { type: "status", placeholder: "以状态过滤", options: DEPLOYMENT_STATUS_FILTER_OPTIONS },
+      filter: {
+        type: "status",
+        placeholder: "以状态过滤",
+        options: DEPLOYMENT_STATUS_FILTER_OPTIONS,
+      },
       width: TABLE_COL_WIDTH.status,
-      render: (value: DeploymentStatus) => <WorkloadStateTag tone={状态色调[value]} label={value} />,
+      render: (value: DeploymentStatus) => (
+        <WorkloadStateTag tone={状态色调[value]} label={value} />
+      ),
       ...getSortableColumnProps("status"),
     },
     {
       title: "启用状态",
       dataIndex: "启用状态",
       key: "state",
-      filter: { type: "status", placeholder: "以启用状态过滤", options: DEPLOYMENT_STATE_FILTER_OPTIONS },
+      filter: {
+        type: "status",
+        placeholder: "以启用状态过滤",
+        options: DEPLOYMENT_STATE_FILTER_OPTIONS,
+      },
       width: TABLE_COL_WIDTH.status,
       render: (value: "启用" | "禁用") => (
-        <WorkloadStateTag tone={value === "禁用" ? "neutral" : "success"} label={value} />
+        <WorkloadStateTag
+          tone={value === "禁用" ? "neutral" : "success"}
+          label={value}
+        />
       ),
       ...getSortableColumnProps("state"),
     },
@@ -766,7 +936,9 @@ export default function DeploymentsPage() {
       key: "replicas",
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.replicas,
-      render: (value: number) => <WorkloadReplicaCell value={value} variant="desired" />,
+      render: (value: number) => (
+        <WorkloadReplicaCell value={value} variant="desired" />
+      ),
       ...getSortableColumnProps("replicas"),
     },
     {
@@ -776,7 +948,11 @@ export default function DeploymentsPage() {
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.ready,
       render: (value: number, row: DeploymentRow) => (
-        <WorkloadReplicaCell value={value} target={row.副本数} variant="ready" />
+        <WorkloadReplicaCell
+          value={value}
+          target={row.副本数}
+          variant="ready"
+        />
       ),
       ...getSortableColumnProps("readyReplicas"),
     },
@@ -787,7 +963,11 @@ export default function DeploymentsPage() {
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.available,
       render: (value: number, row: DeploymentRow) => (
-        <WorkloadReplicaCell value={value} target={row.副本数} variant="available" />
+        <WorkloadReplicaCell
+          value={value}
+          target={row.副本数}
+          variant="available"
+        />
       ),
       ...getSortableColumnProps("availableReplicas"),
     },
@@ -813,7 +993,9 @@ export default function DeploymentsPage() {
       key: "createdAt",
       filter: { type: "text", placeholder: "以时间过滤" },
       width: TABLE_COL_WIDTH.time,
-      render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      render: (value: string) => (
+        <ResourceTimeCell value={value} now={now} mode="relative" />
+      ),
       ...getSortableColumnProps("createdAt"),
     },
     {
@@ -824,20 +1006,22 @@ export default function DeploymentsPage() {
       fixed: "right",
       align: "left",
       render: (_: unknown, row: DeploymentRow) => (
-        <Dropdown
-          trigger={["click"]}
-          placement="bottomRight"
-          classNames={{ root: POD_ACTION_MENU_CLASS }}
-          menu={{
-            items: buildRowActions(row),
-            onClick: ({ key }) => handleRowAction(row, String(key)),
-          }}
-        >
-          {renderResourceActionTriggerButton({
-            ariaLabel: "更多操作",
-            baseClassName: POD_ACTION_TRIGGER_CLASS,
-          })}
-        </Dropdown>
+        <ResourceActionIsolation>
+          <Dropdown
+            trigger={["click"]}
+            placement="bottomRight"
+            classNames={{ root: POD_ACTION_MENU_CLASS }}
+            menu={{
+              items: buildRowActions(row),
+              onClick: ({ key }) => handleRowAction(row, String(key)),
+            }}
+          >
+            {renderResourceActionTriggerButton({
+              ariaLabel: "更多操作",
+              baseClassName: POD_ACTION_TRIGGER_CLASS,
+            })}
+          </Dropdown>
+        </ResourceActionIsolation>
       ),
     },
   ];
@@ -847,10 +1031,15 @@ export default function DeploymentsPage() {
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/workloads/deployments"
-          embedded
           style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton onClick={openAddModal} aria-label="创建Deployment" />}
+          titleSuffix={
+            <ResourceAddButton
+              onClick={openAddModal}
+              aria-label="创建Deployment"
+            />
+          }
         />
+
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
           <ResourceScopeFilterButton
             clusterId={clusterId}
@@ -860,13 +1049,22 @@ export default function DeploymentsPage() {
             knownNamespaces={knownNamespaces}
             namespaceDisabled={namespaceDisabled}
             namespacePlaceholder={namespacePlaceholder}
-            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+            onApply={({
+              clusterId: nextClusterId,
+              namespace: nextNamespace,
+            }) => {
               onScopeChange(nextClusterId, nextNamespace);
               resetPage();
             }}
           />
+
           {!isInitializing && !accessToken ? (
-            <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+            <Alert
+              className="workload-resource-state-alert"
+              type="warning"
+              showIcon
+              title="未检测到登录状态，请先登录后再操作。"
+            />
           ) : null}
           {query.isError ? (
             <Alert
@@ -874,7 +1072,9 @@ export default function DeploymentsPage() {
               type="error"
               showIcon
               title="Deployments 加载失败"
-              description={query.error instanceof Error ? query.error.message : "请求失败"}
+              description={
+                query.error instanceof Error ? query.error.message : "请求失败"
+              }
             />
           ) : null}
           {scaleConvergence ? (
@@ -911,7 +1111,9 @@ export default function DeploymentsPage() {
             bordered
             rowKey="key"
             tableKey="workloads.deployments"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            preferencesClient={createTablePreferencesClient(
+              accessToken || undefined,
+            )}
             globalSearch={{
               value: keywordInput,
               onChange: handleGlobalSearchChange,
@@ -926,9 +1128,18 @@ export default function DeploymentsPage() {
             columns={antd列}
             onResourceNavigate={(request) => setDetailTarget(request)}
             dataSource={表格数据}
-            loading={{ spinning: query.isLoading && !query.data, description: "Deployment 数据加载中..." }}
+            loading={{
+              spinning: query.isLoading && !query.data,
+              description: "Deployment 数据加载中...",
+            }}
             onChange={(paginationInfo, filters, sorter, extra) =>
-              handleTableChange(paginationInfo, filters, sorter, extra, tableBusy)
+              handleTableChange(
+                paginationInfo,
+                filters,
+                sorter,
+                extra,
+                tableBusy,
+              )
             }
             pagination={getPaginationConfig(query.data?.total ?? 0, tableBusy)}
             emptyDescription="暂无数据"
@@ -944,7 +1155,7 @@ export default function DeploymentsPage() {
         token={accessToken || undefined}
       />
 
-      <Modal
+      <OpsModalShell
         title="调整副本数"
         open={Boolean(扩缩容行)}
         onCancel={() => set扩缩容行(null)}
@@ -952,14 +1163,25 @@ export default function DeploymentsPage() {
         okText="确认调整"
         cancelText="取消"
       >
-        <Space orientation="vertical" size={8}>
-          <Typography.Text>
-            部署：<Typography.Text strong>{扩缩容行?.名称 ?? "-"}</Typography.Text>
-          </Typography.Text>
-          <Typography.Text>目标副本数：</Typography.Text>
-          <InputNumber min={0} value={目标副本} onChange={(value: number | null) => set目标副本(value ?? 0)} style={{ width: 220 }} />
-        </Space>
-      </Modal>
+        <OpsFormSection
+          title="副本目标"
+          description="只提交目标副本数，不修改镜像、标签或调度策略。"
+        >
+          <Space orientation="vertical" size={8}>
+            <Typography.Text>
+              部署：
+              <Typography.Text strong>{扩缩容行?.名称 ?? "-"}</Typography.Text>
+            </Typography.Text>
+            <Typography.Text>目标副本数：</Typography.Text>
+            <InputNumber
+              min={0}
+              value={目标副本}
+              onChange={(value: number | null) => set目标副本(value ?? 0)}
+              style={{ width: 220 }}
+            />
+          </Space>
+        </OpsFormSection>
+      </OpsModalShell>
       <ResourceYamlDrawer
         open={Boolean(yaml目标)}
         onClose={() => setYaml目标(null)}
@@ -970,7 +1192,7 @@ export default function DeploymentsPage() {
           void query.refetch();
         }}
       />
-      <Modal
+      <OpsModalShell
         title="编辑 Deployment"
         open={Boolean(editTarget)}
         onCancel={closeEditModal}
@@ -980,21 +1202,33 @@ export default function DeploymentsPage() {
         confirmLoading={editSubmitting}
         destroyOnHidden
       >
-        <Form form={editForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item label="副本数" name="replicas" rules={[{ required: true, message: "请输入副本数" }]}>
-            <InputNumber min={0} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item label="主容器镜像" name="image">
-            <Input placeholder="registry.example.com/app:tag" />
-          </Form.Item>
-          <Form.Item label="Labels" name="labelsText">
-            <Input.TextArea rows={4} placeholder={"app=web\nenv=prod"} />
-          </Form.Item>
-          <Form.Item label="Annotations" name="annotationsText">
-            <Input.TextArea rows={4} placeholder={"description=frontend\nowner=team-a"} />
-          </Form.Item>
-        </Form>
-      </Modal>
+        <OpsFormSection
+          title="可编辑字段"
+          description="仅更新安全编辑补丁支持的副本、镜像、标签和注解。"
+        >
+          <Form form={editForm} layout="vertical" style={{ marginTop: 16 }}>
+            <Form.Item
+              label="副本数"
+              name="replicas"
+              rules={[{ required: true, message: "请输入副本数" }]}
+            >
+              <InputNumber min={0} style={{ width: "100%" }} />
+            </Form.Item>
+            <Form.Item label="主容器镜像" name="image">
+              <Input placeholder="registry.example.com/app:tag" />
+            </Form.Item>
+            <Form.Item label="Labels" name="labelsText">
+              <Input.TextArea rows={4} placeholder={"app=web\nenv=prod"} />
+            </Form.Item>
+            <Form.Item label="Annotations" name="annotationsText">
+              <Input.TextArea
+                rows={4}
+                placeholder={"description=frontend\nowner=team-a"}
+              />
+            </Form.Item>
+          </Form>
+        </OpsFormSection>
+      </OpsModalShell>
       {renderPodLikeResourceActionStyles({
         triggerClassName: POD_ACTION_TRIGGER_CLASS,
         menuClassName: POD_ACTION_MENU_CLASS,

@@ -5,12 +5,12 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Col, Descriptions, Empty, Row, Select, Space, Statistic, Typography } from "antd";
+import { Alert, Col, Descriptions, Empty, Row, Select, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import {
@@ -230,24 +230,33 @@ export default function ObservabilityCenterPage() {
       ) : null}
       <Row gutter={[12, 12]}>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="健康分" value={summary?.healthScore ?? 0} suffix="/ 100" />
-          </OpsSurface>
+          <OpsMetricTile
+            label="健康分"
+            suffix="/ 100"
+            tone="success"
+            value={summary?.healthScore ?? 0}
+          />
         </Col>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="活跃告警" value={summary?.activeAlerts.total ?? 0} />
-          </OpsSurface>
+          <OpsMetricTile
+            label="活跃告警"
+            tone="info"
+            value={summary?.activeAlerts.total ?? 0}
+          />
         </Col>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="严重" value={summary?.activeAlerts.critical ?? 0} styles={{ content: { color: "#cf1322" } }} />
-          </OpsSurface>
+          <OpsMetricTile
+            label="严重"
+            tone="danger"
+            value={summary?.activeAlerts.critical ?? 0}
+          />
         </Col>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="风险" value={summary?.activeAlerts.warning ?? 0} styles={{ content: { color: "#d48806" } }} />
-          </OpsSurface>
+          <OpsMetricTile
+            label="风险"
+            tone="warning"
+            value={summary?.activeAlerts.warning ?? 0}
+          />
         </Col>
       </Row>
 

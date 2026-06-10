@@ -25,7 +25,6 @@ import {
   Row,
   Select,
   Space,
-  Statistic,
   Tooltip,
   Typography,
   message,
@@ -40,6 +39,7 @@ import {
   OpsDrawerShell,
   OpsFilterChip,
   OpsFormSection,
+  OpsMetricTile,
   OpsModalShell,
   OpsPageHeader,
   OpsSurface,
@@ -211,7 +211,16 @@ function resolveRuntimeStatus(
 }
 
 /** CPU/内存 进度条 */
-function UsageBar({ value, color }: { value: number; color: string }) {
+function UsageBar({ value, tone = "success" }: { value: number; tone?: "info" | "success" | "warning" | "danger" }) {
+  const color =
+    tone === "danger"
+      ? "var(--ops-status-danger-text)"
+      : tone === "warning"
+        ? "var(--ops-status-warning-text)"
+        : tone === "info"
+          ? "var(--ops-status-info-text)"
+          : "var(--ops-status-success-text)";
+
   return (
     <Tooltip title={`${value}%`}>
       <Progress
@@ -680,12 +689,12 @@ export default function ClustersPage() {
         <Space orientation="vertical" size={2}>
           <Space size={4}>
             <Typography.Text type="secondary" style={{ fontSize: 11, width: 30 }}>CPU</Typography.Text>
-            <UsageBar value={row.cpuUsage} color={row.cpuUsage > 80 ? "#ff4d4f" : row.cpuUsage > 60 ? "#faad14" : "#52c41a"} />
+            <UsageBar value={row.cpuUsage} tone={row.cpuUsage > 80 ? "danger" : row.cpuUsage > 60 ? "warning" : "success"} />
             <Typography.Text style={{ fontSize: 11 }}>{row.cpuUsage}%</Typography.Text>
           </Space>
           <Space size={4}>
             <Typography.Text type="secondary" style={{ fontSize: 11, width: 30 }}>内存</Typography.Text>
-            <UsageBar value={row.memoryUsage} color={row.memoryUsage > 80 ? "#ff4d4f" : row.memoryUsage > 60 ? "#faad14" : "#1677ff"} />
+            <UsageBar value={row.memoryUsage} tone={row.memoryUsage > 80 ? "danger" : row.memoryUsage > 60 ? "warning" : "info"} />
             <Typography.Text style={{ fontSize: 11 }}>{row.memoryUsage}%</Typography.Text>
           </Space>
         </Space>
@@ -893,104 +902,95 @@ export default function ClustersPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsPageHeader
-        title={(
-          <>
-            集群管理
-            <span className="resource-page-header__title-suffix">
-              <ResourceAddButton onClick={openAddModal} aria-label="创建集群" />
-            </span>
-          </>
-        )}
-        subtitle="查看集群版本、资源使用率和运行状态。系统自动健康探测与资源同步，支持禁用/启用。"
-      />
-
-      <Row gutter={[12, 12]}>
-        <Col xs={24} md={6} xl={4}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="集群总数" value={healthStats.total} />
-          </OpsSurface>
-        </Col>
-        <Col xs={24} md={6} xl={4}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="运行中" value={healthStats.running} styles={{ content: { color: "#389e0d" } }} />
-          </OpsSurface>
-        </Col>
-        <Col xs={24} md={6} xl={4}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="离线" value={healthStats.offline} styles={{ content: { color: "#cf1322" } }} />
-          </OpsSurface>
-        </Col>
-        <Col xs={24} md={6} xl={4}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="探测中" value={healthStats.checking} styles={{ content: { color: "#1677ff" } }} />
-          </OpsSurface>
-        </Col>
-        <Col xs={24} md={6} xl={4}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="离线模式" value={healthStats["offline-mode"]} />
-          </OpsSurface>
-        </Col>
-        <Col xs={24} md={6} xl={4}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="已停用" value={healthStats.disabled} />
-          </OpsSurface>
-        </Col>
-      </Row>
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceFilterToolbar>
-          <ResourceFilterToolbarItem width="auto">
-            <ResourceFacetFilterButton
-              label="环境"
-              value={environment}
-              allLabel="全部环境"
-              panelTitle="环境范围"
-              options={ENVIRONMENT_OPTIONS}
-              onChange={handleEnvironmentChange}
-            />
-          </ResourceFilterToolbarItem>
-        </ResourceFilterToolbar>
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="cluster-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看集群信息。" />
-      ) : null}
-
-      {query.isError ? (
-        <Alert
-          className="cluster-resource-state-alert"
-          type="error"
-          showIcon
-          title="加载失败"
-          description={query.error instanceof Error ? query.error.message : "获取集群数据时发生错误"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<ClusterTableRecord>
-          rowKey="key"
-          tableKey={CLUSTERS_TABLE_KEY}
-          columns={columns as ColumnsType<ClusterTableRecord>}
-          columnSettings={CLUSTER_COLUMN_SETTINGS}
-          dataSource={visibleTableData}
-          preferencesClient={preferencesClient}
-          globalSearch={globalSearch}
-          filters={tableFilters}
-          onFiltersChange={handleFiltersChange}
-          onResourceNavigate={(request) => {
-            if (request.kind !== "Cluster") return;
-            const targetId = String(request.id || request.name || "");
-            const target = visibleTableData.find((item) => item.id === targetId || item.name === targetId);
-            if (!target) return;
-            setSelectedCluster(target);
-            setDetailOpen(true);
-          }}
-          loading={loadingState}
-          onChange={handleResourceTableChange}
-          pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, isTableBusy)}
-          emptyDescription="暂无符合条件的集群数据"
+        <OpsPageHeader
+          className="resource-page-header"
+          style={{ marginBottom: 12 }}
+          title={(
+            <>
+              集群管理
+              <span className="resource-page-header__title-suffix">
+                <ResourceAddButton onClick={openAddModal} aria-label="创建集群" />
+              </span>
+            </>
+          )}
+          subtitle="查看集群版本、资源使用率和运行状态。系统自动健康探测与资源同步，支持禁用/启用。"
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <Row gutter={[12, 12]}>
+            <Col xs={24} md={6} xl={4}>
+              <OpsMetricTile label="集群总数" tone="neutral" value={healthStats.total} />
+            </Col>
+            <Col xs={24} md={6} xl={4}>
+              <OpsMetricTile label="运行中" tone="success" value={healthStats.running} />
+            </Col>
+            <Col xs={24} md={6} xl={4}>
+              <OpsMetricTile label="离线" tone="danger" value={healthStats.offline} />
+            </Col>
+            <Col xs={24} md={6} xl={4}>
+              <OpsMetricTile label="探测中" tone="info" value={healthStats.checking} />
+            </Col>
+            <Col xs={24} md={6} xl={4}>
+              <OpsMetricTile label="离线模式" tone="warning" value={healthStats["offline-mode"]} />
+            </Col>
+            <Col xs={24} md={6} xl={4}>
+              <OpsMetricTile label="已停用" tone="neutral" value={healthStats.disabled} />
+            </Col>
+          </Row>
+
+          <ResourceFilterToolbar>
+            <ResourceFilterToolbarItem width="auto">
+              <ResourceFacetFilterButton
+                label="环境"
+                value={environment}
+                allLabel="全部环境"
+                panelTitle="环境范围"
+                options={ENVIRONMENT_OPTIONS}
+                onChange={handleEnvironmentChange}
+              />
+            </ResourceFilterToolbarItem>
+          </ResourceFilterToolbar>
+
+          {!isInitializing && !accessToken ? (
+            <Alert className="cluster-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看集群信息。" />
+          ) : null}
+
+          {query.isError ? (
+            <Alert
+              className="cluster-resource-state-alert"
+              type="error"
+              showIcon
+              title="加载失败"
+              description={query.error instanceof Error ? query.error.message : "获取集群数据时发生错误"}
+            />
+          ) : null}
+
+          <ResourceTable<ClusterTableRecord>
+            rowKey="key"
+            tableKey={CLUSTERS_TABLE_KEY}
+            columns={columns as ColumnsType<ClusterTableRecord>}
+            columnSettings={CLUSTER_COLUMN_SETTINGS}
+            dataSource={visibleTableData}
+            preferencesClient={preferencesClient}
+            globalSearch={globalSearch}
+            filters={tableFilters}
+            onFiltersChange={handleFiltersChange}
+            onResourceNavigate={(request) => {
+              if (request.kind !== "Cluster") return;
+              const targetId = String(request.id || request.name || "");
+              const target = visibleTableData.find((item) => item.id === targetId || item.name === targetId);
+              if (!target) return;
+              setSelectedCluster(target);
+              setDetailOpen(true);
+            }}
+            bordered
+            loading={loadingState}
+            onChange={handleResourceTableChange}
+            pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, isTableBusy)}
+            emptyDescription="暂无符合条件的集群数据"
+          />
+        </Space>
       </OpsSurface>
 
       <ClusterDetailDrawer

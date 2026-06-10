@@ -423,86 +423,88 @@ export default function EndpointsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/network/endpoints"
-        description="查看 Service 后端地址集合、端口与实际连通目标。"
-        titleSuffix={<ResourceAddButton title="创建Endpoints" onClick={() => {
-            const nextClusterId = clusterId || clusterOptions[0]?.value || "";
-            const nextNamespace = namespace || "default";
-            form.resetFields();
-            form.setFieldsValue({ clusterId: nextClusterId, namespace: nextNamespace, ports: "http:80/TCP" });
-            setCreateMode("form");
-            setCreateYaml("");
-            setCreateYamlClusterId(nextClusterId);
-            setCreateYamlNamespace(nextNamespace);
-            setModalOpen(true);
-          }} />}
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <NetworkResourcePageFilters
-          clusterId={clusterId}
-          namespace={namespace}
-          keywordInput={keywordInput}
-          clusterOptions={clusterFilterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onClusterChange={(value) => {
-            onClusterChange(value);
-            resetPage();
-          }}
-          onNamespaceChange={(value) => {
-            onNamespaceChange(value);
-            resetPage();
-          }}
-          onKeywordInputChange={setKeywordInput}
-          onSearch={handleSearch}
-          keywordPlaceholder="按名称/标签搜索（示例：ep-a app=web env=prod）"
-          marginBottom={0}
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
-      ) : null}
-
-      {isError ? (
-        <Alert
-          className="network-resource-state-alert"
-          type="error"
-          showIcon
-          title="Endpoints 加载失败"
-          description={error instanceof Error ? error.message : "请求失败"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<EndpointsResource>
-          rowKey="id"
-          columns={columns}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          tableKey="network.endpoints"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按名称/标签搜索（示例：ep-a app=web env=prod）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{ sortBy, sortOrder }}
-          dataSource={tableData}
-          loading={isLoading && !data}
-          onChange={(nextPagination, filters, sorter, extra) =>
-            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
-          }
-          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+        <ResourcePageHeader
+          path="/network/endpoints"
+          description="查看 Service 后端地址集合、端口与实际连通目标。"
+          style={{ marginBottom: 12 }}
+          titleSuffix={<ResourceAddButton title="创建Endpoints" onClick={() => {
+              const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+              const nextNamespace = namespace || "default";
+              form.resetFields();
+              form.setFieldsValue({ clusterId: nextClusterId, namespace: nextNamespace, ports: "http:80/TCP" });
+              setCreateMode("form");
+              setCreateYaml("");
+              setCreateYamlClusterId(nextClusterId);
+              setCreateYamlNamespace(nextNamespace);
+              setModalOpen(true);
+            }} />}
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <NetworkResourcePageFilters
+            clusterId={clusterId}
+            namespace={namespace}
+            keywordInput={keywordInput}
+            clusterOptions={clusterFilterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onClusterChange={(value) => {
+              onClusterChange(value);
+              resetPage();
+            }}
+            onNamespaceChange={(value) => {
+              onNamespaceChange(value);
+              resetPage();
+            }}
+            onKeywordInputChange={setKeywordInput}
+            onSearch={handleSearch}
+            keywordPlaceholder="按名称/标签搜索（示例：ep-a app=web env=prod）"
+            marginBottom={0}
+          />
+
+          {!isInitializing && !accessToken ? (
+            <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+          ) : null}
+
+          {isError ? (
+            <Alert
+              className="network-resource-state-alert"
+              type="error"
+              showIcon
+              title="Endpoints 加载失败"
+              description={error instanceof Error ? error.message : "请求失败"}
+            />
+          ) : null}
+
+          <ResourceTable<EndpointsResource>
+            rowKey="id"
+            columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            tableKey="network.endpoints"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：ep-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
+            dataSource={tableData}
+            bordered
+            loading={isLoading && !data}
+            onChange={(nextPagination, filters, sorter, extra) =>
+              handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+            }
+            pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+          />
+        </Space>
       </OpsSurface>
 
       <OpsModalShell

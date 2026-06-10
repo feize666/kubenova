@@ -18,7 +18,7 @@
 在项目根目录执行：
 
 ```bash
-bash scripts/package-release.sh
+bash scripts/service.sh package release
 ```
 
 主要产物：

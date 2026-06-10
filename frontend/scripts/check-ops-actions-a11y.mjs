@@ -8,6 +8,8 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const files = [
   "src/components/ops/ops-button.tsx",
   "src/components/ops/ops-action-dropdown.tsx",
+  "src/components/resource-action-bar.tsx",
+  "src/components/resource-row-actions.tsx",
   "src/app/logs/page.tsx",
   "src/app/network/topology/page.tsx",
   "src/components/resource-table-toolbar.tsx",
@@ -43,6 +45,37 @@ if (!/aria-label=\{ariaLabel\}/.test(actionDropdownSource)) {
 }
 if (!/aria-label=\{props\["aria-label"\]/.test(readFileSync(join(root, "src/components/ops/ops-button.tsx"), "utf8"))) {
   failures.push("src/components/ops/ops-button.tsx: OpsIconActionButton no longer forwards aria-label fallback");
+}
+
+const resourceActionSource = readFileSync(join(root, "src/components/resource-action-bar.tsx"), "utf8");
+for (const token of [
+  "resource-action-dropdown-isolation",
+  "data-resource-table-stop-navigation=\"true\"",
+  "onClick={stopRowNavigation}",
+  "onMouseDown={stopRowNavigation}",
+  "disabledReasonByKey",
+  "openResourceActionConfirm",
+]) {
+  if (!resourceActionSource.includes(token)) {
+    failures.push(`src/components/resource-action-bar.tsx: missing action isolation token ${token}`);
+  }
+}
+
+const rowActionsSource = readFileSync(join(root, "src/components/resource-row-actions.tsx"), "utf8");
+if (!rowActionsSource.includes("data-resource-table-stop-navigation=\"true\"")) {
+  failures.push("src/components/resource-row-actions.tsx: row action isolation marker missing");
+}
+
+const css = readFileSync(join(root, "src/app/globals.css"), "utf8");
+for (const token of [
+  ".resource-action-dropdown-isolation",
+  ".ops-action-dropdown__item-reason",
+  ".resource-action-menu .ant-dropdown-menu-item-disabled",
+  ".resource-table-actions-cell [data-resource-table-stop-navigation=\"true\"]",
+]) {
+  if (!css.includes(token)) {
+    failures.push(`src/app/globals.css: missing action CSS token ${token}`);
+  }
 }
 
 if (failures.length > 0) {

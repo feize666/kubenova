@@ -374,13 +374,12 @@ export default function UsersPage() {
               width: 32,
               height: 32,
               borderRadius: "50%",
-              background: row.role === "admin"
-                ? "linear-gradient(135deg, #1677ff, #0ea5e9)"
-                : "linear-gradient(135deg, #10b981, #059669)",
+              border: `1px solid ${row.role === "admin" ? "var(--ops-status-info-border)" : "var(--ops-status-success-border)"}`,
+              background: row.role === "admin" ? "var(--ops-status-info-bg)" : "var(--ops-status-success-bg)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#fff",
+              color: row.role === "admin" ? "var(--ops-status-info-text)" : "var(--ops-status-success-text)",
               fontSize: 13,
               fontWeight: 700,
               flexShrink: 0,
@@ -505,6 +504,7 @@ export default function UsersPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsPageHeader
+        className="resource-page-header"
         title="用户管理"
         subtitle="管理平台用户账号、角色权限与账号状态。用户创建后可使用用户名+密码登录。"
       />

@@ -781,80 +781,82 @@ export function DynamicConfigResourcePage({
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path={path}
-        titleSuffix={
-          <ResourceAddButton
-            title={`创建${kind}`}
-            onClick={openCreate}
-            aria-label={`创建${kind}`}
-          />
-        }
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceScopeFilterButton
-          clusterId={clusterId}
-          namespace={namespace}
-          clusterOptions={clusterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-            onScopeChange(nextClusterId, nextNamespace);
-            resetPage();
-          }}
-        />
-      </OpsSurface>
-
       <OpsSurface className="dynamic-config-list-surface" variant="panel" padding="sm">
-        {!isInitializing && !accessToken ? (
-          <Alert className="dynamic-config-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
-        ) : null}
-        {listQuery.isError ? (
-          <Alert
-            className="dynamic-config-state-alert"
-            type="error"
-            showIcon
-            title={`${titleKind} 列表加载失败`}
-            description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
-            action={
-              clusterId ? (
-                <Typography.Link onClick={() => refreshDiscoveryMutation.mutate()}>
-                  刷新资源发现
-                </Typography.Link>
-              ) : undefined
-            }
-          />
-        ) : null}
-
-        <ResourceTable<DynamicResourceItem>
-          rowKey="id"
-          columns={columns}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          tableKey={tableKey}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "输入关键字，或 label 过滤（如 env=prod team=platform）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{ sortBy, sortOrder }}
-          dataSource={tableData}
-          layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
-          loading={listQuery.isLoading}
-          onChange={(nextPagination, filters, sorter, extra) =>
-            handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
+        <ResourcePageHeader
+          path={path}
+          style={{ marginBottom: 12 }}
+          titleSuffix={
+            <ResourceAddButton
+              title={`创建${kind}`}
+              onClick={openCreate}
+              aria-label={`创建${kind}`}
+            />
           }
-          pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
-          emptyDescription={emptyDescription}
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              resetPage();
+            }}
+          />
+
+          {!isInitializing && !accessToken ? (
+            <Alert className="dynamic-config-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
+          ) : null}
+          {listQuery.isError ? (
+            <Alert
+              className="dynamic-config-state-alert"
+              type="error"
+              showIcon
+              title={`${titleKind} 列表加载失败`}
+              description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
+              action={
+                clusterId ? (
+                  <Typography.Link onClick={() => refreshDiscoveryMutation.mutate()}>
+                    刷新资源发现
+                  </Typography.Link>
+                ) : undefined
+              }
+            />
+          ) : null}
+
+          <ResourceTable<DynamicResourceItem>
+            bordered
+            rowKey="id"
+            columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            tableKey={tableKey}
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "输入关键字，或 label 过滤（如 env=prod team=platform）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
+            dataSource={tableData}
+            layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
+            loading={listQuery.isLoading}
+            onChange={(nextPagination, filters, sorter, extra) =>
+              handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
+            }
+            pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
+            emptyDescription={emptyDescription}
+          />
+        </Space>
       </OpsSurface>
 
       <ResourceDetailDrawer

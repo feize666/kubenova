@@ -103,7 +103,10 @@ export function ResourceClusterNamespaceFilters({
           label: "关键词",
           value: keywordInput.trim(),
           tone: "warning",
-          onClear: () => onKeywordInputChange(""),
+          onClear: () => {
+            onKeywordInputChange("");
+            window.queueMicrotask(onSearch);
+          },
         }
       : null,
   ].filter(Boolean) as OpsActiveFilter[];
@@ -148,6 +151,7 @@ export function ResourceClusterNamespaceFilters({
             value={keywordInput}
             onChange={onKeywordInputChange}
             onSearch={onSearch}
+            onClearSearch={onSearch}
             width={namespaceVisible ? "lg" : "xl"}
           />
         ) : null}

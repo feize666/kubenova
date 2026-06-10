@@ -13,10 +13,18 @@ import {
 } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
+import {
+  OpsFilterChip,
+  OpsFormSection,
+  OpsModalShell,
+  OpsSurface,
+} from "@/components/ops";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
-import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
+import {
+  ResourceCreateMethodTabs,
+  type ResourceCreateMode,
+} from "@/components/resource-create-method-tabs";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceRowActions } from "@/components/resource-row-actions";
@@ -33,10 +41,21 @@ import {
   type NamespaceListItem,
 } from "@/lib/api/namespaces";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
-import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
+import {
+  applyResourceYaml,
+  type ResourceDetailRequest,
+  type ResourceIdentity,
+} from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
+import {
+  useAntdTableSortPagination,
+  type HeadlampResourceTableColumn,
+  type HeadlampTableFilters,
+} from "@/lib/table";
+import {
+  TABLE_COL_WIDTH,
+  getAdaptiveNameWidth,
+} from "@/lib/table-column-widths";
 
 interface FormValues {
   clusterId: string;
@@ -66,10 +85,17 @@ function getTextFilter(filters: HeadlampTableFilters, key: string) {
 }
 
 function textMatches(value: unknown, filterValue: string) {
-  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+  return (
+    !filterValue ||
+    String(value ?? "")
+      .toLowerCase()
+      .includes(filterValue)
+  );
 }
 
-function buildNamespaceDetailTarget(row: NamespaceListItem): ResourceDetailRequest {
+function buildNamespaceDetailTarget(
+  row: NamespaceListItem,
+): ResourceDetailRequest {
   return {
     kind: "Namespace",
     id: `live-namespace:${row.clusterId}:${row.namespace}`,
@@ -89,23 +115,35 @@ export default function NamespacesPage() {
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
-    useAntdTableSortPagination<NamespaceListItem>({
-      defaultPageSize: 10,
-      allowedSortBy: ["namespace", "clusterId", "updatedAt"],
-    });
+  const {
+    sortBy,
+    sortOrder,
+    pagination,
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<NamespaceListItem>({
+    defaultPageSize: 10,
+    allowedSortBy: ["namespace", "clusterId", "updatedAt"],
+  });
   const [open, setOpen] = useState(false);
   const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
   const [createYaml, setCreateYaml] = useState("");
   const [createYamlClusterId, setCreateYamlClusterId] = useState("");
   const [editing, setEditing] = useState<NamespaceListItem | null>(null);
   const [form] = Form.useForm<FormValues>();
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget] =
+    useState<ResourceDetailRequest | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "namespace-admin", accessToken],
-    queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken!),
+    queryFn: () =>
+      getClusters(
+        { pageSize: 200, state: "active", selectableOnly: true },
+        accessToken!,
+      ),
     enabled: !isInitializing && Boolean(accessToken),
   });
   const namespacesQuery = useQuery({
@@ -138,14 +176,19 @@ export default function NamespacesPage() {
 
   const clusterOptions = useMemo(
     () => [
-      ...((clustersQuery.data?.items ?? [])
-        .map((item) => ({ label: item.name, value: item.id }))),
+      ...(clustersQuery.data?.items ?? []).map((item) => ({
+        label: item.name,
+        value: item.id,
+      })),
     ],
     [clustersQuery.data],
   );
   const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
   const clusterMap = useMemo(
-    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
+    () =>
+      Object.fromEntries(
+        (clustersQuery.data?.items ?? []).map((item) => [item.id, item.name]),
+      ),
     [clustersQuery.data?.items],
   );
 
@@ -165,7 +208,8 @@ export default function NamespacesPage() {
       form.resetFields();
       await queryClient.invalidateQueries({ queryKey: ["namespaces"] });
     },
-    onError: (err) => message.error(err instanceof Error ? err.message : "创建失败"),
+    onError: (err) =>
+      message.error(err instanceof Error ? err.message : "创建失败"),
   });
 
   const mutateApplyYaml = useMutation({
@@ -183,13 +227,18 @@ export default function NamespacesPage() {
       setCreateYaml("");
       await queryClient.invalidateQueries({ queryKey: ["namespaces"] });
     },
-    onError: (err) => message.error(err instanceof Error ? err.message : "YAML 创建失败"),
+    onError: (err) =>
+      message.error(err instanceof Error ? err.message : "YAML 创建失败"),
   });
 
   const mutateUpdate = useMutation({
     mutationFn: async (values: FormValues) => {
       if (!editing) throw new Error("未选择目标名称空间");
-      return updateNamespace(editing.id, { labels: parseLabels(values.labelsText) }, accessToken);
+      return updateNamespace(
+        editing.id,
+        { labels: parseLabels(values.labelsText) },
+        accessToken,
+      );
     },
     onSuccess: async () => {
       message.success("标签更新成功");
@@ -198,7 +247,8 @@ export default function NamespacesPage() {
       form.resetFields();
       await queryClient.invalidateQueries({ queryKey: ["namespaces"] });
     },
-    onError: (err) => message.error(err instanceof Error ? err.message : "更新失败"),
+    onError: (err) =>
+      message.error(err instanceof Error ? err.message : "更新失败"),
   });
 
   const mutateDelete = useMutation({
@@ -207,7 +257,8 @@ export default function NamespacesPage() {
       message.success("名称空间已删除");
       await queryClient.invalidateQueries({ queryKey: ["namespaces"] });
     },
-    onError: (err) => message.error(err instanceof Error ? err.message : "删除失败"),
+    onError: (err) =>
+      message.error(err instanceof Error ? err.message : "删除失败"),
   });
 
   const openEditModal = (row: NamespaceListItem) => {
@@ -229,8 +280,16 @@ export default function NamespacesPage() {
     return (namespacesQuery.data?.items ?? []).filter(
       (item) =>
         textMatches(item.namespace, namespaceFilter) &&
-        textMatches(getClusterDisplayName(clusterMap, item.clusterId, item.clusterName), clusterFilter) &&
-        textMatches(Object.entries(item.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(" "), labelsFilter),
+        textMatches(
+          getClusterDisplayName(clusterMap, item.clusterId, item.clusterName),
+          clusterFilter,
+        ) &&
+        textMatches(
+          Object.entries(item.labels ?? {})
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" "),
+          labelsFilter,
+        ),
     );
   }, [clusterMap, namespacesQuery.data?.items, tableFilters]);
 
@@ -245,15 +304,24 @@ export default function NamespacesPage() {
       title: "名称空间",
       dataIndex: "namespace",
       key: "namespace",
-      width: getAdaptiveNameWidth(namespacesQuery.data?.items?.map((item) => item.namespace) ?? []),
+      width: getAdaptiveNameWidth(
+        namespacesQuery.data?.items?.map((item) => item.namespace) ?? [],
+      ),
       required: true,
       filter: { type: "text", placeholder: "名称空间" },
       render: (value: string, row) => (
-        <Button type="link" className="resource-name-link" onClick={() => setDetailTarget(buildNamespaceDetailTarget(row))}>
+        <Button
+          type="link"
+          className="resource-name-link"
+          onClick={() => setDetailTarget(buildNamespaceDetailTarget(row))}
+        >
           {value}
         </Button>
       ),
-      ...getSortableColumnProps("namespace", namespacesQuery.isLoading && !namespacesQuery.data),
+      ...getSortableColumnProps(
+        "namespace",
+        namespacesQuery.isLoading && !namespacesQuery.data,
+      ),
     },
     {
       title: "集群",
@@ -261,16 +329,25 @@ export default function NamespacesPage() {
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
       filter: { type: "text", placeholder: "集群" },
-      render: (_: unknown, row) => getClusterDisplayName(clusterMap, row.clusterId, row.clusterName),
-      ...getSortableColumnProps("clusterId", namespacesQuery.isLoading && !namespacesQuery.data),
+      render: (_: unknown, row) =>
+        getClusterDisplayName(clusterMap, row.clusterId, row.clusterName),
+      ...getSortableColumnProps(
+        "clusterId",
+        namespacesQuery.isLoading && !namespacesQuery.data,
+      ),
     },
     {
       title: "更新时间",
       dataIndex: "updatedAt",
       key: "updatedAt",
       width: TABLE_COL_WIDTH.updateTime,
-      render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
-      ...getSortableColumnProps("updatedAt", namespacesQuery.isLoading && !namespacesQuery.data),
+      render: (value: string) => (
+        <ResourceTimeCell value={value} now={now} mode="relative" />
+      ),
+      ...getSortableColumnProps(
+        "updatedAt",
+        namespacesQuery.isLoading && !namespacesQuery.data,
+      ),
     },
     {
       title: "标签",
@@ -278,11 +355,15 @@ export default function NamespacesPage() {
       filter: { type: "text", placeholder: "标签" },
       render: (_, row) => {
         const labels = Object.entries(row.labels ?? {});
-        if (!labels.length) return <Typography.Text type="secondary">-</Typography.Text>;
+        if (!labels.length)
+          return <Typography.Text type="secondary">-</Typography.Text>;
         return (
           <Space size={[4, 4]} wrap>
             {labels.map(([k, v]) => (
-              <OpsFilterChip key={`${row.id}-${k}`} tone="neutral">{`${k}=${v}`}</OpsFilterChip>
+              <OpsFilterChip
+                key={`${row.id}-${k}`}
+                tone="neutral"
+              >{`${k}=${v}`}</OpsFilterChip>
             ))}
           </Space>
         );
@@ -323,21 +404,24 @@ export default function NamespacesPage() {
     },
   ];
 
-  const modalSubmitting = mutateCreate.isPending || mutateUpdate.isPending || mutateApplyYaml.isPending;
+  const modalSubmitting =
+    mutateCreate.isPending ||
+    mutateUpdate.isPending ||
+    mutateApplyYaml.isPending;
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/namespaces"
-          embedded
           style={{ marginBottom: 12 }}
           description="统一管理名称空间、标签与资源隔离范围。"
           titleSuffix={
             <ResourceAddButton
               onClick={() => {
                 setEditing(null);
-                const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+                const nextClusterId =
+                  clusterId || clusterOptions[0]?.value || "";
                 form.resetFields();
                 form.setFieldsValue({ clusterId: nextClusterId });
                 setCreateMode("form");
@@ -371,7 +455,12 @@ export default function NamespacesPage() {
           />
 
           {!isInitializing && !accessToken ? (
-            <Alert className="namespace-resource-state-alert" type="warning" showIcon title="请先登录后访问 Namespace 管理。" />
+            <Alert
+              className="namespace-resource-state-alert"
+              type="warning"
+              showIcon
+              title="请先登录后访问 Namespace 管理。"
+            />
           ) : null}
 
           {namespacesQuery.isError ? (
@@ -380,7 +469,11 @@ export default function NamespacesPage() {
               type="error"
               showIcon
               title="Namespace 加载失败"
-              description={namespacesQuery.error instanceof Error ? namespacesQuery.error.message : "请求失败"}
+              description={
+                namespacesQuery.error instanceof Error
+                  ? namespacesQuery.error.message
+                  : "请求失败"
+              }
             />
           ) : null}
 
@@ -389,7 +482,9 @@ export default function NamespacesPage() {
             columns={columns}
             onResourceNavigate={(request) => setDetailTarget(request)}
             tableKey="namespaces"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            preferencesClient={createTablePreferencesClient(
+              accessToken || undefined,
+            )}
             globalSearch={{
               value: keywordInput,
               onChange: handleGlobalSearchChange,
@@ -404,10 +499,18 @@ export default function NamespacesPage() {
             dataSource={tableData}
             loading={namespacesQuery.isLoading}
             onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, namespacesQuery.isLoading && !namespacesQuery.data)
+              handleTableChange(
+                nextPagination,
+                filters,
+                sorter,
+                extra,
+                namespacesQuery.isLoading && !namespacesQuery.data,
+              )
             }
             pagination={getPaginationConfig(
-              namespacesQuery.data?.total ?? namespacesQuery.data?.items?.length ?? 0,
+              namespacesQuery.data?.total ??
+                namespacesQuery.data?.items?.length ??
+                0,
               namespacesQuery.isLoading && !namespacesQuery.data,
             )}
           />
@@ -481,56 +584,112 @@ export default function NamespacesPage() {
             clusterUnavailable={clusterUnavailable}
             kindHint="Namespace"
             disabled={modalSubmitting}
-            formContent={(
-              <Form<FormValues> form={form} layout="vertical" initialValues={{ clusterId: clusterId || undefined }}>
-                <OpsFormSection title="目标范围" description="Namespace 创建后集群和名称不可在此处变更。">
-                  <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
+            formContent={
+              <Form<FormValues>
+                form={form}
+                layout="vertical"
+                initialValues={{ clusterId: clusterId || undefined }}
+              >
+                <OpsFormSection
+                  title="目标范围"
+                  description="Namespace 创建后集群和名称不可在此处变更。"
+                >
+                  <Form.Item
+                    name="clusterId"
+                    label="集群"
+                    rules={[{ required: true, message: "请选择集群" }]}
+                  >
                     <Select
                       options={clusterOptions}
-                      placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
-                      disabled={clusterUnavailable || (!clustersQuery.isLoading && clusterOptions.length === 0)}
-                      notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                      placeholder={
+                        clusterUnavailable ? "集群状态不可用" : "请选择集群"
+                      }
+                      disabled={
+                        clusterUnavailable ||
+                        (!clustersQuery.isLoading &&
+                          clusterOptions.length === 0)
+                      }
+                      notFoundContent={
+                        clusterUnavailable ? "集群状态不可用" : undefined
+                      }
                     />
                   </Form.Item>
-                  <Form.Item name="namespace" label="名称空间" rules={[{ required: true, message: "请输入名称空间" }]}>
+                  <Form.Item
+                    name="namespace"
+                    label="名称空间"
+                    rules={[{ required: true, message: "请输入名称空间" }]}
+                  >
                     <Input placeholder="例如：k8s-test" />
                   </Form.Item>
                 </OpsFormSection>
-                <OpsFormSection title="运维标签" description="标签用于筛选、配额说明和环境归属。">
+                <OpsFormSection
+                  title="运维标签"
+                  description="标签用于筛选、配额说明和环境归属。"
+                >
                   <Form.Item
                     name="labelsText"
                     label="标签（每行 key=value）"
                     extra="可用于记录配额策略、限额说明等运维元信息。"
                   >
-                    <Input.TextArea rows={6} placeholder={"team=platform\nenv=prod\nquota.cpu=2"} />
+                    <Input.TextArea
+                      rows={6}
+                      placeholder={"team=platform\nenv=prod\nquota.cpu=2"}
+                    />
                   </Form.Item>
                 </OpsFormSection>
               </Form>
-            )}
+            }
           />
         ) : (
-        <Form<FormValues> form={form} layout="vertical" initialValues={{ clusterId: clusterId || undefined }}>
-          <OpsFormSection title="目标范围" description="Namespace 创建后集群和名称不可在此处变更。">
-            <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
-              <Select
-                options={(clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id }))}
-                disabled={Boolean(editing)}
-              />
-            </Form.Item>
-            <Form.Item name="namespace" label="名称空间" rules={[{ required: true, message: "请输入名称空间" }]}>
-              <Input disabled={Boolean(editing)} placeholder="例如：k8s-test" />
-            </Form.Item>
-          </OpsFormSection>
-          <OpsFormSection title="运维标签" description="标签用于筛选、配额说明和环境归属。">
-            <Form.Item
-              name="labelsText"
-              label="标签（每行 key=value）"
-              extra="可用于记录配额策略、限额说明等运维元信息。"
+          <Form<FormValues>
+            form={form}
+            layout="vertical"
+            initialValues={{ clusterId: clusterId || undefined }}
+          >
+            <OpsFormSection
+              title="目标范围"
+              description="Namespace 创建后集群和名称不可在此处变更。"
             >
-              <Input.TextArea rows={6} placeholder={"team=platform\nenv=prod\nquota.cpu=2"} />
-            </Form.Item>
-          </OpsFormSection>
-        </Form>
+              <Form.Item
+                name="clusterId"
+                label="集群"
+                rules={[{ required: true, message: "请选择集群" }]}
+              >
+                <Select
+                  options={(clustersQuery.data?.items ?? []).map((item) => ({
+                    label: item.name,
+                    value: item.id,
+                  }))}
+                  disabled={Boolean(editing)}
+                />
+              </Form.Item>
+              <Form.Item
+                name="namespace"
+                label="名称空间"
+                rules={[{ required: true, message: "请输入名称空间" }]}
+              >
+                <Input
+                  disabled={Boolean(editing)}
+                  placeholder="例如：k8s-test"
+                />
+              </Form.Item>
+            </OpsFormSection>
+            <OpsFormSection
+              title="运维标签"
+              description="标签用于筛选、配额说明和环境归属。"
+            >
+              <Form.Item
+                name="labelsText"
+                label="标签（每行 key=value）"
+                extra="可用于记录配额策略、限额说明等运维元信息。"
+              >
+                <Input.TextArea
+                  rows={6}
+                  placeholder={"team=platform\nenv=prod\nquota.cpu=2"}
+                />
+              </Form.Item>
+            </OpsFormSection>
+          </Form>
         )}
       </OpsModalShell>
     </Space>

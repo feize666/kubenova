@@ -20,8 +20,15 @@ import { StatusTag } from "@/components/status-tag";
 import { getClusters, getClusterNodes } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import type { ClusterNodeListItemModel } from "@/lib/contracts/domain";
-import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
+import {
+  useAntdTableSortPagination,
+  type HeadlampResourceTableColumn,
+  type HeadlampTableFilters,
+} from "@/lib/table";
+import {
+  TABLE_COL_WIDTH,
+  getAdaptiveNameWidth,
+} from "@/lib/table-column-widths";
 
 type DetailTarget = NonNullable<ResourceDetailDrawerProps["request"]>;
 
@@ -31,7 +38,12 @@ function getTextFilter(filters: HeadlampTableFilters, key: string) {
 }
 
 function textMatches(value: unknown, filterValue: string) {
-  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+  return (
+    !filterValue ||
+    String(value ?? "")
+      .toLowerCase()
+      .includes(filterValue)
+  );
 }
 
 function parseCpuToCores(value: string | null | undefined): number | null {
@@ -40,7 +52,8 @@ function parseCpuToCores(value: string | null | undefined): number | null {
   const numeric = Number.parseFloat(trimmed);
   if (!Number.isFinite(numeric)) return null;
   if (trimmed.endsWith("n")) return numeric / 1_000_000_000;
-  if (trimmed.endsWith("u") || trimmed.endsWith("µ") || trimmed.endsWith("μ")) return numeric / 1_000_000;
+  if (trimmed.endsWith("u") || trimmed.endsWith("µ") || trimmed.endsWith("μ"))
+    return numeric / 1_000_000;
   if (trimmed.endsWith("m")) return numeric / 1_000;
   if (trimmed.endsWith("K") || trimmed.endsWith("k")) return numeric * 1_000;
   if (trimmed.endsWith("M")) return numeric * 1_000_000;
@@ -75,8 +88,10 @@ function formatCpu(cores: number): string {
 }
 
 function formatMemory(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${Math.round((bytes / 1024 ** 3) * 10) / 10}Gi`;
-  if (bytes >= 1024 ** 2) return `${Math.round((bytes / 1024 ** 2) * 10) / 10}Mi`;
+  if (bytes >= 1024 ** 3)
+    return `${Math.round((bytes / 1024 ** 3) * 10) / 10}Gi`;
+  if (bytes >= 1024 ** 2)
+    return `${Math.round((bytes / 1024 ** 2) * 10) / 10}Mi`;
   if (bytes >= 1024) return `${Math.round((bytes / 1024) * 10) / 10}Ki`;
   return `${Math.round(bytes)}B`;
 }
@@ -86,8 +101,10 @@ function renderUsageBar(
   capacity: string | null | undefined,
   type: "cpu" | "memory",
 ) {
-  const usedValue = type === "cpu" ? parseCpuToCores(usage) : parseMemoryToBytes(usage);
-  const capacityValue = type === "cpu" ? parseCpuToCores(capacity) : parseMemoryToBytes(capacity);
+  const usedValue =
+    type === "cpu" ? parseCpuToCores(usage) : parseMemoryToBytes(usage);
+  const capacityValue =
+    type === "cpu" ? parseCpuToCores(capacity) : parseMemoryToBytes(capacity);
   const rawPercent =
     usedValue !== null && capacityValue !== null && capacityValue > 0
       ? (usedValue / capacityValue) * 100
@@ -100,7 +117,9 @@ function renderUsageBar(
   if (percent === null || capacityValue === null) {
     return (
       <Tooltip title="未检测到 metrics-server 节点指标，当前仅显示容量。">
-        <span className="node-usage-fallback">{capacity ? formatK8sQuantity(capacity, type) : "N/A"}</span>
+        <span className="node-usage-fallback">
+          {capacity ? formatK8sQuantity(capacity, type) : "N/A"}
+        </span>
       </Tooltip>
     );
   }
@@ -119,7 +138,8 @@ function renderUsageBar(
 }
 
 function formatK8sQuantity(value: string, type: "cpu" | "memory"): string {
-  const parsed = type === "cpu" ? parseCpuToCores(value) : parseMemoryToBytes(value);
+  const parsed =
+    type === "cpu" ? parseCpuToCores(value) : parseMemoryToBytes(value);
   if (parsed === null) return value;
   return type === "cpu" ? formatCpu(parsed) : formatMemory(parsed);
 }
@@ -129,7 +149,12 @@ function renderRoles(roles: string[]) {
   return (
     <Space size={4} wrap>
       {visibleRoles.map((role) => (
-        <OpsFilterChip key={role} tone={role === "control-plane" || role === "master" ? "warning" : "info"}>
+        <OpsFilterChip
+          key={role}
+          tone={
+            role === "control-plane" || role === "master" ? "warning" : "info"
+          }
+        >
           {role}
         </OpsFilterChip>
       ))}
@@ -144,35 +169,52 @@ export default function ClusterNodesPage() {
   const [keyword, setKeyword] = useState("");
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
-  const { resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
-    useAntdTableSortPagination<ClusterNodeListItemModel>({
-      defaultPageSize: 10,
-      allowedSortBy: ["name", "ready", "kubeletVersion", "createdAt"],
-    });
+  const {
+    resetPage,
+    getSortableColumnProps,
+    getPaginationConfig,
+    handleTableChange,
+  } = useAntdTableSortPagination<ClusterNodeListItemModel>({
+    defaultPageSize: 10,
+    allowedSortBy: ["name", "ready", "kubeletVersion", "createdAt"],
+  });
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "nodes-page", accessToken],
-    queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken!),
+    queryFn: () =>
+      getClusters(
+        { pageSize: 200, state: "active", selectableOnly: true },
+        accessToken!,
+      ),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
   const clusterOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id })),
+    () =>
+      (clustersQuery.data?.items ?? []).map((item) => ({
+        label: item.name,
+        value: item.id,
+      })),
     [clustersQuery.data?.items],
   );
   const effectiveClusterId = clusterId || clusterOptions[0]?.value || "";
-  const selectedClusterName = clusterOptions.find((item) => item.value === effectiveClusterId)?.label ?? "";
+  const selectedClusterName =
+    clusterOptions.find((item) => item.value === effectiveClusterId)?.label ??
+    "";
 
   const nodesQuery = useQuery({
     queryKey: ["clusters", "nodes", effectiveClusterId, accessToken],
-    queryFn: () => getClusterNodes(effectiveClusterId, accessToken || undefined),
-    enabled: !isInitializing && Boolean(accessToken) && Boolean(effectiveClusterId),
+    queryFn: () =>
+      getClusterNodes(effectiveClusterId, accessToken || undefined),
+    enabled:
+      !isInitializing && Boolean(accessToken) && Boolean(effectiveClusterId),
   });
 
   const tableData = useMemo(() => {
     const search = keyword.trim().toLowerCase();
     const nameFilter = getTextFilter(tableFilters, "name");
-    const readyFilter = typeof tableFilters.ready === "string" ? tableFilters.ready : "";
+    const readyFilter =
+      typeof tableFilters.ready === "string" ? tableFilters.ready : "";
     const roleFilter = getTextFilter(tableFilters, "roles");
     const versionFilter = getTextFilter(tableFilters, "kubeletVersion");
     return (nodesQuery.data?.items ?? []).filter((item) => {
@@ -189,128 +231,154 @@ export default function ClusterNodesPage() {
         .toLowerCase();
       const matchKeyword = search ? joined.includes(search) : true;
       const matchName = textMatches(item.name, nameFilter);
-      const matchReady = readyFilter ? String(item.ready) === readyFilter : true;
+      const matchReady = readyFilter
+        ? String(item.ready) === readyFilter
+        : true;
       const matchRole = textMatches(item.roles.join(" "), roleFilter);
       const matchVersion = textMatches(item.kubeletVersion, versionFilter);
-      return matchKeyword && matchName && matchReady && matchRole && matchVersion;
+      return (
+        matchKeyword && matchName && matchReady && matchRole && matchVersion
+      );
     });
   }, [keyword, nodesQuery.data?.items, tableFilters]);
   const nameWidth = useMemo(
-    () => getAdaptiveNameWidth(tableData.map((item) => item.name), { max: 360 }),
+    () =>
+      getAdaptiveNameWidth(
+        tableData.map((item) => item.name),
+        { max: 360 },
+      ),
     [tableData],
   );
 
-  const columns: Array<HeadlampResourceTableColumn<ClusterNodeListItemModel>> = [
-    {
-      title: "名称",
-      dataIndex: "name",
-      key: "name",
-      width: nameWidth,
-      ellipsis: true,
-      filter: { type: "text", placeholder: "按节点名称过滤" },
-      render: (value: string, row) => (
-        <Typography.Link
-          strong
-          onClick={() =>
-            setDetailTarget({
-              kind: "Node",
-              id: `live-node:${effectiveClusterId}:${row.name}`,
-              label: row.name,
-            })
-          }
-        >
-          {value}
-        </Typography.Link>
-      ),
-      ...getSortableColumnProps("name"),
-    },
-    {
-      title: "Ready",
-      dataIndex: "ready",
-      key: "ready",
-      width: TABLE_COL_WIDTH.status,
-      filter: {
-        type: "select",
-        placeholder: "按状态过滤",
-        options: [
-          { label: "就绪", value: "true" },
-          { label: "未就绪", value: "false" },
-        ],
-      },
-      render: (value: boolean) => <StatusTag state={value ? "succeeded" : "failed"} />,
-      ...getSortableColumnProps("ready"),
-    },
-    {
-      title: "角色",
-      dataIndex: "roles",
-      key: "roles",
-      width: 180,
-      filter: { type: "text", placeholder: "按角色过滤" },
-      render: (value: string[]) => renderRoles(value),
-    },
-    {
-      title: "CPU",
-      dataIndex: "cpuUsagePercent",
-      key: "cpuUsagePercent",
-      width: 118,
-      render: (_: number | null, row) => renderUsageBar(row.cpuUsage, row.cpuCapacity, "cpu"),
-    },
-    {
-      title: "内存",
-      dataIndex: "memoryUsagePercent",
-      key: "memoryUsagePercent",
-      width: 128,
-      render: (_: number | null, row) => renderUsageBar(row.memoryUsage, row.memoryCapacity, "memory"),
-    },
-    {
-      title: "Taints",
-      dataIndex: "taints",
-      key: "taints",
-      width: 280,
-      render: (value: string[]) =>
-        value.length > 0 ? (
-          <Space className="node-taints-cell" size={4} wrap>
-            {value.slice(0, 2).map((item) => (
-              <OpsFilterChip key={item} className="node-taint-chip" title={item} tone="neutral">{item}</OpsFilterChip>
-            ))}
-            {value.length > 2 ? <OpsFilterChip tone="neutral">+{value.length - 2}</OpsFilterChip> : null}
-          </Space>
-        ) : (
-          <Typography.Text type="secondary">无</Typography.Text>
+  const columns: Array<HeadlampResourceTableColumn<ClusterNodeListItemModel>> =
+    [
+      {
+        title: "名称",
+        dataIndex: "name",
+        key: "name",
+        width: nameWidth,
+        ellipsis: true,
+        filter: { type: "text", placeholder: "按节点名称过滤" },
+        render: (value: string, row) => (
+          <Typography.Link
+            strong
+            onClick={() =>
+              setDetailTarget({
+                kind: "Node",
+                id: `live-node:${effectiveClusterId}:${row.name}`,
+                label: row.name,
+              })
+            }
+          >
+            {value}
+          </Typography.Link>
         ),
-    },
-    {
-      title: "Internal IP",
-      dataIndex: "internalIP",
-      key: "internalIP",
-      width: 150,
-      render: (value: string | null) => value ?? "—",
-    },
-    {
-      title: "External IP",
-      dataIndex: "externalIP",
-      key: "externalIP",
-      width: 150,
-      render: (value: string | null) => value ?? "—",
-    },
-    {
-      title: "Kubelet",
-      dataIndex: "kubeletVersion",
-      key: "kubeletVersion",
-      width: TABLE_COL_WIDTH.version,
-      filter: { type: "text", placeholder: "按版本过滤" },
-      render: (value: string | undefined) => value ?? "—",
-      ...getSortableColumnProps("kubeletVersion"),
-    },
-    {
-      title: "Age",
-      dataIndex: "createdAt",
-      key: "createdAt",
-      width: TABLE_COL_WIDTH.updateTime,
-      render: (value: string | null) => <ResourceTimeCell value={value ?? undefined} now={now} />,
-      ...getSortableColumnProps("createdAt"),
-    },
-  ];
+        ...getSortableColumnProps("name"),
+      },
+      {
+        title: "Ready",
+        dataIndex: "ready",
+        key: "ready",
+        width: TABLE_COL_WIDTH.status,
+        filter: {
+          type: "select",
+          placeholder: "按状态过滤",
+          options: [
+            { label: "就绪", value: "true" },
+            { label: "未就绪", value: "false" },
+          ],
+        },
+        render: (value: boolean) => (
+          <StatusTag state={value ? "succeeded" : "failed"} />
+        ),
+        ...getSortableColumnProps("ready"),
+      },
+      {
+        title: "角色",
+        dataIndex: "roles",
+        key: "roles",
+        width: 180,
+        filter: { type: "text", placeholder: "按角色过滤" },
+        render: (value: string[]) => renderRoles(value),
+      },
+      {
+        title: "CPU",
+        dataIndex: "cpuUsagePercent",
+        key: "cpuUsagePercent",
+        width: 118,
+        render: (_: number | null, row) =>
+          renderUsageBar(row.cpuUsage, row.cpuCapacity, "cpu"),
+      },
+      {
+        title: "内存",
+        dataIndex: "memoryUsagePercent",
+        key: "memoryUsagePercent",
+        width: 128,
+        render: (_: number | null, row) =>
+          renderUsageBar(row.memoryUsage, row.memoryCapacity, "memory"),
+      },
+      {
+        title: "Taints",
+        dataIndex: "taints",
+        key: "taints",
+        width: 280,
+        render: (value: string[]) =>
+          value.length > 0 ? (
+            <Space className="node-taints-cell" size={4} wrap>
+              {value.slice(0, 2).map((item) => (
+                <OpsFilterChip
+                  key={item}
+                  className="node-taint-chip"
+                  title={item}
+                  tone="neutral"
+                >
+                  {item}
+                </OpsFilterChip>
+              ))}
+              {value.length > 2 ? (
+                <OpsFilterChip tone="neutral">
+                  +{value.length - 2}
+                </OpsFilterChip>
+              ) : null}
+            </Space>
+          ) : (
+            <Typography.Text type="secondary">无</Typography.Text>
+          ),
+      },
+      {
+        title: "Internal IP",
+        dataIndex: "internalIP",
+        key: "internalIP",
+        width: 150,
+        render: (value: string | null) => value ?? "—",
+      },
+      {
+        title: "External IP",
+        dataIndex: "externalIP",
+        key: "externalIP",
+        width: 150,
+        render: (value: string | null) => value ?? "—",
+      },
+      {
+        title: "Kubelet",
+        dataIndex: "kubeletVersion",
+        key: "kubeletVersion",
+        width: TABLE_COL_WIDTH.version,
+        filter: { type: "text", placeholder: "按版本过滤" },
+        render: (value: string | undefined) => value ?? "—",
+        ...getSortableColumnProps("kubeletVersion"),
+      },
+      {
+        title: "Age",
+        dataIndex: "createdAt",
+        key: "createdAt",
+        width: TABLE_COL_WIDTH.updateTime,
+        render: (value: string | null) => (
+          <ResourceTimeCell value={value ?? undefined} now={now} />
+        ),
+        ...getSortableColumnProps("createdAt"),
+      },
+    ];
 
   const handleGlobalSearchChange = (value: string) => {
     resetPage();
@@ -320,7 +388,10 @@ export default function ClusterNodesPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
-        <ResourcePageHeader path="/clusters/nodes" embedded style={{ marginBottom: 12 }} />
+        <ResourcePageHeader
+          path="/clusters/nodes"
+          style={{ marginBottom: 12 }}
+        />
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
           <ResourceFilterToolbar>
             <ResourceFilterToolbarItem width="auto">
@@ -339,7 +410,12 @@ export default function ClusterNodesPage() {
           </ResourceFilterToolbar>
 
           {!isInitializing && !accessToken ? (
-            <Alert className="cluster-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看工作节点。" />
+            <Alert
+              className="cluster-resource-state-alert"
+              type="warning"
+              showIcon
+              title="未检测到登录状态，请先登录后再查看工作节点。"
+            />
           ) : null}
 
           {!clustersQuery.isLoading && clusterOptions.length === 0 ? (
@@ -358,7 +434,9 @@ export default function ClusterNodesPage() {
               type="warning"
               showIcon
               title="节点数据处于降级状态"
-              description={nodesQuery.data.degradationReason ?? "当前集群节点数据不可用"}
+              description={
+                nodesQuery.data.degradationReason ?? "当前集群节点数据不可用"
+              }
             />
           ) : null}
 
@@ -368,12 +446,19 @@ export default function ClusterNodesPage() {
               type="error"
               showIcon
               title="工作节点加载失败"
-              description={nodesQuery.error instanceof Error ? nodesQuery.error.message : "获取节点数据时发生错误"}
+              description={
+                nodesQuery.error instanceof Error
+                  ? nodesQuery.error.message
+                  : "获取节点数据时发生错误"
+              }
             />
           ) : null}
 
           {!effectiveClusterId && !clustersQuery.isLoading ? (
-            <OpsEmptyState title="请先选择集群" description="工作节点列表需要一个可读集群作为数据源。" />
+            <OpsEmptyState
+              title="请先选择集群"
+              description="工作节点列表需要一个可读集群作为数据源。"
+            />
           ) : (
             <ResourceTable<ClusterNodeListItemModel>
               rowKey="id"
@@ -381,7 +466,9 @@ export default function ClusterNodesPage() {
               columns={columns as ColumnsType<ClusterNodeListItemModel>}
               onResourceNavigate={(request) => setDetailTarget(request)}
               dataSource={tableData}
-              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              preferencesClient={createTablePreferencesClient(
+                accessToken || undefined,
+              )}
               globalSearch={{
                 value: keyword,
                 onChange: handleGlobalSearchChange,
@@ -399,9 +486,18 @@ export default function ClusterNodesPage() {
                   : "工作节点加载中...",
               }}
               onChange={(nextPagination, filters, sorter, extra) =>
-                handleTableChange(nextPagination, filters, sorter, extra, nodesQuery.isLoading)
+                handleTableChange(
+                  nextPagination,
+                  filters,
+                  sorter,
+                  extra,
+                  nodesQuery.isLoading,
+                )
               }
-              pagination={getPaginationConfig(nodesQuery.data?.total ?? tableData.length, nodesQuery.isLoading)}
+              pagination={getPaginationConfig(
+                nodesQuery.data?.total ?? tableData.length,
+                nodesQuery.isLoading,
+              )}
               layoutOptions={{
                 nameValues: tableData.map((item) => item.name),
                 actionWidth: 0,

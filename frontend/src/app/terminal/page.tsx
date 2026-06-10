@@ -15,7 +15,11 @@ import {
 import { App, Select, Space, Tooltip, Typography, theme } from "antd";
 import { ApiError } from "@/lib/api/client";
 import { getClusters } from "@/lib/api/clusters";
-import { createRuntimeSession, resolveSafeRuntimeReturnTo, type CreateRuntimeSessionResponse } from "@/lib/api/runtime";
+import {
+  createRuntimeSession,
+  resolveSafeRuntimeReturnTo,
+  type CreateRuntimeSessionResponse,
+} from "@/lib/api/runtime";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import {
   buildTerminalInputPayload,
@@ -31,7 +35,14 @@ import {
   type TerminalParsedMessage,
 } from "@/lib/ws/terminal";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsFrameShell, OpsIconActionButton, OpsStatusTag, type OpsFrameShellState, type OpsStatusTone } from "@/components/ops";
+import {
+  OpsFilterChip,
+  OpsFrameShell,
+  OpsIconActionButton,
+  OpsStatusTag,
+  type OpsFrameShellState,
+  type OpsStatusTone,
+} from "@/components/ops";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -49,7 +60,11 @@ type SessionCache = RuntimeSessionView & {
   cacheKey: string;
 };
 
-type TerminalVisualState = TerminalConnectionStatus | "expired" | "non-reconnectable" | "error";
+type TerminalVisualState =
+  | TerminalConnectionStatus
+  | "expired"
+  | "non-reconnectable"
+  | "error";
 
 const VISUAL_STATUS_LABEL: Record<TerminalVisualState, string> = {
   connecting: "连接中",
@@ -113,7 +128,10 @@ function formatExpiry(expiresAtMs?: number): string {
 
 function readCssVar(name: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
+    fallback
+  );
 }
 
 function readOpsTerminalTheme() {
@@ -123,7 +141,10 @@ function readOpsTerminalTheme() {
     foreground: readCssVar("--ops-terminal-fg", "#eef6ff"),
     cursor: readCssVar("--ops-status-info-text", "#38bdf8"),
     cursorAccent: background,
-    selectionBackground: readCssVar("--ops-terminal-selection", "rgba(56, 189, 248, 0.45)"),
+    selectionBackground: readCssVar(
+      "--ops-terminal-selection",
+      "rgba(56, 189, 248, 0.45)",
+    ),
     black: "#020617",
     red: "#ef4444",
     green: "#22c55e",
@@ -143,33 +164,74 @@ function readOpsTerminalTheme() {
   };
 }
 
-function normalizeRuntimeError(code?: string, fallback?: string): { text: string; blockReconnect: boolean } {
+function normalizeRuntimeError(
+  code?: string,
+  fallback?: string,
+): { text: string; blockReconnect: boolean } {
   const normalized = (code ?? "").trim();
   const lowered = normalized.toLowerCase();
 
-  if (lowered.includes("session_not_found") || lowered.includes("session_closed") || lowered.includes("会话不存在")) {
-    return { text: "终端会话不存在或已关闭，请重新从资源页进入终端。", blockReconnect: true };
+  if (
+    lowered.includes("session_not_found") ||
+    lowered.includes("session_closed") ||
+    lowered.includes("会话不存在")
+  ) {
+    return {
+      text: "终端会话不存在或已关闭，请重新从资源页进入终端。",
+      blockReconnect: true,
+    };
   }
   if (lowered.includes("expired") || lowered.includes("已过期")) {
-    return { text: "终端会话已过期，请重新创建终端会话。", blockReconnect: true };
+    return {
+      text: "终端会话已过期，请重新创建终端会话。",
+      blockReconnect: true,
+    };
   }
-  if (lowered.includes("container_not_found") || (lowered.includes("容器") && lowered.includes("不存在"))) {
-    return { text: "目标容器不存在，请切换到有效容器后重试。", blockReconnect: true };
+  if (
+    lowered.includes("container_not_found") ||
+    (lowered.includes("容器") && lowered.includes("不存在"))
+  ) {
+    return {
+      text: "目标容器不存在，请切换到有效容器后重试。",
+      blockReconnect: true,
+    };
   }
-  if (lowered.includes("pod_not_found") || (lowered.includes("pod") && lowered.includes("不存在"))) {
-    return { text: "目标 Pod 不存在或已重建，请回到资源页重新进入终端。", blockReconnect: true };
+  if (
+    lowered.includes("pod_not_found") ||
+    (lowered.includes("pod") && lowered.includes("不存在"))
+  ) {
+    return {
+      text: "目标 Pod 不存在或已重建，请回到资源页重新进入终端。",
+      blockReconnect: true,
+    };
   }
-  if (lowered.includes("kubeconfig_invalid") || (lowered.includes("kubeconfig") && lowered.includes("invalid"))) {
-    return { text: "集群接入凭据无效，请修复后再重试终端连接。", blockReconnect: true };
+  if (
+    lowered.includes("kubeconfig_invalid") ||
+    (lowered.includes("kubeconfig") && lowered.includes("invalid"))
+  ) {
+    return {
+      text: "集群接入凭据无效，请修复后再重试终端连接。",
+      blockReconnect: true,
+    };
   }
-  if (lowered.includes("auth") || lowered.includes("token") || lowered.includes("unauthorized")) {
-    return { text: "终端鉴权失败，请重新登录并重新创建终端会话。", blockReconnect: true };
+  if (
+    lowered.includes("auth") ||
+    lowered.includes("token") ||
+    lowered.includes("unauthorized")
+  ) {
+    return {
+      text: "终端鉴权失败，请重新登录并重新创建终端会话。",
+      blockReconnect: true,
+    };
   }
   if (normalized === "RUNTIME_GATEWAY_BOOTSTRAP_FAILED") {
     return { text: "终端服务初始化失败，请稍后重试。", blockReconnect: false };
   }
 
-  return { text: fallback || "终端连接失败，请稍后重试。", blockReconnect: false };
+  return {
+    text: fallback || "终端连接失败，请稍后重试。",
+    blockReconnect: false,
+  };
 }
 
 function mapCloseError(input: {
@@ -188,7 +250,10 @@ function mapCloseError(input: {
     }
   }
   if (expiresAtMs && expiresAtMs <= Date.now()) {
-    return { text: "终端会话已过期，请重新创建终端会话。", blockReconnect: true };
+    return {
+      text: "终端会话已过期，请重新创建终端会话。",
+      blockReconnect: true,
+    };
   }
   if (code === 1006) {
     return {
@@ -197,13 +262,19 @@ function mapCloseError(input: {
     };
   }
   if (code === 1008) {
-    return { text: "终端鉴权失败（1008），请重新登录后重试。", blockReconnect: true };
+    return {
+      text: "终端鉴权失败（1008），请重新登录后重试。",
+      blockReconnect: true,
+    };
   }
   if (code === 1013) {
     return { text: "终端服务暂不可用，请稍后重试。", blockReconnect: false };
   }
 
-  return { text: `终端连接已断开（code=${code}），请重新连接。`, blockReconnect: false };
+  return {
+    text: `终端连接已断开（code=${code}），请重新连接。`,
+    blockReconnect: false,
+  };
 }
 
 export default function TerminalPage() {
@@ -214,13 +285,19 @@ export default function TerminalPage() {
   const searchParams = useSearchParams();
   const clustersQuery = useQuery({
     queryKey: ["clusters", "list", accessToken],
-    queryFn: () => getClusters({ state: "active", selectableOnly: true }, accessToken!),
+    queryFn: () =>
+      getClusters({ state: "active", selectableOnly: true }, accessToken!),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
-  const [status, setStatus] = useState<TerminalConnectionStatus>("disconnected");
-  const [sessionInfo, setSessionInfo] = useState<RuntimeSessionView | null>(null);
-  const [selectedContainer, setSelectedContainer] = useState(searchParams.get("container")?.trim() || "");
+  const [status, setStatus] =
+    useState<TerminalConnectionStatus>("disconnected");
+  const [sessionInfo, setSessionInfo] = useState<RuntimeSessionView | null>(
+    null,
+  );
+  const [selectedContainer, setSelectedContainer] = useState(
+    searchParams.get("container")?.trim() || "",
+  );
   const [lastWarning, setLastWarning] = useState<string>("");
 
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -236,7 +313,14 @@ export default function TerminalPage() {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const connectTerminalRef = useRef<((options?: { forceNewSession?: boolean; isAutoReconnect?: boolean; userInitiated?: boolean }) => Promise<void>) | null>(null);
+  const connectTerminalRef = useRef<
+    | ((options?: {
+        forceNewSession?: boolean;
+        isAutoReconnect?: boolean;
+        userInitiated?: boolean;
+      }) => Promise<void>)
+    | null
+  >(null);
   const lastToastAtRef = useRef<Record<string, number>>({});
   const hasConnectedNoticeRef = useRef(false);
   const allowConnectedToastRef = useRef(false);
@@ -255,11 +339,15 @@ export default function TerminalPage() {
     searchParams.get("returnClusterName")?.trim() ||
     "";
   const clusterMap = useMemo(
-    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
+    () =>
+      Object.fromEntries(
+        (clustersQuery.data?.items ?? []).map((item) => [item.id, item.name]),
+      ),
     [clustersQuery.data?.items],
   );
   const clusterDisplayName = useMemo(
-    () => getClusterDisplayName(clusterMap, targetBase.clusterId, clusterNameHint),
+    () =>
+      getClusterDisplayName(clusterMap, targetBase.clusterId, clusterNameHint),
     [clusterMap, clusterNameHint, targetBase.clusterId],
   );
   const fromPage = searchParams.get("from") ?? "";
@@ -280,15 +368,33 @@ export default function TerminalPage() {
       ]
         .filter(([, value]) => !value)
         .map(([key]) => key),
-    [selectedContainer, targetBase.clusterId, targetBase.namespace, targetBase.pod],
+    [
+      selectedContainer,
+      targetBase.clusterId,
+      targetBase.namespace,
+      targetBase.pod,
+    ],
   );
 
   const targetKey = useMemo(
-    () => [targetBase.clusterId, targetBase.namespace, targetBase.pod, selectedContainer].join("|"),
-    [selectedContainer, targetBase.clusterId, targetBase.namespace, targetBase.pod],
+    () =>
+      [
+        targetBase.clusterId,
+        targetBase.namespace,
+        targetBase.pod,
+        selectedContainer,
+      ].join("|"),
+    [
+      selectedContainer,
+      targetBase.clusterId,
+      targetBase.namespace,
+      targetBase.pod,
+    ],
   );
 
-  const availableContainers = sessionInfo?.target?.availableContainers ?? (selectedContainer ? [selectedContainer] : []);
+  const availableContainers =
+    sessionInfo?.target?.availableContainers ??
+    (selectedContainer ? [selectedContainer] : []);
   const podPhase = sessionInfo?.target?.podPhase;
   const sourceLabel = fromPage || "手动打开";
 
@@ -371,7 +477,10 @@ export default function TerminalPage() {
     socket.onmessage = null;
     socket.onerror = null;
     socket.onclose = null;
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+    if (
+      socket.readyState === WebSocket.OPEN ||
+      socket.readyState === WebSocket.CONNECTING
+    ) {
       socket.close();
     }
   };
@@ -403,7 +512,12 @@ export default function TerminalPage() {
 
   const readSession = async (forceNewSession = false) => {
     const cached = sessionCacheRef.current;
-    if (!forceNewSession && cached && cached.cacheKey === targetKey && !sessionAlmostExpired(cached.expiresAtMs)) {
+    if (
+      !forceNewSession &&
+      cached &&
+      cached.cacheKey === targetKey &&
+      !sessionAlmostExpired(cached.expiresAtMs)
+    ) {
       return cached;
     }
 
@@ -439,7 +553,10 @@ export default function TerminalPage() {
     }
     const attempt = reconnectCountRef.current + 1;
     reconnectCountRef.current = attempt;
-    const baseDelayMs = Math.min(MAX_RECONNECT_DELAY_MS, INITIAL_RECONNECT_DELAY_MS * 2 ** (attempt - 1));
+    const baseDelayMs = Math.min(
+      MAX_RECONNECT_DELAY_MS,
+      INITIAL_RECONNECT_DELAY_MS * 2 ** (attempt - 1),
+    );
     const jitterFactor = 1 + (Math.random() * 2 - 1) * RECONNECT_JITTER_RATIO;
     const delayMs = Math.max(300, Math.floor(baseDelayMs * jitterFactor));
     clearReconnectTimer();
@@ -474,7 +591,10 @@ export default function TerminalPage() {
 
   const explainCreateError = (error: unknown): RuntimeConnectError => {
     if (error instanceof ApiError) {
-      const mapped = normalizeRuntimeError(error.code, sanitizeSensitiveMessage(error.message || "创建运行时会话失败"));
+      const mapped = normalizeRuntimeError(
+        error.code,
+        sanitizeSensitiveMessage(error.message || "创建运行时会话失败"),
+      );
       return new RuntimeConnectError(mapped.text, mapped.blockReconnect);
     }
     if (error instanceof RuntimeConnectError) {
@@ -492,7 +612,11 @@ export default function TerminalPage() {
       return;
     }
     if (parsed.kind === "system") {
-      if (parsed.state === "connecting" || parsed.state === "connected" || parsed.state === "disconnected") {
+      if (
+        parsed.state === "connecting" ||
+        parsed.state === "connected" ||
+        parsed.state === "disconnected"
+      ) {
         setStatus(parsed.state);
       }
       if (parsed.state === "error") {
@@ -503,7 +627,11 @@ export default function TerminalPage() {
         setLastWarning(mapped.text);
         setStatus("disconnected");
         if (attemptUserInitiatedRef.current) {
-          const codeKey = (parsed.code || mapped.text || "runtime-error").toLowerCase();
+          const codeKey = (
+            parsed.code ||
+            mapped.text ||
+            "runtime-error"
+          ).toLowerCase();
           toastOnce(`runtime-error-${codeKey}`, "error", mapped.text);
         }
         return;
@@ -537,8 +665,16 @@ export default function TerminalPage() {
     if (kind === "info") message.info(text);
   };
 
-  const connectTerminal = async (options?: { forceNewSession?: boolean; isAutoReconnect?: boolean; userInitiated?: boolean }) => {
-    const { forceNewSession = false, isAutoReconnect = false, userInitiated = false } = options ?? {};
+  const connectTerminal = async (options?: {
+    forceNewSession?: boolean;
+    isAutoReconnect?: boolean;
+    userInitiated?: boolean;
+  }) => {
+    const {
+      forceNewSession = false,
+      isAutoReconnect = false,
+      userInitiated = false,
+    } = options ?? {};
     if (connectingRef.current || status === "connecting") return;
     if (isInitializing) {
       if (userInitiated) {
@@ -554,7 +690,11 @@ export default function TerminalPage() {
     }
     if (missingParams.length > 0) {
       if (userInitiated) {
-        toastOnce("params-missing", "warning", `缺少连接参数：${missingParams.join(", ")}`);
+        toastOnce(
+          "params-missing",
+          "warning",
+          `缺少连接参数：${missingParams.join(", ")}`,
+        );
       }
       return;
     }
@@ -580,16 +720,21 @@ export default function TerminalPage() {
       wsRef.current = null;
       setStatus("connecting");
       setLastWarning("");
-      writeSystemLine(isAutoReconnect ? "正在执行自动重连..." : "正在准备运行时会话...");
+      writeSystemLine(
+        isAutoReconnect ? "正在执行自动重连..." : "正在准备运行时会话...",
+      );
 
       const session = await readSession(forceNewSession);
       if (!isCurrent()) return;
       setSessionInfo(session);
 
-      const socket = await openGatewaySocket(session.gatewayWsUrl, (nextSocket) => {
-        nextSocket.binaryType = "arraybuffer";
-        wsRef.current = nextSocket;
-      });
+      const socket = await openGatewaySocket(
+        session.gatewayWsUrl,
+        (nextSocket) => {
+          nextSocket.binaryType = "arraybuffer";
+          wsRef.current = nextSocket;
+        },
+      );
       if (!isCurrent()) return;
       clearConnectTimeout();
       connectTimeoutRef.current = setTimeout(() => {
@@ -641,8 +786,12 @@ export default function TerminalPage() {
       socket.onerror = () => {
         if (!isCurrent()) return;
         clearConnectTimeout();
-        const safeWsUrl = redactGatewayWsDisplay(socket.url || session.gatewayWsUrl);
-        setLastWarning(`连接发生错误，等待关闭事件确认失败原因。目标地址：${safeWsUrl}`);
+        const safeWsUrl = redactGatewayWsDisplay(
+          socket.url || session.gatewayWsUrl,
+        );
+        setLastWarning(
+          `连接发生错误，等待关闭事件确认失败原因。目标地址：${safeWsUrl}`,
+        );
       };
 
       socket.onclose = (event) => {
@@ -679,7 +828,7 @@ export default function TerminalPage() {
           scheduleReconnect();
         }
       };
-      } catch (error) {
+    } catch (error) {
       if (!isCurrent()) return;
       clearConnectTimeout();
       clearHeartbeatTimer();
@@ -812,7 +961,12 @@ export default function TerminalPage() {
   }, [targetKey]);
 
   useEffect(() => {
-    if (isInitializing || !accessToken || missingParams.length > 0 || !terminalRef.current) {
+    if (
+      isInitializing ||
+      !accessToken ||
+      missingParams.length > 0 ||
+      !terminalRef.current
+    ) {
       return;
     }
     void connectTerminalRef.current?.();
@@ -862,7 +1016,9 @@ export default function TerminalPage() {
     : "";
   const isExpiredVisual =
     sessionInfo?.sessionState === "expired" ||
-    (sessionInfo?.expiresAtMs ? sessionInfo.expiresAtMs <= Date.now() : false) ||
+    (sessionInfo?.expiresAtMs
+      ? sessionInfo.expiresAtMs <= Date.now()
+      : false) ||
     lastWarning.includes("已过期");
   const isNonReconnectableVisual = sessionInfo?.reconnectable === false;
   const visualState: TerminalVisualState = isExpiredVisual
@@ -884,7 +1040,8 @@ export default function TerminalPage() {
             ? "processing"
             : "neutral";
   const gatewayLabel = sessionInfo?.gatewayWsUrl ? "已绑定" : "未创建";
-  const reconnectLocked = blockReconnectRef.current || isNonReconnectableVisual || isExpiredVisual;
+  const reconnectLocked =
+    blockReconnectRef.current || isNonReconnectableVisual || isExpiredVisual;
 
   return (
     <>
@@ -894,15 +1051,22 @@ export default function TerminalPage() {
         state={VISUAL_FRAME_STATE[visualState]}
         title="Terminal Workbench"
         subtitle={`${clusterDisplayName} / ${targetBase.namespace || "-"} / ${targetBase.pod || "-"} · 来源 ${sourceLabel}`}
-        status={<OpsStatusTag tone={visualTone}>{VISUAL_STATUS_LABEL[visualState]}</OpsStatusTag>}
-        toolbar={(
+        status={
+          <OpsStatusTag tone={visualTone}>
+            {VISUAL_STATUS_LABEL[visualState]}
+          </OpsStatusTag>
+        }
+        toolbar={
           <Space wrap size={8} className="terminal-workbench-toolbar">
             <span className="terminal-workbench-toolbar__select">
               <Select
                 value={selectedContainer || undefined}
                 className="terminal-workbench-container-select"
                 placeholder="选择容器"
-                options={availableContainers.map((container) => ({ label: container, value: container }))}
+                options={availableContainers.map((container) => ({
+                  label: container,
+                  value: container,
+                }))}
                 onChange={(value) => setSelectedContainer(value)}
               />
             </span>
@@ -912,74 +1076,186 @@ export default function TerminalPage() {
                   opsTone="primary"
                   opsVariant="command"
                   icon={<ReloadOutlined />}
-                  onClick={() => void connectTerminal({ forceNewSession: true, userInitiated: true })}
+                  onClick={() =>
+                    void connectTerminal({
+                      forceNewSession: true,
+                      userInitiated: true,
+                    })
+                  }
                   disabled={status === "connecting" || missingParams.length > 0}
-                  disabledReason={status === "connecting" ? "正在连接终端" : missingParams.length > 0 ? missingText : undefined}
+                  disabledReason={
+                    status === "connecting"
+                      ? "正在连接终端"
+                      : missingParams.length > 0
+                        ? missingText
+                        : undefined
+                  }
                 >
                   新建
                 </OpsIconActionButton>
               </Tooltip>
               <Tooltip title="断开终端连接">
-                <OpsIconActionButton opsVariant="command" icon={<CloseCircleOutlined />} onClick={() => disconnectTerminal(true)}>
+                <OpsIconActionButton
+                  opsVariant="command"
+                  icon={<CloseCircleOutlined />}
+                  onClick={() => disconnectTerminal(true)}
+                >
                   断开
                 </OpsIconActionButton>
               </Tooltip>
               <Tooltip title="退出终端">
-                <OpsIconActionButton opsTone="danger" opsVariant="command" icon={<ArrowLeftOutlined />} onClick={() => handleDisconnectAndReturn()}>
+                <OpsIconActionButton
+                  opsTone="danger"
+                  opsVariant="command"
+                  icon={<ArrowLeftOutlined />}
+                  onClick={() => handleDisconnectAndReturn()}
+                >
                   退出
                 </OpsIconActionButton>
               </Tooltip>
             </span>
             <span className="terminal-workbench-toolbar__group terminal-workbench-toolbar__group--utility">
               <Tooltip title="清屏">
-                <OpsIconActionButton opsVariant="icon" icon={<ColumnWidthOutlined />} aria-label="清屏" onClick={clearTerminal} />
+                <OpsIconActionButton
+                  opsVariant="icon"
+                  icon={<ColumnWidthOutlined />}
+                  aria-label="清屏"
+                  onClick={clearTerminal}
+                />
               </Tooltip>
               <Tooltip title="复制终端内容">
-                <OpsIconActionButton opsVariant="icon" icon={<CopyOutlined />} aria-label="复制终端内容" onClick={copyTerminal} />
+                <OpsIconActionButton
+                  opsVariant="icon"
+                  icon={<CopyOutlined />}
+                  aria-label="复制终端内容"
+                  onClick={copyTerminal}
+                />
               </Tooltip>
             </span>
           </Space>
-        )}
-        chips={(
+        }
+        chips={
           <>
-            <OpsFilterChip tone={visualTone === "danger" ? "danger" : visualTone === "warning" ? "warning" : visualTone === "success" ? "success" : "info"}>
+            <OpsFilterChip
+              tone={
+                visualTone === "danger"
+                  ? "danger"
+                  : visualTone === "warning"
+                    ? "warning"
+                    : visualTone === "success"
+                      ? "success"
+                      : "info"
+              }
+            >
               连接 {VISUAL_STATUS_LABEL[visualState]}
             </OpsFilterChip>
-            <OpsFilterChip tone="neutral">Cluster {clusterDisplayName}</OpsFilterChip>
-            <OpsFilterChip tone="neutral">Namespace {targetBase.namespace || "-"}</OpsFilterChip>
-            <OpsFilterChip tone="neutral">Pod {targetBase.pod || "-"}</OpsFilterChip>
-            <OpsFilterChip tone="neutral">Container {selectedContainer || "-"}</OpsFilterChip>
-            <Tooltip title={sessionInfo?.gatewayWsUrl ? sanitizeWsUrlForDisplay(sessionInfo.gatewayWsUrl) : "未创建"}>
-              <OpsFilterChip tone={sessionInfo?.gatewayWsUrl ? "success" : "info"}>Gateway {gatewayLabel}</OpsFilterChip>
-            </Tooltip>
-            <OpsFilterChip tone={isExpiredVisual ? "danger" : "neutral"}>TTL {formatExpiry(sessionInfo?.expiresAtMs)}</OpsFilterChip>
-            <OpsFilterChip tone={sessionInfo?.sessionId ? "neutral" : "info"}>
-              Session {sessionInfo?.sessionId ? sessionInfo.sessionId.slice(0, 8) : "未创建"}
+            <OpsFilterChip tone="neutral">
+              Cluster {clusterDisplayName}
             </OpsFilterChip>
-            {reconnectLocked ? <OpsFilterChip tone="warning">不可重连</OpsFilterChip> : null}
-            {podPhase ? <OpsFilterChip tone={podPhase === "Running" ? "success" : "warning"}>Pod {podPhase}</OpsFilterChip> : null}
+            <OpsFilterChip tone="neutral">
+              Namespace {targetBase.namespace || "-"}
+            </OpsFilterChip>
+            <OpsFilterChip tone="neutral">
+              Pod {targetBase.pod || "-"}
+            </OpsFilterChip>
+            <OpsFilterChip tone="neutral">
+              Container {selectedContainer || "-"}
+            </OpsFilterChip>
+            <Tooltip
+              title={
+                sessionInfo?.gatewayWsUrl
+                  ? sanitizeWsUrlForDisplay(sessionInfo.gatewayWsUrl)
+                  : "未创建"
+              }
+            >
+              <OpsFilterChip
+                tone={sessionInfo?.gatewayWsUrl ? "success" : "info"}
+              >
+                Gateway {gatewayLabel}
+              </OpsFilterChip>
+            </Tooltip>
+            <OpsFilterChip tone={isExpiredVisual ? "danger" : "neutral"}>
+              TTL {formatExpiry(sessionInfo?.expiresAtMs)}
+            </OpsFilterChip>
+            <OpsFilterChip tone={sessionInfo?.sessionId ? "neutral" : "info"}>
+              Session{" "}
+              {sessionInfo?.sessionId
+                ? sessionInfo.sessionId.slice(0, 8)
+                : "未创建"}
+            </OpsFilterChip>
+            {reconnectLocked ? (
+              <OpsFilterChip tone="warning">不可重连</OpsFilterChip>
+            ) : null}
+            {podPhase ? (
+              <OpsFilterChip
+                tone={podPhase === "Running" ? "success" : "warning"}
+              >
+                Pod {podPhase}
+              </OpsFilterChip>
+            ) : null}
           </>
-        )}
-        warning={missingParams.length > 0 ? <Typography.Text>{missingText}</Typography.Text> : null}
-        error={lastWarning ? <Typography.Text>{lastWarning}</Typography.Text> : null}
+        }
+        warning={
+          missingParams.length > 0 ? (
+            <Typography.Text>{missingText}</Typography.Text>
+          ) : null
+        }
+        error={
+          lastWarning ? <Typography.Text>{lastWarning}</Typography.Text> : null
+        }
       >
-        <div className={`terminal-workbench-stage terminal-workbench-stage--${visualState}`}>
+        <div
+          className={`terminal-workbench-stage terminal-workbench-stage--${visualState}`}
+        >
           <div className="terminal-workbench-titlebar">
             <div className="terminal-workbench-title-group">
               <span className="terminal-workbench-dot terminal-workbench-dot--warn" />
               <span className="terminal-workbench-dot terminal-workbench-dot--success" />
               <span className="terminal-workbench-dot terminal-workbench-dot--info" />
               <Typography.Text className="terminal-workbench-title">
-                {clusterDisplayName} · {targetBase.pod || "terminal"}.{targetBase.namespace || "default"}
+                {clusterDisplayName} · {targetBase.pod || "terminal"}.
+                {targetBase.namespace || "default"}
               </Typography.Text>
             </div>
             <div className="terminal-workbench-live-state">
-              {visualState === "connecting" ? <LoadingOutlined className="terminal-workbench-status-icon terminal-workbench-status-icon--processing" /> : null}
-              {visualState === "connected" ? <CheckCircleOutlined className="terminal-workbench-status-icon terminal-workbench-status-icon--success" /> : null}
-              {visualState !== "connecting" && visualState !== "connected" ? (
-                <CloseCircleOutlined className={`terminal-workbench-status-icon terminal-workbench-status-icon--${visualToneClass}`} />
+              {visualState === "connecting" ? (
+                <LoadingOutlined className="terminal-workbench-status-icon terminal-workbench-status-icon--processing" />
               ) : null}
-              <OpsStatusTag tone={visualTone}>{VISUAL_STATUS_LABEL[visualState]}</OpsStatusTag>
+              {visualState === "connected" ? (
+                <CheckCircleOutlined className="terminal-workbench-status-icon terminal-workbench-status-icon--success" />
+              ) : null}
+              {visualState !== "connecting" && visualState !== "connected" ? (
+                <CloseCircleOutlined
+                  className={`terminal-workbench-status-icon terminal-workbench-status-icon--${visualToneClass}`}
+                />
+              ) : null}
+              <OpsStatusTag tone={visualTone}>
+                {VISUAL_STATUS_LABEL[visualState]}
+              </OpsStatusTag>
+            </div>
+          </div>
+
+          <div
+            className="terminal-workbench-telemetry"
+            aria-label="终端会话状态"
+          >
+            <div
+              className={`terminal-workbench-telemetry__item terminal-workbench-telemetry__item--${visualToneClass}`}
+            >
+              <span>Link</span>
+              <strong>{VISUAL_STATUS_LABEL[visualState]}</strong>
+            </div>
+            <div className="terminal-workbench-telemetry__item">
+              <span>Gateway</span>
+              <strong>{gatewayLabel}</strong>
+            </div>
+            <div className="terminal-workbench-telemetry__item">
+              <span>TTL</span>
+              <strong>{formatExpiry(sessionInfo?.expiresAtMs)}</strong>
+            </div>
+            <div className="terminal-workbench-telemetry__item">
+              <span>Target</span>
+              <strong>{selectedContainer || "-"}</strong>
             </div>
           </div>
 
@@ -990,47 +1266,78 @@ export default function TerminalPage() {
       </OpsFrameShell>
       <style jsx global>{`
         .terminal-workbench-shell.ops-frame-shell {
-          --ops-terminal-bg: #fbfdff;
-          --ops-terminal-fg: #162033;
-          --ops-terminal-selection: rgba(37, 99, 235, 0.22);
+          --ops-terminal-bg: #050b14;
+          --ops-terminal-fg: #dff6ff;
+          --ops-terminal-selection: rgba(34, 211, 238, 0.34);
           --terminal-bg: var(--ops-terminal-bg);
-          --terminal-border-glow: rgba(37, 99, 235, 0.16);
-          --terminal-workbench-shell-bg: linear-gradient(180deg, #ffffff, #f8fbff);
-          --terminal-workbench-toolbar-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 249, 255, 0.96));
+          --terminal-border-glow: rgba(34, 211, 238, 0.18);
+          --terminal-workbench-shell-bg: linear-gradient(
+            180deg,
+            #ffffff,
+            #f8fbff
+          );
+          --terminal-workbench-toolbar-bg: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.98),
+            rgba(246, 249, 255, 0.96)
+          );
           --terminal-workbench-toolbar-border: rgba(37, 99, 235, 0.16);
           --terminal-workbench-select-bg: #ffffff;
           --terminal-workbench-select-text: #162033;
           --terminal-workbench-select-muted: #5d6675;
           --terminal-workbench-select-border: #d7e2f1;
           --terminal-workbench-stage-bg:
-            linear-gradient(90deg, transparent 0 23px, rgba(37, 99, 235, 0.04) 23px 24px, transparent 24px 48px),
-            linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            linear-gradient(
+              90deg,
+              transparent 0 23px,
+              rgba(37, 99, 235, 0.04) 23px 24px,
+              transparent 24px 48px
+            ),
+            var(--ops-terminal-bg);
+          --terminal-workbench-telemetry-bg: rgba(8, 18, 31, 0.86);
+          --terminal-workbench-telemetry-border: rgba(56, 189, 248, 0.14);
+          --terminal-workbench-telemetry-muted: rgba(203, 213, 225, 0.68);
+          --terminal-workbench-telemetry-text: rgba(248, 250, 252, 0.94);
           --terminal-workbench-stage-border: rgba(37, 99, 235, 0.22);
           --terminal-workbench-stage-active-border: rgba(14, 165, 233, 0.36);
           --terminal-workbench-stage-danger-border: rgba(220, 38, 38, 0.32);
           --terminal-workbench-stage-warning-border: rgba(180, 83, 9, 0.3);
-          --terminal-workbench-titlebar-bg: rgba(255, 255, 255, 0.96);
-          --terminal-workbench-titlebar-border: rgba(37, 99, 235, 0.14);
-          --terminal-workbench-title-color: #162033;
-          --terminal-workbench-dot-ring: rgba(15, 23, 42, 0.12);
+          --terminal-workbench-titlebar-bg: rgba(7, 15, 27, 0.96);
+          --terminal-workbench-titlebar-border: rgba(56, 189, 248, 0.2);
+          --terminal-workbench-title-color: var(--ops-terminal-fg);
+          --terminal-workbench-dot-ring: rgba(255, 255, 255, 0.08);
           --terminal-workbench-host-bg:
-            linear-gradient(90deg, transparent 0 23px, rgba(37, 99, 235, 0.035) 23px 24px, transparent 24px 48px),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, var(--ops-terminal-bg) 52%);
-          --terminal-workbench-host-scanline: rgba(37, 99, 235, 0.055);
-          --terminal-workbench-host-inner-line: rgba(37, 99, 235, 0.1);
-          --terminal-workbench-scrollbar-track: rgba(226, 232, 240, 0.86);
-          --terminal-workbench-scrollbar-thumb: linear-gradient(180deg, rgba(14, 165, 233, 0.62), rgba(37, 99, 235, 0.5));
+            linear-gradient(
+              90deg,
+              transparent 0 23px,
+              rgba(56, 189, 248, 0.052) 23px 24px,
+              transparent 24px 48px
+            ),
+            linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0.018) 0,
+              transparent 48%
+            ),
+            var(--terminal-bg);
+          --terminal-workbench-host-scanline: rgba(255, 255, 255, 0.035);
+          --terminal-workbench-host-inner-line: rgba(255, 255, 255, 0.026);
+          --terminal-workbench-scrollbar-track: rgba(15, 23, 42, 0.56);
+          --terminal-workbench-scrollbar-thumb: linear-gradient(
+            180deg,
+            rgba(56, 189, 248, 0.72),
+            rgba(59, 130, 246, 0.56)
+          );
           min-height: calc(100vh - 112px);
           border-radius: 8px;
           background: var(--terminal-workbench-shell-bg);
         }
 
         [data-theme="light"] {
-          --ops-terminal-bg: #fbfdff;
-          --ops-terminal-fg: #162033;
-          --ops-terminal-selection: rgba(37, 99, 235, 0.22);
+          --ops-terminal-bg: #050b14;
+          --ops-terminal-fg: #dff6ff;
+          --ops-terminal-selection: rgba(34, 211, 238, 0.34);
           --terminal-bg: var(--ops-terminal-bg);
-          --terminal-border-glow: rgba(37, 99, 235, 0.16);
+          --terminal-border-glow: rgba(34, 211, 238, 0.18);
         }
 
         [data-theme="dark"] .terminal-workbench-shell.ops-frame-shell {
@@ -1039,7 +1346,11 @@ export default function TerminalPage() {
           --ops-terminal-selection: rgba(56, 189, 248, 0.45);
           --terminal-bg: var(--ops-terminal-bg);
           --terminal-border-glow: rgba(56, 189, 248, 0.24);
-          --terminal-workbench-shell-bg: linear-gradient(180deg, rgba(8, 18, 31, 0.98), rgba(3, 10, 20, 0.98));
+          --terminal-workbench-shell-bg: linear-gradient(
+            180deg,
+            rgba(8, 18, 31, 0.98),
+            rgba(3, 10, 20, 0.98)
+          );
           --terminal-workbench-toolbar-bg: rgba(2, 8, 23, 0.28);
           --terminal-workbench-toolbar-border: rgba(148, 163, 184, 0.16);
           --terminal-workbench-select-bg: rgba(2, 8, 23, 0.34);
@@ -1047,8 +1358,17 @@ export default function TerminalPage() {
           --terminal-workbench-select-muted: rgba(226, 232, 240, 0.74);
           --terminal-workbench-select-border: rgba(148, 163, 184, 0.22);
           --terminal-workbench-stage-bg:
-            linear-gradient(90deg, transparent 0 23px, rgba(56, 189, 248, 0.055) 23px 24px, transparent 24px 48px),
+            linear-gradient(
+              90deg,
+              transparent 0 23px,
+              rgba(56, 189, 248, 0.055) 23px 24px,
+              transparent 24px 48px
+            ),
             var(--ops-terminal-bg);
+          --terminal-workbench-telemetry-bg: rgba(8, 18, 31, 0.78);
+          --terminal-workbench-telemetry-border: rgba(56, 189, 248, 0.12);
+          --terminal-workbench-telemetry-muted: rgba(203, 213, 225, 0.68);
+          --terminal-workbench-telemetry-text: rgba(248, 250, 252, 0.94);
           --terminal-workbench-stage-border: rgba(56, 189, 248, 0.24);
           --terminal-workbench-stage-active-border: rgba(34, 211, 238, 0.38);
           --terminal-workbench-stage-danger-border: rgba(248, 113, 113, 0.4);
@@ -1058,23 +1378,44 @@ export default function TerminalPage() {
           --terminal-workbench-title-color: var(--ops-terminal-fg);
           --terminal-workbench-dot-ring: rgba(255, 255, 255, 0.06);
           --terminal-workbench-host-bg:
-            linear-gradient(90deg, transparent 0 23px, rgba(56, 189, 248, 0.052) 23px 24px, transparent 24px 48px),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.018) 0, transparent 48%),
+            linear-gradient(
+              90deg,
+              transparent 0 23px,
+              rgba(56, 189, 248, 0.052) 23px 24px,
+              transparent 24px 48px
+            ),
+            linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0.018) 0,
+              transparent 48%
+            ),
             var(--terminal-bg);
           --terminal-workbench-host-scanline: rgba(255, 255, 255, 0.035);
           --terminal-workbench-host-inner-line: rgba(255, 255, 255, 0.026);
           --terminal-workbench-scrollbar-track: rgba(15, 23, 42, 0.56);
-          --terminal-workbench-scrollbar-thumb: linear-gradient(180deg, rgba(56, 189, 248, 0.72), rgba(59, 130, 246, 0.56));
+          --terminal-workbench-scrollbar-thumb: linear-gradient(
+            180deg,
+            rgba(56, 189, 248, 0.72),
+            rgba(59, 130, 246, 0.56)
+          );
         }
 
         .terminal-workbench-shell .ops-frame-shell__header {
           align-items: center;
           gap: 14px;
+          border-bottom-color: var(--kn-border);
+          background: color-mix(in srgb, var(--kn-surface) 90%, transparent);
+          backdrop-filter: blur(12px) saturate(1.08);
         }
 
         .terminal-workbench-shell .ops-frame-shell__title {
+          color: var(--kn-text);
           font-size: 16px;
           letter-spacing: 0;
+        }
+
+        .terminal-workbench-shell .ops-frame-shell__subtitle {
+          color: var(--kn-text-secondary);
         }
 
         .terminal-workbench-body {
@@ -1101,6 +1442,7 @@ export default function TerminalPage() {
           border: 1px solid var(--terminal-workbench-toolbar-border);
           border-radius: 8px;
           background: var(--terminal-workbench-toolbar-bg);
+          backdrop-filter: blur(10px) saturate(1.08);
         }
 
         .terminal-workbench-toolbar__group--utility {
@@ -1126,13 +1468,15 @@ export default function TerminalPage() {
         .terminal-workbench-stage {
           position: relative;
           display: grid;
-          grid-template-rows: auto minmax(0, 1fr);
+          grid-template-rows: auto auto minmax(0, 1fr);
           min-height: 72vh;
           overflow: hidden;
           border: 1px solid var(--terminal-workbench-stage-border);
           border-radius: 8px;
           background: var(--terminal-workbench-stage-bg);
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76), 0 1px 2px rgba(15, 23, 42, 0.06);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.035),
+            0 1px 2px rgba(15, 23, 42, 0.12);
         }
 
         .terminal-workbench-stage--connecting,
@@ -1218,9 +1562,59 @@ export default function TerminalPage() {
           color: var(--ops-status-danger-text);
         }
 
+        .terminal-workbench-telemetry {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 1px;
+          border-bottom: 1px solid var(--terminal-workbench-telemetry-border);
+          background: var(--terminal-workbench-telemetry-border);
+        }
+
+        .terminal-workbench-telemetry__item {
+          display: grid;
+          gap: 2px;
+          min-width: 0;
+          padding: 8px 12px;
+          background: var(--terminal-workbench-telemetry-bg);
+          color: var(--terminal-workbench-telemetry-text);
+        }
+
+        .terminal-workbench-telemetry__item span {
+          overflow: hidden;
+          color: var(--terminal-workbench-telemetry-muted);
+          font-size: 11px;
+          line-height: 1.2;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .terminal-workbench-telemetry__item strong {
+          overflow: hidden;
+          color: inherit;
+          font-family: var(--kn-font-mono);
+          font-size: 12px;
+          font-weight: 700;
+          line-height: 1.25;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .terminal-workbench-telemetry__item--success strong {
+          color: var(--ops-status-success-text);
+        }
+
+        .terminal-workbench-telemetry__item--warning strong,
+        .terminal-workbench-telemetry__item--processing strong {
+          color: var(--ops-status-warning-text);
+        }
+
+        .terminal-workbench-telemetry__item--danger strong {
+          color: var(--ops-status-danger-text);
+        }
+
         .terminal-workbench-terminal-area {
-          height: 72vh;
-          max-height: 72vh;
+          height: 68vh;
+          max-height: 68vh;
           min-height: 0;
           overflow: hidden;
         }
@@ -1229,19 +1623,24 @@ export default function TerminalPage() {
           background: var(--terminal-workbench-host-bg);
           box-shadow:
             inset 0 0 0 1px var(--terminal-workbench-host-inner-line),
-            inset 0 0 28px color-mix(in srgb, var(--terminal-border-glow) 36%, transparent);
+            inset 0 0 28px
+              color-mix(in srgb, var(--terminal-border-glow) 36%, transparent);
         }
 
         .terminal-workbench-terminal-area .terminal-xterm-host::before {
           background:
-            repeating-linear-gradient(
+            linear-gradient(
               180deg,
-              var(--terminal-workbench-host-scanline) 0,
-              var(--terminal-workbench-host-scanline) 1px,
-              transparent 1px,
-              transparent 20px
+              var(--terminal-workbench-host-scanline),
+              transparent 38%
+            ),
+            linear-gradient(
+              90deg,
+              transparent,
+              var(--terminal-workbench-host-inner-line),
+              transparent
             );
-          opacity: 0.1;
+          opacity: 0.16;
         }
 
         .terminal-workbench-terminal-area .terminal-xterm-host .xterm,
@@ -1251,23 +1650,30 @@ export default function TerminalPage() {
         }
 
         .terminal-workbench-terminal-area .terminal-xterm-host .xterm-viewport {
-          scrollbar-color: rgba(37, 99, 235, 0.5) var(--terminal-workbench-scrollbar-track);
+          scrollbar-color: rgba(37, 99, 235, 0.5)
+            var(--terminal-workbench-scrollbar-track);
         }
 
-        .terminal-workbench-terminal-area .terminal-xterm-host .xterm-viewport::-webkit-scrollbar-track {
+        .terminal-workbench-terminal-area
+          .terminal-xterm-host
+          .xterm-viewport::-webkit-scrollbar-track {
           background: var(--terminal-workbench-scrollbar-track);
         }
 
-        .terminal-workbench-terminal-area .terminal-xterm-host .xterm-viewport::-webkit-scrollbar-thumb {
+        .terminal-workbench-terminal-area
+          .terminal-xterm-host
+          .xterm-viewport::-webkit-scrollbar-thumb {
           background: var(--terminal-workbench-scrollbar-thumb);
           border-color: var(--terminal-workbench-scrollbar-track);
         }
 
         [data-theme="dark"] .terminal-workbench-stage {
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 1px 2px rgba(2, 8, 23, 0.16);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.035),
+            0 1px 2px rgba(2, 8, 23, 0.16);
         }
 
-        @media (max-width: 720px) {
+        @media (max-width: 900px) {
           .terminal-workbench-body {
             padding: 10px;
           }
@@ -1279,6 +1685,15 @@ export default function TerminalPage() {
 
           .terminal-workbench-container-select.ant-select {
             width: 100%;
+          }
+
+          .terminal-workbench-telemetry {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .terminal-workbench-terminal-area {
+            height: 58vh;
+            max-height: 58vh;
           }
         }
       `}</style>

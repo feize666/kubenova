@@ -20,7 +20,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
-import { OpsConfirmModal, OpsFilterChip, OpsFormSection, OpsPageHeader, OpsSurface } from "@/components/ops";
+import { OpsCommandPreview, OpsConfirmModal, OpsFilterChip, OpsFormSection, OpsPageHeader, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { getClusters } from "@/lib/api/clusters";
 import { getStorageResources } from "@/lib/api/storage";
@@ -942,6 +942,7 @@ export default function WorkloadCreateWorkspacePage() {
     <>
     <Space className="workload-create-workspace" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsPageHeader
+        className="resource-page-header"
         title="统一创建工作区"
         subtitle="支持 Pod / Deployment / StatefulSet / ReplicaSet / DaemonSet，集中配置镜像、存储、网络与初始化容器。"
         scope={`${kind} / ${namespace || "default"}`}
@@ -1717,9 +1718,15 @@ export default function WorkloadCreateWorkspacePage() {
                       title={previewYamlQuery.error instanceof Error ? previewYamlQuery.error.message : "YAML 预览生成失败"}
                     />
                   ) : null}
-                  <pre className="workload-create-workspace__yaml">
-                    {previewYamlQuery.data?.yaml || JSON.stringify(previewSpec ?? {}, null, 2)}
-                  </pre>
+                  <OpsCommandPreview
+                    className="workload-create-workspace__yaml"
+                    content={previewYamlQuery.data?.yaml || JSON.stringify(previewSpec ?? {}, null, 2)}
+                    kind="code"
+                    language="YAML"
+                    title="YAML"
+                    tone="neutral"
+                    wrap
+                  />
                 </div>
               </div>
             </OpsFormSection>

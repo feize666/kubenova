@@ -9,7 +9,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Select,
   Space,
   Tabs,
@@ -22,7 +21,7 @@ import type { UploadProps } from "antd";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
-import { OpsIconActionButton, OpsSurface } from "@/components/ops";
+import { OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -629,100 +628,101 @@ export default function HelmPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/workloads/helm"
-        description="安装、升级、回滚与卸载 Helm Release。"
-        titleSuffix={
-          <ResourceAddButton
-            onClick={() => {
-              if (selectedClusterId) {
-                installForm.setFieldsValue({ clusterId: selectedClusterId });
-              }
-              setInstallOpen(true);
-            }}
-            aria-label="安装 Helm Release"
-          />
-        }
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceFilterToolbar className="resource-filter-toolbar--section">
-          <ResourceFilterToolbarItem width="auto">
-            <ResourceScopeFilterButton
-              clusterId={selectedClusterId}
-              namespace={namespace}
-              clusterOptions={helmClusterOptions}
-              clusterLoading={clustersQuery.isLoading}
-              knownNamespaces={knownNamespaces}
-              namespaceDisabled={namespaceDisabled}
-              namespacePlaceholder={namespacePlaceholder}
-              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-                onScopeChange(nextClusterId, nextNamespace);
-                resetPage();
-                setSelectedRowId(null);
-                setDetailTarget(null);
-              }}
-            />
-          </ResourceFilterToolbarItem>
-        </ResourceFilterToolbar>
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert
-          className="workload-resource-state-alert"
-          type="warning"
-          showIcon
-          title="未检测到登录状态，请先登录后再操作。"
-        />
-      ) : null}
-
-      {releasesQuery.isError ? (
-        <Alert
-          className="workload-resource-state-alert"
-          type="error"
-          showIcon
-          title="Helm Release 列表加载失败"
-          description={releasesQuery.error instanceof Error ? releasesQuery.error.message : "请求失败"}
-        />
-      ) : null}
-
-      {!releasesQuery.isError && selectedCluster && selectedCluster.hasKubeconfig === false ? (
-        <Alert
-          className="workload-resource-state-alert"
-          type="warning"
-          showIcon
-          title="当前集群暂不可读取 Helm 数据。"
-          description="请先确认该集群已完成接入后再执行 Helm 查询与操作。"
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<HelmReleaseItem>
-          bordered
-          rowKey="id"
-          tableKey="workloads.helm.releases"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按 Release / Chart 搜索",
-          }}
-          sort={{ sortBy, sortOrder }}
-          columns={columns}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          dataSource={rows}
-          onRow={(record) => ({
-            onClick: () => setSelectedRowId(record.id),
-          })}
-          loading={releasesQuery.isLoading}
-          onChange={(paginationInfo, filters, sorter, extra) => {
-            if (extra.action === "paginate") {
-              setDetailTarget(null);
-            }
-            handleTableChange(paginationInfo, filters, sorter, extra, releasesQuery.isLoading);
-          }}
-          pagination={getPaginationConfig(releasesQuery.data?.total ?? 0, releasesQuery.isLoading)}
+        <ResourcePageHeader
+          path="/workloads/helm"
+          description="安装、升级、回滚与卸载 Helm Release。"
+          style={{ marginBottom: 12 }}
+          titleSuffix={
+            <ResourceAddButton
+              onClick={() => {
+                if (selectedClusterId) {
+                  installForm.setFieldsValue({ clusterId: selectedClusterId });
+                }
+                setInstallOpen(true);
+              }}
+              aria-label="安装 Helm Release"
+            />
+          }
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceFilterToolbar className="resource-filter-toolbar--section">
+            <ResourceFilterToolbarItem width="auto">
+              <ResourceScopeFilterButton
+                clusterId={selectedClusterId}
+                namespace={namespace}
+                clusterOptions={helmClusterOptions}
+                clusterLoading={clustersQuery.isLoading}
+                knownNamespaces={knownNamespaces}
+                namespaceDisabled={namespaceDisabled}
+                namespacePlaceholder={namespacePlaceholder}
+                onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                  onScopeChange(nextClusterId, nextNamespace);
+                  resetPage();
+                  setSelectedRowId(null);
+                  setDetailTarget(null);
+                }}
+              />
+            </ResourceFilterToolbarItem>
+          </ResourceFilterToolbar>
+
+          {!isInitializing && !accessToken ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="warning"
+              showIcon
+              title="未检测到登录状态，请先登录后再操作。"
+            />
+          ) : null}
+
+          {releasesQuery.isError ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="error"
+              showIcon
+              title="Helm Release 列表加载失败"
+              description={releasesQuery.error instanceof Error ? releasesQuery.error.message : "请求失败"}
+            />
+          ) : null}
+
+          {!releasesQuery.isError && selectedCluster && selectedCluster.hasKubeconfig === false ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="warning"
+              showIcon
+              title="当前集群暂不可读取 Helm 数据。"
+              description="请先确认该集群已完成接入后再执行 Helm 查询与操作。"
+            />
+          ) : null}
+
+          <ResourceTable<HelmReleaseItem>
+            bordered
+            rowKey="id"
+            tableKey="workloads.helm.releases"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按 Release / Chart 搜索",
+            }}
+            sort={{ sortBy, sortOrder }}
+            columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            dataSource={rows}
+            onRow={(record) => ({
+              onClick: () => setSelectedRowId(record.id),
+            })}
+            loading={releasesQuery.isLoading}
+            onChange={(paginationInfo, filters, sorter, extra) => {
+              if (extra.action === "paginate") {
+                setDetailTarget(null);
+              }
+              handleTableChange(paginationInfo, filters, sorter, extra, releasesQuery.isLoading);
+            }}
+            pagination={getPaginationConfig(releasesQuery.data?.total ?? 0, releasesQuery.isLoading)}
+          />
+        </Space>
       </OpsSurface>
 
       {renderPodLikeResourceActionStyles({
@@ -820,7 +820,7 @@ export default function HelmPage() {
         ) : null}
       </ResourceDetailDrawer>
 
-      <Modal
+      <OpsModalShell
         title="安装 Helm Release"
         open={installOpen}
         onCancel={() => {
@@ -835,6 +835,7 @@ export default function HelmPage() {
         cancelText="取消"
         confirmLoading={actionMutation.isPending}
         destroyOnHidden
+        description="选择仓库 Chart、版本和 Values，提交后创建 Release。"
       >
         <Form form={installForm} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
@@ -988,9 +989,9 @@ export default function HelmPage() {
             description={chartsQuery.error instanceof Error ? chartsQuery.error.message : "请求失败"}
           />
         ) : null}
-      </Modal>
+      </OpsModalShell>
 
-      <Modal
+      <OpsModalShell
         title={selectedRelease ? `回滚 · ${selectedRelease.name}` : "回滚"}
         open={rollbackOpen}
         onCancel={() => {
@@ -1002,6 +1003,7 @@ export default function HelmPage() {
         cancelText="取消"
         confirmLoading={actionMutation.isPending}
         destroyOnHidden
+        description="按指定 Revision 回滚当前 Helm Release。"
       >
         <Form form={rollbackForm} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item
@@ -1021,7 +1023,7 @@ export default function HelmPage() {
             <InputNumber style={{ width: "100%" }} min={1} precision={0} />
           </Form.Item>
         </Form>
-      </Modal>
+      </OpsModalShell>
     </Space>
   );
 }

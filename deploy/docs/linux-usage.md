@@ -204,19 +204,19 @@ redis-server --version
 ### 2.1 安装依赖
 
 ```bash
-bash scripts/install-deps.sh
+bash scripts/service.sh install-deps
 ```
 
 ### 2.2 初始化数据库
 
 ```bash
-bash scripts/db-init.sh
+bash scripts/service.sh db-init
 ```
 
 ### 2.3 启动服务
 
 ```bash
-bash scripts/dev-up.sh
+bash scripts/service.sh dev up
 ```
 
 启动后会看到：
@@ -228,13 +228,13 @@ bash scripts/dev-up.sh
 ### 2.4 查看状态
 
 ```bash
-bash scripts/dev-status.sh
+bash scripts/service.sh dev status
 ```
 
 ### 2.5 停止服务
 
 ```bash
-bash scripts/dev-down.sh
+bash scripts/service.sh dev down
 ```
 
 ## 3. 正式环境启动
@@ -244,43 +244,43 @@ bash scripts/dev-down.sh
 ### 3.1 安装 systemd 和环境模板
 
 ```bash
-bash scripts/prod-install.sh
+bash scripts/service.sh prod install
 ```
 
 ### 3.2 启动正式环境
 
 ```bash
-bash scripts/prod-up.sh
+bash scripts/service.sh prod up
 ```
 
 ### 3.3 查看状态
 
 ```bash
-bash scripts/prod-status.sh
+bash scripts/service.sh prod status
 ```
 
 ### 3.4 切换版本
 
 ```bash
-bash scripts/prod-switch.sh 1.1.0
+bash scripts/service.sh prod switch 1.1.0
 ```
 
 ### 3.5 回滚版本
 
 ```bash
-bash scripts/prod-rollback.sh 1.0.0
+bash scripts/service.sh prod rollback 1.0.0
 ```
 
 ### 3.6 停止正式环境
 
 ```bash
-bash scripts/prod-down.sh
+bash scripts/service.sh prod down
 ```
 
 ### 3.7 卸载 systemd 和环境模板
 
 ```bash
-bash scripts/prod-uninstall.sh
+bash scripts/service.sh prod uninstall
 ```
 
 ## 4. 发布目录
@@ -306,7 +306,7 @@ curl -fsS http://127.0.0.1:4100/healthz
 
 如果页面打不开，先看：
 
-1. `bash scripts/dev-status.sh` 或 `bash scripts/prod-status.sh`
+1. `bash scripts/service.sh dev status` 或 `bash scripts/service.sh prod status`
 2. `tail -n 200 .run/logs/frontend.log`
 3. `tail -n 200 .run/logs/control-api.log`
 4. `tail -n 200 .run/logs/runtime-gateway.log`

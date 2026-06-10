@@ -1,6 +1,11 @@
 "use client";
 
-import { DeleteOutlined, EditOutlined, EyeOutlined, FileTextOutlined } from "@ant-design/icons";
+import {
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
+  FileTextOutlined,
+} from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import {
   Alert,
@@ -9,13 +14,15 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Select,
   Space,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/lib/table";
+import type {
+  HeadlampResourceTableColumn,
+  HeadlampTableFilters,
+} from "@/lib/table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
@@ -27,15 +34,20 @@ import {
   parseResourceSearchInput,
   POD_ACTION_MENU_CLASS,
   POD_ACTION_TRIGGER_CLASS,
+  ResourceActionIsolation,
   renderPodLikeResourceActionStyles,
   renderResourceActionTriggerButton,
 } from "@/components/resource-action-bar";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
-import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
+import {
+  ResourceCreateMethodTabs,
+  type ResourceCreateMode,
+} from "@/components/resource-create-method-tabs";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsFormSection, OpsModalShell } from "@/components/ops";
 import { OpsSurface } from "@/components/ops/ops-surface";
 import {
   buildWorkloadSafeEditPatch,
@@ -47,21 +59,36 @@ import {
   patchWorkloadById,
   type WorkloadListItem,
 } from "@/lib/api/workloads";
-import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
+import {
+  applyResourceYaml,
+  type ResourceDetailRequest,
+  type ResourceIdentity,
+} from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
-import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
+import {
+  readResourceFilterFromSearchParams,
+  useSyncResourceFilterUrlState,
+} from "@/hooks/use-resource-filter-url-state";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
+import {
+  TABLE_COL_WIDTH,
+  getAdaptiveNameWidth,
+} from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
-import { WorkloadReplicaCell, WorkloadStateTag } from "@/components/workloads/workload-table-cells";
+import {
+  WorkloadReplicaCell,
+  WorkloadStateTag,
+} from "@/components/workloads/workload-table-cells";
 
 function stateTag(state: string) {
-  if (state === "active") return <WorkloadStateTag tone="success" label="运行中" />;
-  if (state === "disabled") return <WorkloadStateTag tone="warning" label="已暂停" />;
+  if (state === "active")
+    return <WorkloadStateTag tone="success" label="运行中" />;
+  if (state === "disabled")
+    return <WorkloadStateTag tone="warning" label="已暂停" />;
   return <WorkloadStateTag tone="danger" label="已删除" />;
 }
 
@@ -77,7 +104,12 @@ function getTextFilter(filters: HeadlampTableFilters, key: string) {
 }
 
 function textMatches(value: unknown, filterValue: string) {
-  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+  return (
+    !filterValue ||
+    String(value ?? "")
+      .toLowerCase()
+      .includes(filterValue)
+  );
 }
 
 function selectMatches(value: unknown, filterValue: unknown) {
@@ -97,8 +129,11 @@ interface FormValues {
 export default function JobsPage() {
   const { message } = App.useApp();
   const searchParams = useSearchParams();
-  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
-    readResourceFilterFromSearchParams(searchParams);
+  const {
+    clusterId: initialClusterId,
+    namespace: initialNamespace,
+    keyword: initialKeyword,
+  } = readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
@@ -106,8 +141,13 @@ export default function JobsPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
-    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const {
+    clusterId,
+    namespace,
+    namespaceDisabled,
+    namespacePlaceholder,
+    onScopeChange,
+  } = useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const {
     sortBy,
     sortOrder,
@@ -119,7 +159,8 @@ export default function JobsPage() {
   } = useAntdTableSortPagination<WorkloadListItem>({
     defaultPageSize: 10,
   });
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget] =
+    useState<ResourceDetailRequest | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<WorkloadListItem | null>(null);
@@ -134,7 +175,15 @@ export default function JobsPage() {
   const queryKey = [
     "workloads",
     "Job",
-    { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize, sortBy, sortOrder },
+    {
+      clusterId,
+      keyword,
+      namespace,
+      page: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
+      sortBy,
+      sortOrder,
+    },
     accessToken,
   ];
 
@@ -153,41 +202,59 @@ export default function JobsPage() {
           sortOrder: sortOrder || undefined,
         },
         accessToken || undefined,
-    ),
+      ),
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "list", accessToken],
-    queryFn: () => getClusters({ state: "active", selectableOnly: true }, accessToken!),
+    queryFn: () =>
+      getClusters({ state: "active", selectableOnly: true }, accessToken!),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
   const clusterOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
+    () =>
+      (clustersQuery.data?.items ?? []).map((c) => ({
+        label: c.name,
+        value: c.id,
+      })),
     [clustersQuery.data],
   );
   const clusterMap = useMemo(
-    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name])),
+    () =>
+      Object.fromEntries(
+        (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
+      ),
     [clustersQuery.data],
   );
 
   const clusterSelectOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
+    () =>
+      (clustersQuery.data?.items ?? []).map((c) => ({
+        label: c.name,
+        value: c.id,
+      })),
     [clustersQuery.data],
   );
-  const clusterUnavailable = !clustersQuery.isLoading && clusterSelectOptions.length === 0;
+  const clusterUnavailable =
+    !clustersQuery.isLoading && clusterSelectOptions.length === 0;
 
   const knownNamespaces = useMemo(
-    () => Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean))),
+    () =>
+      Array.from(
+        new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean)),
+      ),
     [data],
   );
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter(
-        (item) =>
-          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+      (data?.items ?? []).filter((item) =>
+        matchLabelExpressions(
+          item.labels as Record<string, string> | null | undefined,
+          mergedFilters,
+        ),
       ),
     [data?.items, mergedFilters],
   );
@@ -200,18 +267,26 @@ export default function JobsPage() {
     const createdAtFilter = getTextFilter(tableFilters, "createdAt");
     const stateFilter = tableFilters.state;
 
-    return tableData.filter((item) => (
-      textMatches(item.name, nameFilter) &&
-      textMatches(`${item.clusterId} ${getClusterDisplayName(clusterMap, item.clusterId)}`, clusterFilter) &&
-      textMatches(item.namespace, namespaceFilter) &&
-      textMatches(item.readyReplicas, readyFilter) &&
-      textMatches(item.replicas, replicasFilter) &&
-      textMatches(item.createdAt, createdAtFilter) &&
-      selectMatches(item.state, stateFilter)
-    ));
+    return tableData.filter(
+      (item) =>
+        textMatches(item.name, nameFilter) &&
+        textMatches(
+          `${item.clusterId} ${getClusterDisplayName(clusterMap, item.clusterId)}`,
+          clusterFilter,
+        ) &&
+        textMatches(item.namespace, namespaceFilter) &&
+        textMatches(item.readyReplicas, readyFilter) &&
+        textMatches(item.replicas, replicasFilter) &&
+        textMatches(item.createdAt, createdAtFilter) &&
+        selectMatches(item.state, stateFilter),
+    );
   }, [clusterMap, tableData, tableFilters]);
   const nameWidth = useMemo(
-    () => getAdaptiveNameWidth(filteredTableData.map((item) => item.name), { max: 320 }),
+    () =>
+      getAdaptiveNameWidth(
+        filteredTableData.map((item) => item.name),
+        { max: 320 },
+      ),
     [filteredTableData],
   );
   const handleGlobalSearchChange = (value: string) => {
@@ -228,7 +303,11 @@ export default function JobsPage() {
     form.resetFields();
     const defaultClusterId = clusterId || clusterSelectOptions[0]?.value || "";
     const defaultNamespace = namespace || "default";
-    form.setFieldsValue({ replicas: 1, clusterId: defaultClusterId, namespace: defaultNamespace });
+    form.setFieldsValue({
+      replicas: 1,
+      clusterId: defaultClusterId,
+      namespace: defaultNamespace,
+    });
     setCreateMode("form");
     setCreateYaml("");
     setCreateYamlClusterId(defaultClusterId);
@@ -269,7 +348,9 @@ export default function JobsPage() {
         setCreateYaml("");
         void queryClient.invalidateQueries({ queryKey });
       } catch (err) {
-        void message.error(err instanceof Error ? err.message : "YAML 提交失败，请重试");
+        void message.error(
+          err instanceof Error ? err.message : "YAML 提交失败，请重试",
+        );
       } finally {
         setSubmitting(false);
       }
@@ -290,11 +371,7 @@ export default function JobsPage() {
           includeReplicas: true,
           includeImage: true,
         });
-        await patchWorkloadById(
-          editingItem.id,
-          patch,
-          accessToken!,
-        );
+        await patchWorkloadById(editingItem.id, patch, accessToken!);
         void message.success("Job 更新成功");
       } else {
         await createWorkload(
@@ -315,7 +392,9 @@ export default function JobsPage() {
       setCreateYaml("");
       void queryClient.invalidateQueries({ queryKey });
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "操作失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "操作失败，请重试",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -327,7 +406,9 @@ export default function JobsPage() {
       void message.success(`${item.name} 删除成功`);
       void refetch();
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "删除失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "删除失败，请重试",
+      );
     }
   };
 
@@ -399,7 +480,9 @@ export default function JobsPage() {
       ellipsis: true,
       render: (name: string, row: WorkloadListItem) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "Job", id: row.id })}>
+          <Typography.Link
+            onClick={() => setDetailTarget({ kind: "Job", id: row.id })}
+          >
             {name}
           </Typography.Link>
         ) : (
@@ -407,8 +490,24 @@ export default function JobsPage() {
         ),
       ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "clusterId", key: "clusterId", filter: { type: "text", placeholder: "以集群过滤" }, width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", filter: { type: "text", placeholder: "以命名空间过滤" }, width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
+    {
+      title: "集群",
+      dataIndex: "clusterId",
+      key: "clusterId",
+      filter: { type: "text", placeholder: "以集群过滤" },
+      width: TABLE_COL_WIDTH.cluster,
+      render: (_: unknown, row: WorkloadListItem) =>
+        getClusterDisplayName(clusterMap, row.clusterId),
+      ...getSortableColumnProps("clusterId"),
+    },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      filter: { type: "text", placeholder: "以命名空间过滤" },
+      width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace"),
+    },
     {
       title: "完成数",
       dataIndex: "readyReplicas",
@@ -416,7 +515,11 @@ export default function JobsPage() {
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.ready,
       render: (value: number, row: WorkloadListItem) => (
-        <WorkloadReplicaCell value={value} target={row.replicas} variant="ready" />
+        <WorkloadReplicaCell
+          value={value}
+          target={row.replicas}
+          variant="ready"
+        />
       ),
       ...getSortableColumnProps("readyReplicas"),
     },
@@ -426,14 +529,20 @@ export default function JobsPage() {
       key: "replicas",
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.replicas,
-      render: (value: number) => <WorkloadReplicaCell value={value} variant="desired" />,
+      render: (value: number) => (
+        <WorkloadReplicaCell value={value} variant="desired" />
+      ),
       ...getSortableColumnProps("replicas"),
     },
     {
       title: "状态",
       dataIndex: "state",
       key: "state",
-      filter: { type: "status", placeholder: "以状态过滤", options: STATE_FILTER_OPTIONS },
+      filter: {
+        type: "status",
+        placeholder: "以状态过滤",
+        options: STATE_FILTER_OPTIONS,
+      },
       width: TABLE_COL_WIDTH.status,
       render: (value: string) => stateTag(value),
       ...getSortableColumnProps("state"),
@@ -444,7 +553,9 @@ export default function JobsPage() {
       key: "createdAt",
       filter: { type: "text", placeholder: "以时间过滤" },
       width: TABLE_COL_WIDTH.time,
-      render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      render: (value: string) => (
+        <ResourceTimeCell value={value} now={now} mode="relative" />
+      ),
       ...getSortableColumnProps("createdAt"),
     },
     {
@@ -455,90 +566,114 @@ export default function JobsPage() {
       align: "left",
       fixed: "right",
       render: (_: unknown, row: WorkloadListItem) => (
-        <Dropdown
-          trigger={["click"]}
-          placement="bottomRight"
-          classNames={{ root: POD_ACTION_MENU_CLASS }}
-          menu={{
-            items: buildRowActions(),
-            onClick: ({ key }) => handleRowAction(row, String(key)),
-          }}
-        >
-          {renderResourceActionTriggerButton({
-            ariaLabel: "更多操作",
-            baseClassName: POD_ACTION_TRIGGER_CLASS,
-          })}
-        </Dropdown>
+        <ResourceActionIsolation>
+          <Dropdown
+            trigger={["click"]}
+            placement="bottomRight"
+            classNames={{ root: POD_ACTION_MENU_CLASS }}
+            menu={{
+              items: buildRowActions(),
+              onClick: ({ key }) => handleRowAction(row, String(key)),
+            }}
+          >
+            {renderResourceActionTriggerButton({
+              ariaLabel: "更多操作",
+              baseClassName: POD_ACTION_TRIGGER_CLASS,
+            })}
+          </Dropdown>
+        </ResourceActionIsolation>
       ),
     },
   ];
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/workloads/jobs"
-        titleSuffix={<ResourceAddButton onClick={openAddModal} aria-label="创建Job" />}
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceScopeFilterButton
-          clusterId={clusterId}
-          namespace={namespace}
-          clusterOptions={clusterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-            onScopeChange(nextClusterId, nextNamespace);
-            resetPage();
-          }}
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
-      ) : null}
-
-      {isError ? (
-        <Alert
-          className="workload-resource-state-alert"
-          type="error"
-          showIcon
-          title="任务加载失败"
-          description={error instanceof Error ? error.message : "请求失败"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<WorkloadListItem>
-          bordered
-          rowKey="id"
-          tableKey="workloads.jobs"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{ sortBy, sortOrder }}
-          columns={columns}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          dataSource={filteredTableData}
-          loading={isLoading && !data}
-          onChange={(paginationInfo, filters, sorter, extra) =>
-            handleTableChange(paginationInfo, filters, sorter, extra, isLoading && !data)
+        <ResourcePageHeader
+          path="/workloads/jobs"
+          style={{ marginBottom: 12 }}
+          titleSuffix={
+            <ResourceAddButton onClick={openAddModal} aria-label="创建Job" />
           }
-          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({
+              clusterId: nextClusterId,
+              namespace: nextNamespace,
+            }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              resetPage();
+            }}
+          />
+
+          {!isInitializing && !accessToken ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="warning"
+              showIcon
+              title="未检测到登录状态，请先登录后再操作。"
+            />
+          ) : null}
+
+          {isError ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="error"
+              showIcon
+              title="任务加载失败"
+              description={error instanceof Error ? error.message : "请求失败"}
+            />
+          ) : null}
+
+          <ResourceTable<WorkloadListItem>
+            bordered
+            rowKey="id"
+            tableKey="workloads.jobs"
+            preferencesClient={createTablePreferencesClient(
+              accessToken || undefined,
+            )}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
+            columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            dataSource={filteredTableData}
+            loading={isLoading && !data}
+            onChange={(paginationInfo, filters, sorter, extra) =>
+              handleTableChange(
+                paginationInfo,
+                filters,
+                sorter,
+                extra,
+                isLoading && !data,
+              )
+            }
+            pagination={getPaginationConfig(
+              data?.total ?? 0,
+              isLoading && !data,
+            )}
+          />
+        </Space>
       </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title={editingItem ? "编辑 Job" : "新增资源"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
@@ -563,100 +698,132 @@ export default function JobsPage() {
             clusterLoading={clustersQuery.isLoading}
             clusterUnavailable={clusterUnavailable}
             kindHint="Job"
-            formContent={(
-              <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-                <Form.Item
-                  label="名称"
-                  name="name"
-                  rules={[{ required: true, message: "请输入 Job 名称" }]}
-                >
-                  <Input placeholder="例如：batch-job-1" />
-                </Form.Item>
-                <Form.Item
-                  label="名称空间"
-                  name="namespace"
-                  rules={[{ required: true, message: "请输入名称空间" }]}
-                >
-                  <Input placeholder="例如：default" />
-                </Form.Item>
-                <Form.Item
-                  label="集群"
-                  name="clusterId"
-                  rules={[{ required: true, message: "请选择集群" }]}
-                >
-                  <Select
-                    placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
-                    options={clusterSelectOptions}
-                    loading={clustersQuery.isLoading}
-                    disabled={clusterUnavailable}
-                    showSearch
-                    optionFilterProp="label"
-                  />
-                </Form.Item>
-                <Form.Item
-                  label="并行数（replicas）"
-                  name="replicas"
-                  rules={[{ required: true, message: "请输入并行数" }]}
-                >
-                  <InputNumber min={1} style={{ width: "100%" }} placeholder="默认 1" />
-                </Form.Item>
-              </Form>
-            )}
+            formContent={
+              <OpsFormSection
+                title="资源配置"
+                description="按当前页面的安全表单字段提交，不覆盖未展示的高级配置。"
+              >
+                <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+                  <Form.Item
+                    label="名称"
+                    name="name"
+                    rules={[{ required: true, message: "请输入 Job 名称" }]}
+                  >
+                    <Input placeholder="例如：batch-job-1" />
+                  </Form.Item>
+                  <Form.Item
+                    label="名称空间"
+                    name="namespace"
+                    rules={[{ required: true, message: "请输入名称空间" }]}
+                  >
+                    <Input placeholder="例如：default" />
+                  </Form.Item>
+                  <Form.Item
+                    label="集群"
+                    name="clusterId"
+                    rules={[{ required: true, message: "请选择集群" }]}
+                  >
+                    <Select
+                      placeholder={
+                        clusterUnavailable ? "集群状态不可用" : "请选择集群"
+                      }
+                      options={clusterSelectOptions}
+                      loading={clustersQuery.isLoading}
+                      disabled={clusterUnavailable}
+                      showSearch
+                      optionFilterProp="label"
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    label="并行数（replicas）"
+                    name="replicas"
+                    rules={[{ required: true, message: "请输入并行数" }]}
+                  >
+                    <InputNumber
+                      min={1}
+                      style={{ width: "100%" }}
+                      placeholder="默认 1"
+                    />
+                  </Form.Item>
+                </Form>
+              </OpsFormSection>
+            }
           />
         )}
         {editingItem ? (
-          <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="名称"
-            name="name"
-            rules={[{ required: true, message: "请输入 Job 名称" }]}
+          <OpsFormSection
+            title="资源配置"
+            description="按当前页面的安全表单字段提交，不覆盖未展示的高级配置。"
           >
-            <Input placeholder="例如：batch-job-1" disabled={Boolean(editingItem)} />
-          </Form.Item>
-          <Form.Item
-            label="名称空间"
-            name="namespace"
-            rules={[{ required: true, message: "请输入名称空间" }]}
-          >
-            <Input placeholder="例如：default" disabled={Boolean(editingItem)} />
-          </Form.Item>
-          <Form.Item
-            label="集群"
-            name="clusterId"
-            rules={[{ required: true, message: "请选择集群" }]}
-          >
-            <Select
-              placeholder="请选择集群"
-              options={clusterSelectOptions}
-              loading={clustersQuery.isLoading}
-              disabled={Boolean(editingItem)}
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          <Form.Item
-            label="并行数（replicas）"
-            name="replicas"
-            rules={[{ required: true, message: "请输入并行数" }]}
-          >
-            <InputNumber min={1} style={{ width: "100%" }} placeholder="默认 1" />
-          </Form.Item>
-          {editingItem ? (
-            <>
-              <Form.Item label="主容器镜像" name="image">
-                <Input placeholder="registry.example.com/job:tag" />
+            <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+              <Form.Item
+                label="名称"
+                name="name"
+                rules={[{ required: true, message: "请输入 Job 名称" }]}
+              >
+                <Input
+                  placeholder="例如：batch-job-1"
+                  disabled={Boolean(editingItem)}
+                />
               </Form.Item>
-              <Form.Item label="Labels" name="labelsText">
-                <Input.TextArea rows={4} placeholder={"job=batch\nenv=prod"} />
+              <Form.Item
+                label="名称空间"
+                name="namespace"
+                rules={[{ required: true, message: "请输入名称空间" }]}
+              >
+                <Input
+                  placeholder="例如：default"
+                  disabled={Boolean(editingItem)}
+                />
               </Form.Item>
-              <Form.Item label="Annotations" name="annotationsText">
-                <Input.TextArea rows={4} placeholder={"description=batch-job\nowner=team-a"} />
+              <Form.Item
+                label="集群"
+                name="clusterId"
+                rules={[{ required: true, message: "请选择集群" }]}
+              >
+                <Select
+                  placeholder="请选择集群"
+                  options={clusterSelectOptions}
+                  loading={clustersQuery.isLoading}
+                  disabled={Boolean(editingItem)}
+                  showSearch
+                  optionFilterProp="label"
+                />
               </Form.Item>
-            </>
-          ) : null}
-          </Form>
+              <Form.Item
+                label="并行数（replicas）"
+                name="replicas"
+                rules={[{ required: true, message: "请输入并行数" }]}
+              >
+                <InputNumber
+                  min={1}
+                  style={{ width: "100%" }}
+                  placeholder="默认 1"
+                />
+              </Form.Item>
+              {editingItem ? (
+                <>
+                  <Form.Item label="主容器镜像" name="image">
+                    <Input placeholder="registry.example.com/job:tag" />
+                  </Form.Item>
+                  <Form.Item label="Labels" name="labelsText">
+                    <Input.TextArea
+                      rows={4}
+                      placeholder={"job=batch\nenv=prod"}
+                    />
+                  </Form.Item>
+                  <Form.Item label="Annotations" name="annotationsText">
+                    <Input.TextArea
+                      rows={4}
+                      placeholder={"description=batch-job\nowner=team-a"}
+                    />
+                  </Form.Item>
+                </>
+              ) : null}
+            </Form>
+          </OpsFormSection>
         ) : null}
-      </Modal>
+      </OpsModalShell>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}

@@ -16,7 +16,7 @@ const contracts = [
   },
   {
     path: "src/app/aiops/page.tsx",
-    required: ["OpsSurface", "OpsDrawerShell", "ResourcePageHeader", "ResourceTable"],
+    required: ["OpsSurface", "OpsDrawerShell", "ResourcePageHeader", "ResourceTable", "OpsCommandPreview"],
     forbidden: ["cyber-panel", "<Drawer"],
   },
   {
@@ -53,6 +53,14 @@ for (const contract of contracts) {
 const assistant = read("src/app/ai-assistant/page.tsx");
 if (!assistant.includes("Modal.confirm") || !assistant.includes("confirmHighRiskAction")) {
   failures.push("src/app/ai-assistant/page.tsx: high-risk confirm whitelist stale");
+}
+for (const token of ["OpsCommandPreview", "getMarkdownCodePreviewKind", "formatHighRiskActionPreview", "pre: ({ children }) => <>{children}</>"]) {
+  if (!assistant.includes(token)) {
+    failures.push(`src/app/ai-assistant/page.tsx: missing ${token}`);
+  }
+}
+if (assistant.includes("<pre")) {
+  failures.push("src/app/ai-assistant/page.tsx: forbidden local markdown <pre>; use OpsCommandPreview");
 }
 
 if (failures.length > 0) {

@@ -28,6 +28,7 @@ for (const route of workloadRoutes) {
     "ResourceTable",
     "ResourceDetailDrawer",
     "ResourceYamlDrawer",
+    "ResourceActionIsolation",
   ]) {
     if (!content.includes(token)) {
       failures.push(`${path}: missing workload shared contract ${token}`);

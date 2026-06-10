@@ -21,13 +21,13 @@ const contracts = [
   },
   {
     path: "src/app/workloads/helm/page.tsx",
-    required: ["OpsSurface", "ResourcePageHeader", "ResourceTable", "ResourceDetailDrawer", "openResourceActionConfirm"],
-    forbidden: ['<Card>', "cyber-panel"],
+    required: ["OpsSurface", "OpsModalShell", "ResourcePageHeader", "ResourceTable", "ResourceDetailDrawer", "openResourceActionConfirm"],
+    forbidden: ['<Card>', "<Modal", "cyber-panel"],
   },
   {
     path: "src/app/workloads/helm/repositories/page.tsx",
-    required: ["OpsSurface", "ResourcePageHeader", "ResourceTable", "ResourceDetailDrawer", "openResourceActionConfirm"],
-    forbidden: ['<Card>', "cyber-panel"],
+    required: ["OpsSurface", "OpsModalShell", "ResourcePageHeader", "ResourceTable", "ResourceDetailDrawer", "openResourceActionConfirm"],
+    forbidden: ['<Card>', "<Modal", "cyber-panel"],
   },
   {
     path: "src/components/workloads/autoscaling-console.tsx",

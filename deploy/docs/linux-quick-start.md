@@ -3,11 +3,11 @@
 ## 开发机
 
 ```bash
-bash scripts/install-deps.sh
-bash scripts/db-init.sh
-bash scripts/dev-up.sh
-bash scripts/dev-status.sh
-bash scripts/dev-down.sh
+bash scripts/service.sh install-deps
+bash scripts/service.sh db-init
+bash scripts/service.sh dev up
+bash scripts/service.sh dev status
+bash scripts/service.sh dev down
 ```
 
 访问：
@@ -19,13 +19,13 @@ bash scripts/dev-down.sh
 ## 正式环境
 
 ```bash
-bash scripts/prod-install.sh
-bash scripts/prod-up.sh
-bash scripts/prod-status.sh
-bash scripts/prod-switch.sh <version>
-bash scripts/prod-rollback.sh <version>
-bash scripts/prod-down.sh
-bash scripts/prod-uninstall.sh
+bash scripts/service.sh prod install
+bash scripts/service.sh prod up
+bash scripts/service.sh prod status
+bash scripts/service.sh prod switch <version>
+bash scripts/service.sh prod rollback <version>
+bash scripts/service.sh prod down
+bash scripts/service.sh prod uninstall
 ```
 
 ## 目录
@@ -39,8 +39,8 @@ bash scripts/prod-uninstall.sh
 ## 常看命令
 
 ```bash
-bash scripts/dev-status.sh
-bash scripts/prod-status.sh
+bash scripts/service.sh dev status
+bash scripts/service.sh prod status
 tail -n 200 .run/logs/frontend.log
 tail -n 200 .run/logs/control-api.log
 tail -n 200 .run/logs/runtime-gateway.log

@@ -52,7 +52,10 @@ import {
   type LogsReconnectState,
   type RuntimeLogItem,
 } from "@/lib/ws/logs";
-import { buildGatewayWsCandidates, sanitizeSensitiveMessage } from "@/lib/ws/terminal";
+import {
+  buildGatewayWsCandidates,
+  sanitizeSensitiveMessage,
+} from "@/lib/ws/terminal";
 
 type SeverityFilter = "INFO" | "WARN" | "ERROR";
 type TimeMode = "quick" | "relative" | "absolute" | "recent";
@@ -69,14 +72,22 @@ const TAIL_OPTIONS: Array<{ label: string; value: number }> = [
   { label: "全部", value: -1 },
 ];
 
-const QUICK_TIME_OPTIONS: Array<{ label: string; from: string; seconds: number }> = [
+const QUICK_TIME_OPTIONS: Array<{
+  label: string;
+  from: string;
+  seconds: number;
+}> = [
   { label: "最近 15 分钟", from: "now-15m", seconds: 15 * 60 },
   { label: "最近 1 小时", from: "now-1h", seconds: 60 * 60 },
   { label: "最近 6 小时", from: "now-6h", seconds: 6 * 60 * 60 },
   { label: "最近 24 小时", from: "now-24h", seconds: 24 * 60 * 60 },
 ];
 
-const RECENT_TIME_OPTIONS: Array<{ label: string; from: string; seconds: number }> = [
+const RECENT_TIME_OPTIONS: Array<{
+  label: string;
+  from: string;
+  seconds: number;
+}> = [
   { label: "最近 5 分钟", from: "now-5m", seconds: 5 * 60 },
   { label: "最近 15 分钟", from: "now-15m", seconds: 15 * 60 },
   { label: "最近 30 分钟", from: "now-30m", seconds: 30 * 60 },
@@ -163,7 +174,10 @@ function toLogTimeParam(value: Dayjs): string {
 }
 
 function pickTimeMode(raw: string | null, fallback: TimeMode): TimeMode {
-  return raw === "quick" || raw === "relative" || raw === "absolute" || raw === "recent"
+  return raw === "quick" ||
+    raw === "relative" ||
+    raw === "absolute" ||
+    raw === "recent"
     ? raw
     : fallback;
 }
@@ -180,13 +194,23 @@ function parseNowExpression(raw: string): number | null {
   if (!match) return null;
   const amount = Number.parseInt(match[1], 10);
   if (!Number.isFinite(amount) || amount <= 0) return null;
-  const multipliers: Record<TimeUnit, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+  const multipliers: Record<TimeUnit, number> = {
+    s: 1,
+    m: 60,
+    h: 3600,
+    d: 86400,
+  };
   return amount * multipliers[match[2] as TimeUnit];
 }
 
-function secondsToRelativeInput(seconds: number): { amount: string; unit: TimeUnit } {
-  if (seconds % 86400 === 0) return { amount: String(seconds / 86400), unit: "d" };
-  if (seconds % 3600 === 0) return { amount: String(seconds / 3600), unit: "h" };
+function secondsToRelativeInput(seconds: number): {
+  amount: string;
+  unit: TimeUnit;
+} {
+  if (seconds % 86400 === 0)
+    return { amount: String(seconds / 86400), unit: "d" };
+  if (seconds % 3600 === 0)
+    return { amount: String(seconds / 3600), unit: "h" };
   if (seconds % 60 === 0) return { amount: String(seconds / 60), unit: "m" };
   return { amount: String(seconds), unit: "s" };
 }
@@ -213,19 +237,29 @@ function inferInitialTimeState(searchParams: URLSearchParams): {
   relativeAmount: string;
   relativeUnit: TimeUnit;
 } {
-  const legacySinceSeconds = pickPositive(searchParams.get("sinceSeconds"), 60 * 60);
+  const legacySinceSeconds = pickPositive(
+    searchParams.get("sinceSeconds"),
+    60 * 60,
+  );
   const legacySinceTime = normalizeLogTimeParam(searchParams.get("sinceTime"));
   const legacyUntilTime = normalizeLogTimeParam(searchParams.get("untilTime"));
-  const hasModernRange = Boolean(searchParams.get("from") || searchParams.get("to"));
-  const fallbackFrom = legacySinceTime || secondsToNowExpression(legacySinceSeconds);
+  const hasModernRange = Boolean(
+    searchParams.get("from") || searchParams.get("to"),
+  );
+  const fallbackFrom =
+    legacySinceTime || secondsToNowExpression(legacySinceSeconds);
   const fallbackTo = legacyUntilTime || "now";
   const from = normalizeTimeEndpoint(searchParams.get("from"), fallbackFrom);
   const to = normalizeTimeEndpoint(searchParams.get("to"), fallbackTo);
   const relativeSeconds = parseNowExpression(from) ?? legacySinceSeconds;
   const relativeInput = secondsToRelativeInput(relativeSeconds);
-  const modeFallback: TimeMode = legacySinceTime || legacyUntilTime ? "absolute" : "quick";
+  const modeFallback: TimeMode =
+    legacySinceTime || legacyUntilTime ? "absolute" : "quick";
   const mode = hasModernRange
-    ? pickTimeMode(searchParams.get("timeMode"), parseNowExpression(from) ? "quick" : "absolute")
+    ? pickTimeMode(
+        searchParams.get("timeMode"),
+        parseNowExpression(from) ? "quick" : "absolute",
+      )
     : pickTimeMode(searchParams.get("timeMode"), modeFallback);
   const toFollowsNow = to === "now";
 
@@ -233,7 +267,10 @@ function inferInitialTimeState(searchParams: URLSearchParams): {
     mode,
     from,
     to,
-    sinceSeconds: toFollowsNow && parseNowExpression(from) ? parseNowExpression(from)! : legacySinceSeconds,
+    sinceSeconds:
+      toFollowsNow && parseNowExpression(from)
+        ? parseNowExpression(from)!
+        : legacySinceSeconds,
     sinceTime: parseNowExpression(from) ? "" : normalizeLogTimeParam(from),
     untilTime: toFollowsNow ? "" : normalizeLogTimeParam(to),
     follow: toFollowsNow ? pickBool(searchParams.get("follow"), true) : false,
@@ -292,7 +329,8 @@ function buildBackHref(searchParams: URLSearchParams): string {
   if (namespace) params.set("namespace", namespace);
   if (keyword) params.set("keyword", keyword);
   if (phase) params.set("phase", phase);
-  if (page && Number.isFinite(Number.parseInt(page, 10))) params.set("page", page);
+  if (page && Number.isFinite(Number.parseInt(page, 10)))
+    params.set("page", page);
 
   return `/workloads/pods${params.toString() ? `?${params.toString()}` : ""}`;
 }
@@ -307,7 +345,11 @@ function inferSeverity(text: string): SeverityFilter {
   ) {
     return "ERROR";
   }
-  if (upper.includes("WARN") || upper.includes("WRN ") || upper.includes(" W!")) {
+  if (
+    upper.includes("WARN") ||
+    upper.includes("WRN ") ||
+    upper.includes(" W!")
+  ) {
     return "WARN";
   }
   return "INFO";
@@ -351,7 +393,14 @@ function colorizeTerminalLogLine(text: string): string {
   return `\x1b[36m${text}\x1b[0m`;
 }
 
-function toDownloadText(lines: RuntimeLogItem[], options: { beautify: boolean; formatJson: boolean; includeTimestamp: boolean }): string {
+function toDownloadText(
+  lines: RuntimeLogItem[],
+  options: {
+    beautify: boolean;
+    formatJson: boolean;
+    includeTimestamp: boolean;
+  },
+): string {
   return lines
     .map((line) =>
       formatMetaLine({
@@ -364,7 +413,10 @@ function toDownloadText(lines: RuntimeLogItem[], options: { beautify: boolean; f
     .join("\n");
 }
 
-function applySeverityFilter(lines: RuntimeLogItem[], selected: SeverityFilter[]): RuntimeLogItem[] {
+function applySeverityFilter(
+  lines: RuntimeLogItem[],
+  selected: SeverityFilter[],
+): RuntimeLogItem[] {
   if (!selected.length) return lines;
   const set = new Set(selected);
   return lines.filter((line) => set.has(inferSeverity(line.text)));
@@ -373,7 +425,11 @@ function applySeverityFilter(lines: RuntimeLogItem[], selected: SeverityFilter[]
 function writeTerminalBatch(
   terminal: Terminal | null,
   lines: RuntimeLogItem[],
-  options: { beautify: boolean; formatJson: boolean; includeTimestamp: boolean },
+  options: {
+    beautify: boolean;
+    formatJson: boolean;
+    includeTimestamp: boolean;
+  },
 ): void {
   if (!terminal || lines.length === 0) return;
   terminal.write(
@@ -391,7 +447,9 @@ function writeTerminalBatch(
   );
 }
 
-function mapHistoryRecordsToRuntimeLogs(records: LogRecord[]): RuntimeLogItem[] {
+function mapHistoryRecordsToRuntimeLogs(
+  records: LogRecord[],
+): RuntimeLogItem[] {
   return records.map((record) => ({
     id: record.id,
     text: record.message,
@@ -405,7 +463,9 @@ function isPreviousLogNotFoundError(error: unknown): boolean {
     return false;
   }
   const text = error.message.toLowerCase();
-  return text.includes("previous terminated container") && text.includes("not found");
+  return (
+    text.includes("previous terminated container") && text.includes("not found")
+  );
 }
 
 function normalizeLogError(error: unknown): string {
@@ -414,10 +474,17 @@ function normalizeLogError(error: unknown): string {
   if (lowered.includes("pods") && lowered.includes("not found")) {
     return "目标 Pod 不存在或已重建，请回到资源页重新进入日志。";
   }
-  if (lowered.includes("previous terminated container") && lowered.includes("not found")) {
+  if (
+    lowered.includes("previous terminated container") &&
+    lowered.includes("not found")
+  ) {
     return "上一个实例不存在，已回退到当前实例。";
   }
-  if (lowered.includes("unauthorized") || lowered.includes("forbidden") || lowered.includes("鉴权")) {
+  if (
+    lowered.includes("unauthorized") ||
+    lowered.includes("forbidden") ||
+    lowered.includes("鉴权")
+  ) {
     return "日志读取权限不足，请检查登录状态与资源权限。";
   }
   if (lowered.includes("http-code: 400") || lowered.includes("badrequest")) {
@@ -429,7 +496,10 @@ function normalizeLogError(error: unknown): string {
   return sanitizeSensitiveMessage(message || "日志连接失败");
 }
 
-function formatConnectionTag(status: LogsConnectionStatus): { tone: OpsStatusTone; text: string } {
+function formatConnectionTag(status: LogsConnectionStatus): {
+  tone: OpsStatusTone;
+  text: string;
+} {
   if (status === "已连接") return { tone: "success", text: "已连接" };
   if (status === "连接中") return { tone: "processing", text: "连接中" };
   if (status === "重连中") return { tone: "warning", text: "重连中" };
@@ -446,9 +516,11 @@ function mapLogsFrameState(args: {
   streamStatus: LogsConnectionStatus;
 }): OpsFrameShellState {
   if (args.streamStatus === "连接异常" || args.streamError) return "error";
-  if (args.reconnectState || args.streamStatus === "重连中") return "reconnecting";
+  if (args.reconnectState || args.streamStatus === "重连中")
+    return "reconnecting";
   if (args.isConnecting || args.streamStatus === "连接中") return "connecting";
-  if (args.streamStatus === "已连接" && args.follow && !args.effectivePrevious) return "streaming";
+  if (args.streamStatus === "已连接" && args.follow && !args.effectivePrevious)
+    return "streaming";
   if (args.streamStatus === "已连接") return "paused";
   return "disconnected";
 }
@@ -466,15 +538,27 @@ function formatRelativeTimeLabel(seconds: number): string {
 
 function readCssVar(name: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
+    fallback
+  );
 }
 
 function readOpsTerminalTheme() {
   return {
-    background: readCssVar("--ops-terminal-bg", readCssVar("--kn-surface", "#ffffff")),
-    foreground: readCssVar("--ops-terminal-fg", readCssVar("--kn-text", "#151922")),
+    background: readCssVar(
+      "--ops-terminal-bg",
+      readCssVar("--kn-surface", "#ffffff"),
+    ),
+    foreground: readCssVar(
+      "--ops-terminal-fg",
+      readCssVar("--kn-text", "#151922"),
+    ),
     cursor: readCssVar("--ops-log-info", "#67e8f9"),
-    selectionBackground: readCssVar("--ops-terminal-selection", readCssVar("--kn-primary-subtle", "rgba(35, 92, 255, 0.14)")),
+    selectionBackground: readCssVar(
+      "--ops-terminal-selection",
+      readCssVar("--kn-primary-subtle", "rgba(35, 92, 255, 0.14)"),
+    ),
     black: "#0f172a",
     brightBlack: "#64748b",
     blue: "#60a5fa",
@@ -520,11 +604,17 @@ export default function LogsPage() {
   const [timeMode, setTimeMode] = useState<TimeMode>(initialTimeState.mode);
   const [from, setFrom] = useState(initialTimeState.from);
   const [to, setTo] = useState(initialTimeState.to);
-  const [sinceSeconds, setSinceSeconds] = useState(initialTimeState.sinceSeconds);
+  const [sinceSeconds, setSinceSeconds] = useState(
+    initialTimeState.sinceSeconds,
+  );
   const [sinceTime, setSinceTime] = useState(initialTimeState.sinceTime);
   const [untilTime, setUntilTime] = useState(initialTimeState.untilTime);
-  const [relativeAmount, setRelativeAmount] = useState(initialTimeState.relativeAmount);
-  const [relativeUnit, setRelativeUnit] = useState<TimeUnit>(initialTimeState.relativeUnit);
+  const [relativeAmount, setRelativeAmount] = useState(
+    initialTimeState.relativeAmount,
+  );
+  const [relativeUnit, setRelativeUnit] = useState<TimeUnit>(
+    initialTimeState.relativeUnit,
+  );
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useState(
     pickRefreshInterval(searchParams.get("refreshIntervalSeconds")),
   );
@@ -538,11 +628,11 @@ export default function LogsPage() {
   const [severity, setSeverity] = useState<SeverityFilter[]>([]);
   const [availableContainers, setAvailableContainers] = useState<string[]>([]);
 
-  const [streamStatus, setStreamStatus] = useState<LogsConnectionStatus>("未连接");
+  const [streamStatus, setStreamStatus] =
+    useState<LogsConnectionStatus>("未连接");
   const [streamError, setStreamError] = useState("");
-  const [reconnectState, setReconnectState] = useState<LogsReconnectState | null>(
-    null,
-  );
+  const [reconnectState, setReconnectState] =
+    useState<LogsReconnectState | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [rawLines, setRawLines] = useState<RuntimeLogItem[]>([]);
   const [lastLogTimestamp, setLastLogTimestamp] = useState("");
@@ -554,7 +644,8 @@ export default function LogsPage() {
   const [searchRegex, setSearchRegex] = useState(false);
   const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
   const [searchVisible, setSearchVisible] = useState(false);
-  const [searchResultText, setSearchResultText] = useState("输入关键字后开始查找");
+  const [searchResultText, setSearchResultText] =
+    useState("输入关键字后开始查找");
   const [previousUnavailable, setPreviousUnavailable] = useState(false);
 
   const socketRef = useRef<RuntimeLogsSocket | null>(null);
@@ -604,7 +695,9 @@ export default function LogsPage() {
     setUntilTime(nextTimeState.untilTime);
     setRelativeAmount(nextTimeState.relativeAmount);
     setRelativeUnit(nextTimeState.relativeUnit);
-    setRefreshIntervalSeconds(pickRefreshInterval(params.get("refreshIntervalSeconds")));
+    setRefreshIntervalSeconds(
+      pickRefreshInterval(params.get("refreshIntervalSeconds")),
+    );
     setFollow(nextTimeState.follow);
     setPrevious(pickBool(params.get("previous"), false));
     setTimestamps(pickBool(params.get("timestamps"), true));
@@ -630,13 +723,18 @@ export default function LogsPage() {
   const clusterQuery = useQuery({
     queryKey: ["clusters", "list", accessToken],
     queryFn: () =>
-      getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken!),
+      getClusters(
+        { pageSize: 200, state: "active", selectableOnly: true },
+        accessToken!,
+      ),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
   const clusterMap = useMemo(
     () =>
-      Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name])),
+      Object.fromEntries(
+        (clusterQuery.data?.items ?? []).map((item) => [item.id, item.name]),
+      ),
     [clusterQuery.data?.items],
   );
 
@@ -769,8 +867,12 @@ export default function LogsPage() {
   );
 
   const selectedTimeLabel = useMemo(() => {
-    const endLabel = isFollowingNow ? "现在" : dayjs(to).format(LOG_TIME_FORMAT);
-    const quick = QUICK_TIME_OPTIONS.find((item) => item.from === from && isFollowingNow);
+    const endLabel = isFollowingNow
+      ? "现在"
+      : dayjs(to).format(LOG_TIME_FORMAT);
+    const quick = QUICK_TIME_OPTIONS.find(
+      (item) => item.from === from && isFollowingNow,
+    );
     if (quick && (timeMode === "quick" || timeMode === "recent")) {
       return quick.label;
     }
@@ -829,7 +931,8 @@ export default function LogsPage() {
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      const isCopy = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c";
+      const isCopy =
+        (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c";
       if (!isCopy) {
         return;
       }
@@ -863,25 +966,37 @@ export default function LogsPage() {
       timestamps?: boolean;
     }) => {
       const params = new URLSearchParams(currentQuery);
-      if (typeof next.container === "string") params.set("container", next.container);
-      if (typeof next.tailLines === "number") params.set("tailLines", String(next.tailLines));
-      if (typeof next.sinceSeconds === "number") params.set("sinceSeconds", String(next.sinceSeconds));
+      if (typeof next.container === "string")
+        params.set("container", next.container);
+      if (typeof next.tailLines === "number")
+        params.set("tailLines", String(next.tailLines));
+      if (typeof next.sinceSeconds === "number")
+        params.set("sinceSeconds", String(next.sinceSeconds));
       if (next.sinceSeconds === null) params.delete("sinceSeconds");
-      if (typeof next.sinceTime === "string") params.set("sinceTime", next.sinceTime);
+      if (typeof next.sinceTime === "string")
+        params.set("sinceTime", next.sinceTime);
       if (next.sinceTime === null) params.delete("sinceTime");
-      if (typeof next.untilTime === "string") params.set("untilTime", next.untilTime);
+      if (typeof next.untilTime === "string")
+        params.set("untilTime", next.untilTime);
       if (next.untilTime === null) params.delete("untilTime");
-      if (typeof next.timeMode === "string") params.set("timeMode", next.timeMode);
+      if (typeof next.timeMode === "string")
+        params.set("timeMode", next.timeMode);
       if (typeof next.from === "string") params.set("from", next.from);
       if (next.from === null) params.delete("from");
       if (typeof next.to === "string") params.set("to", next.to);
       if (next.to === null) params.delete("to");
       if (typeof next.refreshIntervalSeconds === "number") {
-        params.set("refreshIntervalSeconds", String(next.refreshIntervalSeconds));
+        params.set(
+          "refreshIntervalSeconds",
+          String(next.refreshIntervalSeconds),
+        );
       }
-      if (typeof next.follow === "boolean") params.set("follow", String(next.follow));
-      if (typeof next.previous === "boolean") params.set("previous", String(next.previous));
-      if (typeof next.timestamps === "boolean") params.set("timestamps", String(next.timestamps));
+      if (typeof next.follow === "boolean")
+        params.set("follow", String(next.follow));
+      if (typeof next.previous === "boolean")
+        params.set("previous", String(next.previous));
+      if (typeof next.timestamps === "boolean")
+        params.set("timestamps", String(next.timestamps));
       const nextQuery = params.toString();
       if (nextQuery === currentQuery) {
         return;
@@ -919,11 +1034,19 @@ export default function LogsPage() {
       const now = dayjs();
       const relativeSeconds = parseNowExpression(input.from);
       const toFollowsNow = input.to === "now";
-      const nextFrom = normalizeTimeEndpoint(input.from, secondsToNowExpression(sinceSeconds));
+      const nextFrom = normalizeTimeEndpoint(
+        input.from,
+        secondsToNowExpression(sinceSeconds),
+      );
       const nextTo = normalizeTimeEndpoint(input.to, "now");
-      const nextSinceTime = relativeSeconds === null ? normalizeLogTimeParam(nextFrom) : "";
+      const nextSinceTime =
+        relativeSeconds === null ? normalizeLogTimeParam(nextFrom) : "";
       const nextUntilTime = toFollowsNow ? "" : normalizeLogTimeParam(nextTo);
-      if (nextSinceTime && nextUntilTime && dayjs(nextSinceTime).isAfter(dayjs(nextUntilTime))) {
+      if (
+        nextSinceTime &&
+        nextUntilTime &&
+        dayjs(nextSinceTime).isAfter(dayjs(nextUntilTime))
+      ) {
         return;
       }
       if (nextUntilTime && dayjs(nextUntilTime).isAfter(now)) {
@@ -956,7 +1079,11 @@ export default function LogsPage() {
   const applyRelativeTimeRange = useCallback(() => {
     const amount = Number.parseInt(relativeAmount, 10);
     if (!Number.isFinite(amount) || amount <= 0) return;
-    applyTimeRange({ mode: "relative", from: `now-${amount}${relativeUnit}`, to: "now" });
+    applyTimeRange({
+      mode: "relative",
+      from: `now-${amount}${relativeUnit}`,
+      to: "now",
+    });
   }, [applyTimeRange, relativeAmount, relativeUnit]);
 
   const applyCustomTimeRange = useCallback(
@@ -987,7 +1114,14 @@ export default function LogsPage() {
 
   const connectStream = useCallback(
     async (options?: { resetLines?: boolean; preloadHistory?: boolean }) => {
-      if (isInitializing || !accessToken || !clusterId || !namespace || !pod || !container) {
+      if (
+        isInitializing ||
+        !accessToken ||
+        !clusterId ||
+        !namespace ||
+        !pod ||
+        !container
+      ) {
         return;
       }
       const effectiveUntilTime = isFollowingNow ? "" : untilTime;
@@ -1038,7 +1172,10 @@ export default function LogsPage() {
                 previous: effectivePrevious,
                 timestamps,
                 page: 1,
-                pageSize: tailLines > 0 ? Math.min(Math.max(tailLines, 100), 2500) : 2500,
+                pageSize:
+                  tailLines > 0
+                    ? Math.min(Math.max(tailLines, 100), 2500)
+                    : 2500,
               },
               accessToken,
             );
@@ -1058,7 +1195,10 @@ export default function LogsPage() {
                   previous: false,
                   timestamps,
                   page: 1,
-                  pageSize: tailLines > 0 ? Math.min(Math.max(tailLines, 100), 2500) : 2500,
+                  pageSize:
+                    tailLines > 0
+                      ? Math.min(Math.max(tailLines, 100), 2500)
+                      : 2500,
                 },
                 accessToken,
               );
@@ -1168,7 +1308,9 @@ export default function LogsPage() {
           },
           onReconnectStateChange: (state) => {
             if (currentGeneration !== streamGenerationRef.current) return;
-            setReconnectState(state.stopped || state.attempt === 0 ? null : state);
+            setReconnectState(
+              state.stopped || state.attempt === 0 ? null : state,
+            );
           },
           onOpen: () => {
             if (currentGeneration !== streamGenerationRef.current) return;
@@ -1233,7 +1375,14 @@ export default function LogsPage() {
   );
 
   useEffect(() => {
-    if (!accessToken || isInitializing || !clusterId || !namespace || !pod || !container) {
+    if (
+      !accessToken ||
+      isInitializing ||
+      !clusterId ||
+      !namespace ||
+      !pod ||
+      !container
+    ) {
       return;
     }
     void connectStream({ resetLines: true, preloadHistory: true });
@@ -1269,7 +1418,10 @@ export default function LogsPage() {
       return;
     }
     const timer = window.setTimeout(() => {
-      const terminalRows = terminalHostRef.current?.querySelector(".xterm-rows")?.textContent?.trim() ?? "";
+      const terminalRows =
+        terminalHostRef.current
+          ?.querySelector(".xterm-rows")
+          ?.textContent?.trim() ?? "";
       if (!terminalRows && rawLinesRef.current.length > 0) {
         replayToTerminal(rawLinesRef.current);
       }
@@ -1302,7 +1454,10 @@ export default function LogsPage() {
   };
 
   const downloadLogs = () => {
-    const content = toDownloadText(applySeverityFilter(rawLines, severity), renderOptions);
+    const content = toDownloadText(
+      applySeverityFilter(rawLines, severity),
+      renderOptions,
+    );
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -1353,6 +1508,21 @@ export default function LogsPage() {
   const scopeSubtitle = `${clusterDisplayName} / ${namespace || "-"} / ${resourceName || pod || "-"} / ${
     container || "-"
   }`;
+  const filteredLineCount = applySeverityFilter(rawLines, severity).length;
+  const streamModeLabel = effectivePrevious
+    ? "Previous"
+    : follow
+      ? "Follow"
+      : "Paused";
+  const refreshLabel =
+    refreshIntervalSeconds > 0 && (effectivePrevious || !follow)
+      ? `${refreshIntervalSeconds}s`
+      : follow && !effectivePrevious
+        ? "stream"
+        : "manual";
+  const lastLogLabel = lastLogTimestamp
+    ? dayjs(lastLogTimestamp).format("HH:mm:ss")
+    : "-";
 
   return (
     <OpsFrameShell
@@ -1361,15 +1531,28 @@ export default function LogsPage() {
       title="Pod 日志工作区"
       subtitle={scopeSubtitle}
       state={logsFrameState}
-      status={<OpsStatusTag tone={connectionMeta.tone}>{connectionMeta.text}</OpsStatusTag>}
+      status={
+        <OpsStatusTag tone={connectionMeta.tone}>
+          {connectionMeta.text}
+        </OpsStatusTag>
+      }
       toolbar={
         <Space wrap size={8} className="logs-workbench-top-actions">
           <Tooltip title="重新加载日志">
-            <OpsIconActionButton icon={<ReloadOutlined />} onClick={hardRefresh} loading={isConnecting}>
+            <OpsIconActionButton
+              icon={<ReloadOutlined />}
+              onClick={hardRefresh}
+              loading={isConnecting}
+            >
               刷新
             </OpsIconActionButton>
           </Tooltip>
-          <OpsIconActionButton icon={<ArrowLeftOutlined />} opsTone="danger" opsVariant="danger" onClick={exitBack}>
+          <OpsIconActionButton
+            icon={<ArrowLeftOutlined />}
+            opsTone="danger"
+            opsVariant="danger"
+            onClick={exitBack}
+          >
             退出
           </OpsIconActionButton>
         </Space>
@@ -1377,18 +1560,26 @@ export default function LogsPage() {
       chips={
         <Space wrap size={8} className="logs-workbench-chips">
           <OpsFilterChip tone={effectivePrevious ? "neutral" : "info"}>
-            {effectivePrevious ? "上一个实例" : follow ? "实时跟随" : "跟随已暂停"}
+            {effectivePrevious
+              ? "上一个实例"
+              : follow
+                ? "实时跟随"
+                : "跟随已暂停"}
           </OpsFilterChip>
           <OpsFilterChip tone={isFollowingNow ? "success" : "warning"}>
             {isFollowingNow ? "结束时间=现在，跟随当前时间" : "固定结束时间"}
           </OpsFilterChip>
           <OpsFilterChip tone="neutral">{selectedTimeLabel}</OpsFilterChip>
-          <OpsFilterChip tone="info">{tailLines === -1 ? "全部行" : `${tailLines} 行`}</OpsFilterChip>
+          <OpsFilterChip tone="info">
+            {tailLines === -1 ? "全部行" : `${tailLines} 行`}
+          </OpsFilterChip>
           {severity.length > 0 ? (
             <OpsFilterChip tone="warning">{severity.join(" / ")}</OpsFilterChip>
           ) : null}
           {previousUnavailable ? (
-            <OpsFilterChip tone="warning">上一个实例不存在，已回退到当前实例</OpsFilterChip>
+            <OpsFilterChip tone="warning">
+              上一个实例不存在，已回退到当前实例
+            </OpsFilterChip>
           ) : null}
           {reconnectState ? (
             <OpsFilterChip tone="warning">
@@ -1408,7 +1599,39 @@ export default function LogsPage() {
         ) : undefined
       }
     >
-      <Space orientation="vertical" size={12} className="logs-workbench-stack" style={{ width: "100%" }}>
+      <Space
+        orientation="vertical"
+        size={12}
+        className="logs-workbench-stack"
+        style={{ width: "100%" }}
+      >
+        <div className="logs-signal-row" aria-label="日志流状态">
+          <div
+            className={`logs-signal-card logs-signal-card--${connectionMeta.tone}`}
+          >
+            <span>Stream</span>
+            <strong>{connectionMeta.text}</strong>
+          </div>
+          <div className="logs-signal-card">
+            <span>Mode</span>
+            <strong>{streamModeLabel}</strong>
+          </div>
+          <div className="logs-signal-card">
+            <span>Lines</span>
+            <strong>
+              {filteredLineCount}/{rawLines.length}
+            </strong>
+          </div>
+          <div className="logs-signal-card">
+            <span>Last</span>
+            <strong>{lastLogLabel}</strong>
+          </div>
+          <div className="logs-signal-card">
+            <span>Refresh</span>
+            <strong>{refreshLabel}</strong>
+          </div>
+        </div>
+
         <OpsSurface
           variant="toolbar"
           padding="sm"
@@ -1425,7 +1648,10 @@ export default function LogsPage() {
                       setContainer(value);
                       syncRuntimeQueryToUrl({ container: value });
                     }}
-                    options={containerOptions.map((name) => ({ label: name, value: name }))}
+                    options={containerOptions.map((name) => ({
+                      label: name,
+                      value: name,
+                    }))}
                     style={{ width: 200 }}
                   />
                 </div>
@@ -1448,124 +1674,164 @@ export default function LogsPage() {
                   <Popover
                     trigger="click"
                     placement="bottomLeft"
-	                    content={
-	                      <div className="headlamp-time-popover">
-	                        <div className="headlamp-time-tabs">
-	                          <Select
-	                            value={timeMode}
-	                            onChange={(value) => setTimeMode(value)}
-	                            options={TIME_MODE_OPTIONS}
-	                            style={{ width: 150 }}
-	                          />
-	                          <Select
-	                            value={refreshIntervalSeconds}
-	                            onChange={(value) => {
-	                              setRefreshIntervalSeconds(value);
-	                              syncRuntimeQueryToUrl({ refreshIntervalSeconds: value });
-	                            }}
-	                            options={REFRESH_INTERVAL_OPTIONS}
-	                            style={{ width: 120 }}
-	                          />
-                          <Button icon={<ReloadOutlined />} onClick={hardRefresh} loading={isConnecting}>
+                    content={
+                      <div className="headlamp-time-popover">
+                        <div className="headlamp-time-tabs">
+                          <Select
+                            value={timeMode}
+                            onChange={(value) => setTimeMode(value)}
+                            options={TIME_MODE_OPTIONS}
+                            style={{ width: 150 }}
+                          />
+                          <Select
+                            value={refreshIntervalSeconds}
+                            onChange={(value) => {
+                              setRefreshIntervalSeconds(value);
+                              syncRuntimeQueryToUrl({
+                                refreshIntervalSeconds: value,
+                              });
+                            }}
+                            options={REFRESH_INTERVAL_OPTIONS}
+                            style={{ width: 120 }}
+                          />
+                          <Button
+                            icon={<ReloadOutlined />}
+                            onClick={hardRefresh}
+                            loading={isConnecting}
+                          >
                             刷新
-	                          </Button>
-	                        </div>
-	                        <div className="headlamp-time-section">
-	                          {timeMode === "quick" ? (
-	                            <>
+                          </Button>
+                        </div>
+                        <div className="headlamp-time-section">
+                          {timeMode === "quick" ? (
+                            <>
                               <Typography.Text strong>快捷选择</Typography.Text>
-	                              <Space wrap size={8}>
-	                                {QUICK_TIME_OPTIONS.map((item) => (
-	                                  <Button
-	                                    key={item.from}
-	                                    size="small"
-	                                    type={from === item.from && isFollowingNow ? "primary" : "default"}
-	                                    onClick={() => applyHistoryRange(item.seconds)}
-	                                  >
-	                                    {item.label}
-	                                  </Button>
-	                                ))}
-	                              </Space>
-	                            </>
-	                          ) : null}
-	                          {timeMode === "relative" ? (
-	                            <>
+                              <Space wrap size={8}>
+                                {QUICK_TIME_OPTIONS.map((item) => (
+                                  <Button
+                                    key={item.from}
+                                    size="small"
+                                    type={
+                                      from === item.from && isFollowingNow
+                                        ? "primary"
+                                        : "default"
+                                    }
+                                    onClick={() =>
+                                      applyHistoryRange(item.seconds)
+                                    }
+                                  >
+                                    {item.label}
+                                  </Button>
+                                ))}
+                              </Space>
+                            </>
+                          ) : null}
+                          {timeMode === "relative" ? (
+                            <>
                               <Typography.Text strong>相对时间</Typography.Text>
-	                              <Space wrap>
-	                                <Input
-	                                  value={relativeAmount}
-	                                  onChange={(event) => setRelativeAmount(event.target.value.replace(/\D/g, ""))}
-	                                  onPressEnter={applyRelativeTimeRange}
-	                                  style={{ width: 96 }}
-	                                />
-	                                <Select
-	                                  value={relativeUnit}
-	                                  onChange={setRelativeUnit}
-	                                  options={TIME_UNIT_OPTIONS}
-	                                  style={{ width: 150 }}
-	                                />
-	                                <Button type="primary" onClick={applyRelativeTimeRange}>
+                              <Space wrap>
+                                <Input
+                                  value={relativeAmount}
+                                  onChange={(event) =>
+                                    setRelativeAmount(
+                                      event.target.value.replace(/\D/g, ""),
+                                    )
+                                  }
+                                  onPressEnter={applyRelativeTimeRange}
+                                  style={{ width: 96 }}
+                                />
+                                <Select
+                                  value={relativeUnit}
+                                  onChange={setRelativeUnit}
+                                  options={TIME_UNIT_OPTIONS}
+                                  style={{ width: 150 }}
+                                />
+                                <Button
+                                  type="primary"
+                                  onClick={applyRelativeTimeRange}
+                                >
                                   应用
-	                                </Button>
-	                              </Space>
-	                            </>
-	                          ) : null}
-	                          {timeMode === "absolute" ? (
-	                            <>
-                              <Typography.Text strong>绝对时间范围</Typography.Text>
-	                              <RangePicker
-	                                showTime
-	                                allowClear={false}
-	                                format={LOG_TIME_FORMAT}
-	                                value={customTimeRange}
-	                                disabledDate={disabledFutureLogDate}
-	                                disabledTime={disabledFutureLogTime}
-	                                onChange={applyCustomTimeRange}
-	                                style={{ width: 390 }}
-	                              />
-	                              <Typography.Text type="secondary" className="headlamp-time-help">
+                                </Button>
+                              </Space>
+                            </>
+                          ) : null}
+                          {timeMode === "absolute" ? (
+                            <>
+                              <Typography.Text strong>
+                                绝对时间范围
+                              </Typography.Text>
+                              <RangePicker
+                                showTime
+                                allowClear={false}
+                                format={LOG_TIME_FORMAT}
+                                value={customTimeRange}
+                                disabledDate={disabledFutureLogDate}
+                                disabledTime={disabledFutureLogTime}
+                                onChange={applyCustomTimeRange}
+                                style={{ width: 390 }}
+                              />
+                              <Typography.Text
+                                type="secondary"
+                                className="headlamp-time-help"
+                              >
                                 绝对时间不能晚于当前；固定结束时间会关闭实时跟随。
-	                              </Typography.Text>
-	                            </>
-	                          ) : null}
-	                          {timeMode === "recent" ? (
-	                            <>
-                              <Typography.Text strong>最近使用范围</Typography.Text>
-	                              <Space wrap size={8}>
-	                                {RECENT_TIME_OPTIONS.map((item) => (
-	                                  <Button
-	                                    key={item.from}
-	                                    size="small"
-	                                    type={from === item.from && isFollowingNow ? "primary" : "default"}
-	                                    onClick={() => applyTimeRange({ mode: "recent", from: item.from, to: "now" })}
-	                                  >
-	                                    {item.label}
-	                                  </Button>
-	                                ))}
-	                              </Space>
-	                            </>
-	                          ) : null}
-	                        </div>
-	                        <Typography.Text type="secondary" className="headlamp-time-help">
-                          地址栏使用 timeMode/from/to/refreshIntervalSeconds；旧 sinceSeconds/sinceTime/untilTime 仍可读取。
-	                        </Typography.Text>
-	                      </div>
-	                    }
-	                  >
-	                    <Button className="headlamp-time-trigger">
-	                      <span>{selectedTimeLabel}</span>
+                              </Typography.Text>
+                            </>
+                          ) : null}
+                          {timeMode === "recent" ? (
+                            <>
+                              <Typography.Text strong>
+                                最近使用范围
+                              </Typography.Text>
+                              <Space wrap size={8}>
+                                {RECENT_TIME_OPTIONS.map((item) => (
+                                  <Button
+                                    key={item.from}
+                                    size="small"
+                                    type={
+                                      from === item.from && isFollowingNow
+                                        ? "primary"
+                                        : "default"
+                                    }
+                                    onClick={() =>
+                                      applyTimeRange({
+                                        mode: "recent",
+                                        from: item.from,
+                                        to: "now",
+                                      })
+                                    }
+                                  >
+                                    {item.label}
+                                  </Button>
+                                ))}
+                              </Space>
+                            </>
+                          ) : null}
+                        </div>
+                        <Typography.Text
+                          type="secondary"
+                          className="headlamp-time-help"
+                        >
+                          地址栏使用 timeMode/from/to/refreshIntervalSeconds；旧
+                          sinceSeconds/sinceTime/untilTime 仍可读取。
+                        </Typography.Text>
+                      </div>
+                    }
+                  >
+                    <Button className="headlamp-time-trigger">
+                      <span>{selectedTimeLabel}</span>
                       <DownOutlined />
-	                    </Button>
-	                  </Popover>
-	                </div>
-	              </div>
+                    </Button>
+                  </Popover>
+                </div>
+              </div>
 
               <div className="headlamp-log-group headlamp-log-group-mode">
                 <div className="headlamp-log-switch">
-	                  <Switch
-	                    checked={previous}
-                      aria-label="显示上一个实例日志"
-	                    onChange={(checked) => {
+                  <Switch
+                    checked={previous}
+                    aria-label="显示上一个实例日志"
+                    onChange={(checked) => {
                       setPreviousUnavailable(false);
                       setPrevious(checked);
                       syncRuntimeQueryToUrl({ previous: checked });
@@ -1576,10 +1842,10 @@ export default function LogsPage() {
                 </div>
 
                 <div className="headlamp-log-switch">
-	                  <Switch
-	                    checked={timestamps}
-                      aria-label="显示时间戳"
-	                    onChange={(checked) => {
+                  <Switch
+                    checked={timestamps}
+                    aria-label="显示时间戳"
+                    onChange={(checked) => {
                       setTimestamps(checked);
                       syncRuntimeQueryToUrl({ timestamps: checked });
                     }}
@@ -1589,35 +1855,35 @@ export default function LogsPage() {
                 </div>
 
                 <div className="headlamp-log-switch">
-		                  <Switch
-		                    checked={follow}
-		                    disabled={!isFollowingNow}
-                        aria-label="实时跟随日志"
-		                    onChange={(checked) => {
-	                      if (!isFollowingNow) return;
-	                      setFollow(checked);
-	                      syncRuntimeQueryToUrl({ follow: checked });
-	                    }}
-	                    size="small"
-	                  />
+                  <Switch
+                    checked={follow}
+                    disabled={!isFollowingNow}
+                    aria-label="实时跟随日志"
+                    onChange={(checked) => {
+                      if (!isFollowingNow) return;
+                      setFollow(checked);
+                      syncRuntimeQueryToUrl({ follow: checked });
+                    }}
+                    size="small"
+                  />
                   <span>跟随</span>
                 </div>
 
                 <div className="headlamp-log-switch">
-	                  <Switch
-	                    checked={beautifyEnabled}
-                      aria-label="启用日志美化"
-	                    onChange={setBeautifyEnabled}
+                  <Switch
+                    checked={beautifyEnabled}
+                    aria-label="启用日志美化"
+                    onChange={setBeautifyEnabled}
                     size="small"
                   />
                   <span>美化</span>
                 </div>
 
                 <div className="headlamp-log-switch">
-	                  <Switch
-	                    checked={formatEnabled}
-                      aria-label="启用日志格式化"
-	                    onChange={setFormatEnabled}
+                  <Switch
+                    checked={formatEnabled}
+                    aria-label="启用日志格式化"
+                    onChange={setFormatEnabled}
                     size="small"
                   />
                   <span>格式化</span>
@@ -1640,87 +1906,118 @@ export default function LogsPage() {
                 </div>
 
                 <div className="headlamp-log-actions">
-                <Tooltip title="查找">
-                  <Popover
-                    trigger="click"
-                    placement="bottomRight"
-                    open={searchVisible}
-                    onOpenChange={setSearchVisible}
-                    content={
-                      <div className="headlamp-search-popover">
-                        <Input
-                          className="headlamp-log-search-input"
-                          value={searchText}
-                          onChange={(event) => setSearchText(event.target.value)}
-                          placeholder="查找"
-                          allowClear
-                          style={{ width: 220 }}
-                          onPressEnter={() => runSearch("next")}
-                        />
-                        <Tooltip title="区分大小写">
-	                          <button
-	                            type="button"
-	                            className={`headlamp-search-flag${searchCaseSensitive ? " active" : ""}`}
+                  <Tooltip title="查找">
+                    <Popover
+                      trigger="click"
+                      placement="bottomRight"
+                      open={searchVisible}
+                      onOpenChange={setSearchVisible}
+                      content={
+                        <div className="headlamp-search-popover">
+                          <Input
+                            className="headlamp-log-search-input"
+                            value={searchText}
+                            onChange={(event) =>
+                              setSearchText(event.target.value)
+                            }
+                            placeholder="查找"
+                            allowClear
+                            style={{ width: 220 }}
+                            onPressEnter={() => runSearch("next")}
+                          />
+                          <Tooltip title="区分大小写">
+                            <button
+                              type="button"
+                              className={`headlamp-search-flag${searchCaseSensitive ? " active" : ""}`}
                               aria-label="区分大小写"
                               aria-pressed={searchCaseSensitive}
-	                            onClick={() => setSearchCaseSensitive((value) => !value)}
-                          >
-                            Aa
-                          </button>
-                        </Tooltip>
-                        <Tooltip title="使用正则表达式">
-	                          <button
-	                            type="button"
-	                            className={`headlamp-search-flag${searchRegex ? " active" : ""}`}
+                              onClick={() =>
+                                setSearchCaseSensitive((value) => !value)
+                              }
+                            >
+                              Aa
+                            </button>
+                          </Tooltip>
+                          <Tooltip title="使用正则表达式">
+                            <button
+                              type="button"
+                              className={`headlamp-search-flag${searchRegex ? " active" : ""}`}
                               aria-label="使用正则表达式"
                               aria-pressed={searchRegex}
-	                            onClick={() => setSearchRegex((value) => !value)}
-                          >
-                            .*
-                          </button>
-                        </Tooltip>
-	                        <Tooltip title="上一个匹配">
-	                          <button type="button" className="headlamp-search-icon" aria-label="上一个匹配" onClick={() => runSearch("prev")}>
-	                            ↑
-	                          </button>
-	                        </Tooltip>
-	                        <Tooltip title="下一个匹配">
-	                          <button type="button" className="headlamp-search-icon" aria-label="下一个匹配" onClick={() => runSearch("next")}>
-	                            ↓
-	                          </button>
-	                        </Tooltip>
-	                        <Tooltip title="关闭查找">
-	                          <button type="button" className="headlamp-search-icon" aria-label="关闭查找" onClick={() => setSearchVisible(false)}>
-	                            ×
-	                          </button>
-                        </Tooltip>
-                        <span className="headlamp-search-status">{searchResultText}</span>
-                      </div>
-                    }
-                  >
+                              onClick={() => setSearchRegex((value) => !value)}
+                            >
+                              .*
+                            </button>
+                          </Tooltip>
+                          <Tooltip title="上一个匹配">
+                            <button
+                              type="button"
+                              className="headlamp-search-icon"
+                              aria-label="上一个匹配"
+                              onClick={() => runSearch("prev")}
+                            >
+                              ↑
+                            </button>
+                          </Tooltip>
+                          <Tooltip title="下一个匹配">
+                            <button
+                              type="button"
+                              className="headlamp-search-icon"
+                              aria-label="下一个匹配"
+                              onClick={() => runSearch("next")}
+                            >
+                              ↓
+                            </button>
+                          </Tooltip>
+                          <Tooltip title="关闭查找">
+                            <button
+                              type="button"
+                              className="headlamp-search-icon"
+                              aria-label="关闭查找"
+                              onClick={() => setSearchVisible(false)}
+                            >
+                              ×
+                            </button>
+                          </Tooltip>
+                          <span className="headlamp-search-status">
+                            {searchResultText}
+                          </span>
+                        </div>
+                      }
+                    >
+                      <OpsIconActionButton
+                        opsVariant="icon"
+                        icon={<SearchOutlined />}
+                        aria-label="查找日志"
+                      />
+                    </Popover>
+                  </Tooltip>
+                  <Tooltip title="清除">
                     <OpsIconActionButton
                       opsVariant="icon"
-                      icon={<SearchOutlined />}
-                      aria-label="查找日志"
+                      icon={<ClearOutlined />}
+                      aria-label="清除日志"
+                      onClick={clearAll}
                     />
-                  </Popover>
-                </Tooltip>
-                <Tooltip title="清除">
-                  <OpsIconActionButton opsVariant="icon" icon={<ClearOutlined />} aria-label="清除日志" onClick={clearAll} />
-                </Tooltip>
-                <Tooltip title="下载">
-                  <OpsIconActionButton opsVariant="icon" icon={<DownloadOutlined />} aria-label="下载日志" onClick={downloadLogs} />
-                </Tooltip>
-                <Tooltip title="重新接入">
-                  <OpsIconActionButton
-                    opsVariant="icon"
-                    icon={<ReloadOutlined />}
-                    aria-label="重新接入日志"
-                    onClick={reconnectNow}
-                    loading={isConnecting}
-                  />
-                </Tooltip>
-              </div>
+                  </Tooltip>
+                  <Tooltip title="下载">
+                    <OpsIconActionButton
+                      opsVariant="icon"
+                      icon={<DownloadOutlined />}
+                      aria-label="下载日志"
+                      onClick={downloadLogs}
+                    />
+                  </Tooltip>
+                  <Tooltip title="重新接入">
+                    <OpsIconActionButton
+                      opsVariant="icon"
+                      icon={<ReloadOutlined />}
+                      aria-label="重新接入日志"
+                      onClick={reconnectNow}
+                      loading={isConnecting}
+                    />
+                  </Tooltip>
+                </div>
               </div>
             </div>
           </Space>
@@ -1731,7 +2028,9 @@ export default function LogsPage() {
           padding="none"
           className="logs-terminal-card"
         >
-          <div className={`logs-terminal-frame logs-terminal-frame--${logsFrameState}`}>
+          <div
+            className={`logs-terminal-frame logs-terminal-frame--${logsFrameState}`}
+          >
             <div className="logs-terminal-titlebar">
               <div className="logs-terminal-dots">
                 <span />
@@ -1741,16 +2040,44 @@ export default function LogsPage() {
               <div className="logs-terminal-title">
                 {clusterDisplayName} · {pod || "pod"}.{namespace || "default"}
               </div>
-              <div className={`logs-terminal-state logs-terminal-state--${connectionMeta.tone}`}>{connectionMeta.text}</div>
+              <div
+                className={`logs-terminal-state logs-terminal-state--${connectionMeta.tone}`}
+              >
+                {connectionMeta.text}
+              </div>
             </div>
-	            <div className="logs-terminal-host" ref={terminalHostRef} />
-	            {emptyStateHint.visible ? (
-	              <div className="logs-empty-hint">
-	                <Typography.Text strong>{emptyStateHint.title}</Typography.Text>
-	                <Typography.Text type="secondary">{emptyStateHint.description}</Typography.Text>
-	              </div>
-	            ) : null}
-	          </div>
+            <div className="logs-terminal-telemetry" aria-label="日志终端状态">
+              <div
+                className={`logs-terminal-telemetry__item logs-terminal-telemetry__item--${connectionMeta.tone}`}
+              >
+                <span>Stream</span>
+                <strong>{connectionMeta.text}</strong>
+              </div>
+              <div className="logs-terminal-telemetry__item">
+                <span>Mode</span>
+                <strong>{streamModeLabel}</strong>
+              </div>
+              <div className="logs-terminal-telemetry__item">
+                <span>Lines</span>
+                <strong>
+                  {filteredLineCount}/{rawLines.length}
+                </strong>
+              </div>
+              <div className="logs-terminal-telemetry__item">
+                <span>Container</span>
+                <strong>{container || "-"}</strong>
+              </div>
+            </div>
+            <div className="logs-terminal-host" ref={terminalHostRef} />
+            {emptyStateHint.visible ? (
+              <div className="logs-empty-hint">
+                <Typography.Text strong>{emptyStateHint.title}</Typography.Text>
+                <Typography.Text type="secondary">
+                  {emptyStateHint.description}
+                </Typography.Text>
+              </div>
+            ) : null}
+          </div>
           {streamStatus === "连接异常" ? (
             <Button
               type="primary"
@@ -1766,19 +2093,27 @@ export default function LogsPage() {
 
       <style jsx>{`
         :global(html[data-theme="light"]) {
-          --ops-terminal-bg: #ffffff;
-          --ops-terminal-fg: #172033;
-          --ops-terminal-selection: rgba(35, 92, 255, 0.18);
+          --ops-terminal-bg: #050b14;
+          --ops-terminal-fg: #dff6ff;
+          --ops-terminal-selection: rgba(34, 211, 238, 0.34);
         }
 
         :global(.logs-workbench-shell.ops-frame-shell) {
-          --logs-console-frame-bg: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+          --logs-console-frame-bg: linear-gradient(
+            180deg,
+            #ffffff 0%,
+            #f7f9fc 100%
+          );
           --logs-console-header-bg: rgba(255, 255, 255, 0.92);
           --logs-console-chip-bg: rgba(248, 250, 252, 0.9);
           --logs-console-border: rgba(35, 92, 255, 0.16);
           --logs-console-divider: rgba(100, 116, 139, 0.16);
           --logs-console-text: var(--kn-text, #151922);
           --logs-console-muted: var(--kn-text-secondary, #5d6675);
+          --logs-signal-bg: rgba(255, 255, 255, 0.86);
+          --logs-signal-border: rgba(35, 92, 255, 0.14);
+          --logs-signal-text: #172033;
+          --logs-signal-muted: #5d6675;
           --logs-toolbar-bg: #ffffff;
           --logs-toolbar-panel-bg: linear-gradient(180deg, #ffffff, #f9fbff);
           --logs-toolbar-border: rgba(148, 163, 184, 0.26);
@@ -1786,63 +2121,106 @@ export default function LogsPage() {
           --logs-control-border: rgba(148, 163, 184, 0.34);
           --logs-control-text: var(--kn-text, #151922);
           --logs-control-muted: var(--kn-text-secondary, #5d6675);
-          --logs-terminal-frame-bg: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-          --logs-terminal-frame-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-          --logs-terminal-titlebar-bg: linear-gradient(180deg, #ffffff, #f8fafc);
-          --logs-terminal-titlebar-border: rgba(148, 163, 184, 0.22);
-          --logs-terminal-bg: var(--ops-terminal-bg, #ffffff);
-          --logs-terminal-fg: var(--ops-terminal-fg, #172033);
-          --logs-empty-bg: rgba(255, 255, 255, 0.96);
-          --logs-empty-border: rgba(35, 92, 255, 0.18);
-          --logs-empty-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+          --logs-terminal-frame-bg:
+            radial-gradient(circle at 16% 0%, rgba(34, 211, 238, 0.14), transparent 30%),
+            linear-gradient(
+              90deg,
+              transparent 0 23px,
+              rgba(56, 189, 248, 0.052) 23px 24px,
+              transparent 24px 48px
+            ),
+            linear-gradient(180deg, #081525 0%, var(--ops-terminal-bg) 100%);
+          --logs-terminal-frame-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            inset 0 0 34px rgba(34, 211, 238, 0.1);
+          --logs-terminal-titlebar-bg: rgba(7, 15, 27, 0.96);
+          --logs-terminal-titlebar-border: rgba(56, 189, 248, 0.2);
+          --logs-terminal-telemetry-bg: rgba(8, 18, 31, 0.86);
+          --logs-terminal-telemetry-border: rgba(56, 189, 248, 0.14);
+          --logs-terminal-telemetry-muted: rgba(203, 213, 225, 0.68);
+          --logs-terminal-telemetry-text: rgba(248, 250, 252, 0.94);
+          --logs-terminal-bg: var(--ops-terminal-bg, #050b14);
+          --logs-terminal-fg: var(--ops-terminal-fg, #dff6ff);
+          --logs-empty-bg: rgba(7, 15, 27, 0.94);
+          --logs-empty-border: rgba(56, 189, 248, 0.24);
+          --logs-empty-shadow: 0 12px 24px rgba(2, 8, 23, 0.24);
           min-height: calc(100vh - 112px);
           border-color: var(--logs-console-border);
           background: var(--logs-console-frame-bg);
-          box-shadow: var(--kn-shadow-subtle, 0 8px 20px rgba(15, 23, 42, 0.06));
+          box-shadow: var(--kn-shadow-subtle, 0 1px 2px rgba(15, 23, 42, 0.06));
         }
 
-        :global(html[data-theme="dark"]) :global(.logs-workbench-shell.ops-frame-shell) {
-          --logs-console-frame-bg: linear-gradient(180deg, rgba(8, 18, 31, 0.98), rgba(3, 10, 20, 0.98));
+        :global(html[data-theme="dark"])
+          :global(.logs-workbench-shell.ops-frame-shell) {
+          --logs-console-frame-bg: linear-gradient(
+            180deg,
+            rgba(8, 18, 31, 0.98),
+            rgba(3, 10, 20, 0.98)
+          );
           --logs-console-header-bg: rgba(8, 18, 31, 0.92);
           --logs-console-chip-bg: rgba(12, 25, 42, 0.86);
           --logs-console-border: rgba(56, 189, 248, 0.22);
           --logs-console-divider: rgba(56, 189, 248, 0.14);
           --logs-console-text: #edf6ff;
           --logs-console-muted: rgba(203, 213, 225, 0.72);
+          --logs-signal-bg: rgba(8, 18, 31, 0.78);
+          --logs-signal-border: rgba(56, 189, 248, 0.13);
+          --logs-signal-text: rgba(248, 250, 252, 0.94);
+          --logs-signal-muted: rgba(203, 213, 225, 0.68);
           --logs-toolbar-bg: rgba(9, 18, 31, 0.92);
-          --logs-toolbar-panel-bg: linear-gradient(180deg, rgba(12, 25, 42, 0.96), rgba(8, 17, 31, 0.96));
+          --logs-toolbar-panel-bg: linear-gradient(
+            180deg,
+            rgba(12, 25, 42, 0.96),
+            rgba(8, 17, 31, 0.96)
+          );
           --logs-toolbar-border: rgba(148, 163, 184, 0.18);
           --logs-control-bg: rgba(2, 8, 23, 0.34);
           --logs-control-border: rgba(148, 163, 184, 0.22);
           --logs-control-text: rgba(248, 250, 252, 0.92);
           --logs-control-muted: rgba(226, 232, 240, 0.74);
           --logs-terminal-frame-bg:
-            linear-gradient(90deg, transparent 0 23px, rgba(56, 189, 248, 0.055) 23px 24px, transparent 24px 48px),
+            linear-gradient(
+              90deg,
+              transparent 0 23px,
+              rgba(56, 189, 248, 0.055) 23px 24px,
+              transparent 24px 48px
+            ),
             linear-gradient(180deg, #081525 0%, var(--ops-terminal-bg) 100%);
           --logs-terminal-frame-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
           --logs-terminal-titlebar-bg: rgba(8, 18, 31, 0.96);
           --logs-terminal-titlebar-border: rgba(56, 189, 248, 0.16);
+          --logs-terminal-telemetry-bg: rgba(8, 18, 31, 0.78);
+          --logs-terminal-telemetry-border: rgba(56, 189, 248, 0.12);
+          --logs-terminal-telemetry-muted: rgba(203, 213, 225, 0.68);
+          --logs-terminal-telemetry-text: rgba(248, 250, 252, 0.94);
           --logs-terminal-bg: var(--ops-terminal-bg, #061120);
           --logs-terminal-fg: var(--ops-terminal-fg, #eef6ff);
           --logs-empty-bg: rgba(8, 18, 31, 0.94);
           --logs-empty-border: rgba(56, 189, 248, 0.2);
-          --logs-empty-shadow: 0 18px 34px rgba(2, 8, 23, 0.34);
+          --logs-empty-shadow: 0 8px 16px rgba(2, 8, 23, 0.28);
           border-color: var(--logs-console-border);
           background: var(--logs-console-frame-bg);
-          box-shadow: 0 18px 36px rgba(2, 8, 23, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+          box-shadow:
+            0 1px 2px rgba(2, 8, 23, 0.22),
+            inset 0 1px 0 rgba(255, 255, 255, 0.035);
         }
 
         :global(.logs-workbench-shell .ops-frame-shell__header) {
-          border-bottom-color: var(--logs-console-divider);
-          background: var(--logs-console-header-bg);
+          border-bottom-color: var(--kn-border, var(--logs-console-divider));
+          background: color-mix(
+            in srgb,
+            var(--kn-surface, var(--logs-console-header-bg)) 90%,
+            transparent
+          );
+          backdrop-filter: blur(12px) saturate(1.08);
         }
 
         :global(.logs-workbench-shell .ops-frame-shell__title) {
-          color: var(--logs-console-text);
+          color: var(--kn-text, var(--logs-console-text));
         }
 
         :global(.logs-workbench-shell .ops-frame-shell__subtitle) {
-          color: var(--logs-console-muted);
+          color: var(--kn-text-secondary, var(--logs-console-muted));
         }
 
         :global(.logs-workbench-shell .ops-frame-shell__chips) {
@@ -1869,6 +2247,59 @@ export default function LogsPage() {
 
         :global(.logs-workbench-stack.ant-space) {
           display: flex;
+        }
+
+        .logs-signal-row {
+          display: grid;
+          grid-template-columns: 1.2fr repeat(4, minmax(104px, 1fr));
+          gap: 8px;
+          width: 100%;
+        }
+
+        .logs-signal-card {
+          display: grid;
+          gap: 3px;
+          min-width: 0;
+          padding: 10px 12px;
+          border: 1px solid var(--logs-signal-border);
+          border-radius: 8px;
+          background: var(--logs-signal-bg);
+          color: var(--logs-signal-text);
+          box-shadow: inset 0 1px 0
+            color-mix(in srgb, var(--logs-signal-text) 8%, transparent);
+        }
+
+        .logs-signal-card span {
+          overflow: hidden;
+          color: var(--logs-signal-muted);
+          font-size: 11px;
+          line-height: 1.2;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .logs-signal-card strong {
+          overflow: hidden;
+          color: inherit;
+          font-family: var(--kn-font-mono);
+          font-size: 13px;
+          font-weight: 750;
+          line-height: 1.25;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .logs-signal-card--success strong {
+          color: var(--ops-status-success-text);
+        }
+
+        .logs-signal-card--warning strong,
+        .logs-signal-card--processing strong {
+          color: var(--ops-status-warning-text);
+        }
+
+        .logs-signal-card--danger strong {
+          color: var(--ops-status-danger-text);
         }
 
         .logs-terminal-frame {
@@ -1938,6 +2369,7 @@ export default function LogsPage() {
           border: 1px solid var(--logs-toolbar-border);
           border-radius: 8px;
           background: color-mix(in srgb, var(--logs-toolbar-bg) 88%, #eef4ff);
+          backdrop-filter: blur(10px) saturate(1.08);
         }
 
         .headlamp-log-group-main {
@@ -2028,7 +2460,11 @@ export default function LogsPage() {
         .headlamp-log-toolbar :global(.ant-btn:focus-visible) {
           border-color: var(--ant-color-primary) !important;
           color: var(--ant-color-primary) !important;
-          background: color-mix(in srgb, var(--logs-control-bg) 88%, var(--kn-primary-subtle, rgba(35, 92, 255, 0.1))) !important;
+          background: color-mix(
+            in srgb,
+            var(--logs-control-bg) 88%,
+            var(--kn-primary-subtle, rgba(35, 92, 255, 0.1))
+          ) !important;
         }
 
         .headlamp-time-trigger {
@@ -2043,18 +2479,18 @@ export default function LogsPage() {
           white-space: nowrap;
         }
 
-	        .headlamp-time-popover {
-	          display: grid;
-	          gap: 14px;
-	          width: min(430px, calc(100vw - 48px));
-	        }
+        .headlamp-time-popover {
+          display: grid;
+          gap: 14px;
+          width: min(430px, calc(100vw - 48px));
+        }
 
-	        .headlamp-time-tabs {
-	          display: flex;
-	          align-items: center;
-	          gap: 8px;
-	          flex-wrap: wrap;
-	        }
+        .headlamp-time-tabs {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
 
         .headlamp-time-section {
           display: grid;
@@ -2084,7 +2520,11 @@ export default function LogsPage() {
         .headlamp-search-icon {
           border: 0;
           border-radius: 6px;
-          background: color-mix(in srgb, var(--logs-control-bg) 92%, var(--kn-primary-subtle, rgba(35, 92, 255, 0.1)));
+          background: color-mix(
+            in srgb,
+            var(--logs-control-bg) 92%,
+            var(--kn-primary-subtle, rgba(35, 92, 255, 0.1))
+          );
           color: var(--logs-control-text);
           cursor: pointer;
           font: inherit;
@@ -2108,16 +2548,20 @@ export default function LogsPage() {
           color: var(--ant-color-primary);
         }
 
-        .headlamp-search-popover :global(.headlamp-log-search-input .ant-input) {
+        .headlamp-search-popover
+          :global(.headlamp-log-search-input .ant-input) {
           color: var(--logs-control-text);
         }
 
-        .headlamp-search-popover :global(.headlamp-log-search-input .ant-input::placeholder) {
+        .headlamp-search-popover
+          :global(.headlamp-log-search-input .ant-input::placeholder) {
           color: var(--logs-control-muted);
         }
 
-        .headlamp-search-popover :global(.headlamp-log-search-input .ant-input-prefix),
-        .headlamp-search-popover :global(.headlamp-log-search-input .ant-input-clear-icon) {
+        .headlamp-search-popover
+          :global(.headlamp-log-search-input .ant-input-prefix),
+        .headlamp-search-popover
+          :global(.headlamp-log-search-input .ant-input-clear-icon) {
           color: var(--logs-control-muted);
         }
 
@@ -2144,7 +2588,8 @@ export default function LogsPage() {
           height: 8px;
           border-radius: 50%;
           display: inline-block;
-          box-shadow: 0 0 0 1px color-mix(in srgb, var(--logs-terminal-fg) 12%, transparent);
+          box-shadow: 0 0 0 1px
+            color-mix(in srgb, var(--logs-terminal-fg) 12%, transparent);
         }
 
         .logs-terminal-dots span:nth-child(1) {
@@ -2189,13 +2634,86 @@ export default function LogsPage() {
           color: var(--ops-status-danger-text);
         }
 
+        .logs-terminal-telemetry {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 1px;
+          border-bottom: 1px solid var(--logs-terminal-telemetry-border);
+          background: var(--logs-terminal-telemetry-border);
+        }
+
+        .logs-terminal-telemetry__item {
+          display: grid;
+          gap: 2px;
+          min-width: 0;
+          padding: 8px 12px;
+          background: var(--logs-terminal-telemetry-bg);
+          color: var(--logs-terminal-telemetry-text);
+        }
+
+        .logs-terminal-telemetry__item span {
+          overflow: hidden;
+          color: var(--logs-terminal-telemetry-muted);
+          font-size: 11px;
+          line-height: 1.2;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .logs-terminal-telemetry__item strong {
+          overflow: hidden;
+          color: inherit;
+          font-family: var(--kn-font-mono);
+          font-size: 12px;
+          font-weight: 700;
+          line-height: 1.25;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .logs-terminal-telemetry__item--success strong {
+          color: var(--ops-status-success-text);
+        }
+
+        .logs-terminal-telemetry__item--warning strong,
+        .logs-terminal-telemetry__item--processing strong {
+          color: var(--ops-status-warning-text);
+        }
+
+        .logs-terminal-telemetry__item--danger strong {
+          color: var(--ops-status-danger-text);
+        }
+
         .logs-terminal-host {
+          position: relative;
           width: 100%;
           min-height: 58vh;
           max-height: 72vh;
-          background: var(--logs-terminal-bg);
+          background:
+            linear-gradient(
+              180deg,
+              color-mix(in srgb, var(--logs-terminal-fg) 4%, transparent),
+              transparent 42%
+            ),
+            var(--logs-terminal-bg);
           overflow: hidden;
           padding: 14px;
+        }
+
+        .logs-terminal-host::before {
+          content: "";
+          position: absolute;
+          inset: 11px 14px auto;
+          z-index: 2;
+          height: 1px;
+          pointer-events: none;
+          background: linear-gradient(
+            90deg,
+            transparent,
+            var(--ops-log-info),
+            transparent
+          );
+          opacity: 0.38;
         }
 
         .logs-empty-hint {
@@ -2229,7 +2747,11 @@ export default function LogsPage() {
         }
 
         .logs-empty-hint :global(.ant-typography-secondary) {
-          color: color-mix(in srgb, var(--logs-terminal-fg) 68%, transparent) !important;
+          color: color-mix(
+            in srgb,
+            var(--logs-terminal-fg) 68%,
+            transparent
+          ) !important;
         }
 
         :global(.logs-workbench-body) :global(.xterm) {
@@ -2246,6 +2768,10 @@ export default function LogsPage() {
         }
 
         @media (max-width: 1440px) {
+          .logs-signal-row {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+
           .headlamp-log-toolbar {
             grid-template-columns: 1fr;
             grid-template-areas:
@@ -2265,7 +2791,11 @@ export default function LogsPage() {
           }
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 900px) {
+          .logs-signal-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
           .headlamp-log-group,
           .headlamp-log-group-actions {
             width: 100%;
@@ -2313,6 +2843,10 @@ export default function LogsPage() {
           .logs-terminal-host {
             min-height: 48vh;
             max-height: 62vh;
+          }
+
+          .logs-terminal-telemetry {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
           .logs-terminal-titlebar {

@@ -7,7 +7,7 @@
 启动方式：
 
 ```bash
-bash scripts/dev-up.sh
+bash scripts/service.sh dev up
 ```
 
 特征：
@@ -34,7 +34,7 @@ bash scripts/dev-up.sh
 启动方式：
 
 ```bash
-FRONTEND_BOOT_MODE=stable bash scripts/dev-up.sh
+FRONTEND_BOOT_MODE=stable bash scripts/service.sh dev up
 ```
 
 特征：
@@ -54,7 +54,7 @@ FRONTEND_BOOT_MODE=stable bash scripts/dev-up.sh
 启动方式：
 
 ```bash
-bash scripts/prod-up.sh
+bash scripts/service.sh prod up
 ```
 
 特征：
@@ -115,7 +115,7 @@ backend/runtime-gateway/logs/
 
 说明：
 
-- `dev-up.sh` 和 `prod-up.sh` 会把各服务 stdout/stderr 定向到独立日志文件。
+- `service.sh dev up` 和 `service.sh prod up` 会把各服务 stdout/stderr 定向到独立日志文件。
 - `.run/` 只保留 pid、cache、state 等运行状态，不再作为服务日志目录。
 - 生产 pid 使用 `.run/*.prod.pid`，避免和开发 pid 互相覆盖。
 - 开发、演示、生产日志分文件，避免互相覆盖。

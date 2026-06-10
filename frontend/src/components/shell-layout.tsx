@@ -9,6 +9,7 @@ import {
   DeploymentUnitOutlined,
   HddOutlined,
   HomeOutlined,
+  MenuOutlined,
   SafetyOutlined,
   MonitorOutlined,
   MoonFilled,
@@ -21,7 +22,7 @@ import {
   ToolOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Avatar, Breadcrumb, Dropdown, Input, Layout, Menu, Skeleton, Space } from "antd";
+import { Avatar, Breadcrumb, Dropdown, Input, Layout, Menu, Popover, Skeleton, Space } from "antd";
 import type { MenuProps } from "antd";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -351,6 +352,7 @@ const AppSider = memo(function AppSider({
             icon,
             label: (
               <Link
+                className="app-sidebar-menu__link app-sidebar-menu__link--section"
                 href={section.path}
                 prefetch={false}
                 style={{ display: "block" }}
@@ -382,6 +384,7 @@ const AppSider = memo(function AppSider({
             // Link 包裹 label：鼠标悬停自动触发 Next.js prefetch，点击由 Link 接管导航
             label: (
               <Link
+                className="app-sidebar-menu__link app-sidebar-menu__link--nested"
                 href={item.path}
                 prefetch={false}
                 style={{ display: "block" }}
@@ -498,12 +501,13 @@ const AppSider = memo(function AppSider({
   return (
     <Sider
       width={232}
-      className="app-sidebar"
+      className="app-sidebar kn-glass-surface"
+      data-shell-region="sidebar"
       theme={mode as "dark" | "light"}
       style={{ borderRight: "1px solid var(--kn-border)" }}
     >
       <div
-        className="logo-wrap"
+        className="logo-wrap kn-halo-focus"
         style={{
           display: "flex",
           alignItems: "center",
@@ -588,6 +592,7 @@ function LoadingSkeleton() {
 export function ShellLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { mode, toggleTheme } = useThemeMode();
   const { accessToken, isAuthenticated, isInitializing, username, role, logout } = useAuth();
   const isLoginPage = pathname === "/login";
@@ -623,6 +628,30 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
         .filter(Boolean),
     );
   }, [accessToken, capabilitiesQuery.data, isAuthenticated]);
+  const mobileNavItems = useMemo<MenuProps["items"]>(() => {
+    const visibleSections = [...filterNavSectionsByRole(role, disabledPaths)].sort(
+      (left, right) => getSectionOrder(left.key) - getSectionOrder(right.key),
+    );
+    return visibleSections.map((section) => {
+      const icon = sectionIconMap[section.key] ?? <PartitionOutlined />;
+      if (section.items.length === 0 && section.path) {
+        return {
+          key: section.path,
+          icon,
+          label: section.label,
+        };
+      }
+      return {
+        key: section.key,
+        icon,
+        label: section.label,
+        children: section.items.map((item) => ({
+          key: item.path,
+          label: getNavDisplayLabel(item),
+        })),
+      };
+    });
+  }, [disabledPaths, role]);
   const shellScope = useMemo(
     () => ({
       cluster: searchParams.get("clusterName")?.trim() || searchParams.get("clusterId")?.trim() || "全部集群",
@@ -725,18 +754,38 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
       <a className="shell-skip-link" href="#kubenova-main-content">
         跳到主内容
       </a>
-      <Layout style={{ minHeight: "100vh" }}>
+      <Layout className="kubenova-shell" style={{ minHeight: "100dvh" }}>
         {/* AppSider 用 memo 隔离，pathname 变化时只有 selectedKeys/openKeys 更新，父级其余 state 不会触发它重渲染 */}
         <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} />
         <Layout>
         <Header
-          className="app-header"
+          className="app-header kn-glass-surface"
+          data-shell-region="topbar"
           style={{
             background: "color-mix(in srgb, var(--kn-surface) 94%, transparent)",
             borderBottom: "1px solid var(--kn-border)",
             boxShadow: "var(--kn-shadow-subtle)",
           }}
         >
+          <Dropdown
+            menu={{
+              items: mobileNavItems,
+              selectedKeys: [pathname],
+              onClick: ({ key }) => {
+                if (typeof key !== "string" || !key.startsWith("/")) return;
+                markRouteTransitionQuietWindow();
+                router.push(key);
+              },
+            }}
+            classNames={{ root: "shell-mobile-nav-dropdown" }}
+            trigger={["click"]}
+          >
+            <OpsIconActionButton
+              aria-label="打开移动端导航"
+              className="shell-mobile-nav-trigger"
+              icon={<MenuOutlined />}
+            />
+          </Dropdown>
           <Breadcrumb
             items={[
               {
@@ -789,6 +838,10 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               <strong>{role || "user"}</strong>
             </span>
           </div>
+          <div className="shell-mobile-scope" aria-label="当前移动端工作区范围">
+            <span>{shellScope.cluster}</span>
+            <strong>{shellScope.namespace}</strong>
+          </div>
           <Space size={12} className="shell-topbar-actions">
             <Input
               id="shell-global-search"
@@ -798,6 +851,28 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               placeholder="搜索资源、日志或告警"
               style={{ width: 340 }}
             />
+            <Popover
+              content={
+                <div className="shell-mobile-search-panel">
+                  <Input
+                    id="shell-mobile-global-search"
+                    name="shell-mobile-global-search"
+                    allowClear
+                    prefix={<SearchOutlined />}
+                    placeholder="搜索资源、日志或告警"
+                  />
+                </div>
+              }
+              overlayClassName="shell-mobile-search-popover"
+              placement="bottomRight"
+              trigger="click"
+            >
+              <OpsIconActionButton
+                aria-label="打开移动端搜索"
+                className="shell-mobile-search-trigger"
+                icon={<SearchOutlined />}
+              />
+            </Popover>
             <OpsIconActionButton className="shell-topbar-action" icon={<BellOutlined />}>通知中心</OpsIconActionButton>
             <OpsIconActionButton className="shell-topbar-action" icon={<ReloadOutlined />} onClick={() => window.location.reload()}>
               刷新

@@ -10,7 +10,7 @@ Usage:
   bash scripts/service.sh <command> [options]
 
 Commands:
-  dev up [--no-gateway] [--stable-frontend|--dev-frontend]
+  dev up [--no-gateway] [--stable-frontend|--dev-frontend] [--stable-api|--dev-api]
                                 Start local development services
   dev down [service...]        Stop local development services
   dev restart [service...]     Restart local development services
@@ -24,6 +24,8 @@ Commands:
   prod logs [service]          Tail production service logs
   prod install                 Install systemd units and env templates
   prod uninstall               Uninstall systemd units and env templates
+  prod switch <version>        Switch /opt/kubenova/current to a release
+  prod rollback <version>      Roll back /opt/kubenova/current to a release
 
   install-deps                 Install local dependencies
   db-init                      Initialize local database
@@ -34,8 +36,7 @@ Commands:
   package release              Build and package Ubuntu binary release tarball
   test topology                Run topology verification
   clean topology-artifacts     Clean topology artifacts
-  topology verify              Run topology verification
-  topology clean               Clean topology artifacts
+  clean dev-cache              Clean local frontend development build cache
   help                         Show this help
 
 Services:
@@ -119,6 +120,120 @@ run_script() {
   exec bash "$ROOT_DIR/scripts/$script" "$@"
 }
 
+run_dev() {
+  exec bash "$ROOT_DIR/scripts/dev.sh" "$@"
+}
+
+run_prod() {
+  exec bash "$ROOT_DIR/scripts/prod.sh" "$@"
+}
+
+install_deps() {
+  echo "[安装] 正在安装前端依赖..."
+  npm --prefix "$ROOT_DIR/frontend" install
+
+  echo "[安装] 正在安装 control-api 依赖..."
+  npm --prefix "$ROOT_DIR/backend/control-api" install
+
+  if [[ -d "$ROOT_DIR/backend/runtime-gateway" ]]; then
+    echo "[安装] 正在安装 runtime-gateway 依赖（go mod download）..."
+    (cd "$ROOT_DIR/backend/runtime-gateway" && go mod download)
+  fi
+
+  echo ""
+  echo "✔ 所有依赖已安装"
+}
+
+db_init() {
+  local control_api_dir="$ROOT_DIR/backend/control-api"
+  local db_name="${DB_NAME:-k8s_aiops}"
+  local db_user="${DB_USER:-kubenova}"
+  local db_pass="${DB_PASS:-kubenova_dev}"
+  local db_host="${DB_HOST:-localhost}"
+  local db_port="${DB_PORT:-5432}"
+  local database_url="postgresql://${db_user}:${db_pass}@${db_host}:${db_port}/${db_name}"
+  local reset="false"
+
+  for arg in "$@"; do
+    [[ "$arg" == "--reset" ]] && reset="true"
+  done
+
+  echo "[数据库初始化] 目标：$database_url"
+
+  run_psql() {
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "$1" 2>&1
+  }
+
+  if [[ "$reset" == "true" ]]; then
+    echo "[数据库初始化] --reset：正在删除数据库 $db_name ..."
+    run_psql "DROP DATABASE IF EXISTS $db_name;" || true
+  fi
+
+  echo "[数据库初始化] 正在确保角色 '$db_user' 存在..."
+  run_psql "DO \$\$ BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$db_user') THEN
+      CREATE ROLE $db_user LOGIN PASSWORD '$db_pass' CREATEDB;
+    END IF;
+  END \$\$;" 2>/dev/null || run_psql "ALTER USER $db_user WITH PASSWORD '$db_pass' CREATEDB;"
+
+  echo "[数据库初始化] 正在确保数据库 '$db_name' 存在..."
+  sudo -u postgres psql -c "SELECT 1 FROM pg_database WHERE datname='$db_name'" | grep -q 1 \
+    || run_psql "CREATE DATABASE $db_name OWNER $db_user;"
+
+  run_psql "GRANT ALL PRIVILEGES ON DATABASE $db_name TO $db_user;" 2>/dev/null || true
+
+  echo "[数据库初始化] 正在执行 prisma migrate deploy..."
+  (cd "$control_api_dir" && DATABASE_URL="$database_url" npx prisma migrate deploy 2>&1)
+
+  echo "[数据库初始化] 正在生成 Prisma Client..."
+  (cd "$control_api_dir" && DATABASE_URL="$database_url" npx prisma generate 2>&1)
+
+  echo ""
+  echo "✔ 数据库初始化完成：$database_url"
+  echo "  可执行 'bash scripts/service.sh dev up' 启动所有服务。"
+}
+
+clean_topology_artifacts() {
+  local dry_run="false"
+  if [[ "${1:-}" == "--dry-run" ]]; then
+    dry_run="true"
+  fi
+  local targets=(
+    "$ROOT_DIR/.playwright-mcp"
+    "$ROOT_DIR/tmp-topology-default.md"
+    "$ROOT_DIR/tmp-topology-default.png"
+  )
+
+  echo "[topology-clean] root=$ROOT_DIR dry_run=$dry_run"
+  local target
+  for target in "${targets[@]}"; do
+    [[ -e "$target" ]] || continue
+    if [[ "$dry_run" == "true" ]]; then
+      echo "[topology-clean] would remove: $target"
+      continue
+    fi
+    rm -rf "$target"
+    echo "[topology-clean] removed: $target"
+  done
+  echo "[topology-clean] done"
+}
+
+clean_dev_cache() {
+  local targets=(
+    "$ROOT_DIR/frontend/.next/dev"
+    "$ROOT_DIR/frontend/.next/cache"
+  )
+  echo "[dev-cache-clean] root=$ROOT_DIR"
+  local target
+  for target in "${targets[@]}"; do
+    if [[ -e "$target" ]]; then
+      rm -rf "$target"
+      echo "[dev-cache-clean] removed: $target"
+    fi
+  done
+  echo "[dev-cache-clean] done"
+}
+
 service_log_dir() {
   local mode="$1" service="$2"
   case "$mode:$service" in
@@ -181,22 +296,17 @@ case "$cmd" in
     sub="${1:-help}"
     shift || true
     case "$sub" in
-      up|start)
+      up|start|restart)
         preflight_dev
-        run_script dev-up.sh "$@"
+        run_dev "$sub" "$@"
         ;;
       down|stop)
         preflight_common
-        run_script dev-down.sh "$@"
-        ;;
-      restart)
-        preflight_dev
-        bash "$ROOT_DIR/scripts/dev-down.sh" "$@"
-        exec bash "$ROOT_DIR/scripts/dev-up.sh"
+        run_dev "$sub" "$@"
         ;;
       status)
         preflight_common
-        run_script dev-status.sh "$@"
+        run_dev "$sub" "$@"
         ;;
       logs)
         preflight_logs
@@ -210,44 +320,35 @@ case "$cmd" in
     sub="${1:-help}"
     shift || true
     case "$sub" in
-      up|start)
+      up|start|restart)
         preflight_prod "$sub"
-        run_script prod-up.sh "$@"
+        run_prod "$sub" "$@"
         ;;
       down|stop)
         preflight_common
-        run_script prod-down.sh "$@"
-        ;;
-      restart)
-        preflight_prod up
-        bash "$ROOT_DIR/scripts/prod-down.sh" "$@"
-        exec bash "$ROOT_DIR/scripts/prod-up.sh"
+        run_prod "$sub" "$@"
         ;;
       status)
         preflight_common
-        run_script prod-status.sh "$@"
+        run_prod "$sub" "$@"
         ;;
       logs)
         preflight_logs
         tail_logs prod "${1:-all}"
         ;;
-      install)
+      install|uninstall|switch|rollback)
         preflight_common
-        run_script prod-install.sh "$@"
-        ;;
-      uninstall)
-        preflight_common
-        run_script prod-uninstall.sh "$@"
+        run_prod "$sub" "$@"
         ;;
       help|-h|--help) usage ;;
       *) die "未知 prod 命令: $sub" ;;
     esac
     ;;
   install-deps)
-    run_script install-deps.sh "$@"
+    install_deps "$@"
     ;;
   db-init)
-    run_script db-init.sh "$@"
+    db_init "$@"
     ;;
   build)
     sub="${1:-all}"
@@ -295,19 +396,10 @@ case "$cmd" in
     sub="${1:-help}"
     shift || true
     case "$sub" in
-      topology-artifacts) run_script topology-clean-artifacts.sh "$@" ;;
+      topology-artifacts) clean_topology_artifacts "$@" ;;
+      dev-cache) clean_dev_cache "$@" ;;
       help|-h|--help) usage ;;
       *) die "未知 clean 命令: $sub" ;;
-    esac
-    ;;
-  topology)
-    sub="${1:-help}"
-    shift || true
-    case "$sub" in
-      verify) run_script topology-verify.sh "$@" ;;
-      clean) run_script topology-clean-artifacts.sh "$@" ;;
-      help|-h|--help) usage ;;
-      *) die "未知 topology 命令: $sub" ;;
     esac
     ;;
   *)

@@ -21,7 +21,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Row,
   Select,
   Space,
@@ -29,7 +28,10 @@ import {
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/lib/table";
+import type {
+  HeadlampResourceTableColumn,
+  HeadlampTableFilters,
+} from "@/lib/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
@@ -41,6 +43,7 @@ import {
   parseResourceSearchInput,
   POD_ACTION_MENU_CLASS,
   POD_ACTION_TRIGGER_CLASS,
+  ResourceActionIsolation,
   renderPodLikeResourceActionStyles,
   renderResourceActionTriggerButton,
 } from "@/components/resource-action-bar";
@@ -49,6 +52,7 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsFormSection, OpsModalShell } from "@/components/ops";
 import { OpsSurface } from "@/components/ops/ops-surface";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
@@ -70,15 +74,26 @@ import {
 import { getClusters } from "@/lib/api/clusters";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
-import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
+import {
+  readResourceFilterFromSearchParams,
+  useSyncResourceFilterUrlState,
+} from "@/hooks/use-resource-filter-url-state";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
+import {
+  TABLE_COL_WIDTH,
+  getAdaptiveNameWidth,
+} from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
-import { WorkloadReplicaCell, WorkloadStateTag } from "@/components/workloads/workload-table-cells";
+import {
+  WorkloadReplicaCell,
+  WorkloadStateTag,
+} from "@/components/workloads/workload-table-cells";
 
 function stateTag(state: string) {
-  if (state === "active") return <WorkloadStateTag tone="success" label="启用" />;
-  if (state === "disabled") return <WorkloadStateTag tone="neutral" label="禁用" />;
+  if (state === "active")
+    return <WorkloadStateTag tone="success" label="启用" />;
+  if (state === "disabled")
+    return <WorkloadStateTag tone="neutral" label="禁用" />;
   return <WorkloadStateTag tone="danger" label="已删除" />;
 }
 
@@ -94,7 +109,12 @@ function getTextFilter(filters: HeadlampTableFilters, key: string) {
 }
 
 function textMatches(value: unknown, filterValue: string) {
-  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+  return (
+    !filterValue ||
+    String(value ?? "")
+      .toLowerCase()
+      .includes(filterValue)
+  );
 }
 
 function selectMatches(value: unknown, filterValue: unknown) {
@@ -153,7 +173,9 @@ interface ProbeConfig {
 
 type DaemonSetAction = "scale" | "restart" | "rollback" | "enable" | "disable";
 
-function toNodeSelectorObject(pairs: KeyValuePair[]): Record<string, string> | undefined {
+function toNodeSelectorObject(
+  pairs: KeyValuePair[],
+): Record<string, string> | undefined {
   const normalized = pairs.reduce<Record<string, string>>((acc, pair) => {
     const key = pair.key?.trim();
     const value = pair.value?.trim();
@@ -165,7 +187,9 @@ function toNodeSelectorObject(pairs: KeyValuePair[]): Record<string, string> | u
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
-function toTolerations(values: TolerationForm[]): Array<Record<string, string>> | undefined {
+function toTolerations(
+  values: TolerationForm[],
+): Array<Record<string, string>> | undefined {
   const normalized = values
     .map((item) => ({
       key: item.key?.trim(),
@@ -190,7 +214,9 @@ function toTolerations(values: TolerationForm[]): Array<Record<string, string>> 
   return normalized.length > 0 ? normalized : undefined;
 }
 
-function toHttpProbeConfig(config?: ProbeHttpConfig): Record<string, unknown> | undefined {
+function toHttpProbeConfig(
+  config?: ProbeHttpConfig,
+): Record<string, unknown> | undefined {
   if (!config?.enabled || !config.path?.trim() || !config.port) {
     return undefined;
   }
@@ -207,11 +233,18 @@ function toHttpProbeConfig(config?: ProbeHttpConfig): Record<string, unknown> | 
   };
 }
 
-function buildDaemonSetSpec(values: FormValues): Record<string, unknown> | undefined {
-  const nodeSelector = toNodeSelectorObject(values.scheduling?.nodeSelector ?? []);
+function buildDaemonSetSpec(
+  values: FormValues,
+): Record<string, unknown> | undefined {
+  const nodeSelector = toNodeSelectorObject(
+    values.scheduling?.nodeSelector ?? [],
+  );
   const tolerations = toTolerations(values.scheduling?.tolerations ?? []);
-  const antiAffinityLabelKey = values.scheduling?.podAntiAffinityLabelKey?.trim();
-  const antiAffinityValues = (values.scheduling?.podAntiAffinityLabelValues ?? "")
+  const antiAffinityLabelKey =
+    values.scheduling?.podAntiAffinityLabelKey?.trim();
+  const antiAffinityValues = (
+    values.scheduling?.podAntiAffinityLabelValues ?? ""
+  )
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
@@ -225,7 +258,10 @@ function buildDaemonSetSpec(values: FormValues): Record<string, unknown> | undef
                   {
                     key: antiAffinityLabelKey,
                     operator: "In",
-                    values: antiAffinityValues.length > 0 ? antiAffinityValues : ["true"],
+                    values:
+                      antiAffinityValues.length > 0
+                        ? antiAffinityValues
+                        : ["true"],
                   },
                 ],
               },
@@ -239,8 +275,12 @@ function buildDaemonSetSpec(values: FormValues): Record<string, unknown> | undef
   const livenessProbe = toHttpProbeConfig(values.probes?.liveness);
   const readinessProbe = toHttpProbeConfig(values.probes?.readiness);
   const startupProbe = toHttpProbeConfig(values.probes?.startup);
-  const hasSchedulingConfig = Boolean(nodeSelector || tolerations || podAntiAffinity);
-  const hasProbeConfig = Boolean(livenessProbe || readinessProbe || startupProbe);
+  const hasSchedulingConfig = Boolean(
+    nodeSelector || tolerations || podAntiAffinity,
+  );
+  const hasProbeConfig = Boolean(
+    livenessProbe || readinessProbe || startupProbe,
+  );
 
   if (!hasSchedulingConfig && !hasProbeConfig) {
     return undefined;
@@ -283,8 +323,11 @@ export default function DaemonSetsPage() {
   const { message } = App.useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
-    readResourceFilterFromSearchParams(searchParams);
+  const {
+    clusterId: initialClusterId,
+    namespace: initialNamespace,
+    keyword: initialKeyword,
+  } = readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
@@ -292,8 +335,13 @@ export default function DaemonSetsPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
-    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const {
+    clusterId,
+    namespace,
+    namespaceDisabled,
+    namespacePlaceholder,
+    onScopeChange,
+  } = useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const {
     sortBy,
     sortOrder,
@@ -313,9 +361,23 @@ export default function DaemonSetsPage() {
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [scaleItem, setScaleItem] = useState<WorkloadListItem | null>(null);
   const [targetReplicas, setTargetReplicas] = useState(1);
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget] =
+    useState<ResourceDetailRequest | null>(null);
 
-  const queryKey = ["workloads", "DaemonSet", { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize, sortBy, sortOrder }, accessToken];
+  const queryKey = [
+    "workloads",
+    "DaemonSet",
+    {
+      clusterId,
+      keyword,
+      namespace,
+      page: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
+      sortBy,
+      sortOrder,
+    },
+    accessToken,
+  ];
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey,
@@ -339,33 +401,50 @@ export default function DaemonSetsPage() {
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "list", accessToken],
-    queryFn: () => getClusters({ state: "active", selectableOnly: true }, accessToken!),
+    queryFn: () =>
+      getClusters({ state: "active", selectableOnly: true }, accessToken!),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
   const clusterOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
+    () =>
+      (clustersQuery.data?.items ?? []).map((c) => ({
+        label: c.name,
+        value: c.id,
+      })),
     [clustersQuery.data],
   );
   const clusterMap = useMemo(
-    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name])),
+    () =>
+      Object.fromEntries(
+        (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
+      ),
     [clustersQuery.data],
   );
 
   const clusterSelectOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
+    () =>
+      (clustersQuery.data?.items ?? []).map((c) => ({
+        label: c.name,
+        value: c.id,
+      })),
     [clustersQuery.data],
   );
 
   const knownNamespaces = useMemo(
-    () => Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean))),
+    () =>
+      Array.from(
+        new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean)),
+      ),
     [data],
   );
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter(
-        (item) =>
-          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+      (data?.items ?? []).filter((item) =>
+        matchLabelExpressions(
+          item.labels as Record<string, string> | null | undefined,
+          mergedFilters,
+        ),
       ),
     [data?.items, mergedFilters],
   );
@@ -378,18 +457,26 @@ export default function DaemonSetsPage() {
     const createdAtFilter = getTextFilter(tableFilters, "createdAt");
     const stateFilter = tableFilters.state;
 
-    return tableData.filter((item) => (
-      textMatches(item.name, nameFilter) &&
-      textMatches(`${item.clusterId} ${getClusterDisplayName(clusterMap, item.clusterId)}`, clusterFilter) &&
-      textMatches(item.namespace, namespaceFilter) &&
-      textMatches(item.replicas, replicasFilter) &&
-      textMatches(item.readyReplicas, readyFilter) &&
-      textMatches(item.createdAt, createdAtFilter) &&
-      selectMatches(item.state, stateFilter)
-    ));
+    return tableData.filter(
+      (item) =>
+        textMatches(item.name, nameFilter) &&
+        textMatches(
+          `${item.clusterId} ${getClusterDisplayName(clusterMap, item.clusterId)}`,
+          clusterFilter,
+        ) &&
+        textMatches(item.namespace, namespaceFilter) &&
+        textMatches(item.replicas, replicasFilter) &&
+        textMatches(item.readyReplicas, readyFilter) &&
+        textMatches(item.createdAt, createdAtFilter) &&
+        selectMatches(item.state, stateFilter),
+    );
   }, [clusterMap, tableData, tableFilters]);
   const nameWidth = useMemo(
-    () => getAdaptiveNameWidth(filteredTableData.map((item) => item.name), { max: 320 }),
+    () =>
+      getAdaptiveNameWidth(
+        filteredTableData.map((item) => item.name),
+        { max: 320 },
+      ),
     [filteredTableData],
   );
   const handleGlobalSearchChange = (value: string) => {
@@ -424,14 +511,15 @@ export default function DaemonSetsPage() {
     try {
       const spec = buildDaemonSetSpec(values);
       if (editingItem) {
-        const patch = buildWorkloadSafeEditPatch(editingItem, "DaemonSet", values, {
-          includeImage: true,
-        });
-        await patchWorkloadById(
-          editingItem.id,
-          patch,
-          accessToken!,
+        const patch = buildWorkloadSafeEditPatch(
+          editingItem,
+          "DaemonSet",
+          values,
+          {
+            includeImage: true,
+          },
         );
+        await patchWorkloadById(editingItem.id, patch, accessToken!);
         void message.success("DaemonSet 更新成功");
       } else {
         await createWorkload(
@@ -452,7 +540,9 @@ export default function DaemonSetsPage() {
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey });
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "操作失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "操作失败，请重试",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -464,7 +554,9 @@ export default function DaemonSetsPage() {
       void message.success(`${item.name} 删除成功`);
       void refetch();
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "删除失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "删除失败，请重试",
+      );
     }
   };
 
@@ -507,7 +599,10 @@ export default function DaemonSetsPage() {
     },
   });
 
-  const handleWorkloadAction = async (item: WorkloadListItem, action: DaemonSetAction) => {
+  const handleWorkloadAction = async (
+    item: WorkloadListItem,
+    action: DaemonSetAction,
+  ) => {
     try {
       await actionMutation.mutateAsync({ item, action });
       const actionText =
@@ -520,7 +615,9 @@ export default function DaemonSetsPage() {
               : "禁用";
       void message.success(`${item.name} ${actionText}操作已提交`);
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "操作失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "操作失败，请重试",
+      );
     }
   };
 
@@ -531,9 +628,13 @@ export default function DaemonSetsPage() {
     setScaleItem(null);
     try {
       await actionMutation.mutateAsync({ item: selected, action: "scale" });
-      void message.success(`${selected.name} 扩缩容操作已提交，目标值 ${target}`);
+      void message.success(
+        `${selected.name} 扩缩容操作已提交，目标值 ${target}`,
+      );
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "扩缩容失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "扩缩容失败，请重试",
+      );
     }
   };
 
@@ -544,9 +645,23 @@ export default function DaemonSetsPage() {
       { key: "edit", icon: <EditOutlined />, label: "编辑" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
       { key: "scale", icon: <RetweetOutlined />, label: "扩缩容" },
-      { key: "restart", icon: <ReloadOutlined />, label: "重启", disabled: !active },
-      { key: "rollback", icon: <RollbackOutlined />, label: "回滚", disabled: !active },
-      { key: active ? "disable" : "enable", icon: <StopOutlined />, label: active ? "禁用" : "启用" },
+      {
+        key: "restart",
+        icon: <ReloadOutlined />,
+        label: "重启",
+        disabled: !active,
+      },
+      {
+        key: "rollback",
+        icon: <RollbackOutlined />,
+        label: "回滚",
+        disabled: !active,
+      },
+      {
+        key: active ? "disable" : "enable",
+        icon: <StopOutlined />,
+        label: active ? "禁用" : "启用",
+      },
       { type: "divider" },
       { key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除" },
     ]);
@@ -570,7 +685,12 @@ export default function DaemonSetsPage() {
       setTargetReplicas(item.replicas);
       return;
     }
-    if (key === "restart" || key === "rollback" || key === "disable" || key === "enable") {
+    if (
+      key === "restart" ||
+      key === "rollback" ||
+      key === "disable" ||
+      key === "enable"
+    ) {
       void handleWorkloadAction(item, key as Exclude<DaemonSetAction, "scale">);
       return;
     }
@@ -599,7 +719,9 @@ export default function DaemonSetsPage() {
       ellipsis: true,
       render: (name: string, row: WorkloadListItem) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "DaemonSet", id: row.id })}>
+          <Typography.Link
+            onClick={() => setDetailTarget({ kind: "DaemonSet", id: row.id })}
+          >
             {name}
           </Typography.Link>
         ) : (
@@ -607,15 +729,33 @@ export default function DaemonSetsPage() {
         ),
       ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "clusterId", key: "clusterId", filter: { type: "text", placeholder: "以集群过滤" }, width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", filter: { type: "text", placeholder: "以命名空间过滤" }, width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
+    {
+      title: "集群",
+      dataIndex: "clusterId",
+      key: "clusterId",
+      filter: { type: "text", placeholder: "以集群过滤" },
+      width: TABLE_COL_WIDTH.cluster,
+      render: (_: unknown, row: WorkloadListItem) =>
+        getClusterDisplayName(clusterMap, row.clusterId),
+      ...getSortableColumnProps("clusterId"),
+    },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      filter: { type: "text", placeholder: "以命名空间过滤" },
+      width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace"),
+    },
     {
       title: "期望调度",
       dataIndex: "replicas",
       key: "replicas",
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.replicas,
-      render: (value: number) => <WorkloadReplicaCell value={value} variant="desired" />,
+      render: (value: number) => (
+        <WorkloadReplicaCell value={value} variant="desired" />
+      ),
       ...getSortableColumnProps("replicas"),
     },
     {
@@ -625,7 +765,11 @@ export default function DaemonSetsPage() {
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.ready,
       render: (value: number, row: WorkloadListItem) => (
-        <WorkloadReplicaCell value={value} target={row.replicas} variant="ready" />
+        <WorkloadReplicaCell
+          value={value}
+          target={row.replicas}
+          variant="ready"
+        />
       ),
       ...getSortableColumnProps("readyReplicas"),
     },
@@ -633,7 +777,11 @@ export default function DaemonSetsPage() {
       title: "状态",
       dataIndex: "state",
       key: "state",
-      filter: { type: "status", placeholder: "以状态过滤", options: STATE_FILTER_OPTIONS },
+      filter: {
+        type: "status",
+        placeholder: "以状态过滤",
+        options: STATE_FILTER_OPTIONS,
+      },
       width: TABLE_COL_WIDTH.status,
       render: (value: string) => stateTag(value),
       ...getSortableColumnProps("state"),
@@ -644,7 +792,9 @@ export default function DaemonSetsPage() {
       key: "createdAt",
       filter: { type: "text", placeholder: "以时间过滤" },
       width: TABLE_COL_WIDTH.time,
-      render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      render: (value: string) => (
+        <ResourceTimeCell value={value} now={now} mode="relative" />
+      ),
       ...getSortableColumnProps("createdAt"),
     },
     {
@@ -655,90 +805,117 @@ export default function DaemonSetsPage() {
       align: "left",
       fixed: "right",
       render: (_: unknown, item: WorkloadListItem) => (
-        <Dropdown
-          trigger={["click"]}
-          placement="bottomRight"
-          classNames={{ root: POD_ACTION_MENU_CLASS }}
-          menu={{
-            items: buildRowActions(item),
-            onClick: ({ key }) => handleRowAction(item, String(key)),
-          }}
-        >
-          {renderResourceActionTriggerButton({
-            ariaLabel: "更多操作",
-            baseClassName: POD_ACTION_TRIGGER_CLASS,
-          })}
-        </Dropdown>
+        <ResourceActionIsolation>
+          <Dropdown
+            trigger={["click"]}
+            placement="bottomRight"
+            classNames={{ root: POD_ACTION_MENU_CLASS }}
+            menu={{
+              items: buildRowActions(item),
+              onClick: ({ key }) => handleRowAction(item, String(key)),
+            }}
+          >
+            {renderResourceActionTriggerButton({
+              ariaLabel: "更多操作",
+              baseClassName: POD_ACTION_TRIGGER_CLASS,
+            })}
+          </Dropdown>
+        </ResourceActionIsolation>
       ),
     },
   ];
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/workloads/daemonsets"
-        titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=DaemonSet")} aria-label="创建DaemonSet" />}
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceScopeFilterButton
-          clusterId={clusterId}
-          namespace={namespace}
-          clusterOptions={clusterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-            onScopeChange(nextClusterId, nextNamespace);
-            resetPage();
-          }}
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
-      ) : null}
-
-      {isError ? (
-        <Alert
-          className="workload-resource-state-alert"
-          type="error"
-          showIcon
-          title="守护进程集加载失败"
-          description={error instanceof Error ? error.message : "请求失败"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<WorkloadListItem>
-          bordered
-          rowKey="id"
-          tableKey="workloads.daemonsets"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{ sortBy, sortOrder }}
-          columns={columns}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          dataSource={filteredTableData}
-          loading={(isLoading && !data) || actionMutation.isPending}
-          onChange={(paginationInfo, filters, sorter, extra) =>
-            handleTableChange(paginationInfo, filters, sorter, extra, (isLoading && !data) || actionMutation.isPending)
+        <ResourcePageHeader
+          path="/workloads/daemonsets"
+          style={{ marginBottom: 12 }}
+          titleSuffix={
+            <ResourceAddButton
+              onClick={() => router.push("/workloads/create?kind=DaemonSet")}
+              aria-label="创建DaemonSet"
+            />
           }
-          pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({
+              clusterId: nextClusterId,
+              namespace: nextNamespace,
+            }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              resetPage();
+            }}
+          />
+
+          {!isInitializing && !accessToken ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="warning"
+              showIcon
+              title="未检测到登录状态，请先登录后再操作。"
+            />
+          ) : null}
+
+          {isError ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="error"
+              showIcon
+              title="守护进程集加载失败"
+              description={error instanceof Error ? error.message : "请求失败"}
+            />
+          ) : null}
+
+          <ResourceTable<WorkloadListItem>
+            bordered
+            rowKey="id"
+            tableKey="workloads.daemonsets"
+            preferencesClient={createTablePreferencesClient(
+              accessToken || undefined,
+            )}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
+            columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            dataSource={filteredTableData}
+            loading={(isLoading && !data) || actionMutation.isPending}
+            onChange={(paginationInfo, filters, sorter, extra) =>
+              handleTableChange(
+                paginationInfo,
+                filters,
+                sorter,
+                extra,
+                (isLoading && !data) || actionMutation.isPending,
+              )
+            }
+            pagination={getPaginationConfig(
+              data?.total ?? 0,
+              (isLoading && !data) || actionMutation.isPending,
+            )}
+          />
+        </Space>
       </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title={editingItem ? "编辑 DaemonSet" : "新增资源"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
@@ -748,245 +925,278 @@ export default function DaemonSetsPage() {
         confirmLoading={submitting}
         destroyOnHidden
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="名称"
-            name="name"
-            rules={[{ required: true, message: "请输入 DaemonSet 名称" }]}
-          >
-            <Input placeholder="例如：node-exporter" disabled={Boolean(editingItem)} />
-          </Form.Item>
-          <Form.Item
-            label="名称空间"
-            name="namespace"
-            rules={[{ required: true, message: "请输入名称空间" }]}
-          >
-            <Input placeholder="例如：kube-system" disabled={Boolean(editingItem)} />
-          </Form.Item>
-          <Form.Item
-            label="集群"
-            name="clusterId"
-            rules={[{ required: true, message: "请选择集群" }]}
-          >
-            <Select
-              placeholder="请选择集群"
-              options={clusterSelectOptions}
-              loading={clustersQuery.isLoading}
-              disabled={Boolean(editingItem)}
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          {!editingItem ? (
-            <Form.Item label="节点数（预期）" name="replicas">
-              <InputNumber min={0} style={{ width: "100%" }} placeholder="由调度器决定，可留空" />
+        <OpsFormSection
+          title="资源配置"
+          description="按当前页面的安全表单字段提交，不覆盖未展示的高级配置。"
+        >
+          <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+            <Form.Item
+              label="名称"
+              name="name"
+              rules={[{ required: true, message: "请输入 DaemonSet 名称" }]}
+            >
+              <Input
+                placeholder="例如：node-exporter"
+                disabled={Boolean(editingItem)}
+              />
             </Form.Item>
-          ) : null}
-          {editingItem ? (
-            <>
-              <Form.Item label="主容器镜像" name="image">
-                <Input placeholder="registry.example.com/agent:tag" />
+            <Form.Item
+              label="名称空间"
+              name="namespace"
+              rules={[{ required: true, message: "请输入名称空间" }]}
+            >
+              <Input
+                placeholder="例如：kube-system"
+                disabled={Boolean(editingItem)}
+              />
+            </Form.Item>
+            <Form.Item
+              label="集群"
+              name="clusterId"
+              rules={[{ required: true, message: "请选择集群" }]}
+            >
+              <Select
+                placeholder="请选择集群"
+                options={clusterSelectOptions}
+                loading={clustersQuery.isLoading}
+                disabled={Boolean(editingItem)}
+                showSearch
+                optionFilterProp="label"
+              />
+            </Form.Item>
+            {!editingItem ? (
+              <Form.Item label="节点数（预期）" name="replicas">
+                <InputNumber
+                  min={0}
+                  style={{ width: "100%" }}
+                  placeholder="由调度器决定，可留空"
+                />
               </Form.Item>
-              <Form.Item label="Labels" name="labelsText">
-                <Input.TextArea rows={4} placeholder={"app=agent\ncomponent=node"} />
-              </Form.Item>
-              <Form.Item label="Annotations" name="annotationsText">
-                <Input.TextArea rows={4} placeholder={"description=node-agent\nowner=team-a"} />
-              </Form.Item>
-            </>
-          ) : null}
-          {!editingItem ? (
-            <>
-              <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
-                调度策略
-              </Typography.Text>
-              <Form.List name={["scheduling", "nodeSelector"]}>
-                {(fields, { add, remove }) => (
-                  <div className="workload-form-subsection">
-                    <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
-                      Node Selector
-                    </Typography.Text>
-                    <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-                      {fields.map((field) => (
-                        <Row key={field.key} gutter={8}>
-                          <Col span={11}>
-                            <Form.Item name={[field.name, "key"]} style={{ marginBottom: 0 }}>
-                              <Input placeholder="label key" />
-                            </Form.Item>
-                          </Col>
-                          <Col span={11}>
-                            <Form.Item name={[field.name, "value"]} style={{ marginBottom: 0 }}>
-                              <Input placeholder="label value" />
-                            </Form.Item>
-                          </Col>
-                          <Col span={2}>
-                            <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
-                          </Col>
-                        </Row>
-                      ))}
-                      <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ key: "", value: "" })}>
-                        添加 Node Selector
-                      </Button>
-                    </Space>
-                  </div>
-                )}
-              </Form.List>
-
-              <Form.List name={["scheduling", "tolerations"]}>
-                {(fields, { add, remove }) => (
-                  <div className="workload-form-subsection">
-                    <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
-                      Tolerations
-                    </Typography.Text>
-                    <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-                      {fields.map((field) => (
-                        <Row key={field.key} gutter={8}>
-                          <Col span={5}>
-                            <Form.Item name={[field.name, "key"]} style={{ marginBottom: 0 }}>
-                              <Input placeholder="key" />
-                            </Form.Item>
-                          </Col>
-                          <Col span={5}>
-                            <Form.Item name={[field.name, "operator"]} style={{ marginBottom: 0 }}>
-                              <Select
-                                placeholder="operator"
-                                options={[
-                                  { label: "Equal", value: "Equal" },
-                                  { label: "Exists", value: "Exists" },
-                                ]}
-                              />
-                            </Form.Item>
-                          </Col>
-                          <Col span={6}>
-                            <Form.Item name={[field.name, "value"]} style={{ marginBottom: 0 }}>
-                              <Input placeholder="value (Exists 可留空)" />
-                            </Form.Item>
-                          </Col>
-                          <Col span={6}>
-                            <Form.Item name={[field.name, "effect"]} style={{ marginBottom: 0 }}>
-                              <Select
-                                placeholder="effect"
-                                options={[
-                                  { label: "NoSchedule", value: "NoSchedule" },
-                                  { label: "PreferNoSchedule", value: "PreferNoSchedule" },
-                                  { label: "NoExecute", value: "NoExecute" },
-                                ]}
-                              />
-                            </Form.Item>
-                          </Col>
-                          <Col span={2}>
-                            <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
-                          </Col>
-                        </Row>
-                      ))}
-                      <Button
-                        type="dashed"
-                        icon={<PlusOutlined />}
-                        onClick={() => add({ key: "", operator: "Equal", value: "", effect: "NoSchedule" })}
-                      >
-                        添加 Toleration
-                      </Button>
-                    </Space>
-                  </div>
-                )}
-              </Form.List>
-
-              <div className="workload-form-subsection">
-                <Form.Item name={["scheduling", "podAntiAffinityEnabled"]} valuePropName="checked" style={{ marginBottom: 8 }}>
-                  <Switch checkedChildren="启用 Pod 反亲和性" unCheckedChildren="关闭 Pod 反亲和性" />
+            ) : null}
+            {editingItem ? (
+              <>
+                <Form.Item label="主容器镜像" name="image">
+                  <Input placeholder="registry.example.com/agent:tag" />
                 </Form.Item>
-                <Form.Item noStyle shouldUpdate>
-                  {() =>
-                    form.getFieldValue(["scheduling", "podAntiAffinityEnabled"]) ? (
-                      <Row gutter={8}>
-                        <Col span={8}>
-                          <Form.Item
-                            label="标签 Key"
-                            name={["scheduling", "podAntiAffinityLabelKey"]}
-                            rules={[{ required: true, message: "请输入标签 key" }]}
-                          >
-                            <Input placeholder="app" />
-                          </Form.Item>
-                        </Col>
-                        <Col span={10}>
-                          <Form.Item label="标签值(逗号分隔)" name={["scheduling", "podAntiAffinityLabelValues"]}>
-                            <Input placeholder="web,api" />
-                          </Form.Item>
-                        </Col>
-                        <Col span={6}>
-                          <Form.Item label="Topology Key" name={["scheduling", "podAntiAffinityTopologyKey"]}>
-                            <Input placeholder="kubernetes.io/hostname" />
-                          </Form.Item>
-                        </Col>
-                      </Row>
-                    ) : null
-                  }
+                <Form.Item label="Labels" name="labelsText">
+                  <Input.TextArea
+                    rows={4}
+                    placeholder={"app=agent\ncomponent=node"}
+                  />
                 </Form.Item>
-              </div>
-
-              <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
-                健康探针（HTTP）
-              </Typography.Text>
-              {(["liveness", "readiness", "startup"] as const).map((probeKey) => (
-                <div
-                  key={probeKey}
-                  className="workload-form-subsection"
+                <Form.Item label="Annotations" name="annotationsText">
+                  <Input.TextArea
+                    rows={4}
+                    placeholder={"description=node-agent\nowner=team-a"}
+                  />
+                </Form.Item>
+              </>
+            ) : null}
+            {!editingItem ? (
+              <>
+                <Typography.Text
+                  type="secondary"
+                  style={{ display: "block", marginBottom: 8 }}
                 >
-                  <Row gutter={8} align="middle" style={{ marginBottom: 8 }}>
-                    <Col flex="auto">
-                      <Typography.Text strong>{`${probeKey} Probe`}</Typography.Text>
-                    </Col>
-                    <Col>
-                      <Form.Item name={["probes", probeKey, "enabled"]} valuePropName="checked" style={{ marginBottom: 0 }}>
-                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
-                      </Form.Item>
-                    </Col>
-                  </Row>
+                  调度策略
+                </Typography.Text>
+                <Form.List name={["scheduling", "nodeSelector"]}>
+                  {(fields, { add, remove }) => (
+                    <div className="workload-form-subsection">
+                      <Typography.Text
+                        type="secondary"
+                        style={{ display: "block", marginBottom: 8 }}
+                      >
+                        Node Selector
+                      </Typography.Text>
+                      <Space
+                        orientation="vertical"
+                        size={8}
+                        style={{ width: "100%" }}
+                      >
+                        {fields.map((field) => (
+                          <Row key={field.key} gutter={8}>
+                            <Col span={11}>
+                              <Form.Item
+                                name={[field.name, "key"]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <Input placeholder="label key" />
+                              </Form.Item>
+                            </Col>
+                            <Col span={11}>
+                              <Form.Item
+                                name={[field.name, "value"]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <Input placeholder="label value" />
+                              </Form.Item>
+                            </Col>
+                            <Col span={2}>
+                              <Button
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={() => remove(field.name)}
+                              />
+                            </Col>
+                          </Row>
+                        ))}
+                        <Button
+                          type="dashed"
+                          icon={<PlusOutlined />}
+                          onClick={() => add({ key: "", value: "" })}
+                        >
+                          添加 Node Selector
+                        </Button>
+                      </Space>
+                    </div>
+                  )}
+                </Form.List>
+
+                <Form.List name={["scheduling", "tolerations"]}>
+                  {(fields, { add, remove }) => (
+                    <div className="workload-form-subsection">
+                      <Typography.Text
+                        type="secondary"
+                        style={{ display: "block", marginBottom: 8 }}
+                      >
+                        Tolerations
+                      </Typography.Text>
+                      <Space
+                        orientation="vertical"
+                        size={8}
+                        style={{ width: "100%" }}
+                      >
+                        {fields.map((field) => (
+                          <Row key={field.key} gutter={8}>
+                            <Col span={5}>
+                              <Form.Item
+                                name={[field.name, "key"]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <Input placeholder="key" />
+                              </Form.Item>
+                            </Col>
+                            <Col span={5}>
+                              <Form.Item
+                                name={[field.name, "operator"]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <Select
+                                  placeholder="operator"
+                                  options={[
+                                    { label: "Equal", value: "Equal" },
+                                    { label: "Exists", value: "Exists" },
+                                  ]}
+                                />
+                              </Form.Item>
+                            </Col>
+                            <Col span={6}>
+                              <Form.Item
+                                name={[field.name, "value"]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <Input placeholder="value (Exists 可留空)" />
+                              </Form.Item>
+                            </Col>
+                            <Col span={6}>
+                              <Form.Item
+                                name={[field.name, "effect"]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <Select
+                                  placeholder="effect"
+                                  options={[
+                                    {
+                                      label: "NoSchedule",
+                                      value: "NoSchedule",
+                                    },
+                                    {
+                                      label: "PreferNoSchedule",
+                                      value: "PreferNoSchedule",
+                                    },
+                                    { label: "NoExecute", value: "NoExecute" },
+                                  ]}
+                                />
+                              </Form.Item>
+                            </Col>
+                            <Col span={2}>
+                              <Button
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={() => remove(field.name)}
+                              />
+                            </Col>
+                          </Row>
+                        ))}
+                        <Button
+                          type="dashed"
+                          icon={<PlusOutlined />}
+                          onClick={() =>
+                            add({
+                              key: "",
+                              operator: "Equal",
+                              value: "",
+                              effect: "NoSchedule",
+                            })
+                          }
+                        >
+                          添加 Toleration
+                        </Button>
+                      </Space>
+                    </div>
+                  )}
+                </Form.List>
+
+                <div className="workload-form-subsection">
+                  <Form.Item
+                    name={["scheduling", "podAntiAffinityEnabled"]}
+                    valuePropName="checked"
+                    style={{ marginBottom: 8 }}
+                  >
+                    <Switch
+                      checkedChildren="启用 Pod 反亲和性"
+                      unCheckedChildren="关闭 Pod 反亲和性"
+                    />
+                  </Form.Item>
                   <Form.Item noStyle shouldUpdate>
                     {() =>
-                      form.getFieldValue(["probes", probeKey, "enabled"]) ? (
+                      form.getFieldValue([
+                        "scheduling",
+                        "podAntiAffinityEnabled",
+                      ]) ? (
                         <Row gutter={8}>
                           <Col span={8}>
                             <Form.Item
-                              label="Path"
-                              name={["probes", probeKey, "path"]}
-                              rules={[{ required: true, message: "请输入探针路径" }]}
+                              label="标签 Key"
+                              name={["scheduling", "podAntiAffinityLabelKey"]}
+                              rules={[
+                                { required: true, message: "请输入标签 key" },
+                              ]}
                             >
-                              <Input placeholder="/healthz" />
+                              <Input placeholder="app" />
                             </Form.Item>
                           </Col>
-                          <Col span={4}>
+                          <Col span={10}>
                             <Form.Item
-                              label="Port"
-                              name={["probes", probeKey, "port"]}
-                              rules={[{ required: true, message: "请输入端口" }]}
+                              label="标签值(逗号分隔)"
+                              name={[
+                                "scheduling",
+                                "podAntiAffinityLabelValues",
+                              ]}
                             >
-                              <InputNumber min={1} max={65535} style={{ width: "100%" }} />
+                              <Input placeholder="web,api" />
                             </Form.Item>
                           </Col>
-                          <Col span={4}>
-                            <Form.Item label="初始延迟(s)" name={["probes", probeKey, "initialDelaySeconds"]}>
-                              <InputNumber min={0} style={{ width: "100%" }} />
-                            </Form.Item>
-                          </Col>
-                          <Col span={4}>
-                            <Form.Item label="周期(s)" name={["probes", probeKey, "periodSeconds"]}>
-                              <InputNumber min={1} style={{ width: "100%" }} />
-                            </Form.Item>
-                          </Col>
-                          <Col span={4}>
-                            <Form.Item label="超时(s)" name={["probes", probeKey, "timeoutSeconds"]}>
-                              <InputNumber min={1} style={{ width: "100%" }} />
-                            </Form.Item>
-                          </Col>
-                          <Col span={4}>
-                            <Form.Item label="成功阈值" name={["probes", probeKey, "successThreshold"]}>
-                              <InputNumber min={1} style={{ width: "100%" }} />
-                            </Form.Item>
-                          </Col>
-                          <Col span={4}>
-                            <Form.Item label="失败阈值" name={["probes", probeKey, "failureThreshold"]}>
-                              <InputNumber min={1} style={{ width: "100%" }} />
+                          <Col span={6}>
+                            <Form.Item
+                              label="Topology Key"
+                              name={[
+                                "scheduling",
+                                "podAntiAffinityTopologyKey",
+                              ]}
+                            >
+                              <Input placeholder="kubernetes.io/hostname" />
                             </Form.Item>
                           </Col>
                         </Row>
@@ -994,13 +1204,157 @@ export default function DaemonSetsPage() {
                     }
                   </Form.Item>
                 </div>
-              ))}
-            </>
-          ) : null}
-        </Form>
-      </Modal>
 
-      <Modal
+                <Typography.Text
+                  type="secondary"
+                  style={{ display: "block", marginBottom: 8 }}
+                >
+                  健康探针（HTTP）
+                </Typography.Text>
+                {(["liveness", "readiness", "startup"] as const).map(
+                  (probeKey) => (
+                    <div key={probeKey} className="workload-form-subsection">
+                      <Row
+                        gutter={8}
+                        align="middle"
+                        style={{ marginBottom: 8 }}
+                      >
+                        <Col flex="auto">
+                          <Typography.Text
+                            strong
+                          >{`${probeKey} Probe`}</Typography.Text>
+                        </Col>
+                        <Col>
+                          <Form.Item
+                            name={["probes", probeKey, "enabled"]}
+                            valuePropName="checked"
+                            style={{ marginBottom: 0 }}
+                          >
+                            <Switch
+                              checkedChildren="启用"
+                              unCheckedChildren="关闭"
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                      <Form.Item noStyle shouldUpdate>
+                        {() =>
+                          form.getFieldValue([
+                            "probes",
+                            probeKey,
+                            "enabled",
+                          ]) ? (
+                            <Row gutter={8}>
+                              <Col span={8}>
+                                <Form.Item
+                                  label="Path"
+                                  name={["probes", probeKey, "path"]}
+                                  rules={[
+                                    {
+                                      required: true,
+                                      message: "请输入探针路径",
+                                    },
+                                  ]}
+                                >
+                                  <Input placeholder="/healthz" />
+                                </Form.Item>
+                              </Col>
+                              <Col span={4}>
+                                <Form.Item
+                                  label="Port"
+                                  name={["probes", probeKey, "port"]}
+                                  rules={[
+                                    { required: true, message: "请输入端口" },
+                                  ]}
+                                >
+                                  <InputNumber
+                                    min={1}
+                                    max={65535}
+                                    style={{ width: "100%" }}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={4}>
+                                <Form.Item
+                                  label="初始延迟(s)"
+                                  name={[
+                                    "probes",
+                                    probeKey,
+                                    "initialDelaySeconds",
+                                  ]}
+                                >
+                                  <InputNumber
+                                    min={0}
+                                    style={{ width: "100%" }}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={4}>
+                                <Form.Item
+                                  label="周期(s)"
+                                  name={["probes", probeKey, "periodSeconds"]}
+                                >
+                                  <InputNumber
+                                    min={1}
+                                    style={{ width: "100%" }}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={4}>
+                                <Form.Item
+                                  label="超时(s)"
+                                  name={["probes", probeKey, "timeoutSeconds"]}
+                                >
+                                  <InputNumber
+                                    min={1}
+                                    style={{ width: "100%" }}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={4}>
+                                <Form.Item
+                                  label="成功阈值"
+                                  name={[
+                                    "probes",
+                                    probeKey,
+                                    "successThreshold",
+                                  ]}
+                                >
+                                  <InputNumber
+                                    min={1}
+                                    style={{ width: "100%" }}
+                                  />
+                                </Form.Item>
+                              </Col>
+                              <Col span={4}>
+                                <Form.Item
+                                  label="失败阈值"
+                                  name={[
+                                    "probes",
+                                    probeKey,
+                                    "failureThreshold",
+                                  ]}
+                                >
+                                  <InputNumber
+                                    min={1}
+                                    style={{ width: "100%" }}
+                                  />
+                                </Form.Item>
+                              </Col>
+                            </Row>
+                          ) : null
+                        }
+                      </Form.Item>
+                    </div>
+                  ),
+                )}
+              </>
+            ) : null}
+          </Form>
+        </OpsFormSection>
+      </OpsModalShell>
+
+      <OpsModalShell
         title="调整副本数"
         open={Boolean(scaleItem)}
         onCancel={() => setScaleItem(null)}
@@ -1009,19 +1363,27 @@ export default function DaemonSetsPage() {
         cancelText="取消"
         confirmLoading={actionMutation.isPending}
       >
-        <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-          <Typography.Text>
-            资源：<Typography.Text strong>{scaleItem?.name ?? "-"}</Typography.Text>
-          </Typography.Text>
-          <Typography.Text>目标值：</Typography.Text>
-          <InputNumber
-            min={0}
-            style={{ width: "100%" }}
-            value={targetReplicas}
-            onChange={(value) => setTargetReplicas(typeof value === "number" ? value : 0)}
-          />
-        </Space>
-      </Modal>
+        <OpsFormSection
+          title="调度目标"
+          description="提交期望调度数量，实际覆盖由集群调度器决定。"
+        >
+          <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+            <Typography.Text>
+              资源：
+              <Typography.Text strong>{scaleItem?.name ?? "-"}</Typography.Text>
+            </Typography.Text>
+            <Typography.Text>目标值：</Typography.Text>
+            <InputNumber
+              min={0}
+              style={{ width: "100%" }}
+              value={targetReplicas}
+              onChange={(value) =>
+                setTargetReplicas(typeof value === "number" ? value : 0)
+              }
+            />
+          </Space>
+        </OpsFormSection>
+      </OpsModalShell>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}

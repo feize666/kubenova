@@ -6,7 +6,6 @@ import {
   Alert,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Typography,
@@ -644,115 +643,117 @@ export default function ServiceAccountsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/configs/serviceaccounts"
-        titleSuffix={
-          <ResourceAddButton
-            title="创建ServiceAccount"
-            onClick={() => {
-              createForm.resetFields();
-              const nextClusterId = clusterId || clusterOptions[0]?.value || "";
-              const nextNamespace = namespace || "default";
-              createForm.setFieldsValue({
-                clusterId: nextClusterId,
-                namespace: nextNamespace,
-                automountServiceAccountToken: true,
-              });
-              setCreateMode("form");
-              setCreateYaml("");
-              setCreateYamlClusterId(nextClusterId);
-              setCreateYamlNamespace(nextNamespace);
-              setCreateOpen(true);
-            }}
-          />
-        }
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <NetworkResourcePageFilters
-          clusterId={clusterId}
-          namespace={namespace}
-          keywordInput={keywordInput}
-          clusterOptions={clusterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onClusterChange={(value) => {
-            onClusterChange(value);
-            resetPage();
-          }}
-          onNamespaceChange={(value) => {
-            onNamespaceChange(value);
-            resetPage();
-          }}
-          onKeywordInputChange={setKeywordInput}
-          onSearch={handleSearch}
-          keywordPlaceholder="输入关键字，或 label 过滤（如 env=prod team=platform）"
-          marginBottom={0}
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="config-resource-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
-      ) : null}
-
-      {listQuery.isError ? (
-        <Alert
-          className="config-resource-state-alert"
-          type="error"
-          showIcon
-          title="ServiceAccount 列表加载失败"
-          description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<ServiceAccountRecord>
-          rowKey="id"
-          columns={columns}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          tableKey="configs.serviceaccounts"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "输入关键字，或 label 过滤（如 env=prod team=platform）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{ sortBy, sortOrder }}
-          dataSource={tableData}
-          layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
-          loading={listQuery.isLoading}
-          onChange={(nextPagination, filters, sorter, extra) =>
-            handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
-          }
-          onRow={(record) => ({
-            onClick: (event: ReactMouseEvent<HTMLElement>) => {
-              if (isServiceAccountRowInteractiveTarget(event.target)) return;
-              if (record.id) {
-                setDetailTarget({
-                  kind: "ServiceAccount",
-                  id: record.id,
-                  kindLabel: "ServiceAccount",
-                  apiVersion: record.apiVersion,
-                  namespace: record.namespace,
-                  name: record.name,
-                  label: record.name,
-                  snapshot: { labels: record.labels },
+        <ResourcePageHeader
+          path="/configs/serviceaccounts"
+          style={{ marginBottom: 12 }}
+          titleSuffix={
+            <ResourceAddButton
+              title="创建ServiceAccount"
+              onClick={() => {
+                createForm.resetFields();
+                const nextClusterId = clusterId || clusterOptions[0]?.value || "";
+                const nextNamespace = namespace || "default";
+                createForm.setFieldsValue({
+                  clusterId: nextClusterId,
+                  namespace: nextNamespace,
+                  automountServiceAccountToken: true,
                 });
-              }
-            },
-          })}
-          pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
+                setCreateMode("form");
+                setCreateYaml("");
+                setCreateYamlClusterId(nextClusterId);
+                setCreateYamlNamespace(nextNamespace);
+                setCreateOpen(true);
+              }}
+            />
+          }
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <NetworkResourcePageFilters
+            clusterId={clusterId}
+            namespace={namespace}
+            keywordInput={keywordInput}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onClusterChange={(value) => {
+              onClusterChange(value);
+              resetPage();
+            }}
+            onNamespaceChange={(value) => {
+              onNamespaceChange(value);
+              resetPage();
+            }}
+            onKeywordInputChange={setKeywordInput}
+            onSearch={handleSearch}
+            keywordPlaceholder="输入关键字，或 label 过滤（如 env=prod team=platform）"
+            marginBottom={0}
+          />
+
+          {!isInitializing && !accessToken ? (
+            <Alert className="config-resource-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
+          ) : null}
+
+          {listQuery.isError ? (
+            <Alert
+              className="config-resource-state-alert"
+              type="error"
+              showIcon
+              title="ServiceAccount 列表加载失败"
+              description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
+            />
+          ) : null}
+
+          <ResourceTable<ServiceAccountRecord>
+            bordered
+            rowKey="id"
+            columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            tableKey="configs.serviceaccounts"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "输入关键字，或 label 过滤（如 env=prod team=platform）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
+            dataSource={tableData}
+            layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
+            loading={listQuery.isLoading}
+            onChange={(nextPagination, filters, sorter, extra) =>
+              handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
+            }
+            onRow={(record) => ({
+              onClick: (event: ReactMouseEvent<HTMLElement>) => {
+                if (isServiceAccountRowInteractiveTarget(event.target)) return;
+                if (record.id) {
+                  setDetailTarget({
+                    kind: "ServiceAccount",
+                    id: record.id,
+                    kindLabel: "ServiceAccount",
+                    apiVersion: record.apiVersion,
+                    namespace: record.namespace,
+                    name: record.name,
+                    label: record.name,
+                    snapshot: { labels: record.labels },
+                  });
+                }
+              },
+            })}
+            pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
+          />
+        </Space>
       </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         className="config-resource-utility-modal"
         title="YAML"
         open={yamlOpen}
@@ -788,7 +789,7 @@ export default function ServiceAccountsPage() {
           spellCheck={false}
           style={{ fontFamily: "monospace" }}
         />
-      </Modal>
+      </OpsModalShell>
 
       <OpsModalShell
         title="新建 ServiceAccount"
@@ -906,7 +907,7 @@ export default function ServiceAccountsPage() {
         />
       </OpsModalShell>
 
-      <Modal
+      <OpsModalShell
         className="config-resource-utility-modal config-resource-token-modal"
         title={`关联 Secret/Token · ${tokenTitle}`}
         open={tokenModalOpen}
@@ -962,7 +963,7 @@ export default function ServiceAccountsPage() {
             },
           ]}
         />
-      </Modal>
+      </OpsModalShell>
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}

@@ -14,6 +14,8 @@ for (const token of [
   "footerActions",
   "returnFocusRef",
   "VARIANT_WIDTH",
+  "inspector: 460",
+  "clamp(384px, 32vw",
   "afterOpenChange",
   "ops-drawer-shell__footer-actions",
 ]) {
@@ -23,7 +25,7 @@ for (const token of [
 }
 
 const resourceDetail = read("src/components/resource-detail/resource-detail-drawer.tsx");
-for (const token of ["variant=\"resource\"", "OpsLoadingState", "OpsErrorState", "OpsEmptyState"]) {
+for (const token of ["variant=\"resource\"", "state={drawerState}", "OpsLoadingState", "OpsErrorState", "OpsEmptyState"]) {
   if (!resourceDetail.includes(token)) {
     failures.push(`src/components/resource-detail/resource-detail-drawer.tsx: missing ${token}`);
   }
@@ -45,6 +47,8 @@ for (const token of ["business-detail-drawer__identity", "OpsEmptyState", "OpsFi
 
 const yaml = read("src/components/resource-yaml-drawer.tsx");
 for (const token of [
+  "variant=\"resource\"",
+  "state={drawerState}",
   "readOnly",
   "maskSensitive",
   "maskSensitiveYaml",
@@ -64,6 +68,7 @@ const css = read("src/app/globals.css");
 for (const token of [
   ".ops-drawer-shell__header",
   ".ops-drawer-shell__footer",
+  ".ops-drawer-shell--inspector",
   ".ops-drawer-shell--editor",
   ".ops-drawer-shell--workbench",
   ".ops-drawer-shell__wrapper",

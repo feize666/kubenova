@@ -26,7 +26,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsFormSection, OpsIconActionButton, OpsModalShell, OpsPageHeader, OpsStatusTag, OpsSurface, type OpsFilterChipTone } from "@/components/ops";
+import { OpsFilterChip, OpsFormSection, OpsIconActionButton, OpsMetricTile, OpsModalShell, OpsPageHeader, OpsStatusTag, OpsSurface, type OpsFilterChipTone } from "@/components/ops";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import {
   POD_ACTION_MENU_CLASS,
@@ -86,7 +86,7 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     label: "管理员",
     description: "拥有平台所有资源的读写权限，可管理用户、集群和安全策略",
     icon: <CrownOutlined />,
-    color: "#f5222d",
+    color: "var(--ops-status-danger-text)",
     permissions: [
       "读写所有 Namespace 下的工作负载",
       "管理集群配置和节点",
@@ -102,7 +102,7 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     label: "运维工程师",
     description: "可操作工作负载（扩缩容、重启）和配置，但不可修改用户权限",
     icon: <ToolOutlined />,
-    color: "#fa8c16",
+    color: "var(--ops-status-warning-text)",
     permissions: [
       "读写指定 Namespace 下的工作负载",
       "执行扩缩容、重启、回滚操作",
@@ -118,7 +118,7 @@ const ROLE_DEFINITIONS: RoleDefinition[] = [
     label: "只读用户",
     description: "对所有资源仅有只读访问权限，不可执行任何写操作",
     icon: <EyeOutlined />,
-    color: "#1677ff",
+    color: "var(--ops-status-info-text)",
     permissions: [
       "只读访问工作负载列表和详情",
       "只读访问集群信息",
@@ -147,7 +147,6 @@ function RoleCards() {
       variant="panel"
       padding="md"
       title="平台角色权限说明"
-      actions={<UserOutlined className="rbac-role-guide__icon" />}
     >
       <Row gutter={[16, 16]}>
         {ROLE_DEFINITIONS.map((role) => (
@@ -766,7 +765,7 @@ export default function RbacPage() {
       ...getSortableColumnProps("subject", query.isLoading && !query.data),
       render: (value: string, row) => (
         <Space size={4} style={{ minWidth: 0 }}>
-          <UserOutlined style={{ color: "#8c8c8c" }} />
+          <UserOutlined style={{ color: "var(--kn-text-muted)" }} />
           <Typography.Text copyable={{ text: value }} style={{ fontFamily: "monospace" }} ellipsis>
             {row.subjectKind}:{value}
             {row.subjectKind === "ServiceAccount" && row.subjectNamespace ? `@${row.subjectNamespace}` : ""}
@@ -848,157 +847,153 @@ export default function RbacPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsPageHeader
+        className="resource-page-header"
         title="访问控制（RBAC）"
         subtitle="管理平台角色绑定关系，控制用户对 Kubernetes 资源的访问权限。"
-        actions={
-          <div className="rbac-page-header__stats">
-            <Row gutter={16}>
-              {[
-                { label: "绑定总数", value: stats.total, color: "#1677ff" },
-                { label: "已启用", value: stats.active, color: "#52c41a" },
-                { label: "集群级", value: stats.clusterLevel, color: "#722ed1" },
-                { label: "名称空间级", value: stats.nsLevel, color: "#1677ff" },
-              ].map(({ label, value, color }) => (
-                <Col key={label} style={{ textAlign: "center" }}>
-                  <Typography.Title level={3} style={{ margin: 0, color }}>
-                    {query.isLoading ? "-" : value}
-                  </Typography.Title>
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    {label}
-                  </Typography.Text>
-                </Col>
-              ))}
-            </Row>
-          </div>
-        }
       />
+
+      <Row gutter={[12, 12]}>
+        <Col xs={24} sm={12} lg={6}>
+          <OpsMetricTile label="绑定总数" tone="info" value={query.isLoading ? "-" : stats.total} />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <OpsMetricTile label="已启用" tone="success" value={query.isLoading ? "-" : stats.active} />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <OpsMetricTile label="集群级" tone="neutral" value={query.isLoading ? "-" : stats.clusterLevel} />
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <OpsMetricTile label="名称空间级" tone="info" value={query.isLoading ? "-" : stats.nsLevel} />
+        </Col>
+      </Row>
 
       {/* 角色说明卡片 */}
       <RoleCards />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceFilterToolbar>
-          <ResourceFilterToolbarItem width="auto">
-            <ResourceScopeFilterButton
-              clusterId={clusterId}
-              namespace={namespace}
-              clusterOptions={clusterOptions}
-              clusterLoading={clustersQuery.isLoading}
-              knownNamespaces={knownNamespaces}
-              namespaceDisabled={namespaceDisabled}
-              namespacePlaceholder={namespacePlaceholder}
-              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-                onScopeChange(nextClusterId, nextNamespace);
-                setPage(1);
-              }}
-            />
-          </ResourceFilterToolbarItem>
-        </ResourceFilterToolbar>
-      </OpsSurface>
-
-      {/* 错误提示 */}
-      {!isInitializing && !accessToken ? (
-        <Alert className="identity-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录。" />
-      ) : null}
-
-      {query.isError ? (
-        <Alert
-          className="identity-resource-state-alert"
-          type="error"
-          showIcon
-          title="加载失败"
-          description={query.error instanceof Error ? query.error.message : "获取 RBAC 数据时发生错误"}
-        />
-      ) : null}
-
-      {mutation.isError ? (
-        <Alert
-          className="identity-resource-state-alert"
-          type="error"
-          showIcon
-          title="操作失败"
-          description={mutation.error instanceof Error ? mutation.error.message : "RBAC 启停操作失败"}
-        />
-      ) : null}
-
-      {deleteMutation.isError ? (
-        <Alert
-          className="identity-resource-state-alert"
-          type="error"
-          showIcon
-          title="删除失败"
-          description={deleteMutation.error instanceof Error ? deleteMutation.error.message : "删除 RBAC 绑定时发生错误"}
-        />
-      ) : null}
 
       {/* 绑定列表 */}
       <OpsSurface
         variant="panel"
         padding="sm"
         title="角色绑定列表"
-        actions={query.data ? <OpsFilterChip tone="info">共 {query.data.total} 条</OpsFilterChip> : null}
+        subtitle={query.data ? <OpsFilterChip tone="info">共 {query.data.total} 条</OpsFilterChip> : null}
       >
-        <ResourceTable<RbacTableRecord>
-          rowKey="key"
-          tableKey="business.rbac"
-          columns={columns}
-          dataSource={rows}
-          layoutOptions={{ nameValues: rows.map((item) => item.name), actionWidth: TABLE_COL_WIDTH.actionCompact }}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: (value) => {
-              setKeywordInput(value);
-              setKeyword(value.trim());
-              setPage(1);
-            },
-            placeholder: "搜索策略名 / 用户名 / 名称空间",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            setKindFilter(typeof nextFilters.kind === "string" ? nextFilters.kind : "");
-            setPage(1);
-          }}
-          toolbarExtra={
-            <Space size={8} wrap>
-              <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void query.refetch()} loading={query.isFetching}>
-                刷新
-              </OpsIconActionButton>
-              <ResourceAddButton compact={false} label="新建绑定" onClick={() => setCreateOpen(true)} aria-label="新建绑定" />
-            </Space>
-          }
-          loading={{ spinning: query.isLoading, description: "RBAC 数据加载中..." }}
-          onChange={(pagination, filters, sorter, extra) => {
-            handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
-            if (pagination.current && pagination.current !== page) {
-              setPage(pagination.current);
-            }
-            if (pagination.pageSize && pagination.pageSize !== pageSize) {
-              setPageSize(pagination.pageSize);
-              setPage(1);
-            }
-          }}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize,
-            total: query.data?.total ?? 0,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceFilterToolbar>
+            <ResourceFilterToolbarItem width="auto">
+              <ResourceScopeFilterButton
+                clusterId={clusterId}
+                namespace={namespace}
+                clusterOptions={clusterOptions}
+                clusterLoading={clustersQuery.isLoading}
+                knownNamespaces={knownNamespaces}
+                namespaceDisabled={namespaceDisabled}
+                namespacePlaceholder={namespacePlaceholder}
+                onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                  onScopeChange(nextClusterId, nextNamespace);
+                  setPage(1);
+                }}
+              />
+            </ResourceFilterToolbarItem>
+          </ResourceFilterToolbar>
+
+          {/* 错误提示 */}
+          {!isInitializing && !accessToken ? (
+            <Alert className="identity-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录。" />
+          ) : null}
+
+          {query.isError ? (
+            <Alert
+              className="identity-resource-state-alert"
+              type="error"
+              showIcon
+              title="加载失败"
+              description={query.error instanceof Error ? query.error.message : "获取 RBAC 数据时发生错误"}
+            />
+          ) : null}
+
+          {mutation.isError ? (
+            <Alert
+              className="identity-resource-state-alert"
+              type="error"
+              showIcon
+              title="操作失败"
+              description={mutation.error instanceof Error ? mutation.error.message : "RBAC 启停操作失败"}
+            />
+          ) : null}
+
+          {deleteMutation.isError ? (
+            <Alert
+              className="identity-resource-state-alert"
+              type="error"
+              showIcon
+              title="删除失败"
+              description={deleteMutation.error instanceof Error ? deleteMutation.error.message : "删除 RBAC 绑定时发生错误"}
+            />
+          ) : null}
+
+          <ResourceTable<RbacTableRecord>
+            rowKey="key"
+            tableKey="business.rbac"
+            columns={columns}
+            dataSource={rows}
+            bordered
+            layoutOptions={{ nameValues: rows.map((item) => item.name), actionWidth: TABLE_COL_WIDTH.actionCompact }}
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: (value) => {
+                setKeywordInput(value);
+                setKeyword(value.trim());
                 setPage(1);
-                return;
+              },
+              placeholder: "搜索策略名 / 用户名 / 名称空间",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              setKindFilter(typeof nextFilters.kind === "string" ? nextFilters.kind : "");
+              setPage(1);
+            }}
+            toolbarExtra={
+              <Space size={8} wrap>
+                <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void query.refetch()} loading={query.isFetching}>
+                  刷新
+                </OpsIconActionButton>
+                <ResourceAddButton compact={false} label="新建绑定" onClick={() => setCreateOpen(true)} aria-label="新建绑定" />
+              </Space>
+            }
+            loading={{ spinning: query.isLoading, description: "RBAC 数据加载中..." }}
+            onChange={(pagination, filters, sorter, extra) => {
+              handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
+              if (pagination.current && pagination.current !== page) {
+                setPage(pagination.current);
               }
-              setPage(nextPage);
-            },
-            showTotal: (total) => `共 ${total} 条`,
-          })}
-          emptyDescription={
-            keyword || namespace || clusterId || kindFilter
-              ? "暂无符合条件的 RBAC 绑定"
-              : "暂无 RBAC 绑定，点击「新建绑定」创建"
-          }
-        />
+              if (pagination.pageSize && pagination.pageSize !== pageSize) {
+                setPageSize(pagination.pageSize);
+                setPage(1);
+              }
+            }}
+            pagination={buildTablePagination({
+              current: page,
+              pageSize,
+              total: query.data?.total ?? 0,
+              onChange: (nextPage, nextPageSize) => {
+                if (nextPageSize !== pageSize) {
+                  setPageSize(nextPageSize);
+                  setPage(1);
+                  return;
+                }
+                setPage(nextPage);
+              },
+              showTotal: (total) => `共 ${total} 条`,
+            })}
+            emptyDescription={
+              keyword || namespace || clusterId || kindFilter
+                ? "暂无符合条件的 RBAC 绑定"
+                : "暂无 RBAC 绑定，点击「新建绑定」创建"
+            }
+          />
+        </Space>
       </OpsSurface>
 
       <CreateRbacModal

@@ -2,11 +2,11 @@
 
 import { ReloadOutlined, RobotOutlined, SafetyOutlined, WarningOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, App, Col, Descriptions, Empty, Row, Select, Space, Statistic, Typography } from "antd";
+import { Alert, App, Col, Descriptions, Empty, Row, Select, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { OpsCommandPreview, OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import {
@@ -50,6 +50,34 @@ function riskTag(value: AiopsRecommendationItem["riskLevel"]) {
   if (value === "high") return <OpsStatusTag tone="danger">高</OpsStatusTag>;
   if (value === "medium") return <OpsStatusTag tone="warning">中</OpsStatusTag>;
   return <OpsStatusTag tone="success">低</OpsStatusTag>;
+}
+
+function formatPrecheckResult(precheck: AiopsRecommendationPrecheck) {
+  return [
+    `status: ${precheck.status}`,
+    `incident: ${precheck.incidentId}`,
+    `recommendation: ${precheck.recommendationId}`,
+    `approvalRequired: ${precheck.approvalRequired ? "true" : "false"}`,
+    `timestamp: ${new Date(precheck.timestamp).toLocaleString("zh-CN")}`,
+    `rollbackHint: ${precheck.rollbackHint}`,
+    "",
+    "checks:",
+    ...precheck.checks.map((item) => `- ${item.status} ${item.key}: ${item.label} - ${item.message}`),
+  ].join("\n");
+}
+
+function formatApprovalResult(approval: AiopsRecommendationApproval) {
+  return [
+    `approved: ${approval.approved ? "true" : "false"}`,
+    `executionStatus: ${approval.executionStatus}`,
+    `incident: ${approval.incidentId}`,
+    `recommendation: ${approval.recommendationId}`,
+    `audit: ${approval.audit.id}`,
+    `auditTimestamp: ${new Date(approval.audit.timestamp).toLocaleString("zh-CN")}`,
+    `timestamp: ${new Date(approval.timestamp).toLocaleString("zh-CN")}`,
+    `message: ${approval.message}`,
+    `rollbackHint: ${approval.rollbackHint}`,
+  ].join("\n");
 }
 
 export default function AiopsCenterPage() {
@@ -236,24 +264,35 @@ export default function AiopsCenterPage() {
 
       <Row gutter={[12, 12]}>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="异常总数" value={summary?.anomalyOverview.total ?? 0} prefix={<RobotOutlined />} />
-          </OpsSurface>
+          <OpsMetricTile
+            icon={<RobotOutlined />}
+            label="异常总数"
+            tone="info"
+            value={summary?.anomalyOverview.total ?? 0}
+          />
         </Col>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="严重异常" value={summary?.anomalyOverview.critical ?? 0} styles={{ content: { color: "#cf1322" } }} prefix={<WarningOutlined />} />
-          </OpsSurface>
+          <OpsMetricTile
+            icon={<WarningOutlined />}
+            label="严重异常"
+            tone="danger"
+            value={summary?.anomalyOverview.critical ?? 0}
+          />
         </Col>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="关联分组" value={summary?.correlationGroups.length ?? 0} />
-          </OpsSurface>
+          <OpsMetricTile
+            label="关联分组"
+            tone="warning"
+            value={summary?.correlationGroups.length ?? 0}
+          />
         </Col>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="审计状态" value={summary?.auditState.auditTrailReady ? "就绪" : "缺失"} prefix={<SafetyOutlined />} />
-          </OpsSurface>
+          <OpsMetricTile
+            icon={<SafetyOutlined />}
+            label="审计状态"
+            tone={summary?.auditState.auditTrailReady ? "success" : "warning"}
+            value={summary?.auditState.auditTrailReady ? "就绪" : "缺失"}
+          />
         </Col>
       </Row>
 
@@ -423,23 +462,25 @@ export default function AiopsCenterPage() {
                           </OpsStatusTag>
                         </Space>
                         {precheck ? (
-                          <Space orientation="vertical" size={6} style={{ width: "100%" }}>
-                            <Typography.Text strong>Precheck 结果：{precheck.status}</Typography.Text>
-                            {precheck.checks.map((item) => (
-                              <Space key={item.key} wrap>
-                                <OpsStatusTag tone={item.status === "passed" ? "success" : "danger"}>{item.status}</OpsStatusTag>
-                                <Typography.Text>{item.label}</Typography.Text>
-                                <Typography.Text type="secondary">{item.message}</Typography.Text>
-                              </Space>
-                            ))}
-                          </Space>
+                          <OpsCommandPreview
+                            content={formatPrecheckResult(precheck)}
+                            description="只读预检输出，未执行集群变更"
+                            kind="approval"
+                            language="AIOps"
+                            title={`Precheck 结果：${precheck.status}`}
+                            tone={precheck.status === "passed" ? "success" : "danger"}
+                            wrap
+                          />
                         ) : null}
                         {approval ? (
-                          <Alert
-                            type="info"
-                            showIcon
-                            title={approval.message}
-                            description={`审计 ${approval.audit.id} / ${approval.executionStatus} / ${approval.rollbackHint}`}
+                          <OpsCommandPreview
+                            content={formatApprovalResult(approval)}
+                            description="审批审计记录，执行状态保持只读"
+                            kind="approval"
+                            language="Audit"
+                            title="审批结果"
+                            tone="info"
+                            wrap
                           />
                         ) : null}
                       </Space>

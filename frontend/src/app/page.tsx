@@ -173,15 +173,21 @@ function OverviewCard({
   action,
   children,
   className,
+  state = "ready",
 }: {
   title: string;
   scope?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  state?: "ready" | "loading" | "empty" | "degraded";
 }) {
   return (
-    <section className={["ops-overview-card", className].filter(Boolean).join(" ")}>
+    <section
+      className={["ops-overview-card", "ops-surface", "ops-surface--panel", "ops-surface--pad-none", className].filter(Boolean).join(" ")}
+      data-ops-overview-card=""
+      data-state={state}
+    >
       <div className="ops-overview-card__header">
         <div className="ops-overview-card__heading">
           <div className="ops-overview-card__title">{title}</div>
@@ -285,22 +291,25 @@ function ImpactMap({ impact }: { impact?: ServiceImpact }) {
         <path d="M204 86 C228 124 250 132 282 132" />
         <path className="is-danger" d="M332 86 H362" />
       </svg>
-      <div className={`ops-overview-impact-node ops-overview-impact-node--edge ${getImpactNodeToneClass(internet.status)} is-internet`}>
+      <div
+        className={`ops-overview-impact-node ops-overview-impact-node--edge ${getImpactNodeToneClass(internet.status)} is-internet`}
+        data-node-status={internet.status ?? "unknown"}
+      >
         {internet.label}
       </div>
-      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(ingress.status)} is-gateway`}>
+      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(ingress.status)} is-gateway`} data-node-status={ingress.status ?? "unknown"}>
         {ingress.label}
       </div>
-      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(service0.status)} is-user`}>
+      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(service0.status)} is-user`} data-node-status={service0.status ?? "unknown"}>
         {service0.label}
       </div>
-      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(service1.status)} is-order`}>
+      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(service1.status)} is-order`} data-node-status={service1.status ?? "unknown"}>
         {service1.label}
       </div>
-      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(service2.status)} is-payment`}>
+      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(service2.status)} is-payment`} data-node-status={service2.status ?? "unknown"}>
         {service2.label}
       </div>
-      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(backend.status)} is-db`}>
+      <div className={`ops-overview-impact-node ${getImpactNodeToneClass(backend.status)} is-db`} data-node-status={backend.status ?? "unknown"}>
         {backend.label}
       </div>
     </div>
@@ -598,7 +607,10 @@ export default function HomePage() {
         </div>
         <div className="ops-overview-span-3">
           <OverviewCard title="严重告警" scope={scopeLabel} action={<AlertOutlined />}>
-            <div className="ops-overview-big-number is-danger">{riskSummary.critical}<span>↑</span></div>
+            <div className="ops-overview-big-number is-danger">
+              {riskSummary.critical}
+              <span className={riskSummary.critical > 0 ? "is-up" : "is-flat"}>{riskSummary.critical > 0 ? "↑" : "—"}</span>
+            </div>
             <div className="ops-overview-list">
               <BarRow label="严重" value={riskSummary.critical} percent={riskSummary.critical * 12} tone="red" />
               <BarRow label="警告" value={stats?.alerts.warning ?? 0} percent={(stats?.alerts.warning ?? 0) * 8} tone="orange" />
@@ -608,7 +620,10 @@ export default function HomePage() {
         </div>
         <div className="ops-overview-span-3">
           <OverviewCard title="异常工作负载" scope={scopeLabel} action={<DeploymentUnitOutlined />}>
-            <div className="ops-overview-big-number is-warning">{riskSummary.unhealthy}<span>↑</span></div>
+            <div className="ops-overview-big-number is-warning">
+              {riskSummary.unhealthy}
+              <span className={riskSummary.unhealthy > 0 ? "is-up" : "is-flat"}>{riskSummary.unhealthy > 0 ? "↑" : "—"}</span>
+            </div>
             <div className="ops-overview-list">
               <BarRow label="异常负载" value={riskSummary.unhealthy} percent={riskSummary.unhealthy * 10} tone="orange" />
               <BarRow label="健康负载" value={stats?.workloads.healthy ?? 0} percent={(stats?.workloads.healthy ?? 0) * 2} tone="green" />

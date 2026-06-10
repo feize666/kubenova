@@ -26,7 +26,7 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Alert, Empty, Input, Skeleton, Tooltip } from "antd";
+import { Alert, Input, Tooltip } from "antd";
 import { useRouter } from "next/navigation";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -48,7 +48,7 @@ import ReactFlow, {
   type NodeTypes,
 } from "reactflow";
 import { useAuth } from "@/components/auth-context";
-import { OpsIconActionButton, OpsPageHeader } from "@/components/ops";
+import { OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsInspectorShell, OpsLoadingState, OpsPageHeader, type OpsInspectorFact } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { listAutoscalingPolicies, type AutoscalingPolicyItem } from "@/lib/api/autoscaling";
@@ -1474,29 +1474,35 @@ function DetailRail({
   const relationSummaries = getRelationSummaries(node, model);
   const yamlDisabledReason = node ? getYamlDisabledReason(node) : null;
   const clusterDisplayName = node?.data.clusterId ? getClusterDisplayName(clusterMap, node.data.clusterId) : "-";
+  const facts: OpsInspectorFact[] | undefined = node
+    ? [
+        { label: "类型", value: KIND_LABEL[String(node.data.kind)] ?? String(node.data.kind) },
+        { label: "状态", value: STATUS_LABEL[node.data.status], tone: node.data.status === "success" ? "success" : node.data.status === "warning" ? "warning" : "danger" },
+        { label: "名称空间", value: node.data.namespace ?? "-" },
+        { label: "集群", value: clusterDisplayName },
+        ...(node.data.instance ? [{ label: "实例", value: node.data.instance }] : []),
+        ...(node.data.nodeName ? [{ label: "节点", value: node.data.nodeName }] : []),
+      ]
+    : undefined;
+
   return (
-    <aside className={`resource-map-rail ${node ? "is-open" : ""}`}>
+    <OpsInspectorShell
+      className={`resource-map-rail ${node ? "is-open" : ""}`}
+      motion={false}
+      title={node?.data.label ?? "资源密度摘要"}
+      description={node?.data.subtitle ?? "Topology / Storage / Config"}
+      facts={facts}
+      actions={node ? <button type="button" aria-label="关闭" onClick={onClose}><CloseOutlined /></button> : null}
+      state={node ? "idle" : "empty"}
+      stateTitle={node ? undefined : "未选择资源"}
+      stateDescription={node ? undefined : "选择拓扑节点后查看状态、关联资源、详情与 YAML 操作。"}
+    >
       {node ? (
         <>
-          <div className="resource-map-rail__head">
-            <div className="resource-map-rail__title">
-              <span>{node.data.subtitle}</span>
-              <strong>{node.data.label}</strong>
-            </div>
-            <button type="button" aria-label="关闭" onClick={onClose}><CloseOutlined /></button>
-          </div>
           <div className="resource-map-rail__body">
             <div className={`resource-map-health is-${node.data.status}`}>
               <span>{STATUS_LABEL[node.data.status]}</span>
               <strong>{node.data.kind === "Group" ? `${children.length} 个资源` : KIND_LABEL[String(node.data.kind)] ?? node.data.kind}</strong>
-            </div>
-            <div className="resource-map-facts">
-              <RailFact label="类型" value={KIND_LABEL[String(node.data.kind)] ?? String(node.data.kind)} />
-              <RailFact label="状态" value={STATUS_LABEL[node.data.status]} />
-              <RailFact label="名称空间" value={node.data.namespace ?? "-"} />
-              <RailFact label="集群" value={clusterDisplayName} />
-              {node.data.instance ? <RailFact label="实例" value={node.data.instance} /> : null}
-              {node.data.nodeName ? <RailFact label="节点" value={node.data.nodeName} /> : null}
             </div>
             <div className="resource-map-actions">
               <OpsIconActionButton icon={<InfoCircleOutlined />} onClick={onOpenDetail} disabled={!node.data.detail || Boolean(children.length)}>
@@ -1566,30 +1572,11 @@ function DetailRail({
           </div>
         </>
       ) : (
-        <>
-          <div className="resource-map-rail__head">
-            <div className="resource-map-rail__title">
-              <span>Topology / Storage / Config</span>
-              <strong>资源密度摘要</strong>
-            </div>
-          </div>
-          <div className="resource-map-rail__body">
-            <DensityOverview model={model} />
-          </div>
-        </>
+        <div className="resource-map-rail__body">
+          <DensityOverview model={model} />
+        </div>
       )}
-    </aside>
-  );
-}
-
-function RailFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span>{label}</span>
-      <Tooltip title={value} placement="topLeft">
-        <strong>{value}</strong>
-      </Tooltip>
-    </div>
+    </OpsInspectorShell>
   );
 }
 
@@ -1749,6 +1736,14 @@ export default function NetworkTopologyPage() {
   const selectedNode = useMemo(() => view.nodes.find((node) => node.id === selectedNodeId) ?? null, [selectedNodeId, view.nodes]);
   const motionEnabled = !isMoving && view.nodes.length <= LARGE_GRAPH_NODE_LIMIT && view.edges.length <= LARGE_GRAPH_EDGE_LIMIT;
   const canExpandAll = visible.filteredCount <= 50;
+  const canvasState = isLoading
+    ? "loading"
+    : error && view.nodes.length === 0
+      ? "error"
+      : view.nodes.length === 0
+        ? "empty"
+        : "idle";
+  const canvasView = canvasState === "idle" ? view : { nodes: [], edges: [] };
 
   const toggleSource = useCallback((source: SourceKey) => {
     setSelectedSources((current) => {
@@ -1856,15 +1851,20 @@ export default function NetworkTopologyPage() {
 
       <div className="resource-map-workbench">
         <div className="resource-map-canvas">
-          {isLoading ? (
-            <div className="resource-map-loading"><Skeleton active paragraph={{ rows: 8 }} /></div>
-          ) : view.nodes.length === 0 ? (
-            <Empty description="暂无可展示数据，请调整筛选条件或切换名称空间" />
-          ) : (
-            <ReactFlowProvider>
-              <FlowCanvas view={view} selectedNodeId={selectedNodeId} setSelectedNodeId={selectNode} onOpenEntity={openEntity} onOpenNodeDetail={openNodeDetail} onMoveState={setIsMoving} motionEnabled={motionEnabled} fitVersion={fitVersion} />
-            </ReactFlowProvider>
-          )}
+          <ReactFlowProvider>
+            <FlowCanvas view={canvasView} selectedNodeId={selectedNodeId} setSelectedNodeId={selectNode} onOpenEntity={openEntity} onOpenNodeDetail={openNodeDetail} onMoveState={setIsMoving} motionEnabled={motionEnabled} fitVersion={fitVersion} />
+          </ReactFlowProvider>
+          {canvasState !== "idle" ? (
+            <div className="resource-map-canvas-state">
+              {canvasState === "loading" ? (
+                <OpsLoadingState title="正在加载拓扑" description="控制器保持可用，加载完成后自动渲染资源关系。" />
+              ) : canvasState === "error" ? (
+                <OpsErrorState title="拓扑数据加载失败" description={error instanceof Error ? error.message : "部分资源暂不可用"} />
+              ) : (
+                <OpsEmptyState title="暂无可展示数据" description="请调整筛选条件或切换名称空间。" />
+              )}
+            </div>
+          ) : null}
           <div className="resource-map-motion-state">
             <span className={motionEnabled ? "is-on" : ""} />
             {motionEnabled ? "流动连线" : "性能降级"}
@@ -1875,183 +1875,6 @@ export default function NetworkTopologyPage() {
 
       <ResourceDetailDrawer open={Boolean(detailRequest)} onClose={() => setDetailRequest(null)} token={token} request={detailRequest} onNavigateRequest={(request) => setDetailRequest(request)} />
       <ResourceYamlDrawer open={Boolean(yamlTarget)} onClose={() => setYamlTarget(null)} token={token} identity={yamlTarget?.identity ?? null} dynamicIdentity={yamlTarget?.dynamicIdentity ?? null} onUpdated={refresh} />
-
-      <style jsx global>{`
-        body.topology-overview-active { overflow: hidden; }
-        .resource-map-shell {
-          --map-page-bg: var(--ops-bg);
-          --map-panel-bg: var(--ops-surface-overlay);
-          --map-canvas-bg: var(--ops-surface-overlay);
-          --map-card-bg: var(--ops-surface-overlay);
-          --map-card-bg-soft: var(--ops-subtle-bg);
-          --map-text: var(--ops-text);
-          --map-heading: var(--ops-text);
-          --map-muted: var(--ops-text-muted);
-          --map-border: var(--ops-border-subtle);
-          --map-border-strong: var(--ops-border-strong);
-          --map-shadow: var(--ops-shadow-subtle);
-          --map-grid: rgba(100,116,139,.08);
-          --map-edge: var(--ops-text-faint);
-          height: calc(100dvh - 104px); min-height: 640px; display: flex; flex-direction: column; gap: 12px; padding: 14px; color: var(--map-text); background: var(--map-page-bg);
-        }
-        [data-theme="dark"] .resource-map-shell {
-          --map-panel-bg: color-mix(in srgb, var(--ops-surface) 88%, transparent);
-          --map-canvas-bg: var(--ops-bg);
-          --map-card-bg: var(--ops-surface);
-          --map-grid: rgba(148,163,184,.07);
-        }
-        .resource-map-header.ops-page-header { min-height: 52px; background: var(--map-panel-bg); border-color: var(--map-border); box-shadow: var(--map-shadow); }
-        .resource-map-header .ops-page-header__scope { color: var(--map-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
-        .resource-map-header .ops-page-header__title { font-size: 24px; line-height: 1.1; font-weight: 780; color: var(--map-heading); }
-        .resource-map-header .ops-page-header__subtitle { color: var(--map-muted); }
-        .resource-map-header__stats { display: flex; gap: 8px; }
-        .resource-map-header__stats span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); background: var(--map-panel-bg); border-radius: 8px; padding: 7px 10px; color: var(--map-muted); text-transform: none; }
-        .resource-map-header__stats strong { color: var(--map-heading); }
-        .resource-map-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid var(--map-border); background: var(--map-panel-bg); box-shadow: var(--map-shadow); border-radius: 8px; padding: 8px; }
-        .resource-map-toolbar__scope,
-        .resource-map-toolbar__filters,
-        .resource-map-toolbar__actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
-        .resource-map-toolbar__filters { overflow: hidden; }
-        .resource-map-toolbar__actions { justify-content: flex-end; }
-        .resource-map-toolbar select, .resource-map-toolbar button { height: 34px; border-radius: 8px; border: 1px solid var(--map-border-strong); background: var(--map-card-bg-soft); color: var(--map-text); padding: 0 10px; font-size: 13px; white-space: nowrap; box-shadow: none; }
-        .resource-map-toolbar button { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
-        .resource-map-toolbar button:hover { border-color: color-mix(in srgb, #2563eb 34%, var(--map-border)); background: color-mix(in srgb, var(--map-card-bg-soft) 82%, var(--map-card-bg)); }
-        .resource-map-toolbar button.is-active { background: color-mix(in srgb, var(--source-color, #0ea5e9) 16%, var(--map-card-bg)); border-color: color-mix(in srgb, var(--source-color, #0ea5e9) 58%, var(--map-border)); color: var(--map-heading); }
-        .resource-map-toolbar button:disabled { opacity: .45; cursor: not-allowed; }
-        .resource-map-toolbar .ant-input-affix-wrapper { width: 220px; height: 34px; border-radius: 8px; background: var(--map-card-bg-soft); border-color: var(--map-border-strong); color: var(--map-text); }
-        .resource-map-toolbar .ant-input { background: transparent; color: var(--map-text); }
-        .resource-map-source-chips, .resource-map-segments { display: inline-flex; align-items: center; gap: 0; }
-        .resource-map-source-chips { min-width: 0; overflow: auto hidden; scrollbar-width: none; }
-        .resource-map-source-chips::-webkit-scrollbar { display: none; }
-        .resource-map-source-chips button, .resource-map-segments button { border-radius: 0; margin-left: -1px; }
-        .resource-map-source-chips button { flex: 0 0 auto; min-width: 84px; justify-content: center; }
-        .resource-map-source-chips button span { white-space: nowrap; }
-        .resource-map-segments button { min-width: 48px; justify-content: center; }
-        .resource-map-source-chips button:first-child, .resource-map-segments button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
-        .resource-map-source-chips button:last-child, .resource-map-segments button:last-child { border-radius: 0 8px 8px 0; }
-        .resource-map-source-chips button.is-active { box-shadow: inset 0 -2px 0 var(--source-color); }
-        .resource-map-source-chips strong { color: var(--source-color); font-variant-numeric: tabular-nums; }
-        .resource-map-workbench { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 370px; gap: 12px; }
-        .resource-map-canvas { position: relative; overflow: hidden; border-radius: 8px; border: 1px solid var(--map-border); background: var(--map-canvas-bg); box-shadow: none; }
-        .resource-map-canvas::before { content: ""; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(var(--map-grid) 1px, transparent 1px), linear-gradient(90deg, var(--map-grid) 1px, transparent 1px); background-size: 40px 40px; mask-image: linear-gradient(180deg, #000 0 72%, transparent 100%); }
-        .resource-map-flow-host { position: relative; width: 100%; height: 100%; min-height: 420px; }
-        .resource-map-canvas .react-flow { width: 100%; height: 100%; background: transparent; }
-        .resource-map-canvas .react-flow__pane { cursor: grab; }
-        .resource-map-canvas .react-flow__pane:active { cursor: grabbing; }
-        .resource-map-loading { max-width: 760px; margin: 80px auto; padding: 32px; }
-        .resource-map-node { width: 100%; height: 100%; position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 8px; color: var(--map-text); background: var(--map-card-bg); border: 1px solid var(--map-border); box-shadow: none; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
-        .resource-map-node::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(90deg, var(--node-accent), transparent 34%); opacity: .1; }
-        .resource-map-node::after { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 0 999px 999px 0; background: var(--node-accent); opacity: .8; }
-        .resource-map-node:hover, .resource-map-node.is-selected { border-color: var(--node-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--node-accent) 30%, transparent); transform: translateY(-1px); }
-        .resource-map-node__handle { opacity: 0; }
-        .resource-map-node__icon { width: 40px; height: 40px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 13%, var(--map-card-bg)); border: 1px solid color-mix(in srgb, var(--node-accent) 22%, transparent); }
-        .resource-map-node__text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-        .resource-map-node__text span { color: var(--map-muted); font-size: 12px; }
-        .resource-map-node__text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-heading); font-size: 15px; }
-        .resource-map-node__status { margin-left: auto; width: 24px; height: 24px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: var(--map-card-bg-soft); border: 1px solid var(--map-border); }
-        .resource-map-node.is-error .resource-map-node__status { color: #fb7185; }
-        .resource-map-node.is-warning .resource-map-node__status { color: #fbbf24; }
-        .resource-map-node.is-success .resource-map-node__status { color: #34d399; }
-        .resource-map-node--group { display: block; padding: 0; background: color-mix(in srgb, var(--map-card-bg-soft) 84%, transparent); border-style: solid; box-shadow: none; }
-        .resource-map-node--group::after { display: none; }
-        .resource-map-node__group-head { height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--map-border); background: color-mix(in srgb, var(--node-accent) 6%, transparent); }
-        .resource-map-node__group-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; color: var(--map-heading); }
-        .resource-map-node__badge { min-width: 28px; height: 24px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--node-accent) 14%, transparent); color: var(--node-accent); font-size: 12px; }
-        .resource-map-node__collapse { height: 26px; border-radius: 999px; border: 1px solid var(--map-border); background: var(--map-panel-bg); color: var(--map-muted); padding: 0 9px; font-size: 12px; cursor: pointer; }
-        .resource-map-node__collapse:hover { border-color: var(--node-accent); color: var(--map-heading); }
-        .resource-map-node__stack-grid { position: absolute; inset: 56px 24px 22px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
-        .resource-map-stack-card { position: relative; min-width: 0; height: 86px; display: flex; align-items: center; gap: 14px; border: 1px solid var(--map-border); border-radius: 8px; background: var(--map-card-bg); color: var(--map-text); padding: 12px 14px; text-align: left; cursor: pointer; box-shadow: none; transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease; }
-        .resource-map-stack-card:hover { border-color: var(--node-accent); transform: translateY(-1px); }
-        .resource-map-stack-card__icon { width: 46px; height: 46px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: var(--node-accent); background: color-mix(in srgb, var(--node-accent) 14%, var(--map-card-bg)); }
-        .resource-map-stack-card__copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-        .resource-map-stack-card__copy small { color: var(--map-muted); font-size: 13px; }
-        .resource-map-stack-card__copy strong { color: var(--map-heading); font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
-        .resource-map-stack-card__badge { position: absolute; right: -14px; top: -14px; min-width: 34px; height: 34px; padding: 0 8px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: var(--map-panel-bg); border: 1px solid var(--map-border); color: var(--map-heading); font-size: 14px; font-weight: 760; }
-        .resource-map-edge .react-flow__edge-path { stroke: var(--map-edge); stroke-opacity: .72; transition: stroke-opacity .15s ease, stroke-width .15s ease; }
-        .resource-map-edge--owner .react-flow__edge-path { stroke: var(--map-edge-owner); }
-        .resource-map-edge--network .react-flow__edge-path, .resource-map-edge--gateway .react-flow__edge-path { stroke: var(--map-edge-network); }
-        .resource-map-edge--config .react-flow__edge-path { stroke: var(--map-edge-config); }
-        .resource-map-edge--storage .react-flow__edge-path { stroke: var(--map-edge-storage); }
-        .resource-map-edge.is-related .react-flow__edge-path,
-        .resource-map-edge:hover .react-flow__edge-path { stroke-opacity: .96; }
-        .has-motion .resource-map-edge .react-flow__edge-path { stroke-dasharray: 10 11; animation: resource-map-flow 1.9s linear infinite; }
-        .is-static .resource-map-edge .react-flow__edge-path { stroke-dasharray: none; animation: none; }
-        @keyframes resource-map-flow { to { stroke-dashoffset: -30; } }
-        @media (prefers-reduced-motion: reduce) { .has-motion .resource-map-edge .react-flow__edge-path { animation: none; stroke-dasharray: none; } }
-        .resource-map-breadcrumbs { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: 8px; background: var(--map-panel-bg); border: 1px solid var(--map-border); color: var(--map-muted); font-size: 12px; }
-        .resource-map-breadcrumbs strong { color: var(--map-heading); }
-        .resource-map-breadcrumbs button { height: 24px; border-radius: 999px; border: 1px solid var(--map-border); background: var(--map-card-bg-soft); color: var(--map-text); padding: 0 9px; font-size: 12px; cursor: pointer; }
-        .resource-map-breadcrumbs button:hover { border-color: var(--map-edge-network); color: var(--map-heading); }
-        .resource-map-motion-state { position: absolute; right: 12px; bottom: 12px; display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 6px 10px; background: var(--map-panel-bg); border: 1px solid var(--map-border); color: var(--map-muted); font-size: 12px; pointer-events: none; }
-        .resource-map-motion-state span { width: 7px; height: 7px; border-radius: 999px; background: #64748b; }
-        .resource-map-motion-state span.is-on { background: #22c55e; }
-        .resource-map-rail { min-width: 0; overflow: hidden; border-radius: 8px; border: 1px solid var(--map-border); background: var(--map-panel-bg); display: flex; flex-direction: column; box-shadow: var(--map-shadow); }
-        .resource-map-rail > .ant-empty { margin: auto; color: var(--map-muted); }
-        .resource-map-rail__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px; border-bottom: 1px solid var(--map-border); }
-        .resource-map-rail__title { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-        .resource-map-rail__head span { color: var(--map-muted); font-size: 12px; }
-        .resource-map-rail__head strong { color: var(--map-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .resource-map-rail__head button { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--map-border); background: var(--map-card-bg-soft); color: var(--map-text); cursor: pointer; }
-        .resource-map-rail__body { overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
-        .resource-map-health { border: 1px solid var(--map-border); border-radius: 8px; padding: 12px; background: var(--map-card-bg-soft); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-        .resource-map-health span { font-size: 12px; color: var(--map-muted); }
-        .resource-map-health strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-heading); }
-        .resource-map-health.is-success { border-color: color-mix(in srgb, #22c55e 38%, var(--map-border)); }
-        .resource-map-health.is-warning { border-color: color-mix(in srgb, #f59e0b 48%, var(--map-border)); }
-        .resource-map-health.is-error { border-color: color-mix(in srgb, #fb7185 52%, var(--map-border)); }
-        .resource-map-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .resource-map-facts div { min-width: 0; border: 1px solid var(--map-border); border-radius: 8px; padding: 10px; background: var(--map-card-bg-soft); }
-        .resource-map-facts span { display: block; color: var(--map-muted); font-size: 11px; }
-        .resource-map-facts strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--map-heading); font-size: 13px; }
-        .resource-map-section { border: 1px solid var(--map-border); border-radius: 8px; background: var(--map-card-bg-soft); padding: 10px; }
-        .resource-map-section-title { color: var(--map-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; margin-bottom: 8px; }
-        .resource-map-health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
-        .resource-map-health-grid span { min-width: 0; border: 1px solid var(--map-border); border-radius: 8px; padding: 8px; color: var(--map-muted); font-size: 12px; }
-        .resource-map-health-grid strong { display: block; margin-top: 4px; color: var(--map-heading); font-size: 16px; }
-        .resource-map-health-grid .is-success strong { color: #22c55e; }
-        .resource-map-health-grid .is-warning strong { color: #f59e0b; }
-        .resource-map-health-grid .is-error strong { color: #fb7185; }
-        .resource-map-kind-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-        .resource-map-kind-strip span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--map-border); border-radius: 999px; padding: 4px 8px; color: var(--map-muted); font-size: 12px; }
-        .resource-map-kind-strip strong { color: var(--map-heading); }
-        .resource-map-list { display: flex; flex-direction: column; gap: 7px; }
-        .resource-map-list__item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--map-border); border-radius: 8px; padding: 9px; background: var(--map-card-bg-soft); color: var(--map-text); text-align: left; cursor: pointer; }
-        .resource-map-list__item > span { color: #0ea5e9; }
-        .resource-map-list__item div { min-width: 0; flex: 1; }
-        .resource-map-list__item strong, .resource-map-list__item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .resource-map-list__item strong { color: var(--map-heading); }
-        .resource-map-list__item small { color: var(--map-muted); }
-        .resource-map-list__item em { flex: 0 0 auto; color: var(--map-muted); font-style: normal; font-size: 12px; }
-        .resource-map-list__item.is-error { border-color: color-mix(in srgb, #fb7185 42%, var(--map-border)); }
-        .resource-map-list__item.is-warning { border-color: color-mix(in srgb, #f59e0b 38%, var(--map-border)); }
-        .resource-map-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-        .resource-map-density { display: grid; gap: 12px; }
-        .resource-map-density__hero { display: grid; gap: 4px; border: 1px solid var(--map-border); border-radius: 8px; padding: 14px; background: var(--map-card-bg); }
-        .resource-map-density__hero span { color: var(--map-muted); font-size: 12px; }
-        .resource-map-density__hero strong { color: var(--map-heading); font-size: 30px; line-height: 1; }
-        .resource-map-density__hero small { color: var(--map-muted); font-size: 12px; line-height: 1.35; }
-        .resource-map-density-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-        .resource-map-density-card { min-width: 0; display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--density-color) 24%, var(--map-border)); border-radius: 8px; padding: 9px; background: color-mix(in srgb, var(--density-color) 7%, var(--map-card-bg)); }
-        .resource-map-density-card__icon { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: var(--density-color); background: color-mix(in srgb, var(--density-color) 12%, transparent); }
-        .resource-map-density-card div { min-width: 0; display: grid; gap: 2px; }
-        .resource-map-density-card strong,
-        .resource-map-density-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .resource-map-density-card strong { color: var(--map-heading); font-size: 13px; }
-        .resource-map-density-card small { color: var(--map-muted); font-size: 11px; }
-        .resource-map-density-card em { grid-column: 1 / -1; color: var(--density-color); font-size: 11px; font-style: normal; font-weight: 700; }
-        .resource-map-density-panel { border: 1px solid var(--map-border); border-radius: 8px; padding: 10px; background: var(--map-card-bg-soft); }
-        .resource-map-density-row { display: grid; grid-template-columns: 58px minmax(0, 1fr) 30px; align-items: center; gap: 8px; min-height: 26px; color: var(--map-muted); font-size: 12px; }
-        .resource-map-density-row i { position: relative; height: 5px; overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--map-border) 74%, transparent); }
-        .resource-map-density-row i::before { content: ""; position: absolute; inset-block: 0; left: 0; width: var(--density-scale); border-radius: inherit; background: var(--map-edge-network); }
-        .resource-map-density-row strong { color: var(--map-heading); text-align: right; }
-        .resource-map-canvas .react-flow__controls { box-shadow: var(--map-shadow); }
-        .resource-map-canvas .react-flow__controls-button { background: var(--map-panel-bg); border-color: var(--map-border); color: var(--map-text); }
-        .resource-map-canvas .react-flow__background { color: var(--map-dot); }
-        .resource-map-zoom-percent { margin-bottom: -54px; min-width: 44px; height: 36px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: var(--map-panel-bg); border: 1px solid var(--map-border); box-shadow: var(--map-shadow); color: var(--map-text); font-size: 12px; font-weight: 740; pointer-events: none; }
-        @media (max-width: 1280px) { .resource-map-toolbar { grid-template-columns: 1fr; } .resource-map-toolbar__actions { justify-content: flex-start; flex-wrap: wrap; } }
-        @media (max-width: 1100px) { .resource-map-shell { height: auto; min-height: 100vh; } .resource-map-workbench { grid-template-columns: 1fr; } .resource-map-rail { min-height: 280px; } .resource-map-canvas { min-height: 640px; } }
-        @media (max-width: 720px) { .resource-map-header { align-items: flex-start; flex-direction: column; } .resource-map-header__stats, .resource-map-toolbar__scope, .resource-map-toolbar__filters { flex-wrap: wrap; } .resource-map-toolbar select, .resource-map-toolbar .ant-input-affix-wrapper { width: 100%; } .resource-map-facts { grid-template-columns: 1fr; } }
-      `}</style>
     </section>
   );
 }
