@@ -10,7 +10,6 @@ if [[ ! -f "$TASKS_FILE" && -f "$SLICE_TASKS_FILE" ]]; then
   TASKS_FILE="$SLICE_TASKS_FILE"
 fi
 TOPOLOGY_FILE="$ROOT_DIR/frontend/src/app/network/topology/page.tsx"
-CLEANUP_FILE="$ROOT_DIR/scripts/topology-clean-artifacts.sh"
 SERVICE_FILE="$ROOT_DIR/scripts/service.sh"
 AUTH_CLIENT_FILE="$ROOT_DIR/frontend/src/lib/api/client.ts"
 AUTH_CONTEXT_FILE="$ROOT_DIR/frontend/src/components/auth-context.tsx"
@@ -256,7 +255,6 @@ NODE
 
 check_file "tasks file" "$TASKS_FILE"
 check_file "topology page" "$TOPOLOGY_FILE"
-check_file "cleanup script" "$CLEANUP_FILE"
 check_file "service entrypoint" "$SERVICE_FILE"
 check_file "auth client" "$AUTH_CLIENT_FILE"
 check_file "auth context" "$AUTH_CONTEXT_FILE"
@@ -283,7 +281,7 @@ if [[ "$failures" -eq 0 ]]; then
   check_realtime_stream_guard
   check_refresh_interval_guard
   check_topology_query_key_guard
-  check_pattern "cleanup command hooks" "topology-artifacts|topology verify|topology clean|topology-verify\\.sh" "$SERVICE_FILE"
+    check_pattern "cleanup command hooks" "topology-artifacts|test topology|topology-verify\\.sh" "$SERVICE_FILE"
   if [[ "$TASKS_FILE" == "$SPEC_TASKS_FILE" ]]; then
     check_pattern "task list markers" "5\\.1|5\\.2|5\\.3|5\\.4|12\\.5" "$TASKS_FILE"
   else

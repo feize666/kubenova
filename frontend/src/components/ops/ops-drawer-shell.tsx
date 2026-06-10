@@ -11,7 +11,7 @@ export type OpsDrawerShellProps = Omit<DrawerProps, "children"> & {
   state?: OpsStateKind | "idle";
   stateDescription?: ReactNode;
   stateTitle?: ReactNode;
-  variant?: "resource" | "detail" | "editor" | "workbench" | "business";
+  variant?: "resource" | "detail" | "editor" | "workbench" | "business" | "inspector";
   widthPx?: number;
   footerActions?: ReactNode;
   returnFocusRef?: RefObject<HTMLElement | null>;
@@ -21,6 +21,7 @@ const VARIANT_WIDTH: Record<NonNullable<OpsDrawerShellProps["variant"]>, number>
   resource: 960,
   detail: 960,
   business: 840,
+  inspector: 460,
   editor: 1040,
   workbench: 1180,
 };
@@ -47,6 +48,11 @@ export function OpsDrawerShell({
     typeof styles === "function" ? {} : (styles as Record<string, CSSProperties | undefined> | undefined);
 
   const resolvedWidth = widthPx ?? VARIANT_WIDTH[variant];
+  const inspectorMaxWidth = Math.min(Math.max(resolvedWidth, 384), 460);
+  const resolvedWrapperWidth =
+    variant === "inspector"
+      ? `min(100vw, clamp(384px, 32vw, ${inspectorMaxWidth}px))`
+      : `min(100vw, ${resolvedWidth}px, max(50vw, 720px))`;
 
   return (
     <Drawer
@@ -62,7 +68,7 @@ export function OpsDrawerShell({
       styles={{
         ...semanticStyles,
         wrapper: {
-          width: `min(100vw, ${resolvedWidth}px, max(50vw, 720px))`,
+          width: resolvedWrapperWidth,
           maxWidth: "none",
           ...semanticStyles?.wrapper,
         },

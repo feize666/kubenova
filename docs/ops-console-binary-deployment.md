@@ -64,7 +64,7 @@ sudo test -d "${TARGET}/frontend/.next/standalone/.next/static"
 sudo test -x "${TARGET}/runtime-gateway/runtime-gateway"
 ```
 
-注意：`prod-up.sh` 会检查 frontend standalone 包、control-api 构建产物、runtime-gateway 可执行文件。若构建产物布局不同，需要先调整发布包，而不是跳过检查。
+注意：`service.sh prod up` 会检查 frontend standalone 包、control-api 构建产物、runtime-gateway 可执行文件。若构建产物布局不同，需要先调整发布包，而不是跳过检查。
 
 ## 配置
 
@@ -143,7 +143,7 @@ bash scripts/service.sh prod switch <version>
 bash scripts/service.sh prod status
 ```
 
-`prod-switch.sh` 会检查：
+`service.sh prod switch` 会检查：
 
 - `runtime-gateway/runtime-gateway` 可执行
 - `control-api/dist/src/main.js` 存在

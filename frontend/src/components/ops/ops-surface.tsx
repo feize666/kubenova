@@ -2,7 +2,7 @@
 
 import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
 
-export type OpsSurfaceVariant = "panel" | "raised" | "flat" | "toolbar" | "workbench" | "code" | "danger";
+export type OpsSurfaceVariant = "panel" | "raised" | "flat" | "toolbar" | "workbench" | "glass" | "halo" | "code" | "danger";
 export type OpsSurfacePadding = "none" | "xs" | "sm" | "md" | "lg";
 
 export type OpsSurfaceProps = HTMLAttributes<HTMLElement> & {

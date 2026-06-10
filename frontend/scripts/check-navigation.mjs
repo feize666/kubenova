@@ -7,6 +7,7 @@ import process from "node:process";
 const projectRoot = process.cwd();
 const navigationPath = path.join(projectRoot, "src/config/navigation.ts");
 const shellLayoutPath = path.join(projectRoot, "src/components/shell-layout.tsx");
+const globalsPath = path.join(projectRoot, "src/app/globals.css");
 const appRoot = path.join(projectRoot, "src/app");
 const forbiddenSidebarPaths = new Set(["/dashboard", "/monitoring"]);
 const outputPath = resolveOutputPath();
@@ -264,6 +265,34 @@ function extractObjectKeys(text, variableName) {
   });
 }
 
+function extractCssBlock(cssText, selector) {
+  const selectorIndex = cssText.indexOf(selector);
+  if (selectorIndex === -1) return "";
+  const openIndex = cssText.indexOf("{", selectorIndex);
+  if (openIndex === -1) return "";
+  const closeIndex = findMatching(cssText, openIndex, "{", "}");
+  return cssText.slice(openIndex + 1, closeIndex);
+}
+
+function extractCssVariables(cssText, selector, prefix) {
+  const variables = new Map();
+  const variablePattern = new RegExp(`(${prefix}[A-Za-z0-9_-]+)\\s*:\\s*([^;]+);`, "g");
+  let searchIndex = 0;
+  while (searchIndex < cssText.length) {
+    const selectorIndex = cssText.indexOf(selector, searchIndex);
+    if (selectorIndex === -1) break;
+    const openIndex = cssText.indexOf("{", selectorIndex);
+    if (openIndex === -1) break;
+    const closeIndex = findMatching(cssText, openIndex, "{", "}");
+    const block = cssText.slice(openIndex + 1, closeIndex);
+    for (const match of block.matchAll(variablePattern)) {
+      variables.set(match[1], match[2].trim());
+    }
+    searchIndex = closeIndex + 1;
+  }
+  return variables;
+}
+
 function toAppPagePath(routePath) {
   if (!routePath.startsWith("/")) {
     throw new Error(`Navigation path must start with "/": ${routePath}`);
@@ -307,6 +336,7 @@ function writeSummary(summary) {
 function main() {
   const navigationText = fs.readFileSync(navigationPath, "utf8");
   const shellLayoutText = fs.readFileSync(shellLayoutPath, "utf8");
+  const globalsText = fs.readFileSync(globalsPath, "utf8");
 
   const sections = extractNavigation(navigationText);
   const sectionKeys = sections.map((section) => section.key);
@@ -345,8 +375,56 @@ function main() {
     "findActiveSectionKey",
     "getSectionOrder",
     "sectionIconMap[section.key]",
+    "className=\"app-sidebar-menu__link app-sidebar-menu__link--section\"",
+    "className=\"app-sidebar-menu__link app-sidebar-menu__link--nested\"",
+    "className=\"shell-status-band\"",
+    "className=\"shell-mobile-nav-trigger\"",
+    "className=\"shell-mobile-scope\"",
+    "className=\"shell-mobile-search-trigger\"",
+    "className=\"shell-topbar-actions\"",
+    "id=\"shell-global-search\"",
+    "id=\"shell-mobile-global-search\"",
+    "className={`shell-theme-toggle shell-theme-toggle--${mode}`}",
   ];
   const missingShellContracts = requiredShellContracts.filter((contract) => !shellLayoutText.includes(contract));
+  const requiredCssContracts = [
+    "[data-theme=\"light\"] .app-sidebar.ant-layout-sider",
+    "background: #ffffff !important;",
+    "--sidebar-icon-config: #db2777;",
+    "--sidebar-icon-config: #f472b6;",
+    ".app-sidebar-menu__label--nested::before",
+    ".app-sidebar-menu__link--nested",
+    ".shell-status-band",
+    ".shell-mobile-nav-trigger.ops-icon-action-button.ant-btn",
+    ".shell-mobile-search-trigger.ops-icon-action-button.ant-btn",
+    ".shell-mobile-scope",
+    ".shell-mobile-nav-dropdown .ant-dropdown-menu",
+    ".shell-topbar-action.ops-icon-action-button.ant-btn",
+    ".app-header .ant-input-affix-wrapper",
+    "height: 34px;",
+    "height: 32px;",
+  ];
+  const missingCssContracts = requiredCssContracts.filter((contract) => !globalsText.includes(contract));
+  const sidebarIconNames = [
+    "--sidebar-icon-overview",
+    "--sidebar-icon-panorama",
+    "--sidebar-icon-cluster",
+    "--sidebar-icon-workloads",
+    "--sidebar-icon-network",
+    "--sidebar-icon-storage",
+    "--sidebar-icon-config",
+    "--sidebar-icon-delivery",
+    "--sidebar-icon-observability",
+    "--sidebar-icon-intelligence",
+    "--sidebar-icon-security",
+    "--sidebar-icon-system",
+  ];
+  const lightSidebarIconValues = extractCssVariables(globalsText, "[data-theme=\"light\"] .app-sidebar-menu.ant-menu", "--sidebar-icon-");
+  const darkSidebarIconValues = extractCssVariables(globalsText, "[data-theme=\"dark\"] .app-sidebar-menu.ant-menu", "--sidebar-icon-");
+  const missingLightSidebarIcons = sidebarIconNames.filter((name) => !lightSidebarIconValues.has(name));
+  const missingDarkSidebarIcons = sidebarIconNames.filter((name) => !darkSidebarIconValues.has(name));
+  const duplicateLightSidebarIconColors = findDuplicates(sidebarIconNames.map((name) => lightSidebarIconValues.get(name)).filter(Boolean));
+  const duplicateDarkSidebarIconColors = findDuplicates(sidebarIconNames.map((name) => darkSidebarIconValues.get(name)).filter(Boolean));
   const clusterDomain = sections.find((section) => section.key === "section-cluster-domain");
   const clusterDomainPaths = clusterDomain?.items.map((item) => item.path) ?? [];
   const nodeIndex = clusterDomainPaths.indexOf("/clusters/nodes");
@@ -368,6 +446,11 @@ function main() {
   if (forbiddenPaths.length > 0) failures.push(`Forbidden sidebar paths:\n${formatList([...new Set(forbiddenPaths)])}`);
   if (invalidSections.length > 0) failures.push(`Invalid section shapes:\n${formatList(invalidSections)}`);
   if (missingShellContracts.length > 0) failures.push(`Missing shell navigation contracts:\n${formatList(missingShellContracts)}`);
+  if (missingCssContracts.length > 0) failures.push(`Missing shell CSS contracts:\n${formatList(missingCssContracts)}`);
+  if (missingLightSidebarIcons.length > 0) failures.push(`Missing light sidebar icon tokens:\n${formatList(missingLightSidebarIcons)}`);
+  if (missingDarkSidebarIcons.length > 0) failures.push(`Missing dark sidebar icon tokens:\n${formatList(missingDarkSidebarIcons)}`);
+  if (duplicateLightSidebarIconColors.length > 0) failures.push(`Duplicate light sidebar icon colors:\n${formatList(duplicateLightSidebarIconColors)}`);
+  if (duplicateDarkSidebarIconColors.length > 0) failures.push(`Duplicate dark sidebar icon colors:\n${formatList(duplicateDarkSidebarIconColors)}`);
   if (invalidClusterDomainOrder.length > 0) failures.push(`Invalid cluster domain order:\n${formatList(invalidClusterDomainOrder)}`);
 
   const summary = {
@@ -387,6 +470,11 @@ function main() {
     forbiddenPaths: [...new Set(forbiddenPaths)],
     invalidSections,
     missingShellContracts,
+    missingCssContracts,
+    missingLightSidebarIcons,
+    missingDarkSidebarIcons,
+    duplicateLightSidebarIconColors,
+    duplicateDarkSidebarIconColors,
     invalidClusterDomainOrder,
     generatedAt: new Date().toISOString(),
   };

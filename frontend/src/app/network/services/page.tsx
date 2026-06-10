@@ -648,64 +648,66 @@ export default function ServicesPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path={SERVICE_PATH}
-        description="管理集群 Service 访问策略、端口映射与服务暴露方式。"
-        titleSuffix={<ResourceAddButton title="创建Service" onClick={handleOpenCreate} />}
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <NetworkResourcePageFilters
-          clusterId={clusterId}
-          namespace={namespace}
-          keywordInput={keywordInput}
-          clusterOptions={clusterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          clusterUnavailable={clusterUnavailable}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespaceDisabled ? "请先选择集群" : "全部名称空间"}
-          onClusterChange={handleClusterChange}
-          onNamespaceChange={handleNamespaceChange}
-          onKeywordInputChange={setKeywordInput}
-          onSearch={handleSearch}
-          keywordPlaceholder="按名称/标签搜索（示例：svc-a app=web env=prod）"
-          marginBottom={0}
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
-      ) : null}
-
-      {isError ? (
-        <Alert
-          className="network-resource-state-alert"
-          type="error"
-          showIcon
-          title="网络服务加载失败"
-          description={error instanceof Error ? error.message : "请求失败"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ServiceTimeProvider>
-          <ResourceTable<NetworkResource>
-            rowKey="id"
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            tableKey={SERVICE_TABLE_KEY}
-            preferencesClient={preferencesClient}
-            globalSearch={globalSearch}
-            filters={tableFilters}
-            onFiltersChange={handleFiltersChange}
-            sort={sortState}
-            dataSource={tableData}
-            loading={isTableBusy}
-            onChange={handleResourceTableChange}
-            pagination={getPaginationConfig(data?.total ?? 0, isTableBusy)}
+        <ResourcePageHeader
+          path={SERVICE_PATH}
+          description="管理集群 Service 访问策略、端口映射与服务暴露方式。"
+          style={{ marginBottom: 12 }}
+          titleSuffix={<ResourceAddButton title="创建Service" onClick={handleOpenCreate} />}
+        />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <NetworkResourcePageFilters
+            clusterId={clusterId}
+            namespace={namespace}
+            keywordInput={keywordInput}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            clusterUnavailable={clusterUnavailable}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespaceDisabled ? "请先选择集群" : "全部名称空间"}
+            onClusterChange={handleClusterChange}
+            onNamespaceChange={handleNamespaceChange}
+            onKeywordInputChange={setKeywordInput}
+            onSearch={handleSearch}
+            keywordPlaceholder="按名称/标签搜索（示例：svc-a app=web env=prod）"
+            marginBottom={0}
           />
-        </ServiceTimeProvider>
+
+          {!isInitializing && !accessToken ? (
+            <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+          ) : null}
+
+          {isError ? (
+            <Alert
+              className="network-resource-state-alert"
+              type="error"
+              showIcon
+              title="网络服务加载失败"
+              description={error instanceof Error ? error.message : "请求失败"}
+            />
+          ) : null}
+
+          <ServiceTimeProvider>
+            <ResourceTable<NetworkResource>
+              rowKey="id"
+              columns={columns}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              tableKey={SERVICE_TABLE_KEY}
+              preferencesClient={preferencesClient}
+              globalSearch={globalSearch}
+              filters={tableFilters}
+              onFiltersChange={handleFiltersChange}
+              sort={sortState}
+              dataSource={tableData}
+              bordered
+              loading={isTableBusy}
+              onChange={handleResourceTableChange}
+              pagination={getPaginationConfig(data?.total ?? 0, isTableBusy)}
+            />
+          </ServiceTimeProvider>
+        </Space>
       </OpsSurface>
 
       <OpsModalShell

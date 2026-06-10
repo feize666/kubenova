@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Alert, Empty, Space, message } from "antd";
+import { Space, message } from "antd";
 import { useAuth } from "@/components/auth-context";
 import { downloadClusterKubeconfig, getClusterDetail } from "@/lib/api/clusters";
 import type { ClusterTableRecord } from "@/app/clusters/page";
@@ -58,9 +58,8 @@ function isOfflineClusterSnapshot(cluster: ClusterTableRecord | null, runtimeSta
 function renderOfflineClusterNotice(mode: "offline" | "offline-mode") {
   const isOfflineMode = mode === "offline-mode";
   return (
-    <Alert
-      type="warning"
-      showIcon
+    <OpsDegradedState
+      compact
       title={isOfflineMode ? "集群处于离线模式" : "集群当前离线"}
       description={
         isOfflineMode
@@ -230,10 +229,11 @@ export function ClusterDetailDrawer({
                   />
                 ) : null}
                 {nodeItems.length === 0 ? (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={nodeSummaryDegraded ? "节点数据降级为空" : "暂无节点数据"}
-                  />
+                  nodeSummaryDegraded ? (
+                    <OpsDegradedState compact title="节点数据降级为空" description="节点清单读取失败，当前无可展示节点。" />
+                  ) : (
+                    <OpsEmptyState compact title="暂无节点数据" description="当前集群详情未返回节点清单。" />
+                  )
                 ) : (
                   <DetailDescriptions
                     items={nodeItems.map((item) => ({
@@ -267,11 +267,10 @@ export function ClusterDetailDrawer({
             </DetailSection>
           </Space>
         ) : showFallbackSnapshot ? (
-            <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+          <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             {detailTimedOut ? (
-              <Alert
-                type="error"
-                showIcon
+              <OpsErrorState
+                compact
                 title="集群详情加载超时"
                 description="实时详情读取时间过长，当前展示列表快照。可重试刷新，或先用列表信息继续排查。"
                 action={
@@ -298,7 +297,7 @@ export function ClusterDetailDrawer({
             </DetailSection>
           </Space>
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无详情数据" />
+          <OpsEmptyState title="暂无详情数据" description="当前集群没有可展示的实时详情或列表快照。" />
         )}
       </div>
     </OpsDrawerShell>

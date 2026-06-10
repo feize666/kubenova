@@ -494,75 +494,77 @@ export default function ConfigMapsPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/configs/configmaps"
-        titleSuffix={<ResourceAddButton title="创建ConfigMap" onClick={handleOpenCreate} />}
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceScopeFilterButton
-          clusterId={clusterId}
-          namespace={namespace}
-          clusterOptions={clusterFilterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-            onScopeChange(nextClusterId, nextNamespace);
-            resetPage();
-          }}
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert
-          className="config-resource-state-alert"
-          type="warning"
-          showIcon
-          title="未检测到登录状态，请先登录后再操作。"
-        />
-      ) : null}
-
-      {isError ? (
-        <Alert
-          className="config-resource-state-alert"
-          type="error"
-          showIcon
-          title="ConfigMap 加载失败"
-          description={error instanceof Error ? error.message : "请求失败"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<ConfigResourceItem>
-          tableKey="configs.configmaps"
-          rowKey="id"
-          columns={columns as ColumnsType<ConfigResourceItem>}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          dataSource={tableData}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: globalSearchInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "搜索名称或标签，如 cm-a app=web",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{
-            sortBy,
-            sortOrder,
-          }}
-          layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
-          loading={isLoading && !data}
-          onChange={(nextPagination, filters, sorter, extra) =>
-            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
-          }
-          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+        <ResourcePageHeader
+          path="/configs/configmaps"
+          style={{ marginBottom: 12 }}
+          titleSuffix={<ResourceAddButton title="创建ConfigMap" onClick={handleOpenCreate} />}
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterFilterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              resetPage();
+            }}
+          />
+
+          {!isInitializing && !accessToken ? (
+            <Alert
+              className="config-resource-state-alert"
+              type="warning"
+              showIcon
+              title="未检测到登录状态，请先登录后再操作。"
+            />
+          ) : null}
+
+          {isError ? (
+            <Alert
+              className="config-resource-state-alert"
+              type="error"
+              showIcon
+              title="ConfigMap 加载失败"
+              description={error instanceof Error ? error.message : "请求失败"}
+            />
+          ) : null}
+
+          <ResourceTable<ConfigResourceItem>
+            bordered
+            tableKey="configs.configmaps"
+            rowKey="id"
+            columns={columns as ColumnsType<ConfigResourceItem>}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            dataSource={tableData}
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: globalSearchInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "搜索名称或标签，如 cm-a app=web",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{
+              sortBy,
+              sortOrder,
+            }}
+            layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
+            loading={isLoading && !data}
+            onChange={(nextPagination, filters, sorter, extra) =>
+              handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+            }
+            pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+          />
+        </Space>
       </OpsSurface>
 
       <OpsModalShell

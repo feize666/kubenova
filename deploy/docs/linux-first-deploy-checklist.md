@@ -19,10 +19,10 @@
 
 ## 2. 开发机自检
 
-- [ ] 执行 `bash scripts/install-deps.sh`
-- [ ] 执行 `bash scripts/db-init.sh`
-- [ ] 执行 `bash scripts/dev-up.sh`
-- [ ] 执行 `bash scripts/dev-status.sh`
+- [ ] 执行 `bash scripts/service.sh install-deps`
+- [ ] 执行 `bash scripts/service.sh db-init`
+- [ ] 执行 `bash scripts/service.sh dev up`
+- [ ] 执行 `bash scripts/service.sh dev status`
 - [ ] `http://localhost:3000` 可打开
 - [ ] `http://localhost:4000` 可打开
 - [ ] `ws://localhost:4100` 可连接
@@ -39,9 +39,9 @@
 
 ## 4. 正式安装
 
-- [ ] 执行 `bash scripts/prod-install.sh`
-- [ ] 执行 `bash scripts/prod-up.sh`
-- [ ] 执行 `bash scripts/prod-status.sh`
+- [ ] 执行 `bash scripts/service.sh prod install`
+- [ ] 执行 `bash scripts/service.sh prod up`
+- [ ] 执行 `bash scripts/service.sh prod status`
 
 ## 5. 首次验证
 
@@ -54,6 +54,6 @@
 ## 6. 常见回滚
 
 - [ ] 记录上一个可用版本号
-- [ ] 执行 `bash scripts/prod-rollback.sh <version>`
-- [ ] 执行 `bash scripts/prod-status.sh`
+- [ ] 执行 `bash scripts/service.sh prod rollback <version>`
+- [ ] 执行 `bash scripts/service.sh prod status`
 

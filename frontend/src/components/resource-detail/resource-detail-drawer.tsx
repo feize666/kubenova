@@ -8,7 +8,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
 import type { DynamicResourceIdentity, ResourceIdentity, ResourceDetailResponse } from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { OpsDegradedState, OpsDrawerShell, OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState } from "@/components/ops";
+import { OpsCommandPreview, OpsDegradedState, OpsDrawerShell, OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState } from "@/components/ops";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceDetailContent } from "./renderers";
 import type { ResourceDetailDrawerProps } from "./types";
@@ -78,41 +78,15 @@ function SnapshotBlock({
 }) {
   if (!value || Object.keys(value).length === 0) return null;
   return (
-    <div
-      style={{
-        border: "1px solid var(--ant-color-border-secondary)",
-        borderRadius: 8,
-        overflow: "hidden",
-        background: "var(--ant-color-bg-container)",
-      }}
-    >
-      <div
-        style={{
-          padding: "8px 10px",
-          borderBottom: "1px solid var(--ant-color-border-secondary)",
-          color: "var(--ant-color-text-secondary)",
-          fontSize: 12,
-          fontWeight: 700,
-          textTransform: "uppercase",
-        }}
-      >
-        {title}
-      </div>
-      <pre
-        style={{
-          margin: 0,
-          maxHeight: 280,
-          overflow: "auto",
-          padding: 12,
-          fontSize: 12,
-          lineHeight: 1.5,
-          whiteSpace: "pre-wrap",
-          overflowWrap: "anywhere",
-        }}
-      >
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    </div>
+    <OpsCommandPreview
+      allowCopy
+      content={JSON.stringify(value, null, 2)}
+      kind="code"
+      language="JSON"
+      title={title}
+      tone="neutral"
+      wrap
+    />
   );
 }
 
@@ -241,6 +215,7 @@ export function ResourceDetailDrawer({
   const yamlTarget = useMemo(() => buildDetailYamlTarget(query.data, activeRequest), [query.data, activeRequest]);
   const activeSnapshot = activeRequest?.snapshot;
   const canShowSnapshotFallback = hasSnapshot(activeSnapshot);
+  const drawerState = query.isFetching && hasDetailData ? "loading" : "idle";
 
   const title = (() => {
     if (!activeRequest) {
@@ -267,6 +242,9 @@ export function ResourceDetailDrawer({
       onClose={handleClose}
       variant="resource"
       widthPx={width}
+      state={drawerState}
+      stateTitle={drawerState === "loading" ? "正在刷新资源详情" : undefined}
+      stateDescription={drawerState === "loading" ? "当前内容保持可读，刷新完成后自动更新。" : undefined}
       classNames={{
         wrapper: "resource-detail-drawer-wrapper",
       }}

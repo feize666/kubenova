@@ -29,6 +29,7 @@ export type ResourceTableToolbarProps<T extends object> = {
 };
 
 export function ResourceTableToolbar<T extends object>({ table, extra }: ResourceTableToolbarProps<T>) {
+  const activeFilterCount = table.activeFilterCount + (table.globalSearch?.value ? 1 : 0);
   const searchPanel = table.globalSearch ? (
     <OpsPopoverPanel title="搜索" subtitle="按关键字过滤当前表格" className="resource-table-search-panel">
       <Input
@@ -63,7 +64,14 @@ export function ResourceTableToolbar<T extends object>({ table, extra }: Resourc
   );
 
   return (
-    <div className="resource-table-toolbar">
+    <div
+      className={[
+        "resource-table-toolbar",
+        activeFilterCount > 0 ? "resource-table-toolbar--has-active-filters" : undefined,
+      ].filter(Boolean).join(" ")}
+      data-active-filter-count={activeFilterCount}
+      data-resource-table-toolbar=""
+    >
       <div className="resource-table-toolbar-left">{extra}</div>
       <Space className="resource-table-toolbar-actions" size={8} wrap>
         {table.globalSearch ? (

@@ -58,29 +58,14 @@ for (const path of modalShellRoutes) {
   if (!content.includes("OpsModalShell")) {
     failures.push(`${path}: missing OpsModalShell for representative forms`);
   }
+  if (content.includes("<Modal")) {
+    failures.push(`${path}: resource route modal must use OpsModalShell, not raw antd Modal`);
+  }
 }
 
 const pvc = read("src/app/storage/pvc/page.tsx");
 if (!pvc.includes("openOpsConfirm") || !pvc.includes("删除 PVC")) {
   failures.push("src/app/storage/pvc/page.tsx: missing shared PVC destructive confirm");
-}
-
-const allowedLegacyModals = [
-  {
-    path: "src/app/network/gateway-api/page.tsx",
-    reason: "Gateway API dynamic CRD create/update modal is intentionally deferred",
-  },
-  {
-    path: "src/app/configs/serviceaccounts/page.tsx",
-    reason: "ServiceAccount YAML and token modals are intentionally deferred",
-  },
-];
-
-for (const item of allowedLegacyModals) {
-  const content = read(item.path);
-  if (!content.includes("<Modal")) {
-    failures.push(`${item.path}: deferred modal whitelist stale (${item.reason})`);
-  }
 }
 
 if (failures.length > 0) {

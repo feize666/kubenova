@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# dev-up.sh — 一键启动所有开发服务
-# 用法: bash scripts/dev-up.sh [--no-gateway] [--stable-frontend|--dev-frontend] [--stable-api|--dev-api]
+# dev.sh — development service lifecycle
+# 用法: bash scripts/dev.sh up|down|restart|status [options]
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,6 +31,90 @@ SERVICE_LOG_SUFFIX="dev"
 source "$ROOT_DIR/scripts/_service-lib.sh"
 service_lib_init
 
+dev_usage() {
+  cat <<'USAGE'
+Usage:
+  bash scripts/dev.sh up [--no-gateway] [--stable-frontend|--dev-frontend] [--stable-api|--dev-api]
+  bash scripts/dev.sh down [frontend|control-api|runtime-gateway|all...]
+  bash scripts/dev.sh restart [frontend|control-api|runtime-gateway|all...]
+  bash scripts/dev.sh status
+USAGE
+}
+
+stop_named_service() {
+  local name="$1"
+  case "$name" in
+    frontend) stop_service "frontend" "$FRONTEND_PORT" ;;
+    control-api) stop_service "control-api" "$CONTROL_API_PORT" ;;
+    runtime-gateway) stop_service "runtime-gateway" "$RUNTIME_GATEWAY_PORT" ;;
+    all)
+      stop_service "frontend" "$FRONTEND_PORT"
+      stop_service "control-api" "$CONTROL_API_PORT"
+      stop_service "runtime-gateway" "$RUNTIME_GATEWAY_PORT"
+      ;;
+    *)
+      echo "[错误] 未知服务: $name" >&2
+      dev_usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+cmd="${1:-up}"
+case "$cmd" in
+  up|start)
+    shift || true
+    ;;
+  down|stop)
+    shift || true
+    services=("$@")
+    if [[ "${#services[@]}" -eq 0 ]]; then
+      services=("all")
+    fi
+    for service in "${services[@]}"; do
+      stop_named_service "$service"
+    done
+    exit 0
+    ;;
+  restart)
+    shift || true
+    services=("$@")
+    if [[ "${#services[@]}" -eq 0 ]]; then
+      services=("all")
+    fi
+    for service in "${services[@]}"; do
+      stop_named_service "$service"
+    done
+    exec bash "$ROOT_DIR/scripts/dev.sh" up
+    ;;
+  status)
+    shift || true
+    SERVICE_STATUS_ADOPT="false"
+    echo "开发服务状态"
+    echo "  root: $ROOT_DIR"
+    echo "  ports: frontend=$FRONTEND_PORT control-api=$CONTROL_API_PORT runtime-gateway=$RUNTIME_GATEWAY_PORT"
+    echo "  status adopt: $SERVICE_STATUS_ADOPT (false=只检测，不接管监听 pid)"
+    echo
+    check_service_status "frontend" "$FRONTEND_PORT"
+    check_service_status "control-api" "$CONTROL_API_PORT"
+    check_service_status "runtime-gateway" "$RUNTIME_GATEWAY_PORT"
+    echo
+    service_log_dirs_summary
+    exit 0
+    ;;
+  help|-h|--help)
+    dev_usage
+    exit 0
+    ;;
+  -*)
+    ;;
+  *)
+    echo "[错误] 未知 dev 命令: $cmd" >&2
+    dev_usage >&2
+    exit 2
+    ;;
+esac
+
 # 解析参数
 for arg in "$@"; do
   case "$arg" in
@@ -47,7 +131,9 @@ check_dep npm  "npm"
 check_dep curl "curl"
 check_dep psql "PostgreSQL client (apt install postgresql-client)"
 check_dep redis-cli "Redis (apt install redis)"
-check_dep helm "Helm CLI (https://helm.sh/docs/intro/install/)"
+if ! command -v helm >/dev/null 2>&1; then
+  echo "[警告] 未找到 helm，基础服务继续启动；Helm 应用/仓库能力会不可用。安装: https://helm.sh/docs/intro/install/" >&2
+fi
 
 if [[ "$START_GATEWAY" == "true" ]]; then
   check_dep go "Go (https://go.dev)"
@@ -259,13 +345,13 @@ prepare_control_api_standalone() {
 
 # ── 服务健康检查 ────────────────────────────────────────
 wait_for_postgres() {
-  local db_url="${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/kubenova}"
+  local db_url="${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/k8s_aiops}"
   local check_url="${db_url%%\?*}"
   echo "[预检] 正在检查 PostgreSQL..."
   if ! psql "$check_url" -c "SELECT 1" &>/dev/null; then
     echo "[错误] 无法连接 PostgreSQL：$db_url" >&2
     echo "  请确认 PostgreSQL 已启动且数据库已创建。" >&2
-    echo "  可执行：bash scripts/db-init.sh" >&2
+    echo "  可执行：bash scripts/service.sh db-init" >&2
     exit 1
   fi
   echo "[预检] PostgreSQL 正常"
@@ -558,9 +644,9 @@ start_if_not_running "control-api" \
   "$CONTROL_API_DIR" \
   "$CONTROL_API_PORT" \
   "$(if [[ "$CONTROL_API_BOOT_MODE" == "stable" ]]; then
-      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/kubenova} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' node dist/src/main.js"
+      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' node dist/src/main.js"
     else
-      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/kubenova} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' npx --no-install nest start --watch"
+      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' npx --no-install nest start --watch"
     fi)"
 
 if [[ "$START_GATEWAY" == "true" ]]; then
@@ -590,4 +676,4 @@ if [[ "$START_GATEWAY" == "true" ]]; then
 fi
 echo ""
 service_log_dirs_summary
-echo "停止命令: bash scripts/dev-down.sh"
+echo "停止命令: bash scripts/service.sh dev down"

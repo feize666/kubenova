@@ -1,6 +1,7 @@
 # 前端
 node_modules/
 .next/
+.turbo/
 dist/
 build/
 coverage/
@@ -29,6 +30,18 @@ pnpm-debug.log*
 .env.test.local
 .env.production.local
 
+# 数据库/本地测试数据
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.sql
+*.bak
+/tmp/
+/temp/
+/data/
+/db/
+
 # 系统垃圾
 .DS_Store
 .DS_Store?
@@ -46,3 +59,4 @@ pnpm-debug.log*
 .run/
 artifacts/
 AGENTS.md
+DESIGN.md

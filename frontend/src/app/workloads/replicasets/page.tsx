@@ -1,6 +1,14 @@
 "use client";
 
-import { DeleteOutlined, EyeOutlined, FileTextOutlined, ReloadOutlined, RetweetOutlined, RollbackOutlined, StopOutlined } from "@ant-design/icons";
+import {
+  DeleteOutlined,
+  EyeOutlined,
+  FileTextOutlined,
+  ReloadOutlined,
+  RetweetOutlined,
+  RollbackOutlined,
+  StopOutlined,
+} from "@ant-design/icons";
 import { useMemo, useState } from "react";
 import {
   Alert,
@@ -9,13 +17,15 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Select,
   Space,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/lib/table";
+import type {
+  HeadlampResourceTableColumn,
+  HeadlampTableFilters,
+} from "@/lib/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
@@ -27,6 +37,7 @@ import {
   parseResourceSearchInput,
   POD_ACTION_MENU_CLASS,
   POD_ACTION_TRIGGER_CLASS,
+  ResourceActionIsolation,
   renderPodLikeResourceActionStyles,
   renderResourceActionTriggerButton,
 } from "@/components/resource-action-bar";
@@ -35,6 +46,7 @@ import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsFormSection, OpsModalShell } from "@/components/ops";
 import { OpsSurface } from "@/components/ops/ops-surface";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
@@ -46,23 +58,37 @@ import {
   patchWorkloadById,
   type WorkloadListItem,
 } from "@/lib/api/workloads";
-import { type ResourceDetailRequest, type ResourceIdentity } from "@/lib/api/resources";
+import {
+  type ResourceDetailRequest,
+  type ResourceIdentity,
+} from "@/lib/api/resources";
 import { getClusters } from "@/lib/api/clusters";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
-import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
+import {
+  readResourceFilterFromSearchParams,
+  useSyncResourceFilterUrlState,
+} from "@/hooks/use-resource-filter-url-state";
 import {
   runScaleConvergence,
   type ScaleConvergenceRound,
 } from "@/lib/workloads/scale-convergence";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
+import {
+  TABLE_COL_WIDTH,
+  getAdaptiveNameWidth,
+} from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
-import { WorkloadReplicaCell, WorkloadStateTag } from "@/components/workloads/workload-table-cells";
+import {
+  WorkloadReplicaCell,
+  WorkloadStateTag,
+} from "@/components/workloads/workload-table-cells";
 
 function stateTag(state: string) {
-  if (state === "active") return <WorkloadStateTag tone="success" label="启用" />;
-  if (state === "disabled") return <WorkloadStateTag tone="neutral" label="禁用" />;
+  if (state === "active")
+    return <WorkloadStateTag tone="success" label="启用" />;
+  if (state === "disabled")
+    return <WorkloadStateTag tone="neutral" label="禁用" />;
   return <WorkloadStateTag tone="danger" label="已删除" />;
 }
 
@@ -78,7 +104,12 @@ function getTextFilter(filters: HeadlampTableFilters, key: string) {
 }
 
 function textMatches(value: unknown, filterValue: string) {
-  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+  return (
+    !filterValue ||
+    String(value ?? "")
+      .toLowerCase()
+      .includes(filterValue)
+  );
 }
 
 function selectMatches(value: unknown, filterValue: unknown) {
@@ -103,8 +134,11 @@ export default function ReplicaSetsPage() {
   const { message } = App.useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
-    readResourceFilterFromSearchParams(searchParams);
+  const {
+    clusterId: initialClusterId,
+    namespace: initialNamespace,
+    keyword: initialKeyword,
+  } = readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
   const now = useNowTicker();
@@ -112,8 +146,13 @@ export default function ReplicaSetsPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
-    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const {
+    clusterId,
+    namespace,
+    namespaceDisabled,
+    namespacePlaceholder,
+    onScopeChange,
+  } = useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const {
     sortBy,
     sortOrder,
@@ -133,13 +172,23 @@ export default function ReplicaSetsPage() {
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [scaleItem, setScaleItem] = useState<WorkloadListItem | null>(null);
   const [targetReplicas, setTargetReplicas] = useState(1);
-  const [scaleConvergence, setScaleConvergence] = useState<ScaleConvergenceViewState | null>(null);
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [scaleConvergence, setScaleConvergence] =
+    useState<ScaleConvergenceViewState | null>(null);
+  const [detailTarget, setDetailTarget] =
+    useState<ResourceDetailRequest | null>(null);
 
   const queryKey = [
     "workloads",
     "ReplicaSet",
-    { clusterId, keyword, namespace, page: pagination.pageIndex + 1, pageSize: pagination.pageSize, sortBy, sortOrder },
+    {
+      clusterId,
+      keyword,
+      namespace,
+      page: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
+      sortBy,
+      sortOrder,
+    },
     accessToken,
   ];
 
@@ -165,33 +214,50 @@ export default function ReplicaSetsPage() {
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "list", accessToken],
-    queryFn: () => getClusters({ state: "active", selectableOnly: true }, accessToken!),
+    queryFn: () =>
+      getClusters({ state: "active", selectableOnly: true }, accessToken!),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
   const clusterOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
+    () =>
+      (clustersQuery.data?.items ?? []).map((c) => ({
+        label: c.name,
+        value: c.id,
+      })),
     [clustersQuery.data],
   );
   const clusterMap = useMemo(
-    () => Object.fromEntries((clustersQuery.data?.items ?? []).map((c) => [c.id, c.name])),
+    () =>
+      Object.fromEntries(
+        (clustersQuery.data?.items ?? []).map((c) => [c.id, c.name]),
+      ),
     [clustersQuery.data],
   );
 
   const clusterSelectOptions = useMemo(
-    () => (clustersQuery.data?.items ?? []).map((c) => ({ label: c.name, value: c.id })),
+    () =>
+      (clustersQuery.data?.items ?? []).map((c) => ({
+        label: c.name,
+        value: c.id,
+      })),
     [clustersQuery.data],
   );
 
   const knownNamespaces = useMemo(
-    () => Array.from(new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean))),
+    () =>
+      Array.from(
+        new Set((data?.items ?? []).map((i) => i.namespace).filter(Boolean)),
+      ),
     [data],
   );
   const tableData = useMemo(
     () =>
-      (data?.items ?? []).filter(
-        (item) =>
-          matchLabelExpressions(item.labels as Record<string, string> | null | undefined, mergedFilters),
+      (data?.items ?? []).filter((item) =>
+        matchLabelExpressions(
+          item.labels as Record<string, string> | null | undefined,
+          mergedFilters,
+        ),
       ),
     [data?.items, mergedFilters],
   );
@@ -204,18 +270,26 @@ export default function ReplicaSetsPage() {
     const createdAtFilter = getTextFilter(tableFilters, "createdAt");
     const stateFilter = tableFilters.state;
 
-    return tableData.filter((item) => (
-      textMatches(item.name, nameFilter) &&
-      textMatches(`${item.clusterId} ${getClusterDisplayName(clusterMap, item.clusterId)}`, clusterFilter) &&
-      textMatches(item.namespace, namespaceFilter) &&
-      textMatches(item.replicas, replicasFilter) &&
-      textMatches(item.readyReplicas, readyFilter) &&
-      textMatches(item.createdAt, createdAtFilter) &&
-      selectMatches(item.state, stateFilter)
-    ));
+    return tableData.filter(
+      (item) =>
+        textMatches(item.name, nameFilter) &&
+        textMatches(
+          `${item.clusterId} ${getClusterDisplayName(clusterMap, item.clusterId)}`,
+          clusterFilter,
+        ) &&
+        textMatches(item.namespace, namespaceFilter) &&
+        textMatches(item.replicas, replicasFilter) &&
+        textMatches(item.readyReplicas, readyFilter) &&
+        textMatches(item.createdAt, createdAtFilter) &&
+        selectMatches(item.state, stateFilter),
+    );
   }, [clusterMap, tableData, tableFilters]);
   const nameWidth = useMemo(
-    () => getAdaptiveNameWidth(filteredTableData.map((item) => item.name), { max: 320 }),
+    () =>
+      getAdaptiveNameWidth(
+        filteredTableData.map((item) => item.name),
+        { max: 320 },
+      ),
     [filteredTableData],
   );
   const handleGlobalSearchChange = (value: string) => {
@@ -266,7 +340,9 @@ export default function ReplicaSetsPage() {
       form.resetFields();
       void queryClient.invalidateQueries({ queryKey });
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "操作失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "操作失败，请重试",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -278,7 +354,9 @@ export default function ReplicaSetsPage() {
       void message.success(`${item.name} 删除成功`);
       void refetch();
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "删除失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "删除失败，请重试",
+      );
     }
   };
 
@@ -323,7 +401,11 @@ export default function ReplicaSetsPage() {
     const target = Math.max(0, Math.trunc(targetReplicas));
     setScaleItem(null);
     try {
-      const result = await actionMutation.mutateAsync({ item: selected, action: "scale", replicas: target });
+      const result = await actionMutation.mutateAsync({
+        item: selected,
+        action: "scale",
+        replicas: target,
+      });
       if (!result.accepted) {
         throw new Error(result.message || "扩缩容请求未被接受");
       }
@@ -331,15 +413,23 @@ export default function ReplicaSetsPage() {
         desiredReplicas: target,
         initialObservedState: {
           desiredReplicas: result.scaleResult?.desiredReplicas ?? target,
-          observedReplicas: result.scaleResult?.observedReplicas ?? result.record.replicas ?? selected.replicas,
-          readyReplicas: result.scaleResult?.readyReplicas ?? result.record.readyReplicas ?? selected.readyReplicas,
+          observedReplicas:
+            result.scaleResult?.observedReplicas ??
+            result.record.replicas ??
+            selected.replicas,
+          readyReplicas:
+            result.scaleResult?.readyReplicas ??
+            result.record.readyReplicas ??
+            selected.readyReplicas,
           availableReplicas: result.scaleResult?.availableReplicas ?? null,
           observedAt: result.scaleResult?.observedAt,
           status: result.scaleResult?.status,
         },
         refetch,
         resolveObservedState: (payload) => {
-          const latest = payload?.items?.find((item) => item.id === selected.id);
+          const latest = payload?.items?.find(
+            (item) => item.id === selected.id,
+          );
           if (!latest) {
             return null;
           }
@@ -356,7 +446,9 @@ export default function ReplicaSetsPage() {
         timeoutMs: 60_000,
       });
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "扩缩容失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "扩缩容失败，请重试",
+      );
     }
   };
 
@@ -376,7 +468,9 @@ export default function ReplicaSetsPage() {
               : "禁用";
       void message.success(`${item.name} ${actionText}操作已提交`);
     } catch (err) {
-      void message.error(err instanceof Error ? err.message : "操作失败，请重试");
+      void message.error(
+        err instanceof Error ? err.message : "操作失败，请重试",
+      );
     }
   };
 
@@ -386,9 +480,23 @@ export default function ReplicaSetsPage() {
       { key: "describe", icon: <EyeOutlined />, label: "描述" },
       { key: "scale", icon: <RetweetOutlined />, label: "扩缩容" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
-      { key: "restart", icon: <ReloadOutlined />, label: "重启", disabled: !active },
-      { key: "rollback", icon: <RollbackOutlined />, label: "回滚", disabled: !active },
-      { key: active ? "disable" : "enable", icon: <StopOutlined />, label: active ? "禁用" : "启用" },
+      {
+        key: "restart",
+        icon: <ReloadOutlined />,
+        label: "重启",
+        disabled: !active,
+      },
+      {
+        key: "rollback",
+        icon: <RollbackOutlined />,
+        label: "回滚",
+        disabled: !active,
+      },
+      {
+        key: active ? "disable" : "enable",
+        icon: <StopOutlined />,
+        label: active ? "禁用" : "启用",
+      },
       { type: "divider" },
       { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true },
     ]);
@@ -408,7 +516,12 @@ export default function ReplicaSetsPage() {
       setYamlTarget(resolveIdentity(row));
       return;
     }
-    if (key === "restart" || key === "rollback" || key === "enable" || key === "disable") {
+    if (
+      key === "restart" ||
+      key === "rollback" ||
+      key === "enable" ||
+      key === "disable"
+    ) {
       void handleWorkloadAction(row, key as Exclude<ReplicaSetAction, "scale">);
       return;
     }
@@ -436,7 +549,9 @@ export default function ReplicaSetsPage() {
       ellipsis: true,
       render: (name: string, row: WorkloadListItem) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "ReplicaSet", id: row.id })}>
+          <Typography.Link
+            onClick={() => setDetailTarget({ kind: "ReplicaSet", id: row.id })}
+          >
             {name}
           </Typography.Link>
         ) : (
@@ -444,15 +559,33 @@ export default function ReplicaSetsPage() {
         ),
       ...getSortableColumnProps("name"),
     },
-    { title: "集群", dataIndex: "clusterId", key: "clusterId", filter: { type: "text", placeholder: "以集群过滤" }, width: TABLE_COL_WIDTH.cluster, render: (_: unknown, row: WorkloadListItem) => getClusterDisplayName(clusterMap, row.clusterId), ...getSortableColumnProps("clusterId") },
-    { title: "名称空间", dataIndex: "namespace", key: "namespace", filter: { type: "text", placeholder: "以命名空间过滤" }, width: TABLE_COL_WIDTH.namespace, ...getSortableColumnProps("namespace") },
+    {
+      title: "集群",
+      dataIndex: "clusterId",
+      key: "clusterId",
+      filter: { type: "text", placeholder: "以集群过滤" },
+      width: TABLE_COL_WIDTH.cluster,
+      render: (_: unknown, row: WorkloadListItem) =>
+        getClusterDisplayName(clusterMap, row.clusterId),
+      ...getSortableColumnProps("clusterId"),
+    },
+    {
+      title: "名称空间",
+      dataIndex: "namespace",
+      key: "namespace",
+      filter: { type: "text", placeholder: "以命名空间过滤" },
+      width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace"),
+    },
     {
       title: "期望副本",
       dataIndex: "replicas",
       key: "replicas",
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.replicas,
-      render: (value: number) => <WorkloadReplicaCell value={value} variant="desired" />,
+      render: (value: number) => (
+        <WorkloadReplicaCell value={value} variant="desired" />
+      ),
       ...getSortableColumnProps("replicas"),
     },
     {
@@ -462,7 +595,11 @@ export default function ReplicaSetsPage() {
       filter: { type: "text", placeholder: "过滤" },
       width: TABLE_COL_WIDTH.ready,
       render: (value: number, row: WorkloadListItem) => (
-        <WorkloadReplicaCell value={value} target={row.replicas} variant="ready" />
+        <WorkloadReplicaCell
+          value={value}
+          target={row.replicas}
+          variant="ready"
+        />
       ),
       ...getSortableColumnProps("readyReplicas"),
     },
@@ -470,7 +607,11 @@ export default function ReplicaSetsPage() {
       title: "状态",
       dataIndex: "state",
       key: "state",
-      filter: { type: "status", placeholder: "以状态过滤", options: STATE_FILTER_OPTIONS },
+      filter: {
+        type: "status",
+        placeholder: "以状态过滤",
+        options: STATE_FILTER_OPTIONS,
+      },
       width: TABLE_COL_WIDTH.status,
       render: (value: string) => stateTag(value),
       ...getSortableColumnProps("state"),
@@ -481,7 +622,9 @@ export default function ReplicaSetsPage() {
       key: "createdAt",
       filter: { type: "text", placeholder: "以时间过滤" },
       width: TABLE_COL_WIDTH.time,
-      render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
+      render: (value: string) => (
+        <ResourceTimeCell value={value} now={now} mode="relative" />
+      ),
       ...getSortableColumnProps("createdAt"),
     },
     {
@@ -492,120 +635,147 @@ export default function ReplicaSetsPage() {
       align: "left",
       fixed: "right",
       render: (_: unknown, row: WorkloadListItem) => (
-        <Dropdown
-          trigger={["click"]}
-          placement="bottomRight"
-          classNames={{ root: POD_ACTION_MENU_CLASS }}
-          menu={{
-            items: buildRowActions(row),
-            onClick: ({ key }) => handleRowAction(row, String(key)),
-          }}
-        >
-          {renderResourceActionTriggerButton({
-            ariaLabel: "更多操作",
-            baseClassName: POD_ACTION_TRIGGER_CLASS,
-          })}
-        </Dropdown>
+        <ResourceActionIsolation>
+          <Dropdown
+            trigger={["click"]}
+            placement="bottomRight"
+            classNames={{ root: POD_ACTION_MENU_CLASS }}
+            menu={{
+              items: buildRowActions(row),
+              onClick: ({ key }) => handleRowAction(row, String(key)),
+            }}
+          >
+            {renderResourceActionTriggerButton({
+              ariaLabel: "更多操作",
+              baseClassName: POD_ACTION_TRIGGER_CLASS,
+            })}
+          </Dropdown>
+        </ResourceActionIsolation>
       ),
     },
   ];
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/workloads/replicasets"
-        titleSuffix={<ResourceAddButton onClick={() => router.push("/workloads/create?kind=ReplicaSet")} aria-label="创建ReplicaSet" />}
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceScopeFilterButton
-          clusterId={clusterId}
-          namespace={namespace}
-          clusterOptions={clusterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-            onScopeChange(nextClusterId, nextNamespace);
-            resetPage();
-          }}
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
-      ) : null}
-
-      {isError ? (
-        <Alert
-          className="workload-resource-state-alert"
-          type="error"
-          showIcon
-          title="副本集加载失败"
-          description={error instanceof Error ? error.message : "请求失败"}
-        />
-      ) : null}
-
-      {scaleConvergence ? (
-        <Alert
-          className="workload-resource-state-alert"
-          type={
-            scaleConvergence.round.status === "stable"
-              ? "success"
-              : scaleConvergence.round.status === "timeout"
-                ? "warning"
-                : "info"
-          }
-          showIcon
-          closable
-          onClose={() => setScaleConvergence(null)}
-          title={
-            scaleConvergence.round.status === "accepted"
-              ? `${scaleConvergence.workloadName} 扩缩容请求已受理`
-              : scaleConvergence.round.status === "converging"
-                ? `${scaleConvergence.workloadName} 正在收敛到目标副本`
-                : scaleConvergence.round.status === "stable"
-                  ? `${scaleConvergence.workloadName} 副本已稳定`
-                  : `${scaleConvergence.workloadName} 收敛超时，持续显示最新观测值`
-          }
-          description={
-            scaleConvergence.round.status === "accepted"
-              ? `期望副本 ${scaleConvergence.round.observed.desiredReplicas}，当前副本 ${scaleConvergence.round.observed.observedReplicas ?? "-"}，就绪副本 ${scaleConvergence.round.observed.readyReplicas ?? "-"}`
-              : `第 ${scaleConvergence.round.attempt}/${scaleConvergence.round.maxAttempts} 轮确认：期望副本 ${scaleConvergence.round.observed.desiredReplicas}，当前副本 ${scaleConvergence.round.observed.observedReplicas ?? "-"}，就绪副本 ${scaleConvergence.round.observed.readyReplicas ?? "-"}`
-          }
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<WorkloadListItem>
-          bordered
-          rowKey="id"
-          tableKey="workloads.replicasets"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{ sortBy, sortOrder }}
-          columns={columns}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          dataSource={filteredTableData}
-          loading={(isLoading && !data) || actionMutation.isPending}
-          onChange={(paginationInfo, filters, sorter, extra) =>
-            handleTableChange(paginationInfo, filters, sorter, extra, (isLoading && !data) || actionMutation.isPending)
+        <ResourcePageHeader
+          path="/workloads/replicasets"
+          style={{ marginBottom: 12 }}
+          titleSuffix={
+            <ResourceAddButton
+              onClick={() => router.push("/workloads/create?kind=ReplicaSet")}
+              aria-label="创建ReplicaSet"
+            />
           }
-          pagination={getPaginationConfig(data?.total ?? 0, (isLoading && !data) || actionMutation.isPending)}
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({
+              clusterId: nextClusterId,
+              namespace: nextNamespace,
+            }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              resetPage();
+            }}
+          />
+
+          {!isInitializing && !accessToken ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="warning"
+              showIcon
+              title="未检测到登录状态，请先登录后再操作。"
+            />
+          ) : null}
+
+          {isError ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="error"
+              showIcon
+              title="副本集加载失败"
+              description={error instanceof Error ? error.message : "请求失败"}
+            />
+          ) : null}
+
+          {scaleConvergence ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type={
+                scaleConvergence.round.status === "stable"
+                  ? "success"
+                  : scaleConvergence.round.status === "timeout"
+                    ? "warning"
+                    : "info"
+              }
+              showIcon
+              closable
+              onClose={() => setScaleConvergence(null)}
+              title={
+                scaleConvergence.round.status === "accepted"
+                  ? `${scaleConvergence.workloadName} 扩缩容请求已受理`
+                  : scaleConvergence.round.status === "converging"
+                    ? `${scaleConvergence.workloadName} 正在收敛到目标副本`
+                    : scaleConvergence.round.status === "stable"
+                      ? `${scaleConvergence.workloadName} 副本已稳定`
+                      : `${scaleConvergence.workloadName} 收敛超时，持续显示最新观测值`
+              }
+              description={
+                scaleConvergence.round.status === "accepted"
+                  ? `期望副本 ${scaleConvergence.round.observed.desiredReplicas}，当前副本 ${scaleConvergence.round.observed.observedReplicas ?? "-"}，就绪副本 ${scaleConvergence.round.observed.readyReplicas ?? "-"}`
+                  : `第 ${scaleConvergence.round.attempt}/${scaleConvergence.round.maxAttempts} 轮确认：期望副本 ${scaleConvergence.round.observed.desiredReplicas}，当前副本 ${scaleConvergence.round.observed.observedReplicas ?? "-"}，就绪副本 ${scaleConvergence.round.observed.readyReplicas ?? "-"}`
+              }
+            />
+          ) : null}
+
+          <ResourceTable<WorkloadListItem>
+            bordered
+            rowKey="id"
+            tableKey="workloads.replicasets"
+            preferencesClient={createTablePreferencesClient(
+              accessToken || undefined,
+            )}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
+            columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            dataSource={filteredTableData}
+            loading={(isLoading && !data) || actionMutation.isPending}
+            onChange={(paginationInfo, filters, sorter, extra) =>
+              handleTableChange(
+                paginationInfo,
+                filters,
+                sorter,
+                extra,
+                (isLoading && !data) || actionMutation.isPending,
+              )
+            }
+            pagination={getPaginationConfig(
+              data?.total ?? 0,
+              (isLoading && !data) || actionMutation.isPending,
+            )}
+          />
+        </Space>
       </OpsSurface>
 
-      <Modal
+      <OpsModalShell
         title={editingItem ? "编辑 ReplicaSet" : "新增资源"}
         open={modalOpen}
         onOk={() => void handleModalSubmit()}
@@ -615,46 +785,58 @@ export default function ReplicaSetsPage() {
         confirmLoading={submitting}
         destroyOnHidden
       >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="名称"
-            name="name"
-            rules={[{ required: true, message: "请输入 ReplicaSet 名称" }]}
-          >
-            <Input placeholder="例如：my-app-rs" disabled={Boolean(editingItem)} />
-          </Form.Item>
-          <Form.Item
-            label="名称空间"
-            name="namespace"
-            rules={[{ required: true, message: "请输入名称空间" }]}
-          >
-            <Input placeholder="例如：default" />
-          </Form.Item>
-          <Form.Item
-            label="集群"
-            name="clusterId"
-            rules={[{ required: true, message: "请选择集群" }]}
-          >
-            <Select
-              placeholder="请选择集群"
-              options={clusterSelectOptions}
-              loading={clustersQuery.isLoading}
-              disabled={Boolean(editingItem)}
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          <Form.Item
-            label="副本数"
-            name="replicas"
-            rules={[{ required: true, message: "请输入副本数" }]}
-          >
-            <InputNumber min={0} style={{ width: "100%" }} placeholder="默认 1" />
-          </Form.Item>
-        </Form>
-      </Modal>
+        <OpsFormSection
+          title="资源配置"
+          description="按当前页面的安全表单字段提交，不覆盖未展示的高级配置。"
+        >
+          <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+            <Form.Item
+              label="名称"
+              name="name"
+              rules={[{ required: true, message: "请输入 ReplicaSet 名称" }]}
+            >
+              <Input
+                placeholder="例如：my-app-rs"
+                disabled={Boolean(editingItem)}
+              />
+            </Form.Item>
+            <Form.Item
+              label="名称空间"
+              name="namespace"
+              rules={[{ required: true, message: "请输入名称空间" }]}
+            >
+              <Input placeholder="例如：default" />
+            </Form.Item>
+            <Form.Item
+              label="集群"
+              name="clusterId"
+              rules={[{ required: true, message: "请选择集群" }]}
+            >
+              <Select
+                placeholder="请选择集群"
+                options={clusterSelectOptions}
+                loading={clustersQuery.isLoading}
+                disabled={Boolean(editingItem)}
+                showSearch
+                optionFilterProp="label"
+              />
+            </Form.Item>
+            <Form.Item
+              label="副本数"
+              name="replicas"
+              rules={[{ required: true, message: "请输入副本数" }]}
+            >
+              <InputNumber
+                min={0}
+                style={{ width: "100%" }}
+                placeholder="默认 1"
+              />
+            </Form.Item>
+          </Form>
+        </OpsFormSection>
+      </OpsModalShell>
 
-      <Modal
+      <OpsModalShell
         title="调整副本数"
         open={Boolean(scaleItem)}
         onCancel={() => setScaleItem(null)}
@@ -663,19 +845,27 @@ export default function ReplicaSetsPage() {
         cancelText="取消"
         confirmLoading={actionMutation.isPending}
       >
-        <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-          <Typography.Text>
-            资源：<Typography.Text strong>{scaleItem?.name ?? "-"}</Typography.Text>
-          </Typography.Text>
-          <Typography.Text>目标副本：</Typography.Text>
-          <InputNumber
-            min={0}
-            style={{ width: "100%" }}
-            value={targetReplicas}
-            onChange={(value) => setTargetReplicas(typeof value === "number" ? value : 0)}
-          />
-        </Space>
-      </Modal>
+        <OpsFormSection
+          title="副本目标"
+          description="只提交目标副本数，不修改镜像、标签或调度策略。"
+        >
+          <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+            <Typography.Text>
+              资源：
+              <Typography.Text strong>{scaleItem?.name ?? "-"}</Typography.Text>
+            </Typography.Text>
+            <Typography.Text>目标副本：</Typography.Text>
+            <InputNumber
+              min={0}
+              style={{ width: "100%" }}
+              value={targetReplicas}
+              onChange={(value) =>
+                setTargetReplicas(typeof value === "number" ? value : 0)
+              }
+            />
+          </Space>
+        </OpsFormSection>
+      </OpsModalShell>
 
       <ResourceDetailDrawer
         open={Boolean(detailTarget)}

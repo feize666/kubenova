@@ -12,7 +12,6 @@ import {
   Row,
   Select,
   Space,
-  Statistic,
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -21,7 +20,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsIconActionButton, OpsModalShell, OpsPageHeader, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { OpsCommandPreview, OpsFilterChip, OpsIconActionButton, OpsMetricTile, OpsModalShell, OpsPageHeader, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import {
   ResourceFilterToolbar,
@@ -639,102 +638,93 @@ export default function InspectionPage() {
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsPageHeader
+        className="resource-page-header"
         title="集群资源巡检"
         subtitle="参考主流 Kubernetes 平台，统一巡检集群、名称空间、工作负载、网络、存储、配置与活跃告警。"
       />
 
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceFilterToolbar
-          actions={
-            <>
-              <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void handleRefreshInspection()} loading={refreshingInspection}>
-                重新巡检
-              </OpsIconActionButton>
-              <Select
-                style={{ width: 130 }}
-                value={exportFormat}
-                onChange={(value) => setExportFormat(value)}
-                options={[
-                  { label: "JSON", value: "json" },
-                  { label: "CSV", value: "csv" },
-                  { label: "Excel", value: "xlsx" },
-                ]}
-              />
-              <OpsIconActionButton
-                opsTone="primary"
-                opsVariant="primary"
-                icon={<DownloadOutlined />}
-                onClick={() => exportMutation.mutate()}
-                loading={exportMutation.isPending}
-                disabled={!enabled}
-                disabledReason={!enabled ? "登录后可导出报告" : undefined}
-              >
-                导出报告
-              </OpsIconActionButton>
-              <Typography.Text type="secondary">
-                最后更新时间：{reportQuery.dataUpdatedAt ? new Date(reportQuery.dataUpdatedAt).toLocaleString("zh-CN") : "-"}
-              </Typography.Text>
-            </>
-          }
-        >
-          <ResourceFilterToolbarItem width="auto">
-            <ResourceScopeFilterButton
-              clusterId={clusterId}
-              namespace={namespace}
-              clusterOptions={clusterOptions}
-              clusterLoading={clustersQuery.isLoading}
-              knownNamespaces={knownNamespaces}
-              namespaceDisabled={namespaceDisabled}
-              namespacePlaceholder={namespacePlaceholder}
-              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-                onScopeChange(nextClusterId, nextNamespace);
-                setIssuePage(1);
-              }}
-            />
-          </ResourceFilterToolbarItem>
-          <ResourceFilterToolbarItem label="时间范围" width="sm">
+      <ResourceFilterToolbar
+        actions={
+          <>
+            <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void handleRefreshInspection()} loading={refreshingInspection}>
+              重新巡检
+            </OpsIconActionButton>
             <Select
-              style={{ width: "100%" }}
-              value={timePreset}
-              onChange={(value: MonitoringTimePreset | "custom") => setTimePreset(value)}
-              options={TIME_PRESETS}
+              style={{ width: 130 }}
+              value={exportFormat}
+              onChange={(value) => setExportFormat(value)}
+              options={[
+                { label: "JSON", value: "json" },
+                { label: "CSV", value: "csv" },
+                { label: "Excel", value: "xlsx" },
+              ]}
+            />
+            <OpsIconActionButton
+              opsTone="primary"
+              opsVariant="primary"
+              icon={<DownloadOutlined />}
+              onClick={() => exportMutation.mutate()}
+              loading={exportMutation.isPending}
+              disabled={!enabled}
+              disabledReason={!enabled ? "登录后可导出报告" : undefined}
+            >
+              导出报告
+            </OpsIconActionButton>
+            <Typography.Text type="secondary">
+              最后更新时间：{reportQuery.dataUpdatedAt ? new Date(reportQuery.dataUpdatedAt).toLocaleString("zh-CN") : "-"}
+            </Typography.Text>
+          </>
+        }
+      >
+        <ResourceFilterToolbarItem width="auto">
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            namespace={namespace}
+            clusterOptions={clusterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+              onScopeChange(nextClusterId, nextNamespace);
+              setIssuePage(1);
+            }}
+          />
+        </ResourceFilterToolbarItem>
+        <ResourceFilterToolbarItem label="时间范围" width="sm">
+          <Select
+            style={{ width: "100%" }}
+            value={timePreset}
+            onChange={(value: MonitoringTimePreset | "custom") => setTimePreset(value)}
+            options={TIME_PRESETS}
+          />
+        </ResourceFilterToolbarItem>
+        {timePreset === "custom" ? (
+          <ResourceFilterToolbarItem label="自定义时间" width="xl">
+            <RangePicker
+              showTime
+              format="YYYY-MM-DD HH:mm:ss"
+              value={customRange}
+              onChange={(value) => setCustomRange(value as [Dayjs, Dayjs] | null)}
             />
           </ResourceFilterToolbarItem>
-          {timePreset === "custom" ? (
-            <ResourceFilterToolbarItem label="自定义时间" width="xl">
-              <RangePicker
-                showTime
-                format="YYYY-MM-DD HH:mm:ss"
-                value={customRange}
-                onChange={(value) => setCustomRange(value as [Dayjs, Dayjs] | null)}
-              />
-            </ResourceFilterToolbarItem>
-          ) : null}
-        </ResourceFilterToolbar>
-      </OpsSurface>
+        ) : null}
+      </ResourceFilterToolbar>
 
       {!enabled ? <Alert className="inspection-resource-state-alert" type="warning" showIcon title="请先登录后再执行资源巡检。" /> : null}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="巡检评分" value={reportQuery.data?.summary.score ?? 0} suffix="/ 100" />
-          </OpsSurface>
+          <OpsMetricTile label="巡检评分" suffix="/ 100" tone="success" value={reportQuery.data?.summary.score ?? 0} />
         </Col>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="资源总数" value={reportQuery.data?.summary.totalResources ?? 0} />
-          </OpsSurface>
+          <OpsMetricTile label="资源总数" tone="neutral" value={reportQuery.data?.summary.totalResources ?? 0} />
         </Col>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="严重问题" value={reportQuery.data?.summary.critical ?? 0} styles={{ content: { color: "#cf1322" } }} />
-          </OpsSurface>
+          <OpsMetricTile label="严重问题" tone="danger" value={reportQuery.data?.summary.critical ?? 0} />
         </Col>
         <Col xs={24} md={6}>
-          <OpsSurface variant="panel" padding="sm">
-            <Statistic title="警告问题" value={reportQuery.data?.summary.warning ?? 0} styles={{ content: { color: "#d48806" } }} />
-          </OpsSurface>
+          <OpsMetricTile label="警告问题" tone="warning" value={reportQuery.data?.summary.warning ?? 0} />
         </Col>
       </Row>
 
@@ -768,7 +758,7 @@ export default function InspectionPage() {
         variant="panel"
         padding="sm"
         title="能力基线矩阵（Rancher / KubeSphere 对标）"
-        actions={
+        subtitle={
           <Typography.Text type="secondary">
             最后更新时间：{capabilityQuery.data?.updatedAt ? new Date(capabilityQuery.data.updatedAt).toLocaleString("zh-CN") : "-"}
           </Typography.Text>
@@ -776,16 +766,16 @@ export default function InspectionPage() {
       >
         <Row gutter={[16, 16]} style={{ marginBottom: 8 }}>
           <Col xs={24} md={6}>
-            <Statistic title="能力项总数" value={capabilityStats.total} />
+            <OpsMetricTile label="能力项总数" tone="neutral" value={capabilityStats.total} />
           </Col>
           <Col xs={24} md={6}>
-            <Statistic title="已实现" value={capabilityStats.implemented} styles={{ content: { color: "#389e0d" } }} />
+            <OpsMetricTile label="已实现" tone="success" value={capabilityStats.implemented} />
           </Col>
           <Col xs={24} md={6}>
-            <Statistic title="规划中" value={capabilityStats.planned} styles={{ content: { color: "#1677ff" } }} />
+            <OpsMetricTile label="规划中" tone="info" value={capabilityStats.planned} />
           </Col>
           <Col xs={24} md={6}>
-            <Statistic title="待补齐" value={capabilityStats.gap} styles={{ content: { color: "#d48806" } }} />
+            <OpsMetricTile label="待补齐" tone="warning" value={capabilityStats.gap} />
           </Col>
         </Row>
 
@@ -896,9 +886,15 @@ export default function InspectionPage() {
               </Descriptions.Item>
             </Descriptions>
             <OpsSurface variant="raised" padding="sm" title="生成结果">
-              <pre style={{ margin: 0, overflowX: "auto", whiteSpace: "pre-wrap" }}>
-                {activeResult.generatedYaml || "(无返回内容)"}
-              </pre>
+              <OpsCommandPreview
+                className="inspection-resource-state-yaml"
+                content={activeResult.generatedYaml || "(无返回内容)"}
+                kind="code"
+                language="YAML"
+                title="生成结果"
+                tone={activeResult.success ? "success" : "danger"}
+                wrap
+              />
             </OpsSurface>
           </Space>
         ) : null}

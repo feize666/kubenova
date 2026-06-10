@@ -36,7 +36,7 @@ flowchart LR
 
 ## 快速部署
 
-当前 README 只保留 Ubuntu 二进制部署方式。目标主机建议使用 Ubuntu 22.04 或 24.04。
+当前 README 只保留 Ubuntu 二进制部署方式。目标主机建议使用 Ubuntu 22.04 或 24.04。统一脚本入口是 `bash scripts/service.sh`。
 
 ### 1. 安装依赖
 
@@ -46,9 +46,6 @@ sudo apt-get install -y bash curl tar gzip psmisc postgresql postgresql-client r
 
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
-
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm version --short
 
 GO_VERSION=1.25.0
 curl -fsSLO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
@@ -63,6 +60,13 @@ npm -v
 go version
 psql --version
 redis-cli --version
+```
+
+Helm 是可选依赖。未安装 Helm 时服务仍可启动，但 Helm 应用和仓库管理能力不可用。需要该能力时再安装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm version --short
 ```
 
 ### 2. 初始化数据库
@@ -81,7 +85,7 @@ SQL
 在项目根目录执行：
 
 ```bash
-bash scripts/package-release.sh
+bash scripts/service.sh package release
 ```
 
 输出：
@@ -179,6 +183,30 @@ bash scripts/service.sh dev status
 bash scripts/service.sh dev logs
 bash scripts/service.sh dev down
 ```
+
+开发默认数据库是 PostgreSQL 里的 `k8s_aiops`，不会写入项目目录，也不会进入 Git。若需要导出测试库或临时备份，放到 `/case/temp/kubenova-db/` 或仓库 `tmp/` 下；仓库已忽略 `*.dump`、`*.sql`、`*.sqlite*`、`tmp/`、`data/`、`db/`。
+
+前端开发缓存可能快速变大，尤其 Next/Turbopack 的隐藏目录 `frontend/.next/dev/cache`。`du frontend/*` 不显示隐藏目录，可用下面命令查看和清理：
+
+```bash
+du -ah --max-depth=1 frontend | sort -h
+bash scripts/service.sh clean dev-cache
+```
+
+脚本已精简为少量入口：
+
+```text
+scripts/service.sh                 # 统一入口
+scripts/dev.sh                     # 开发服务生命周期，由 service.sh 调用
+scripts/prod.sh                    # 生产服务生命周期，由 service.sh 调用
+scripts/_service-lib.sh            # 进程、端口、健康检查共享库
+scripts/_dev-env.sh                # 开发环境默认值
+scripts/package-release.sh         # 发布包构建
+scripts/dev-supervise.sh           # 前端 dev 监护
+scripts/topology-verify.sh         # 拓扑静态校验
+```
+
+依赖安装、数据库初始化、拓扑清理已合入 `service.sh`。旧的 `dev-up.sh`、`dev-down.sh`、`prod-up.sh`、`prod-switch.sh` 等重复入口已移除。使用 `service.sh` 子命令替代。
 
 ## 质量检查
 

@@ -8,7 +8,7 @@ import {
   SyncOutlined,
 } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Dropdown, Form, Input, Modal, Select, Space, Switch, Typography } from "antd";
+import { Alert, App, Button, Dropdown, Form, Input, Select, Space, Switch, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { MenuProps } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -29,7 +29,7 @@ import { useAuth } from "@/components/auth-context";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
-import { OpsIconActionButton, OpsSurface } from "@/components/ops";
+import { OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
 import { getClusters } from "@/lib/api/clusters";
 import { ApiError } from "@/lib/api/client";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -748,96 +748,96 @@ export default function HelmRepositoriesPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/workloads/helm/repositories"
-        description="管理 Helm 仓库、同步状态与模板导入。"
-        titleSuffix={
-          <ResourceAddButton
-            onClick={() => {
-              setFormError(null);
-              setMode("create");
-              form.setFieldsValue({
-                clusterId: clusterId || undefined,
-                name: "",
-                url: "",
-                repositoryKind: "http",
-                authType: "none",
-                username: "",
-                password: "",
-                caData: "",
-                insecureSkipTlsVerify: false,
-              });
-              setFormOpen(true);
-            }}
-            aria-label="创建 Helm 仓库"
-          />
-        }
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceScopeFilterButton
-          clusterId={clusterId}
-          clusterOptions={repositoryClusterOptions}
-          namespaceVisible={false}
-          onApply={({ clusterId: nextClusterId }) => {
-            setClusterId(nextClusterId);
-            resetPage();
-          }}
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert
-          className="workload-resource-state-alert"
-          type="warning"
-          showIcon
-          title="未检测到登录状态，请先登录后再操作。"
-        />
-      ) : null}
-
-      {repositoriesQuery.isError ? (
-        <Alert
-          className="workload-resource-state-alert"
-          type="error"
-          showIcon
-          title="Helm 仓库列表加载失败"
-          description={repositoriesQuery.error instanceof Error ? repositoriesQuery.error.message : "请求失败"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<HelmRepositoryItem>
-          bordered
-          rowKey={(row) => `${row.clusterId}/${row.name}`}
-          tableKey="workloads.helm.repositories"
-          columns={columns as ColumnsType<HelmRepositoryItem>}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          dataSource={rows}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按仓库 / 地址 / 集群搜索",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          toolbarExtra={
-            <Space size={8} wrap>
-              <OpsIconActionButton
-                icon={<ImportOutlined />}
-                loading={importHostMutation.isPending}
-                disabled={!accessToken || !hostImportClusterId}
-                disabledReason={!hostImportClusterId ? "请选择集群后导入宿主 Helm 仓库" : undefined}
-                onClick={() => void importHostMutation.mutateAsync(hostImportClusterId)}
-              >
-                重新导入宿主
-              </OpsIconActionButton>
-              <OpsIconActionButton
-                icon={<FileTextOutlined />}
-                disabled={!accessToken}
+        <ResourcePageHeader
+          path="/workloads/helm/repositories"
+          description="管理 Helm 仓库、同步状态与模板导入。"
+          style={{ marginBottom: 12 }}
+          titleSuffix={
+            <ResourceAddButton
+              onClick={() => {
+                setFormError(null);
+                setMode("create");
+                form.setFieldsValue({
+                  clusterId: clusterId || undefined,
+                  name: "",
+                  url: "",
+                  repositoryKind: "http",
+                  authType: "none",
+                  username: "",
+                  password: "",
+                  caData: "",
+                  insecureSkipTlsVerify: false,
+                });
+                setFormOpen(true);
+              }}
+              aria-label="创建 Helm 仓库"
+            />
+          }
+        />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceScopeFilterButton
+            clusterId={clusterId}
+            clusterOptions={repositoryClusterOptions}
+            namespaceVisible={false}
+            onApply={({ clusterId: nextClusterId }) => {
+              setClusterId(nextClusterId);
+              resetPage();
+            }}
+          />
+
+          {!isInitializing && !accessToken ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="warning"
+              showIcon
+              title="未检测到登录状态，请先登录后再操作。"
+            />
+          ) : null}
+
+          {repositoriesQuery.isError ? (
+            <Alert
+              className="workload-resource-state-alert"
+              type="error"
+              showIcon
+              title="Helm 仓库列表加载失败"
+              description={repositoriesQuery.error instanceof Error ? repositoriesQuery.error.message : "请求失败"}
+            />
+          ) : null}
+
+          <ResourceTable<HelmRepositoryItem>
+            bordered
+            rowKey={(row) => `${row.clusterId}/${row.name}`}
+            tableKey="workloads.helm.repositories"
+            columns={columns as ColumnsType<HelmRepositoryItem>}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            dataSource={rows}
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按仓库 / 地址 / 集群搜索",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            toolbarExtra={
+              <Space size={8} wrap>
+                <OpsIconActionButton
+                  icon={<ImportOutlined />}
+                  loading={importHostMutation.isPending}
+                  disabled={!accessToken || !hostImportClusterId}
+                  disabledReason={!hostImportClusterId ? "请选择集群后导入宿主 Helm 仓库" : undefined}
+                  onClick={() => void importHostMutation.mutateAsync(hostImportClusterId)}
+                >
+                  重新导入宿主
+                </OpsIconActionButton>
+                <OpsIconActionButton
+                  icon={<FileTextOutlined />}
+                  disabled={!accessToken}
                 onClick={() => {
                   quickUrlForm.setFieldsValue({
                     clusterId: hostImportClusterId || undefined,
@@ -903,6 +903,7 @@ export default function HelmRepositoriesPage() {
             repositoriesQuery.isLoading && rows.length === 0,
           )}
         />
+        </Space>
       </OpsSurface>
 
       <ResourceDetailDrawer
@@ -913,7 +914,7 @@ export default function HelmRepositoriesPage() {
         token={accessToken ?? undefined}
       />
 
-      <Modal
+      <OpsModalShell
         title={mode === "create" ? "新增 Helm 仓库" : "编辑 Helm 仓库"}
         open={formOpen}
         onCancel={() => {
@@ -935,6 +936,7 @@ export default function HelmRepositoriesPage() {
         cancelText="取消"
         confirmLoading={mutation.isPending}
         destroyOnHidden
+        description="配置仓库地址、认证方式和 TLS 选项。"
       >
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
@@ -987,10 +989,11 @@ export default function HelmRepositoriesPage() {
           </Form.Item>
           <Form.Item
             name="insecureSkipTlsVerify"
+            label="TLS 证书校验"
             valuePropName="checked"
             tooltip="仅用于受控内网或临时排障。生产仓库建议配置 CA。"
           >
-            <Switch /> <Typography.Text style={{ marginLeft: 8 }}>跳过 TLS 证书校验</Typography.Text>
+            <Switch checkedChildren="跳过" unCheckedChildren="校验" />
           </Form.Item>
         </Form>
         {formError ? (
@@ -1014,9 +1017,9 @@ export default function HelmRepositoriesPage() {
             }
           />
         ) : null}
-      </Modal>
+      </OpsModalShell>
 
-      <Modal
+      <OpsModalShell
         title="通过 URL 快速新增仓库"
         open={quickUrlOpen}
         onCancel={() => {
@@ -1038,6 +1041,7 @@ export default function HelmRepositoriesPage() {
         cancelText="取消"
         confirmLoading={quickUrlMutation.isPending}
         destroyOnHidden
+        description="输入 Chart 仓库或 OCI Registry URL，提交后自动验证。"
       >
         <Form form={quickUrlForm} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
@@ -1088,9 +1092,9 @@ export default function HelmRepositoriesPage() {
             }
           />
         ) : null}
-      </Modal>
+      </OpsModalShell>
 
-      <Modal
+      <OpsModalShell
         title="导入模板 Helm 仓库"
         open={presetOpen}
         onCancel={() => {
@@ -1104,6 +1108,7 @@ export default function HelmRepositoriesPage() {
         cancelText="取消"
         confirmLoading={importPresetsMutation.isPending}
         destroyOnHidden
+        description="从模板列表批量导入常用 Helm 仓库。"
       >
         <Space orientation="vertical" size={12} style={{ width: "100%", marginTop: 12 }}>
           <Typography.Text type="secondary">
@@ -1133,7 +1138,7 @@ export default function HelmRepositoriesPage() {
             />
           ) : null}
         </Space>
-      </Modal>
+      </OpsModalShell>
       {renderPodLikeResourceActionStyles({ triggerClassName: POD_ACTION_TRIGGER_CLASS, menuClassName: POD_ACTION_MENU_CLASS })}
     </Space>
   );

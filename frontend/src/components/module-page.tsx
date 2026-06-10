@@ -4,7 +4,7 @@ import { Alert, Col, Input, Row, Select, Space, Switch, Typography } from "antd"
 import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsSurface, OpsStatusTag, type OpsStatusTone } from "@/components/ops";
+import { OpsPageHeader, OpsSurface, OpsStatusTag, type OpsStatusTone } from "@/components/ops";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTable } from "@/components/resource-table";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
@@ -177,61 +177,57 @@ export function ModulePage({
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
-        <Typography.Title level={4} style={{ marginBottom: 8 }}>
-          {title}
-        </Typography.Title>
-        <Typography.Text type="secondary">{description}</Typography.Text>
-      </OpsSurface>
+        <OpsPageHeader className="resource-page-header" title={title} subtitle={description} style={{ marginBottom: 12 }} />
 
-      <OpsSurface variant="toolbar" padding="sm">
-        <Row gutter={[12, 12]} align="middle">
-          <Col xs={24} sm={12} md={8} lg={8}>
-            <Input
-              allowClear
-              placeholder="请输入关键字筛选"
-              value={keyword}
-              onChange={(e) => handleKeywordChange(e.target.value)}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={8} lg={6}>
-            <Select
-              style={{ width: "100%" }}
-              value={namespace}
-              options={["全部名称空间", ...namespaceOptions].map((item) => ({ label: item, value: item }))}
-              onChange={handleNamespaceChange}
-            />
-          </Col>
-          <Col xs={24} sm={24} md={8} lg={10}>
-            <Space>
-              <Switch checked={onlyHealthy} onChange={handleOnlyHealthyChange} />
-              <Typography.Text>仅显示健康资源</Typography.Text>
-            </Space>
-          </Col>
-        </Row>
-      </OpsSurface>
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <Row gutter={[12, 12]} align="middle">
+            <Col xs={24} sm={12} md={8} lg={8}>
+              <Input
+                allowClear
+                placeholder="请输入关键字筛选"
+                value={keyword}
+                onChange={(e) => handleKeywordChange(e.target.value)}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={8} lg={6}>
+              <Select
+                style={{ width: "100%" }}
+                value={namespace}
+                options={["全部名称空间", ...namespaceOptions].map((item) => ({ label: item, value: item }))}
+                onChange={handleNamespaceChange}
+              />
+            </Col>
+            <Col xs={24} sm={24} md={8} lg={10}>
+              <Space>
+                <Switch checked={onlyHealthy} onChange={handleOnlyHealthyChange} />
+                <Typography.Text>仅显示健康资源</Typography.Text>
+              </Space>
+            </Col>
+          </Row>
 
-      {error ? <Alert className="module-resource-state-alert" type="error" showIcon title="数据加载失败" description={error} /> : null}
+          {error ? <Alert className="module-resource-state-alert" type="error" showIcon title="数据加载失败" description={error} /> : null}
 
-      <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<ModuleRecord>
-          rowKey="key"
-          columns={normalizedColumns}
-          dataSource={filteredData}
-          loading={loading && !hasInitialData}
-          layoutOptions={{
-            nameValues: dataSource.map((item) => item.name),
-            actionWidth: TABLE_COL_WIDTH.action,
-          }}
-          scroll={{ x: tableScrollX }}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          pagination={buildCompactTablePagination({
-            current: 1,
-            pageSize: 6,
-            total: filteredData.length,
-            onChange: () => undefined,
-          })}
-          {...tableProps}
-        />
+          <ResourceTable<ModuleRecord>
+            rowKey="key"
+            columns={normalizedColumns}
+            dataSource={filteredData}
+            bordered
+            loading={loading && !hasInitialData}
+            layoutOptions={{
+              nameValues: dataSource.map((item) => item.name),
+              actionWidth: TABLE_COL_WIDTH.action,
+            }}
+            scroll={{ x: tableScrollX }}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            pagination={buildCompactTablePagination({
+              current: 1,
+              pageSize: 6,
+              total: filteredData.length,
+              onChange: () => undefined,
+            })}
+            {...tableProps}
+          />
+        </Space>
       </OpsSurface>
 
       <ResourceDetailDrawer

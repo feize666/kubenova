@@ -34,6 +34,9 @@ export function OpsPageHeader({
 
   return (
     <section
+      data-component="ops-page-header"
+      data-density={compact ? "compact" : "default"}
+      data-surface={surface ? "surface" : "embedded"}
       className={[
         "ops-page-header",
         surface ? "ops-page-header--surface" : "ops-page-header--embedded",

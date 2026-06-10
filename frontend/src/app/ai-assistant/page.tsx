@@ -33,20 +33,38 @@ import {
   Select,
   Space,
   Spin,
-  Statistic,
   Tooltip,
   Typography,
   message,
 } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/components/auth-context";
-import { AiDeleteSessionDialog, type AiDeleteSessionTarget } from "@/components/ai/delete-session-dialog";
-import { OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
+import {
+  AiDeleteSessionDialog,
+  type AiDeleteSessionTarget,
+} from "@/components/ai/delete-session-dialog";
+import {
+  OpsCommandPreview,
+  OpsDrawerShell,
+  OpsFilterChip,
+  OpsIconActionButton,
+  OpsMetricTile,
+  OpsStatusTag,
+  OpsSurface,
+} from "@/components/ops";
 import {
   createSession,
   executeAction,
@@ -83,10 +101,12 @@ const QUICK_PROMPTS = [
   "请给出当前工作负载扩缩容与资源优化建议",
   "请评估当前发布风险并给出回滚判定条件",
 ];
-const AI_ASSISTANT_CURRENT_SESSION_KEY = "kubenova.ai.assistant.currentSessionId";
+const AI_ASSISTANT_CURRENT_SESSION_KEY =
+  "kubenova.ai.assistant.currentSessionId";
 const AI_ASSISTANT_SESSIONS_CACHE_KEY = "kubenova.ai.assistant.sessions";
 const AI_ASSISTANT_MESSAGES_CACHE_PREFIX = "kubenova.ai.assistant.messages.";
-const CHAT_WORKSPACE_DESKTOP_HEIGHT = "clamp(520px, calc(100vh - 240px), 720px)";
+const CHAT_WORKSPACE_DESKTOP_HEIGHT =
+  "clamp(520px, calc(100vh - 240px), 720px)";
 const MESSAGE_BUBBLE_MAX_HEIGHT = "min(42vh, 320px)";
 const PAGE_QUERY_GC_TIME_MS = 5 * 60_000;
 const HIGH_RISK_ACTIONS = new Set<AiAssistantCanonicalOperation>([
@@ -136,38 +156,95 @@ function formatTime(iso: string): string {
   });
 }
 
+function getMarkdownCodePreviewKind(language: string, content: string) {
+  const normalizedLanguage = language.toLowerCase();
+  const normalizedContent = content.trim().toLowerCase();
+  if (
+    ["bash", "shell", "sh", "zsh", "powershell", "ps1", "cmd"].includes(
+      normalizedLanguage,
+    )
+  ) {
+    return "command";
+  }
+  if (
+    normalizedLanguage === "log" ||
+    normalizedContent.startsWith("kubectl ")
+  ) {
+    return "log";
+  }
+  return "code";
+}
+
+function formatHighRiskActionPreview(action: AiActionExecuteRequest) {
+  const target = action.target ?? {};
+  const lines = [`operation: ${action.operation}`];
+  if (target.clusterId) lines.push(`cluster: ${target.clusterId}`);
+  if (target.namespace) lines.push(`namespace: ${target.namespace}`);
+  if (target.kind && target.name)
+    lines.push(`resource: ${target.kind}/${target.name}`);
+  if (target.resourceType) lines.push(`resourceType: ${target.resourceType}`);
+  if (target.resourceId) lines.push(`resourceId: ${target.resourceId}`);
+  if (target.provider) lines.push(`provider: ${target.provider}`);
+  if (target.vmId) lines.push(`vmId: ${target.vmId}`);
+  if (target.reason) lines.push(`targetReason: ${target.reason}`);
+  if (action.reason) lines.push(`reason: ${action.reason}`);
+  if (action.options && Object.keys(action.options).length > 0) {
+    lines.push("options:");
+    lines.push(JSON.stringify(action.options, null, 2));
+  }
+  return lines.join("\n");
+}
+
 function MarkdownContent({ content }: { content: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
-        p: ({ children }) => <p style={{ margin: "0 0 8px", lineHeight: 1.7, wordBreak: "break-word", overflowWrap: "anywhere" }}>{children}</p>,
-        ul: ({ children }) => <ul style={{ margin: "4px 0 8px", paddingLeft: 20 }}>{children}</ul>,
-        ol: ({ children }) => <ol style={{ margin: "4px 0 8px", paddingLeft: 20 }}>{children}</ol>,
-        li: ({ children }) => <li style={{ marginBottom: 2, lineHeight: 1.6 }}>{children}</li>,
+        p: ({ children }) => (
+          <p
+            style={{
+              margin: "0 0 8px",
+              lineHeight: 1.7,
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+            }}
+          >
+            {children}
+          </p>
+        ),
+        ul: ({ children }) => (
+          <ul style={{ margin: "4px 0 8px", paddingLeft: 20 }}>{children}</ul>
+        ),
+        ol: ({ children }) => (
+          <ol style={{ margin: "4px 0 8px", paddingLeft: 20 }}>{children}</ol>
+        ),
+        li: ({ children }) => (
+          <li style={{ marginBottom: 2, lineHeight: 1.6 }}>{children}</li>
+        ),
+        pre: ({ children }) => <>{children}</>,
         code: ({ children, className }) => {
-          const text = String(children ?? "");
-          const isBlock = className?.startsWith("language-") || text.includes("\n");
+          const text = String(children ?? "").replace(/\n$/, "");
+          const isBlock =
+            className?.startsWith("language-") || text.includes("\n");
+          const language = className?.replace(/^language-/, "") || "";
           if (isBlock) {
+            const kind = getMarkdownCodePreviewKind(language, text);
             return (
-              <pre
-                style={{
-                  background: "var(--ai-chat-code-bg)",
-                  borderRadius: 6,
-                  padding: "8px 12px",
-                  maxWidth: "100%",
-                  overflowX: "auto",
-                  overflowY: "auto",
-                  maxHeight: 320,
-                  overscrollBehaviorX: "contain",
-                  overscrollBehaviorY: "contain",
-                  fontSize: 12,
-                  margin: "8px 0",
-                  lineHeight: 1.5,
-                }}
-              >
-                <code>{children}</code>
-              </pre>
+              <OpsCommandPreview
+                content={text}
+                kind={kind}
+                language={language || undefined}
+                title={
+                  kind === "command"
+                    ? "命令建议"
+                    : kind === "log"
+                      ? "日志片段"
+                      : "代码片段"
+                }
+                tone={kind === "command" ? "info" : "neutral"}
+                wrap={kind !== "command"}
+                style={{ margin: "8px 0" }}
+              />
             );
           }
           return (
@@ -221,19 +298,37 @@ function MessageBubble({
       <Avatar
         size={32}
         icon={isUser ? <UserOutlined /> : <RobotOutlined />}
-        style={{ background: isUser ? "#2f54eb" : "#1677ff", color: "#fff", flexShrink: 0 }}
+        style={{
+          background: isUser ? "#2f54eb" : "#1677ff",
+          color: "#fff",
+          flexShrink: 0,
+        }}
       />
-      <div style={{ maxWidth: "78%", minWidth: 0, display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start" }}>
+      <div
+        style={{
+          maxWidth: "78%",
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: isUser ? "flex-end" : "flex-start",
+        }}
+      >
         <div
           style={{
-            background: isUser ? "#1677ff" : "var(--ai-chat-assistant-bubble-bg)",
+            background: isUser
+              ? "#1677ff"
+              : "var(--ai-chat-assistant-bubble-bg)",
             color: isUser ? "#fff" : "var(--surface-text)",
             borderRadius: isUser ? "16px 4px 16px 16px" : "4px 16px 16px 16px",
             padding: "10px 14px",
             fontSize: 14,
             lineHeight: 1.65,
-            border: isUser ? "none" : "1px solid var(--ai-chat-assistant-bubble-border)",
-            boxShadow: isUser ? "none" : "var(--ai-chat-assistant-bubble-shadow)",
+            border: isUser
+              ? "none"
+              : "1px solid var(--ai-chat-assistant-bubble-border)",
+            boxShadow: isUser
+              ? "none"
+              : "var(--ai-chat-assistant-bubble-shadow)",
             maxWidth: "100%",
             overflowX: "hidden",
             maxHeight: MESSAGE_BUBBLE_MAX_HEIGHT,
@@ -241,9 +336,28 @@ function MessageBubble({
             overscrollBehaviorY: "contain",
           }}
         >
-          {isUser ? <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere" }}>{message.content}</div> : <MarkdownContent content={displayedContent} />}
+          {isUser ? (
+            <div
+              style={{
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                overflowWrap: "anywhere",
+              }}
+            >
+              {message.content}
+            </div>
+          ) : (
+            <MarkdownContent content={displayedContent} />
+          )}
           {attachments.length > 0 ? (
-            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <div
+              style={{
+                marginTop: 8,
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 6,
+              }}
+            >
               {attachments.map((attachment) => (
                 <OpsFilterChip
                   key={attachment.id}
@@ -261,7 +375,9 @@ function MessageBubble({
                 display: "block",
                 marginTop: 8,
                 fontSize: 12,
-                color: isUser ? "rgba(255,255,255,0.88)" : "var(--ai-chat-assistant-muted)",
+                color: isUser
+                  ? "rgba(255,255,255,0.88)"
+                  : "var(--ai-chat-assistant-muted)",
               }}
             >
               语音输入：{message.voiceInput.transcript}
@@ -273,7 +389,13 @@ function MessageBubble({
                 <OpsIconActionButton
                   key={descriptor.id}
                   size="small"
-                  opsTone={descriptor.riskLevel === "critical" ? "danger" : descriptor.riskLevel === "high" ? "primary" : "default"}
+                  opsTone={
+                    descriptor.riskLevel === "critical"
+                      ? "danger"
+                      : descriptor.riskLevel === "high"
+                        ? "primary"
+                        : "default"
+                  }
                   loading={loadingActionId === descriptor.id}
                   onClick={() => onAction(descriptor)}
                 >
@@ -283,7 +405,10 @@ function MessageBubble({
             </Space>
           ) : null}
         </div>
-        <Typography.Text type="secondary" style={{ fontSize: 11, marginTop: 4 }}>
+        <Typography.Text
+          type="secondary"
+          style={{ fontSize: 11, marginTop: 4 }}
+        >
           {formatTime(message.createdAt)}
         </Typography.Text>
       </div>
@@ -298,7 +423,15 @@ interface SessionItem {
   messageCount: number;
 }
 
-function ModelSettingsDrawer({ open, onClose, token }: { open: boolean; onClose: () => void; token?: string }) {
+function ModelSettingsDrawer({
+  open,
+  onClose,
+  token,
+}: {
+  open: boolean;
+  onClose: () => void;
+  token?: string;
+}) {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -376,7 +509,11 @@ function ModelSettingsDrawer({ open, onClose, token }: { open: boolean; onClose:
       footerActions={
         <Space style={{ width: "100%", justifyContent: "flex-end" }}>
           <Button onClick={onClose}>取消</Button>
-          <Button type="primary" loading={saving} onClick={() => void handleSave()}>
+          <Button
+            type="primary"
+            loading={saving}
+            onClick={() => void handleSave()}
+          >
             保存
           </Button>
         </Space>
@@ -390,27 +527,71 @@ function ModelSettingsDrawer({ open, onClose, token }: { open: boolean; onClose:
             rules={[{ required: true, message: "请输入中转站 Base URL" }]}
             extra="支持 OpenAI chat/completions 兼容地址，例如 https://xxx/v1"
           >
-            <Input id="ai-model-base-url" name="ai-model-base-url" placeholder="https://api.openai.com/v1" />
+            <Input
+              id="ai-model-base-url"
+              name="ai-model-base-url"
+              placeholder="https://api.openai.com/v1"
+            />
           </Form.Item>
 
-          <Form.Item label="API Key" name="apiKey" extra="留空表示不修改当前 Key">
-            <Input.Password id="ai-model-api-key" name="ai-model-api-key" placeholder="sk-..." autoComplete="off" />
+          <Form.Item
+            label="API Key"
+            name="apiKey"
+            extra="留空表示不修改当前 Key"
+          >
+            <Input.Password
+              id="ai-model-api-key"
+              name="ai-model-api-key"
+              placeholder="sk-..."
+              autoComplete="off"
+            />
           </Form.Item>
 
-          <Form.Item label="Model" name="modelName" rules={[{ required: true, message: "请输入模型名称" }]}>
-            <Input id="ai-model-name" name="ai-model-name" placeholder="gpt-4o-mini" />
+          <Form.Item
+            label="Model"
+            name="modelName"
+            rules={[{ required: true, message: "请输入模型名称" }]}
+          >
+            <Input
+              id="ai-model-name"
+              name="ai-model-name"
+              placeholder="gpt-4o-mini"
+            />
           </Form.Item>
 
-          <Form.Item label="最大 Tokens" name="maxTokens" rules={[{ required: true, message: "请输入最大 Tokens" }]}>
-            <InputNumber id="ai-model-max-tokens" name="ai-model-max-tokens" min={128} max={131072} step={256} style={{ width: "100%" }} />
+          <Form.Item
+            label="最大 Tokens"
+            name="maxTokens"
+            rules={[{ required: true, message: "请输入最大 Tokens" }]}
+          >
+            <InputNumber
+              id="ai-model-max-tokens"
+              name="ai-model-max-tokens"
+              min={128}
+              max={131072}
+              step={256}
+              style={{ width: "100%" }}
+            />
           </Form.Item>
 
-          <Form.Item label="请求超时(ms)" name="timeoutMs" rules={[{ required: true, message: "请输入超时时间" }]}>
-            <InputNumber id="ai-model-timeout" name="ai-model-timeout" min={3000} max={180000} step={1000} style={{ width: "100%" }} />
+          <Form.Item
+            label="请求超时(ms)"
+            name="timeoutMs"
+            rules={[{ required: true, message: "请输入超时时间" }]}
+          >
+            <InputNumber
+              id="ai-model-timeout"
+              name="ai-model-timeout"
+              min={3000}
+              max={180000}
+              step={1000}
+              style={{ width: "100%" }}
+            />
           </Form.Item>
 
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            也可在 `.env.ai.local` 配置：`AI_MODEL_BASE_URL`、`AI_MODEL_API_KEY`、`AI_MODEL_NAME`、`AI_MODEL_MAX_TOKENS`、`AI_MODEL_TIMEOUT_MS`。
+            也可在 `.env.ai.local`
+            配置：`AI_MODEL_BASE_URL`、`AI_MODEL_API_KEY`、`AI_MODEL_NAME`、`AI_MODEL_MAX_TOKENS`、`AI_MODEL_TIMEOUT_MS`。
           </Typography.Text>
         </Form>
       </Spin>
@@ -428,8 +609,12 @@ export default function AiAssistantPage() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AiConversationMessage[]>([]);
   const [inputText, setInputText] = useState("");
-  const [pendingAttachments, setPendingAttachments] = useState<AiMessageAttachment[]>([]);
-  const [voiceInputMeta, setVoiceInputMeta] = useState<AiVoiceInputMeta | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    AiMessageAttachment[]
+  >([]);
+  const [voiceInputMeta, setVoiceInputMeta] = useState<AiVoiceInputMeta | null>(
+    null,
+  );
   const [recording, setRecording] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -462,7 +647,8 @@ export default function AiAssistantPage() {
   const { data: presets } = useQuery<PresetQuestion[]>({
     queryKey: ["ai-assistant", "presets"],
     queryFn: () => getPresetQuestions(accessToken || undefined),
-    enabled: deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+    enabled:
+      deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
     staleTime: 5 * 60_000,
     gcTime: PAGE_QUERY_GC_TIME_MS,
     refetchOnWindowFocus: false,
@@ -471,7 +657,8 @@ export default function AiAssistantPage() {
   const { data: suggestions } = useQuery({
     queryKey: ["ai-assistant", "suggestions"],
     queryFn: () => getAiSuggestions(accessToken || undefined),
-    enabled: deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+    enabled:
+      deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
     staleTime: 20_000,
     gcTime: PAGE_QUERY_GC_TIME_MS,
     refetchOnWindowFocus: false,
@@ -481,9 +668,13 @@ export default function AiAssistantPage() {
     queryKey: ["ai-assistant", "clusters", accessToken],
     queryFn: async () => {
       const { getClusters } = await import("@/lib/api/clusters");
-      return getClusters({ state: "active", selectableOnly: true }, accessToken!);
+      return getClusters(
+        { state: "active", selectableOnly: true },
+        accessToken!,
+      );
     },
-    enabled: deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+    enabled:
+      deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
     staleTime: 2 * 60_000,
     gcTime: PAGE_QUERY_GC_TIME_MS,
     refetchOnWindowFocus: false,
@@ -505,7 +696,8 @@ export default function AiAssistantPage() {
   } = useQuery({
     queryKey: ["ai-assistant", "config-ping"],
     queryFn: () => pingAiConfig(accessToken || undefined),
-    enabled: deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+    enabled:
+      deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
     retry: false,
     staleTime: 60_000,
     gcTime: PAGE_QUERY_GC_TIME_MS,
@@ -522,20 +714,23 @@ export default function AiAssistantPage() {
   }, [accessToken, isAdmin, isInitializing]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: loading ? "smooth" : "auto" });
+    messagesEndRef.current?.scrollIntoView({
+      behavior: loading ? "smooth" : "auto",
+    });
   }, [messages.length, loading]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
-    const ctor = (
-      window as unknown as {
-        SpeechRecognition?: SpeechRecognitionCtor;
-        webkitSpeechRecognition?: SpeechRecognitionCtor;
-      }
-    ).SpeechRecognition
-      ?? (
+    const ctor =
+      (
+        window as unknown as {
+          SpeechRecognition?: SpeechRecognitionCtor;
+          webkitSpeechRecognition?: SpeechRecognitionCtor;
+        }
+      ).SpeechRecognition ??
+      (
         window as unknown as {
           SpeechRecognition?: SpeechRecognitionCtor;
           webkitSpeechRecognition?: SpeechRecognitionCtor;
@@ -557,20 +752,28 @@ export default function AiAssistantPage() {
     };
     setSessions((prev) => {
       const existed = prev.some((s) => s.id === item.id);
-      const merged = existed ? prev.map((s) => (s.id === item.id ? item : s)) : [item, ...prev];
+      const merged = existed
+        ? prev.map((s) => (s.id === item.id ? item : s))
+        : [item, ...prev];
       return merged.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     });
   }, []);
 
-  const updateMessagesWithLatest = useCallback((msgs: AiConversationMessage[]) => {
-    setMessages(msgs);
-  }, []);
+  const updateMessagesWithLatest = useCallback(
+    (msgs: AiConversationMessage[]) => {
+      setMessages(msgs);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined" || !cacheHydrated) {
       return;
     }
-    localStorage.setItem(AI_ASSISTANT_SESSIONS_CACHE_KEY, JSON.stringify(sessions));
+    localStorage.setItem(
+      AI_ASSISTANT_SESSIONS_CACHE_KEY,
+      JSON.stringify(sessions),
+    );
   }, [cacheHydrated, sessions]);
 
   useEffect(() => {
@@ -605,7 +808,9 @@ export default function AiAssistantPage() {
     let cancelled = false;
     setCacheHydrated(false);
 
-    const cachedSessionsRaw = localStorage.getItem(AI_ASSISTANT_SESSIONS_CACHE_KEY);
+    const cachedSessionsRaw = localStorage.getItem(
+      AI_ASSISTANT_SESSIONS_CACHE_KEY,
+    );
     if (cachedSessionsRaw) {
       try {
         const parsed = JSON.parse(cachedSessionsRaw) as SessionItem[];
@@ -617,7 +822,9 @@ export default function AiAssistantPage() {
       }
     }
 
-    const cachedCurrent = localStorage.getItem(AI_ASSISTANT_CURRENT_SESSION_KEY);
+    const cachedCurrent = localStorage.getItem(
+      AI_ASSISTANT_CURRENT_SESSION_KEY,
+    );
     if (cachedCurrent) {
       setCurrentSessionId(cachedCurrent);
       const cachedMessagesRaw = localStorage.getItem(
@@ -625,12 +832,16 @@ export default function AiAssistantPage() {
       );
       if (cachedMessagesRaw) {
         try {
-          const parsed = JSON.parse(cachedMessagesRaw) as AiConversationMessage[];
+          const parsed = JSON.parse(
+            cachedMessagesRaw,
+          ) as AiConversationMessage[];
           if (Array.isArray(parsed)) {
             setMessages(parsed);
           }
         } catch {
-          localStorage.removeItem(`${AI_ASSISTANT_MESSAGES_CACHE_PREFIX}${cachedCurrent}`);
+          localStorage.removeItem(
+            `${AI_ASSISTANT_MESSAGES_CACHE_PREFIX}${cachedCurrent}`,
+          );
         }
       }
     }
@@ -696,7 +907,10 @@ export default function AiAssistantPage() {
         },
         accessToken,
       );
-      const session = "session" in result ? (result as SendMessageResponse).session : (result as AiConversationSession);
+      const session =
+        "session" in result
+          ? (result as SendMessageResponse).session
+          : (result as AiConversationSession);
       syncSession(session);
       setCurrentSessionId(session.id);
       setMessages(session.messages);
@@ -706,7 +920,13 @@ export default function AiAssistantPage() {
     } finally {
       setCreating(false);
     }
-  }, [accessToken, actionClusterId, alertForm.namespace, creating, syncSession]);
+  }, [
+    accessToken,
+    actionClusterId,
+    alertForm.namespace,
+    creating,
+    syncSession,
+  ]);
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
@@ -722,7 +942,10 @@ export default function AiAssistantPage() {
           setActionClusterId(session.clusterContext.clusterId);
         }
         if (session.clusterContext?.namespace) {
-          setAlertForm((prev) => ({ ...prev, namespace: session.clusterContext?.namespace ?? prev.namespace }));
+          setAlertForm((prev) => ({
+            ...prev,
+            namespace: session.clusterContext?.namespace ?? prev.namespace,
+          }));
         }
       } catch (error) {
         const text = error instanceof Error ? error.message : "读取会话失败";
@@ -782,7 +1005,9 @@ export default function AiAssistantPage() {
       await deleteSession(deleteTargetId, accessToken);
       const remaining = sessions.filter((item) => item.id !== deleteTargetId);
       setSessions(remaining);
-      localStorage.removeItem(`${AI_ASSISTANT_MESSAGES_CACHE_PREFIX}${deleteTargetId}`);
+      localStorage.removeItem(
+        `${AI_ASSISTANT_MESSAGES_CACHE_PREFIX}${deleteTargetId}`,
+      );
       if (currentSessionId === deleteTargetId) {
         const fallbackSessionId = remaining[0]?.id ?? null;
         setCurrentSessionId(fallbackSessionId);
@@ -861,13 +1086,14 @@ export default function AiAssistantPage() {
       return;
     }
 
-    const Ctor = (
-      window as unknown as {
-        SpeechRecognition?: SpeechRecognitionCtor;
-        webkitSpeechRecognition?: SpeechRecognitionCtor;
-      }
-    ).SpeechRecognition
-      ?? (
+    const Ctor =
+      (
+        window as unknown as {
+          SpeechRecognition?: SpeechRecognitionCtor;
+          webkitSpeechRecognition?: SpeechRecognitionCtor;
+        }
+      ).SpeechRecognition ??
+      (
         window as unknown as {
           SpeechRecognition?: SpeechRecognitionCtor;
           webkitSpeechRecognition?: SpeechRecognitionCtor;
@@ -906,7 +1132,9 @@ export default function AiAssistantPage() {
       if (!cleaned) {
         return;
       }
-      setInputText((prev) => (prev.trim() ? `${prev.trim()}\n${cleaned}` : cleaned));
+      setInputText((prev) =>
+        prev.trim() ? `${prev.trim()}\n${cleaned}` : cleaned,
+      );
       const durationMs = Math.max(0, Date.now() - recordStartAtRef.current);
       setVoiceInputMeta({
         transcript: cleaned,
@@ -928,7 +1156,11 @@ export default function AiAssistantPage() {
       }
       const attachmentsToSend = [...pendingAttachments];
       const voiceToSend = voiceInputMeta ?? undefined;
-      const payload = textPayload || (attachmentsToSend.length > 0 ? "请基于我上传的附件给出诊断建议。" : "");
+      const payload =
+        textPayload ||
+        (attachmentsToSend.length > 0
+          ? "请基于我上传的附件给出诊断建议。"
+          : "");
       if (!payload) {
         return;
       }
@@ -944,7 +1176,9 @@ export default function AiAssistantPage() {
             {
               title: payload.slice(0, 30),
               message: payload,
-              attachments: attachmentsToSend.length ? attachmentsToSend : undefined,
+              attachments: attachmentsToSend.length
+                ? attachmentsToSend
+                : undefined,
               voiceInput: voiceToSend,
               surface: "console",
               clusterId: actionClusterId || undefined,
@@ -953,7 +1187,10 @@ export default function AiAssistantPage() {
             },
             accessToken,
           );
-          const session = "session" in result ? (result as SendMessageResponse).session : (result as AiConversationSession);
+          const session =
+            "session" in result
+              ? (result as SendMessageResponse).session
+              : (result as AiConversationSession);
           syncSession(session);
           setCurrentSessionId(session.id);
           updateMessagesWithLatest(session.messages);
@@ -982,7 +1219,9 @@ export default function AiAssistantPage() {
           currentSessionId,
           {
             message: payload,
-            attachments: attachmentsToSend.length ? attachmentsToSend : undefined,
+            attachments: attachmentsToSend.length
+              ? attachmentsToSend
+              : undefined,
             voiceInput: voiceToSend,
             clusterId: actionClusterId || undefined,
             namespace: alertForm.namespace || undefined,
@@ -1000,7 +1239,18 @@ export default function AiAssistantPage() {
         setLoading(false);
       }
     },
-    [accessToken, actionClusterId, alertForm.kind, alertForm.namespace, currentSessionId, loading, pendingAttachments, syncSession, updateMessagesWithLatest, voiceInputMeta],
+    [
+      accessToken,
+      actionClusterId,
+      alertForm.kind,
+      alertForm.namespace,
+      currentSessionId,
+      loading,
+      pendingAttachments,
+      syncSession,
+      updateMessagesWithLatest,
+      voiceInputMeta,
+    ],
   );
 
   const parseKindAndName = (resourceId?: string) => {
@@ -1023,34 +1273,46 @@ export default function AiAssistantPage() {
     setMessages((prev) => [...prev, msg]);
   }, []);
 
-  const buildExecutionMessage = useCallback((descriptor: AiActionDescriptor, result: Awaited<ReturnType<typeof executeAction>>) => {
-    const lines: string[] = [];
-    lines.push(result.status === "success" ? `动作执行成功：${descriptor.label}` : `动作执行失败：${descriptor.label}`);
-    lines.push(`请求ID：${result.requestId}`);
-    lines.push(`操作：${result.operation}`);
-    if (result.error?.message) {
-      lines.push(`错误：${result.error.message}`);
-    }
-    if (result.result?.length) {
-      lines.push("结果：");
-      lines.push("```json");
-      lines.push(JSON.stringify(result.result, null, 2));
-      lines.push("```");
-    }
-    if (result.rollbackSuggestion) {
-      lines.push(`回滚建议：${result.rollbackSuggestion}`);
-    }
-    if (result.writeback && !result.writeback.persisted) {
-      lines.push(`会话回写失败：${result.writeback.error ?? "unknown"}`);
-    }
-    return lines.join("\n");
-  }, []);
+  const buildExecutionMessage = useCallback(
+    (
+      descriptor: AiActionDescriptor,
+      result: Awaited<ReturnType<typeof executeAction>>,
+    ) => {
+      const lines: string[] = [];
+      lines.push(
+        result.status === "success"
+          ? `动作执行成功：${descriptor.label}`
+          : `动作执行失败：${descriptor.label}`,
+      );
+      lines.push(`请求ID：${result.requestId}`);
+      lines.push(`操作：${result.operation}`);
+      if (result.error?.message) {
+        lines.push(`错误：${result.error.message}`);
+      }
+      if (result.result?.length) {
+        lines.push("结果：");
+        lines.push("```json");
+        lines.push(JSON.stringify(result.result, null, 2));
+        lines.push("```");
+      }
+      if (result.rollbackSuggestion) {
+        lines.push(`回滚建议：${result.rollbackSuggestion}`);
+      }
+      if (result.writeback && !result.writeback.persisted) {
+        lines.push(`会话回写失败：${result.writeback.error ?? "unknown"}`);
+      }
+      return lines.join("\n");
+    },
+    [],
+  );
 
   const confirmHighRiskAction = useCallback(
-    (descriptor: AiActionDescriptor, action: AiActionExecuteRequest): Promise<boolean> =>
+    (
+      descriptor: AiActionDescriptor,
+      action: AiActionExecuteRequest,
+    ): Promise<boolean> =>
       new Promise((resolve) => {
         let settled = false;
-        const target = action.target ?? {};
         Modal.confirm({
           title: descriptor.confirmation?.title || "确认执行高风险动作",
           okText: "确认执行",
@@ -1059,18 +1321,23 @@ export default function AiAssistantPage() {
           content: (
             <Space orientation="vertical" size={4}>
               <Typography.Text strong>{descriptor.label}</Typography.Text>
-              <Typography.Text type="secondary">操作: {action.operation}</Typography.Text>
               {descriptor.confirmation?.summary ? (
-                <Typography.Text type="secondary">{descriptor.confirmation.summary}</Typography.Text>
+                <Typography.Text type="secondary">
+                  {descriptor.confirmation.summary}
+                </Typography.Text>
               ) : null}
-              {target.clusterId ? <Typography.Text type="secondary">集群: {target.clusterId}</Typography.Text> : null}
-              {target.namespace ? <Typography.Text type="secondary">名称空间: {target.namespace}</Typography.Text> : null}
-              {target.kind && target.name ? (
-                <Typography.Text type="secondary">目标资源: {target.kind}/{target.name}</Typography.Text>
-              ) : null}
-              {target.provider ? <Typography.Text type="secondary">云厂商: {target.provider}</Typography.Text> : null}
-              {target.vmId ? <Typography.Text type="secondary">虚机ID: {target.vmId}</Typography.Text> : null}
-              <Typography.Text type="danger">该操作可能造成业务波动，请确认目标后再继续。</Typography.Text>
+              <OpsCommandPreview
+                allowCopy={false}
+                content={formatHighRiskActionPreview(action)}
+                kind="approval"
+                language="Action"
+                title="高风险动作摘要"
+                tone="danger"
+                wrap
+              />
+              <Typography.Text type="danger">
+                该操作可能造成业务波动，请确认目标后再继续。
+              </Typography.Text>
             </Space>
           ),
           onOk: () => {
@@ -1106,12 +1373,18 @@ export default function AiAssistantPage() {
         if (descriptor.filterKey && descriptor.filterValue) {
           query.set(descriptor.filterKey, descriptor.filterValue);
         }
-        router.push(query.toString() ? `${descriptor.routePath}?${query.toString()}` : descriptor.routePath);
+        router.push(
+          query.toString()
+            ? `${descriptor.routePath}?${query.toString()}`
+            : descriptor.routePath,
+        );
         return;
       }
 
       const op = normalizeAiAssistantActionOperation(
-        typeof descriptor.operation === "string" ? descriptor.operation : undefined,
+        typeof descriptor.operation === "string"
+          ? descriptor.operation
+          : undefined,
       );
       if (!op) {
         message.warning("该动作缺少可执行 operation 或 operation 不受支持");
@@ -1133,7 +1406,8 @@ export default function AiAssistantPage() {
         action.target = {
           ...targetFromDescriptor,
           clusterId,
-          namespace: targetFromDescriptor.namespace ?? alertForm.namespace ?? undefined,
+          namespace:
+            targetFromDescriptor.namespace ?? alertForm.namespace ?? undefined,
         };
         action.options = {
           ...descriptor.options,
@@ -1167,17 +1441,24 @@ export default function AiAssistantPage() {
         }
         action.target = {
           clusterId,
-          namespace: targetFromDescriptor.namespace ?? alertForm.namespace ?? "default",
-          kind: targetFromDescriptor.kind ?? parsedResource?.kind ?? "Deployment",
+          namespace:
+            targetFromDescriptor.namespace ?? alertForm.namespace ?? "default",
+          kind:
+            targetFromDescriptor.kind ?? parsedResource?.kind ?? "Deployment",
           name: targetFromDescriptor.name ?? parsedResource?.name ?? "",
         };
         if (!action.target.name) {
           message.warning("该动作缺少资源名称，无法执行重启");
           return;
         }
-      } else if (op === "vm-power-on" || op === "vm-power-off" || op === "vm-restart") {
+      } else if (
+        op === "vm-power-on" ||
+        op === "vm-power-off" ||
+        op === "vm-restart"
+      ) {
         const vmId = targetFromDescriptor.vmId ?? parsedResource?.name ?? "";
-        const provider = targetFromDescriptor.provider ?? parsedResource?.kind ?? "";
+        const provider =
+          targetFromDescriptor.provider ?? parsedResource?.kind ?? "";
         const clusterId = targetFromDescriptor.clusterId ?? actionClusterId;
         if (!provider || !vmId) {
           message.warning("该虚机动作缺少 provider/vmId，无法执行");
@@ -1185,7 +1466,8 @@ export default function AiAssistantPage() {
         }
         action.target = {
           clusterId: clusterId || undefined,
-          namespace: targetFromDescriptor.namespace ?? alertForm.namespace ?? undefined,
+          namespace:
+            targetFromDescriptor.namespace ?? alertForm.namespace ?? undefined,
           provider,
           vmId,
         };
@@ -1205,7 +1487,10 @@ export default function AiAssistantPage() {
         let sessionRefreshed = false;
         if (currentSessionId) {
           try {
-            const latestSession = await getSession(currentSessionId, accessToken);
+            const latestSession = await getSession(
+              currentSessionId,
+              accessToken,
+            );
             syncSession(latestSession);
             updateMessagesWithLatest(latestSession.messages);
             sessionRefreshed = true;
@@ -1214,7 +1499,9 @@ export default function AiAssistantPage() {
           }
         }
         if (!sessionRefreshed || result.writeback?.persisted === false) {
-          appendAssistantExecutionMessage(buildExecutionMessage(descriptor, result));
+          appendAssistantExecutionMessage(
+            buildExecutionMessage(descriptor, result),
+          );
         }
       } catch (error) {
         const text = error instanceof Error ? error.message : "动作执行失败";
@@ -1254,7 +1541,10 @@ export default function AiAssistantPage() {
           },
           accessToken,
         );
-        const session = "session" in result ? (result as SendMessageResponse).session : (result as AiConversationSession);
+        const session =
+          "session" in result
+            ? (result as SendMessageResponse).session
+            : (result as AiConversationSession);
         syncSession(session);
         setCurrentSessionId(session.id);
         updateMessagesWithLatest(session.messages);
@@ -1265,7 +1555,14 @@ export default function AiAssistantPage() {
         setLoading(false);
       }
     },
-    [accessToken, actionClusterId, alertForm.namespace, loading, syncSession, updateMessagesWithLatest],
+    [
+      accessToken,
+      actionClusterId,
+      alertForm.namespace,
+      loading,
+      syncSession,
+      updateMessagesWithLatest,
+    ],
   );
 
   const handleTriggerDiagnosis = useCallback(async () => {
@@ -1297,8 +1594,17 @@ export default function AiAssistantPage() {
     [currentSessionId, sessions],
   );
 
-  const criticalCount = useMemo(() => suggestions?.items.filter((item) => item.severity === "critical").length ?? 0, [suggestions]);
-  const highCount = useMemo(() => suggestions?.items.filter((item) => item.severity === "high").length ?? 0, [suggestions]);
+  const criticalCount = useMemo(
+    () =>
+      suggestions?.items.filter((item) => item.severity === "critical")
+        .length ?? 0,
+    [suggestions],
+  );
+  const highCount = useMemo(
+    () =>
+      suggestions?.items.filter((item) => item.severity === "high").length ?? 0,
+    [suggestions],
+  );
   const clusterOptions = useMemo(
     () =>
       (clustersData?.items ?? []).map((cluster) => ({
@@ -1316,7 +1622,10 @@ export default function AiAssistantPage() {
           title="无权限访问 KubeNova 中台"
           subTitle="当前账号不是管理员，无法查看会话、建议与执行任何 AI 运维动作。"
           extra={
-            <OpsIconActionButton opsTone="primary" onClick={() => router.push("/")}>
+            <OpsIconActionButton
+              opsTone="primary"
+              onClick={() => router.push("/")}
+            >
               返回首页
             </OpsIconActionButton>
           }
@@ -1331,7 +1640,9 @@ export default function AiAssistantPage() {
         id="alert-title"
         name="alert-title"
         value={alertForm.title}
-        onChange={(e) => setAlertForm((prev) => ({ ...prev, title: e.target.value }))}
+        onChange={(e) =>
+          setAlertForm((prev) => ({ ...prev, title: e.target.value }))
+        }
         placeholder="告警标题"
       />
       <Space.Compact style={{ width: "100%" }}>
@@ -1345,13 +1656,17 @@ export default function AiAssistantPage() {
             { label: "medium", value: "medium" },
             { label: "low", value: "low" },
           ]}
-          onChange={(value) => setAlertForm((prev) => ({ ...prev, severity: value }))}
+          onChange={(value) =>
+            setAlertForm((prev) => ({ ...prev, severity: value }))
+          }
         />
         <Input
           id="alert-namespace"
           name="alert-namespace"
           value={alertForm.namespace}
-          onChange={(e) => setAlertForm((prev) => ({ ...prev, namespace: e.target.value }))}
+          onChange={(e) =>
+            setAlertForm((prev) => ({ ...prev, namespace: e.target.value }))
+          }
           placeholder="namespace"
         />
       </Space.Compact>
@@ -1360,14 +1675,21 @@ export default function AiAssistantPage() {
           id="alert-kind"
           value={alertForm.kind}
           style={{ width: "35%" }}
-          options={["Pod", "Deployment", "StatefulSet", "Node"].map((v) => ({ label: v, value: v }))}
-          onChange={(value) => setAlertForm((prev) => ({ ...prev, kind: value }))}
+          options={["Pod", "Deployment", "StatefulSet", "Node"].map((v) => ({
+            label: v,
+            value: v,
+          }))}
+          onChange={(value) =>
+            setAlertForm((prev) => ({ ...prev, kind: value }))
+          }
         />
         <Input
           id="alert-source"
           name="alert-source"
           value={alertForm.source}
-          onChange={(e) => setAlertForm((prev) => ({ ...prev, source: e.target.value }))}
+          onChange={(e) =>
+            setAlertForm((prev) => ({ ...prev, source: e.target.value }))
+          }
           placeholder="source"
         />
       </Space.Compact>
@@ -1375,11 +1697,17 @@ export default function AiAssistantPage() {
         id="alert-description"
         name="alert-description"
         value={alertForm.description}
-        onChange={(e) => setAlertForm((prev) => ({ ...prev, description: e.target.value }))}
+        onChange={(e) =>
+          setAlertForm((prev) => ({ ...prev, description: e.target.value }))
+        }
         autoSize={{ minRows: 3, maxRows: 5 }}
         placeholder="告警详情"
       />
-      <OpsIconActionButton opsTone="primary" onClick={() => void handleTriggerDiagnosis()} loading={loading}>
+      <OpsIconActionButton
+        opsTone="primary"
+        onClick={() => void handleTriggerDiagnosis()}
+        loading={loading}
+      >
         触发诊断
       </OpsIconActionButton>
 
@@ -1419,19 +1747,38 @@ export default function AiAssistantPage() {
         overflow: "hidden",
       }}
     >
-      <OpsSurface className="ai-assistant-hero-surface" variant="workbench" padding="sm" style={{ flex: "0 0 auto", minWidth: 0, overflow: "hidden" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+      <OpsSurface
+        className="ai-assistant-hero-surface"
+        variant="workbench"
+        padding="sm"
+        style={{ flex: "0 0 auto", minWidth: 0, overflow: "hidden" }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
           <div>
             <Typography.Title level={3} style={{ margin: 0 }}>
               KubeNova Assistant Workbench
             </Typography.Title>
-            <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0" }}>
+            <Typography.Paragraph
+              type="secondary"
+              style={{ margin: "4px 0 0" }}
+            >
               通过告警接入、智能诊断、ChatOps 会话和可执行建议形成闭环运维。
             </Typography.Paragraph>
           </div>
           <Space>
             {!showAlertPanelInline ? (
-              <OpsIconActionButton icon={<ApiOutlined />} onClick={() => setAlertDrawerOpen(true)} disabled={isInitializing || !accessToken}>
+              <OpsIconActionButton
+                icon={<ApiOutlined />}
+                onClick={() => setAlertDrawerOpen(true)}
+                disabled={isInitializing || !accessToken}
+              >
                 告警接入
               </OpsIconActionButton>
             ) : null}
@@ -1456,25 +1803,42 @@ export default function AiAssistantPage() {
 
         <Row gutter={[12, 12]} style={{ marginTop: 8 }}>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface className="ai-assistant-metric-card" variant="panel" padding="sm">
-              <Statistic title="活跃告警" value={suggestions?.items.length ?? 0} prefix={<WarningOutlined />} />
-            </OpsSurface>
+            <OpsMetricTile
+              className="ai-assistant-metric-card"
+              icon={<WarningOutlined />}
+              label="活跃告警"
+              tone="info"
+              value={suggestions?.items.length ?? 0}
+            />
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface className="ai-assistant-metric-card" variant="panel" padding="sm">
-              <Statistic title="严重告警" value={criticalCount} styles={{ content: { color: "#cf1322" } }} />
-            </OpsSurface>
+            <OpsMetricTile
+              className="ai-assistant-metric-card"
+              label="严重告警"
+              tone="danger"
+              value={criticalCount}
+            />
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface className="ai-assistant-metric-card" variant="panel" padding="sm">
-              <Statistic title="高风险告警" value={highCount} styles={{ content: { color: "#d46b08" } }} />
-            </OpsSurface>
+            <OpsMetricTile
+              className="ai-assistant-metric-card"
+              label="高风险告警"
+              tone="warning"
+              value={highCount}
+            />
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <OpsSurface className="ai-assistant-metric-card" variant="panel" padding="sm">
+            <OpsSurface
+              className="ai-assistant-metric-card"
+              variant="panel"
+              padding="sm"
+            >
               <Space orientation="vertical" size={4} style={{ width: "100%" }}>
                 <Typography.Text type="secondary">模型中转站</Typography.Text>
-                <OpsStatusTag tone={pingData?.ok ? "success" : "danger"} className="ai-assistant-status-chip">
+                <OpsStatusTag
+                  tone={pingData?.ok ? "success" : "danger"}
+                  className="ai-assistant-status-chip"
+                >
                   {pingData?.ok ? "在线" : "不可用"}
                 </OpsStatusTag>
                 <Typography.Text style={{ fontSize: 12 }} ellipsis>
@@ -1486,9 +1850,16 @@ export default function AiAssistantPage() {
         </Row>
       </OpsSurface>
 
-      <Row gutter={[12, 12]} style={{ flex: 1, minHeight: 0, minWidth: 0, alignItems: "stretch" }}>
+      <Row
+        gutter={[12, 12]}
+        style={{ flex: 1, minHeight: 0, minWidth: 0, alignItems: "stretch" }}
+      >
         {showAlertPanelInline ? (
-          <Col xs={24} xl={9} style={{ display: "flex", minHeight: 0, minWidth: 0 }}>
+          <Col
+            xs={24}
+            xl={9}
+            style={{ display: "flex", minHeight: 0, minWidth: 0 }}
+          >
             <OpsSurface
               title="告警接入模拟"
               actions={<OpsFilterChip tone="info">Webhook</OpsFilterChip>}
@@ -1505,7 +1876,11 @@ export default function AiAssistantPage() {
           </Col>
         ) : null}
 
-        <Col xs={24} xl={showAlertPanelInline ? 15 : 24} style={{ display: "flex", minHeight: 0, minWidth: 0 }}>
+        <Col
+          xs={24}
+          xl={showAlertPanelInline ? 15 : 24}
+          style={{ display: "flex", minHeight: 0, minWidth: 0 }}
+        >
           <OpsSurface
             title="ChatOps"
             actions={
@@ -1518,7 +1893,9 @@ export default function AiAssistantPage() {
             className="ai-assistant-chat-surface"
             style={{
               flex: 1,
-              height: screens.xl ? CHAT_WORKSPACE_DESKTOP_HEIGHT : "calc(100vh - 220px)",
+              height: screens.xl
+                ? CHAT_WORKSPACE_DESKTOP_HEIGHT
+                : "calc(100vh - 220px)",
               minHeight: 0,
               minWidth: 0,
               display: "flex",
@@ -1526,7 +1903,9 @@ export default function AiAssistantPage() {
               overflow: "hidden",
             }}
           >
-            <Layout style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+            <Layout
+              style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}
+            >
               <Sider
                 width={240}
                 style={{
@@ -1566,39 +1945,66 @@ export default function AiAssistantPage() {
                   }}
                 >
                   {sessions.length === 0 ? (
-                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无会话" style={{ marginTop: 32 }} />
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="暂无会话"
+                      style={{ marginTop: 32 }}
+                    />
                   ) : (
                     <List
                       size="small"
                       dataSource={sessions}
                       renderItem={(session) => (
-	                        <List.Item
-	                          onClick={() => void handleSelectSession(session.id)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                void handleSelectSession(session.id);
-                              }
-                            }}
-                            role="button"
-                            tabIndex={0}
-                            aria-current={session.id === currentSessionId ? "true" : undefined}
-	                          style={{
-	                            cursor: "pointer",
+                        <List.Item
+                          onClick={() => void handleSelectSession(session.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              void handleSelectSession(session.id);
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          aria-current={
+                            session.id === currentSessionId ? "true" : undefined
+                          }
+                          style={{
+                            cursor: "pointer",
                             marginBottom: 4,
                             borderRadius: 8,
-                            border: session.id === currentSessionId ? "1px solid rgba(22,119,255,0.35)" : "1px solid transparent",
-                            background: session.id === currentSessionId ? "rgba(22,119,255,0.06)" : "transparent",
+                            border:
+                              session.id === currentSessionId
+                                ? "1px solid rgba(22,119,255,0.35)"
+                                : "1px solid transparent",
+                            background:
+                              session.id === currentSessionId
+                                ? "rgba(22,119,255,0.06)"
+                                : "transparent",
                             padding: "8px 10px",
                           }}
                         >
-                          <div style={{ width: "100%", display: "flex", alignItems: "center", gap: 8 }}>
+                          <div
+                            style={{
+                              width: "100%",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <Typography.Text strong={session.id === currentSessionId} ellipsis style={{ display: "block" }}>
+                              <Typography.Text
+                                strong={session.id === currentSessionId}
+                                ellipsis
+                                style={{ display: "block" }}
+                              >
                                 {session.title}
                               </Typography.Text>
-                              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                                {session.messageCount} 条 · {formatTime(session.updatedAt)}
+                              <Typography.Text
+                                type="secondary"
+                                style={{ fontSize: 11 }}
+                              >
+                                {session.messageCount} 条 ·{" "}
+                                {formatTime(session.updatedAt)}
                               </Typography.Text>
                             </div>
                             <Tooltip title="删除会话">
@@ -1622,10 +2028,29 @@ export default function AiAssistantPage() {
                 </div>
               </Sider>
 
-              <Content style={{ display: "flex", flexDirection: "column", background: "var(--ai-chat-content-bg)", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
-                <div style={{ padding: "12px 16px 8px", borderBottom: "1px solid var(--ai-chat-header-border)", background: "var(--ai-chat-header-bg)", overflowX: "hidden" }}>
+              <Content
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  background: "var(--ai-chat-content-bg)",
+                  minHeight: 0,
+                  minWidth: 0,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  className="ai-assistant-chat-context-header"
+                  style={{
+                    padding: "12px 16px 8px",
+                    borderBottom: "1px solid var(--ai-chat-header-border)",
+                    background: "var(--ai-chat-header-bg)",
+                    overflowX: "hidden",
+                  }}
+                >
                   <Space size={8} wrap style={{ width: "100%" }}>
-                    <Typography.Text type="secondary">执行上下文集群:</Typography.Text>
+                    <Typography.Text type="secondary">
+                      执行上下文集群:
+                    </Typography.Text>
                     <Select
                       id="ai-action-cluster"
                       style={{ width: 220, maxWidth: "100%" }}
@@ -1634,7 +2059,11 @@ export default function AiAssistantPage() {
                       placeholder="选择集群"
                       options={clusterOptions}
                     />
-                    {currentSession ? <OpsFilterChip tone="neutral">{currentSession.title}</OpsFilterChip> : null}
+                    {currentSession ? (
+                      <OpsFilterChip tone="neutral">
+                        {currentSession.title}
+                      </OpsFilterChip>
+                    ) : null}
                   </Space>
                 </div>
 
@@ -1650,10 +2079,12 @@ export default function AiAssistantPage() {
                     padding: "14px 16px",
                   }}
                 >
-
                   {messages.length === 0 ? (
                     <div style={{ paddingTop: 48 }}>
-                      <Empty description="开始一条 ChatOps 会话" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      <Empty
+                        description="开始一条 ChatOps 会话"
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      />
                     </div>
                   ) : (
                     messages.map((item) => (
@@ -1667,9 +2098,19 @@ export default function AiAssistantPage() {
                   )}
 
                   {loading && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 12 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: 12,
+                      }}
+                    >
                       <Spin size="small" />
-                      <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                      <Typography.Text
+                        type="secondary"
+                        style={{ fontSize: 13 }}
+                      >
                         KubeNova 中台正在分析...
                       </Typography.Text>
                     </div>
@@ -1677,10 +2118,22 @@ export default function AiAssistantPage() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                <div style={{ padding: "8px 12px", borderTop: "1px solid var(--ai-chat-composer-border)", background: "var(--ai-chat-composer-bg)", overflowX: "hidden" }}>
+                <div
+                  style={{
+                    padding: "8px 12px",
+                    borderTop: "1px solid var(--ai-chat-composer-border)",
+                    background: "var(--ai-chat-composer-bg)",
+                    overflowX: "hidden",
+                  }}
+                >
                   <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
                     {QUICK_PROMPTS.map((prompt) => (
-                      <OpsIconActionButton key={prompt} size="small" onClick={() => void handleSend(prompt)} disabled={loading || !accessToken}>
+                      <OpsIconActionButton
+                        key={prompt}
+                        size="small"
+                        onClick={() => void handleSend(prompt)}
+                        disabled={loading || !accessToken}
+                      >
                         {prompt.slice(0, 14)}...
                       </OpsIconActionButton>
                     ))}
@@ -1699,32 +2152,50 @@ export default function AiAssistantPage() {
                     }}
                   />
 
-                  {(pendingAttachments.length > 0 || voiceInputMeta) ? (
+                  {pendingAttachments.length > 0 || voiceInputMeta ? (
                     <div style={{ marginBottom: 8 }}>
                       <Space wrap size={[6, 6]}>
                         {pendingAttachments.map((attachment) => (
                           <OpsFilterChip
                             key={attachment.id}
-                            tone={attachment.category === "image" ? "info" : "neutral"}
+                            tone={
+                              attachment.category === "image"
+                                ? "info"
+                                : "neutral"
+                            }
                             closable
                             onClose={(event) => {
                               event.preventDefault();
                               handleRemovePendingAttachment(attachment.id);
                             }}
                           >
-                            {attachment.fileName} · {formatFileSize(attachment.size)}
+                            {attachment.fileName} ·{" "}
+                            {formatFileSize(attachment.size)}
                           </OpsFilterChip>
                         ))}
                         {voiceInputMeta ? (
-                          <OpsFilterChip tone="warning" icon={<AudioOutlined />}>
-                            语音转写 {voiceInputMeta.durationMs ? `${Math.round(voiceInputMeta.durationMs / 1000)}s` : ""}
+                          <OpsFilterChip
+                            tone="warning"
+                            icon={<AudioOutlined />}
+                          >
+                            语音转写{" "}
+                            {voiceInputMeta.durationMs
+                              ? `${Math.round(voiceInputMeta.durationMs / 1000)}s`
+                              : ""}
                           </OpsFilterChip>
                         ) : null}
                       </Space>
                     </div>
                   ) : null}
 
-                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end", minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "flex-end",
+                      minWidth: 0,
+                    }}
+                  >
                     <Space orientation="vertical" size={6}>
                       <Tooltip title="上传文件/图片">
                         <OpsIconActionButton
@@ -1738,10 +2209,17 @@ export default function AiAssistantPage() {
                       <Tooltip title={recording ? "停止录音" : "语音输入"}>
                         <OpsIconActionButton
                           className="resource-table-icon-action-compact"
-                          icon={recording ? <StopOutlined /> : <AudioOutlined />}
+                          icon={
+                            recording ? <StopOutlined /> : <AudioOutlined />
+                          }
                           aria-label={recording ? "停止录音" : "语音输入"}
                           onClick={toggleRecording}
-                          disabled={!voiceSupported || loading || isInitializing || !accessToken}
+                          disabled={
+                            !voiceSupported ||
+                            loading ||
+                            isInitializing ||
+                            !accessToken
+                          }
                           opsTone={recording ? "danger" : "default"}
                         />
                       </Tooltip>
@@ -1767,7 +2245,8 @@ export default function AiAssistantPage() {
                         onClick={() => void handleSend(inputText)}
                         loading={loading}
                         disabled={
-                          (!inputText.trim() && pendingAttachments.length === 0) ||
+                          (!inputText.trim() &&
+                            pendingAttachments.length === 0) ||
                           isInitializing ||
                           !accessToken
                         }
@@ -1781,7 +2260,11 @@ export default function AiAssistantPage() {
         </Col>
       </Row>
 
-      <ModelSettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} token={accessToken || undefined} />
+      <ModelSettingsDrawer
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        token={accessToken || undefined}
+      />
       <AiDeleteSessionDialog
         open={deleteDialogOpen}
         target={deleteTarget}

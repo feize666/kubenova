@@ -1,4 +1,10 @@
 export {
+  OpsCommandPreview,
+  type OpsCommandPreviewKind,
+  type OpsCommandPreviewProps,
+  type OpsCommandPreviewTone,
+} from "./ops-command-preview";
+export {
   OpsConfirmModal,
   openOpsConfirm,
   type OpsConfirmModalProps,
@@ -23,6 +29,33 @@ export {
   type OpsFormSectionProps,
   type OpsModalShellProps,
 } from "./ops-modal-shell";
+export {
+  OpsInspectorShell,
+  type OpsInspectorFact,
+  type OpsInspectorShellProps,
+  type OpsInspectorShellVariant,
+} from "./ops-inspector-shell";
+export {
+  OpsMotionFrame,
+  type OpsMotionDuration,
+  type OpsMotionFrameProps,
+  type OpsMotionKind,
+} from "./ops-motion-frame";
+export {
+  OpsMetricTile,
+  type OpsMetricTileProps,
+  type OpsMetricTileTone,
+} from "./ops-metric-tile";
+export {
+  OpsHaloFocus,
+  type OpsHaloFocusProps,
+  type OpsHaloFocusTone,
+} from "./ops-halo-focus";
+export {
+  OpsMobileResourceCard,
+  type OpsMobileResourceCardMeta,
+  type OpsMobileResourceCardProps,
+} from "./ops-mobile-resource-card";
 export { OpsPageHeader, type OpsPageHeaderProps } from "./ops-page-header";
 export { OpsPopoverPanel } from "./ops-popover-panel";
 export { OpsScopeSelector, type OpsScopeSelectorOption, type OpsScopeSelectorProps } from "./ops-scope-selector";

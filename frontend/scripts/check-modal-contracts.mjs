@@ -76,6 +76,14 @@ const representativeForms = [
     path: "src/components/workloads/autoscaling-console.tsx",
     tokens: ["OpsModalShell", "配置 HPA/VPA", "confirmLoading", "Form.List"],
   },
+  {
+    path: "src/app/workloads/helm/page.tsx",
+    tokens: ["OpsModalShell", "安装 Helm Release", "确认安装", "确认回滚"],
+  },
+  {
+    path: "src/app/workloads/helm/repositories/page.tsx",
+    tokens: ["OpsModalShell", "新增 Helm 仓库", "通过 URL 快速新增仓库", "导入模板 Helm 仓库"],
+  },
 ];
 
 for (const contract of representativeForms) {
@@ -84,6 +92,31 @@ for (const contract of representativeForms) {
     if (!content.includes(token)) {
       failures.push(`${contract.path}: missing representative form contract ${token}`);
     }
+  }
+  if (content.includes("<Modal")) {
+    failures.push(`${contract.path}: representative form modal must use OpsModalShell, not raw antd Modal`);
+  }
+}
+
+const workloadModalRoutes = [
+  "deployments",
+  "statefulsets",
+  "daemonsets",
+  "replicasets",
+  "jobs",
+  "cronjobs",
+];
+
+for (const route of workloadModalRoutes) {
+  const path = `src/app/workloads/${route}/page.tsx`;
+  const content = read(path);
+  for (const token of ["OpsModalShell", "OpsFormSection", "openOpsConfirm"]) {
+    if (!content.includes(token)) {
+      failures.push(`${path}: missing workload modal contract ${token}`);
+    }
+  }
+  if (content.includes("<Modal")) {
+    failures.push(`${path}: workload form modal must use OpsModalShell, not raw antd Modal`);
   }
 }
 

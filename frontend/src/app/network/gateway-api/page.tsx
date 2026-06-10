@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Typography, message } from "antd";
+import { Alert, Col, Form, Input, InputNumber, Row, Select, Space, Typography, message } from "antd";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -12,7 +12,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
-import { OpsSurface } from "@/components/ops";
+import { OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
@@ -1057,109 +1057,113 @@ export default function GatewayApiPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/network/gateway-api"
-        titleZh="Gateway API"
-        titleEn="Gateway API"
-        description="管理 Gateway API 资源。"
-        titleSuffix={
-          <ResourceAddButton
-            compact={false}
-            label="新增资源"
-            disabled={!canCreate}
-            onClick={handleOpenCreate}
-          />
-        }
-      />
-
-      <OpsSurface className="network-gateway-toolbar" variant="toolbar" padding="sm">
-        <Row gutter={[12, 12]}>
-          <Col span={24}>
-            <Select
-              value={kind}
-              options={gatewayKindOptions}
-              style={{ width: "100%" }}
-              loading={discoveryQuery.isLoading}
-              onChange={(value) => {
-                setKind(value);
-                resetPage();
-                setKeyword("");
-                setKeywordInput("");
-              }}
-            />
-          </Col>
-        </Row>
-        <NetworkResourcePageFilters
-          clusterId={clusterId}
-          namespace={namespace}
-          keywordInput={keywordInput}
-          clusterOptions={clusterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled || !kindMeta.namespaced}
-          namespacePlaceholder={!kindMeta.namespaced ? "集群级资源" : namespacePlaceholder}
-          onClusterChange={(value) => {
-            onClusterChange(value);
-            resetPage();
-          }}
-          onNamespaceChange={(value) => {
-            onNamespaceChange(value);
-            resetPage();
-          }}
-          onKeywordInputChange={setKeywordInput}
-          onSearch={handleSearch}
-          keywordPlaceholder="按名称/标签搜索"
-          marginBottom={0}
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="network-resource-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
-      ) : null}
-
-      {listQuery.isError ? (
-        <Alert
-          className="network-resource-state-alert"
-          type="error"
-          showIcon
-          title={`${kindMeta.title} 列表加载失败`}
-          description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<GatewayRow>
-          rowKey="id"
-          columns={columns}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          tableKey="network.gateway-api"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按名称/标签搜索（示例：gw-a app=web env=prod）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{ sortBy, sortOrder }}
-          dataSource={tableData}
-          loading={listQuery.isLoading}
-          onChange={(nextPagination, filters, sorter, extra) =>
-            handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading)
+        <ResourcePageHeader
+          path="/network/gateway-api"
+          titleZh="Gateway API"
+          titleEn="Gateway API"
+          description="管理 Gateway API 资源。"
+          style={{ marginBottom: 12 }}
+          titleSuffix={
+            <ResourceAddButton
+              compact={false}
+              label="新增资源"
+              disabled={!canCreate}
+              onClick={handleOpenCreate}
+            />
           }
-          pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading)}
-          onRow={(record) => ({
-            onClick: (event: ReactMouseEvent<HTMLElement>) => {
-              if (isGatewayRowInteractiveTarget(event.target)) return;
-              if (record.id) {
-                setDetailTarget(buildGatewayDynamicDetailTarget(kindMeta, record));
-              }
-            },
-          })}
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <div className="network-gateway-toolbar">
+            <Row gutter={[12, 12]}>
+              <Col span={24}>
+                <Select
+                  value={kind}
+                  options={gatewayKindOptions}
+                  style={{ width: "100%" }}
+                  loading={discoveryQuery.isLoading}
+                  onChange={(value) => {
+                    setKind(value);
+                    resetPage();
+                    setKeyword("");
+                    setKeywordInput("");
+                  }}
+                />
+              </Col>
+            </Row>
+            <NetworkResourcePageFilters
+              clusterId={clusterId}
+              namespace={namespace}
+              keywordInput={keywordInput}
+              clusterOptions={clusterOptions}
+              clusterLoading={clustersQuery.isLoading}
+              knownNamespaces={knownNamespaces}
+              namespaceDisabled={namespaceDisabled || !kindMeta.namespaced}
+              namespacePlaceholder={!kindMeta.namespaced ? "集群级资源" : namespacePlaceholder}
+              onClusterChange={(value) => {
+                onClusterChange(value);
+                resetPage();
+              }}
+              onNamespaceChange={(value) => {
+                onNamespaceChange(value);
+                resetPage();
+              }}
+              onKeywordInputChange={setKeywordInput}
+              onSearch={handleSearch}
+              keywordPlaceholder="按名称/标签搜索"
+              marginBottom={0}
+            />
+          </div>
+
+          {!isInitializing && !accessToken ? (
+            <Alert className="network-resource-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
+          ) : null}
+
+          {listQuery.isError ? (
+            <Alert
+              className="network-resource-state-alert"
+              type="error"
+              showIcon
+              title={`${kindMeta.title} 列表加载失败`}
+              description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
+            />
+          ) : null}
+
+          <ResourceTable<GatewayRow>
+            rowKey="id"
+            columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            tableKey="network.gateway-api"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：gw-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
+            dataSource={tableData}
+            bordered
+            loading={listQuery.isLoading}
+            onChange={(nextPagination, filters, sorter, extra) =>
+              handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading)
+            }
+            pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading)}
+            onRow={(record) => ({
+              onClick: (event: ReactMouseEvent<HTMLElement>) => {
+                if (isGatewayRowInteractiveTarget(event.target)) return;
+                if (record.id) {
+                  setDetailTarget(buildGatewayDynamicDetailTarget(kindMeta, record));
+                }
+              },
+            })}
+          />
+        </Space>
       </OpsSurface>
 
       <ResourceDetailDrawer
@@ -1182,7 +1186,7 @@ export default function GatewayApiPage() {
         onUpdated={() => void listQuery.refetch()}
       />
 
-      <Modal
+      <OpsModalShell
         title={editingRow ? `编辑 ${kindMeta.title}` : `新增 ${kindMeta.title}`}
         open={createOpen}
         onOk={() => void handleCreateSubmit()}
@@ -1216,114 +1220,116 @@ export default function GatewayApiPage() {
             formContent={null}
           />
         ) : (
-        <Form form={createForm} layout="vertical" style={{ marginTop: 16 }}>
-          {!editingRow ? (
-            <Form.Item>
-              <Typography.Link onClick={() => setCreateMode("yaml")}>使用 YAML / 上传创建</Typography.Link>
+        <OpsFormSection title="Gateway API 配置" description="结构化表单只写入当前类型的核心字段，高级字段可切换 YAML 创建。">
+          <Form form={createForm} layout="vertical" style={{ marginTop: 16 }}>
+            {!editingRow ? (
+              <Form.Item>
+                <Typography.Link onClick={() => setCreateMode("yaml")}>使用 YAML / 上传创建</Typography.Link>
+              </Form.Item>
+            ) : null}
+            <Form.Item label="名称" name="name" rules={[{ required: true, message: "请输入名称" }]}>
+              <Input disabled={Boolean(editingRow)} />
             </Form.Item>
-          ) : null}
-          <Form.Item label="名称" name="name" rules={[{ required: true, message: "请输入名称" }]}>
-            <Input disabled={Boolean(editingRow)} />
-          </Form.Item>
-          {selectedGatewayKind !== "gatewayclass" ? (
-            <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
-              <Input disabled={Boolean(editingRow)} placeholder="default" />
-            </Form.Item>
-          ) : null}
-          {selectedGatewayKind === "gatewayclass" ? (
-            <>
-              <Form.Item label="控制器名称" name="controllerName" rules={[{ required: true, message: "请输入控制器名称" }]}>
-                <Input placeholder="例如：example.com/gateway-controller" />
+            {selectedGatewayKind !== "gatewayclass" ? (
+              <Form.Item label="名称空间" name="namespace" rules={[{ required: true, message: "请输入名称空间" }]}>
+                <Input disabled={Boolean(editingRow)} placeholder="default" />
               </Form.Item>
-              <Form.Item label="参数引用 Group" name="parametersGroup">
-                <Input placeholder="例如：gateway.networking.k8s.io" />
-              </Form.Item>
-              <Form.Item label="参数引用 Kind" name="parametersKind">
-                <Input placeholder="例如：ConfigMap" />
-              </Form.Item>
-              <Form.Item label="参数引用名称" name="parametersName">
-                <Input placeholder="例如：gateway-params" />
-              </Form.Item>
-            </>
-          ) : null}
-          {selectedGatewayKind === "gateway" ? (
-            <>
-              <Form.Item label="GatewayClass 名称" name="gatewayClassName" rules={[{ required: true, message: "请输入 GatewayClass 名称" }]}>
-                <Input placeholder="例如：istio" />
-              </Form.Item>
-              <Form.Item label="地址类型" name="addressType">
-                <Input placeholder="例如：IPAddress" />
-              </Form.Item>
-              <Form.Item label="地址值" name="addresses">
-                <Input placeholder="例如：10.0.0.10" />
-              </Form.Item>
-              <Form.Item label="监听器名称" name="listenerName">
-                <Input placeholder="例如：http" />
-              </Form.Item>
-              <Form.Item label="监听器端口" name="listenerPort">
-                <InputNumber style={{ width: "100%" }} min={1} max={65535} />
-              </Form.Item>
-              <Form.Item label="监听器协议" name="listenerProtocol">
-                <Input placeholder="HTTP / HTTPS" />
-              </Form.Item>
-              <Form.Item label="监听器 Hostname" name="listenerHostname">
-                <Input placeholder="例如：gateway.example.com" />
-              </Form.Item>
-              <Form.Item label="允许路由方式" name="allowedRoutesFrom" initialValue="Selector">
-                <Select
-                  options={[
-                    { label: "All", value: "All" },
-                    { label: "Same", value: "Same" },
-                    { label: "Selector", value: "Selector" },
-                    { label: "None", value: "None" },
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item label="允许路由名称空间" name="allowedRoutesNamespaces">
-                <Input placeholder="空格分隔，例如：default prod" />
-              </Form.Item>
-            </>
-          ) : null}
-          {selectedGatewayKind === "httproute" ? (
-            <>
-              <Form.Item label="父 Gateway 名称" name="parentGatewayName" rules={[{ required: true, message: "请输入父 Gateway 名称" }]}>
-                <Input placeholder="例如：istio" />
-              </Form.Item>
-              <Form.Item label="Hostnames（空格分隔）" name="hostnames">
-                <Input placeholder="example.com api.example.com" />
-              </Form.Item>
-              <Form.Item label="匹配路径" name="matchPath">
-                <Input placeholder="/" />
-              </Form.Item>
-              <Form.Item label="路径类型" name="pathType">
-                <Select
-                  options={[
-                    { label: "PathPrefix", value: "PathPrefix" },
-                    { label: "Exact", value: "Exact" },
-                    { label: "RegularExpression", value: "RegularExpression" },
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item label="后端 Service 名称" name="backendServiceName">
-                <Input placeholder="例如：web-svc" />
-              </Form.Item>
-              <Form.Item label="后端 Service 端口" name="backendServicePort">
-                <InputNumber style={{ width: "100%" }} min={1} max={65535} />
-              </Form.Item>
-              <Form.Item label="后端权重" name="backendWeight">
-                <InputNumber style={{ width: "100%" }} min={0} max={1000} />
-              </Form.Item>
-              <Form.Item label="请求头名称" name="headerName">
-                <Input placeholder="例如：X-Env" />
-              </Form.Item>
-              <Form.Item label="请求头值" name="headerValue">
-                <Input placeholder="例如：prod" />
-              </Form.Item>
-            </>
-          ) : null}
-        </Form>
+            ) : null}
+            {selectedGatewayKind === "gatewayclass" ? (
+              <>
+                <Form.Item label="控制器名称" name="controllerName" rules={[{ required: true, message: "请输入控制器名称" }]}>
+                  <Input placeholder="例如：example.com/gateway-controller" />
+                </Form.Item>
+                <Form.Item label="参数引用 Group" name="parametersGroup">
+                  <Input placeholder="例如：gateway.networking.k8s.io" />
+                </Form.Item>
+                <Form.Item label="参数引用 Kind" name="parametersKind">
+                  <Input placeholder="例如：ConfigMap" />
+                </Form.Item>
+                <Form.Item label="参数引用名称" name="parametersName">
+                  <Input placeholder="例如：gateway-params" />
+                </Form.Item>
+              </>
+            ) : null}
+            {selectedGatewayKind === "gateway" ? (
+              <>
+                <Form.Item label="GatewayClass 名称" name="gatewayClassName" rules={[{ required: true, message: "请输入 GatewayClass 名称" }]}>
+                  <Input placeholder="例如：istio" />
+                </Form.Item>
+                <Form.Item label="地址类型" name="addressType">
+                  <Input placeholder="例如：IPAddress" />
+                </Form.Item>
+                <Form.Item label="地址值" name="addresses">
+                  <Input placeholder="例如：10.0.0.10" />
+                </Form.Item>
+                <Form.Item label="监听器名称" name="listenerName">
+                  <Input placeholder="例如：http" />
+                </Form.Item>
+                <Form.Item label="监听器端口" name="listenerPort">
+                  <InputNumber style={{ width: "100%" }} min={1} max={65535} />
+                </Form.Item>
+                <Form.Item label="监听器协议" name="listenerProtocol">
+                  <Input placeholder="HTTP / HTTPS" />
+                </Form.Item>
+                <Form.Item label="监听器 Hostname" name="listenerHostname">
+                  <Input placeholder="例如：gateway.example.com" />
+                </Form.Item>
+                <Form.Item label="允许路由方式" name="allowedRoutesFrom" initialValue="Selector">
+                  <Select
+                    options={[
+                      { label: "All", value: "All" },
+                      { label: "Same", value: "Same" },
+                      { label: "Selector", value: "Selector" },
+                      { label: "None", value: "None" },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item label="允许路由名称空间" name="allowedRoutesNamespaces">
+                  <Input placeholder="空格分隔，例如：default prod" />
+                </Form.Item>
+              </>
+            ) : null}
+            {selectedGatewayKind === "httproute" ? (
+              <>
+                <Form.Item label="父 Gateway 名称" name="parentGatewayName" rules={[{ required: true, message: "请输入父 Gateway 名称" }]}>
+                  <Input placeholder="例如：istio" />
+                </Form.Item>
+                <Form.Item label="Hostnames（空格分隔）" name="hostnames">
+                  <Input placeholder="example.com api.example.com" />
+                </Form.Item>
+                <Form.Item label="匹配路径" name="matchPath">
+                  <Input placeholder="/" />
+                </Form.Item>
+                <Form.Item label="路径类型" name="pathType">
+                  <Select
+                    options={[
+                      { label: "PathPrefix", value: "PathPrefix" },
+                      { label: "Exact", value: "Exact" },
+                      { label: "RegularExpression", value: "RegularExpression" },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item label="后端 Service 名称" name="backendServiceName">
+                  <Input placeholder="例如：web-svc" />
+                </Form.Item>
+                <Form.Item label="后端 Service 端口" name="backendServicePort">
+                  <InputNumber style={{ width: "100%" }} min={1} max={65535} />
+                </Form.Item>
+                <Form.Item label="后端权重" name="backendWeight">
+                  <InputNumber style={{ width: "100%" }} min={0} max={1000} />
+                </Form.Item>
+                <Form.Item label="请求头名称" name="headerName">
+                  <Input placeholder="例如：X-Env" />
+                </Form.Item>
+                <Form.Item label="请求头值" name="headerValue">
+                  <Input placeholder="例如：prod" />
+                </Form.Item>
+              </>
+            ) : null}
+          </Form>
+        </OpsFormSection>
         )}
-      </Modal>
+      </OpsModalShell>
     </Space>
   );
 }

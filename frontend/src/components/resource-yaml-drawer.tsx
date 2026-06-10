@@ -234,6 +234,7 @@ export function ResourceYamlDrawer({
   const lineCount = yamlText ? yamlText.split("\n").length : 0;
   const downloadDisabled = query.isLoading || !effectiveIdentity || !yamlText.trim();
   const saveDisabled = query.isLoading || readOnly || shouldMaskSensitive || !yamlText.trim();
+  const drawerState = mutation.isPending || (query.isFetching && Boolean(yamlText)) ? "loading" : "idle";
 
   return (
     <OpsDrawerShell
@@ -241,7 +242,16 @@ export function ResourceYamlDrawer({
       size="large"
       open={open}
       destroyOnHidden
-      variant="editor"
+      variant="resource"
+      state={drawerState}
+      stateTitle={mutation.isPending ? "正在保存 YAML" : drawerState === "loading" ? "正在刷新 YAML" : undefined}
+      stateDescription={
+        mutation.isPending
+          ? "保存完成后抽屉会关闭并刷新资源。"
+          : drawerState === "loading"
+            ? "当前内容保持可读，刷新完成后自动更新。"
+            : undefined
+      }
       styles={{
         body: { padding: 24, overflow: "auto" },
       }}

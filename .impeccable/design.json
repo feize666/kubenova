@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-10T09:50:00.000Z",
+  "title": "Design System: KubeNova",
+  "extensions": {
+    "northStar": "Mission Control Glass",
+    "register": "product",
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Ops Blue",
+        "canonical": "#4f8cff",
+        "lightTheme": "#235cff",
+        "usage": "Primary actions, selected navigation, focus rings, active filters, resource links."
+      },
+      "accent": {
+        "role": "secondary",
+        "displayName": "Signal Cyan",
+        "canonical": "#22d3ee",
+        "lightTheme": "#0ea5e9",
+        "usage": "Live status, topology signal lines, AI analysis, streaming and runtime connection states."
+      },
+      "neutral-dark": {
+        "role": "neutral",
+        "displayName": "Black Ops Neutral",
+        "canonical": "#090d14",
+        "tonalRamp": ["#090d14", "#0d131d", "#111720", "#171e29", "#1a2230"]
+      },
+      "neutral-light": {
+        "role": "neutral",
+        "displayName": "White Ops Neutral",
+        "canonical": "#f7f8fa",
+        "tonalRamp": ["#f7f8fa", "#ffffff", "#edf0f4", "#dde2ea", "#151922"]
+      }
+    },
+    "themeModes": {
+      "default": "dark",
+      "supported": ["dark", "light"],
+      "contract": "Both themes must preserve hierarchy, contrast, spacing, states, and all information. No dark-only features."
+    },
+    "motion": {
+      "fast": "120ms",
+      "base": "180ms",
+      "slow": "260ms",
+      "easing": "cubic-bezier(0.2, 0, 0, 1)",
+      "allowed": ["state feedback", "focus halo", "topology selection", "AI analysis progress", "live connection state"],
+      "forbidden": ["decorative loops", "page-load choreography", "large background animation"]
+    },
+    "glass": {
+      "allowedSurfaces": ["shell", "command-bar", "popover", "drawer", "modal", "topology-inspector", "ai-panel", "incident-focus"],
+      "forbiddenSurfaces": ["dense-resource-table", "large-form-body", "yaml-editor-body", "terminal-text-layer"],
+      "rule": "Glass must improve depth or focus; otherwise use solid surface tokens."
+    },
+    "informationArchitecture": {
+      "rule": "Do not duplicate features. Add new capability as a view, tab, panel, or mode inside its owning domain before adding navigation.",
+      "owningDomains": {
+        "incidents": "AIOps",
+        "tracing": "Observability",
+        "compliance": "Security or Inspection",
+        "automation": "AIOps recommendations or System Management",
+        "cost": "Overview or Observability until backed by dedicated data model"
+      }
+    },
+    "componentRules": {
+      "buttons": "One primary action per surface; icon-only controls require aria-label.",
+      "tables": "Compact, bordered, solid backgrounds; no heavy blur behind data.",
+      "drawers": "12px radius, structured header/body/footer, keyboard close path, mobile width guard.",
+      "modals": "Use for blocking decisions only; destructive actions require explicit confirm state.",
+      "chips": "Pill shape for filters and status; show applied count and clear affordance where relevant.",
+      "workbenches": "Topology, AIOps, AI, terminal, and logs may use controlled glass and halo focus."
+    },
+    "acceptance": [
+      "Dark and light themes both pass contrast review for core surfaces.",
+      "No duplicate navigation entries for the same user job.",
+      "No new page-local color system when ops tokens exist.",
+      "Every icon-only control has an accessible name.",
+      "Reduced motion path exists for halo, scan, and streaming effects."
+    ]
+  }
+}

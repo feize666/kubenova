@@ -8,12 +8,7 @@ import {
   FileTextOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Alert,
-  Space,
-  Typography,
-  message,
-} from "antd";
+import { Alert, Space, Typography, message } from "antd";
 import type { MenuProps, TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -28,7 +23,10 @@ import {
 } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceTable } from "@/components/resource-table";
-import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
+import type {
+  HeadlampResourceTableColumn,
+  HeadlampTableFilters,
+} from "@/components/resource-table";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
@@ -38,21 +36,28 @@ import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-bu
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { getClusters } from "@/lib/api/clusters";
 import { buildLogsRoute } from "@/lib/api/logs";
-import {
-  deleteWorkload,
-  getWorkloadsByKind,
-} from "@/lib/api/workloads";
+import { deleteWorkload, getWorkloadsByKind } from "@/lib/api/workloads";
 import type { WorkloadListItem, WorkloadKindParam } from "@/lib/api/workloads";
-import type { ResourceDetailRequest, ResourceIdentity } from "@/lib/api/resources";
+import type {
+  ResourceDetailRequest,
+  ResourceIdentity,
+} from "@/lib/api/resources";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { buildTerminalRoute } from "@/lib/workloads/terminal";
-import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
+import {
+  TABLE_COL_WIDTH,
+  getAdaptiveNameWidth,
+} from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { QUERY_CACHE_TIMINGS } from "@/lib/query";
-import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
+import {
+  readResourceFilterFromSearchParams,
+  useSyncResourceFilterUrlState,
+} from "@/hooks/use-resource-filter-url-state";
 import { OpsActionDropdown } from "@/components/ops/ops-action-dropdown";
+import { ResourceActionIsolation } from "@/components/resource-action-bar";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
 import { OpsSurface } from "@/components/ops/ops-surface";
@@ -132,13 +137,19 @@ function parseLiveMetrics(value: unknown):
           }
           const row = item as Record<string, unknown>;
           return {
-            timestamp: typeof row.timestamp === "string" ? row.timestamp : new Date().toISOString(),
+            timestamp:
+              typeof row.timestamp === "string"
+                ? row.timestamp
+                : new Date().toISOString(),
             cpuUsage: typeof row.cpuUsage === "number" ? row.cpuUsage : null,
-            memoryUsage: typeof row.memoryUsage === "number" ? row.memoryUsage : null,
+            memoryUsage:
+              typeof row.memoryUsage === "number" ? row.memoryUsage : null,
           };
         })
         .filter(
-          (item): item is {
+          (
+            item,
+          ): item is {
             timestamp: string;
             cpuUsage: number | null;
             memoryUsage: number | null;
@@ -146,7 +157,10 @@ function parseLiveMetrics(value: unknown):
         )
     : [];
   return {
-    capturedAt: typeof raw.capturedAt === "string" ? raw.capturedAt : new Date().toISOString(),
+    capturedAt:
+      typeof raw.capturedAt === "string"
+        ? raw.capturedAt
+        : new Date().toISOString(),
     source: typeof raw.source === "string" ? raw.source : "none",
     available: raw.available === true,
     freshnessWindowMs:
@@ -168,13 +182,18 @@ function extractPodStatus(item: WorkloadListItem): PodStatusFields {
     nodeName: typeof s.nodeName === "string" ? s.nodeName : undefined,
     restartCount: typeof s.restartCount === "number" ? s.restartCount : 0,
     containerNames: Array.isArray(s.containerNames)
-      ? s.containerNames.filter((item): item is string => typeof item === "string")
+      ? s.containerNames.filter(
+          (item): item is string => typeof item === "string",
+        )
       : [],
     containerImages: Array.isArray(s.containerImages)
-      ? s.containerImages.filter((item): item is string => typeof item === "string")
+      ? s.containerImages.filter(
+          (item): item is string => typeof item === "string",
+        )
       : [],
     replicas: typeof s.replicas === "number" ? s.replicas : undefined,
-    readyReplicas: typeof s.readyReplicas === "number" ? s.readyReplicas : undefined,
+    readyReplicas:
+      typeof s.readyReplicas === "number" ? s.readyReplicas : undefined,
   };
 }
 
@@ -217,19 +236,29 @@ function extractPodUsage(item: WorkloadListItem): PodUsageFields {
     s.usage,
     s.metrics,
     s.resourceMetrics,
-  ].filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value)));
+  ].filter((value): value is Record<string, unknown> =>
+    Boolean(value && typeof value === "object" && !Array.isArray(value)),
+  );
 
   const cpuCandidates: unknown[] = [
     s.cpuUsagePercent,
     s.cpuUsage,
     s.cpuPercent,
-    ...usageSources.flatMap((source) => [source.cpuUsagePercent, source.cpuUsage, source.cpuPercent]),
+    ...usageSources.flatMap((source) => [
+      source.cpuUsagePercent,
+      source.cpuUsage,
+      source.cpuPercent,
+    ]),
   ];
   const memoryCandidates: unknown[] = [
     s.memoryUsagePercent,
     s.memoryUsage,
     s.memoryPercent,
-    ...usageSources.flatMap((source) => [source.memoryUsagePercent, source.memoryUsage, source.memoryPercent]),
+    ...usageSources.flatMap((source) => [
+      source.memoryUsagePercent,
+      source.memoryUsage,
+      source.memoryPercent,
+    ]),
   ];
 
   const cpuUsagePercent = cpuCandidates
@@ -239,7 +268,9 @@ function extractPodUsage(item: WorkloadListItem): PodUsageFields {
     .map(readUsagePercent)
     .find((value): value is number => typeof value === "number");
 
-  const usageAvailable = typeof cpuUsagePercent === "number" || typeof memoryUsagePercent === "number";
+  const usageAvailable =
+    typeof cpuUsagePercent === "number" ||
+    typeof memoryUsagePercent === "number";
 
   if (!usageAvailable) {
     return {
@@ -331,7 +362,9 @@ function PodCreatedAtCell({ value }: { value: string }) {
 
 function PodTimeProvider({ children }: { children: ReactNode }) {
   const now = useNowTicker();
-  return <PodNowContext.Provider value={now}>{children}</PodNowContext.Provider>;
+  return (
+    <PodNowContext.Provider value={now}>{children}</PodNowContext.Provider>
+  );
 }
 
 function resolveIdentity(row: PodRow): ResourceIdentity {
@@ -343,10 +376,18 @@ function resolveIdentity(row: PodRow): ResourceIdentity {
   };
 }
 
-function renderUsageCell(value: number | null, row: PodRow, kind: "cpu" | "memory") {
+function renderUsageCell(
+  value: number | null,
+  row: PodRow,
+  kind: "cpu" | "memory",
+) {
   if (!row.usageAvailable || value === null) {
     return (
-      <Space orientation="vertical" size={2} style={{ width: "100%", alignItems: "flex-start" }}>
+      <Space
+        orientation="vertical"
+        size={2}
+        style={{ width: "100%", alignItems: "flex-start" }}
+      >
         <OpsFilterChip tone="neutral" style={{ marginInlineEnd: 0 }}>
           无可用指标
         </OpsFilterChip>
@@ -364,7 +405,7 @@ function renderUsageCell(value: number | null, row: PodRow, kind: "cpu" | "memor
       percent={
         kind === "cpu"
           ? Math.min(100, Math.max(0, value * 100))
-          : Math.min(100, (value / (1024 ** 3)) * 100)
+          : Math.min(100, (value / 1024 ** 3) * 100)
       }
     />
   );
@@ -380,9 +421,16 @@ function mapItemToRow(item: WorkloadListItem): PodRow {
     containerImages,
     replicas,
     readyReplicas,
-  } =
-    extractPodStatus(item);
-  const { cpuUsagePercent, memoryUsagePercent, cpuUsage, memoryUsage, history, usageAvailable, usageNote } = extractPodUsage(item);
+  } = extractPodStatus(item);
+  const {
+    cpuUsagePercent,
+    memoryUsagePercent,
+    cpuUsage,
+    memoryUsage,
+    history,
+    usageAvailable,
+    usageNote,
+  } = extractPodUsage(item);
   return {
     ...item,
     key: item.id,
@@ -404,11 +452,11 @@ function mapItemToRow(item: WorkloadListItem): PodRow {
   };
 }
 
-function parseSearchInput(input: string): { keyword: string; labels: string[] } {
-  const tokens = input
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+function parseSearchInput(input: string): {
+  keyword: string;
+  labels: string[];
+} {
+  const tokens = input.trim().split(/\s+/).filter(Boolean);
   const labels = tokens.filter((token) => token.includes("="));
   const keywords = tokens.filter((token) => !token.includes("="));
   return {
@@ -432,24 +480,38 @@ function getTextFilter(filters: HeadlampTableFilters, key: string) {
 }
 
 function textMatches(value: unknown, filterValue: string) {
-  return !filterValue || String(value ?? "").toLowerCase().includes(filterValue);
+  return (
+    !filterValue ||
+    String(value ?? "")
+      .toLowerCase()
+      .includes(filterValue)
+  );
 }
 
 export default function PodsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
-    readResourceFilterFromSearchParams(searchParams);
+  const {
+    clusterId: initialClusterId,
+    namespace: initialNamespace,
+    keyword: initialKeyword,
+  } = readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
-    useClusterNamespaceFilter(initialClusterId, initialNamespace);
+  const {
+    clusterId,
+    namespace,
+    namespaceDisabled,
+    namespacePlaceholder,
+    onScopeChange,
+  } = useClusterNamespaceFilter(initialClusterId, initialNamespace);
 
   // 筛选状态
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [keyword, setKeyword] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const phaseFilter = typeof tableFilters.phase === "string" ? tableFilters.phase : "";
+  const phaseFilter =
+    typeof tableFilters.phase === "string" ? tableFilters.phase : "";
   const {
     sortBy,
     sortOrder,
@@ -478,7 +540,8 @@ export default function PodsPage() {
     ],
   });
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget] =
+    useState<ResourceDetailRequest | null>(null);
   const page = pagination.pageIndex + 1;
   const pageSize = pagination.pageSize;
 
@@ -487,7 +550,11 @@ export default function PodsPage() {
     ...POD_LIST_QUERY_CACHE_OPTIONS,
     placeholderData: (previousData) => previousData,
     queryKey: ["clusters", "list-for-pods", accessToken],
-    queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken),
+    queryFn: () =>
+      getClusters(
+        { pageSize: 200, state: "active", selectableOnly: true },
+        accessToken,
+      ),
     enabled: !isInitializing && Boolean(accessToken),
   });
 
@@ -540,7 +607,7 @@ export default function PodsPage() {
           ...(phaseFilter ? { state: phaseFilter } : {}),
         } as Parameters<typeof getWorkloadsByKind>[1],
         accessToken,
-    ),
+      ),
     enabled: !isInitializing && Boolean(accessToken),
   });
   const tableBusy = podsQuery.isFetching;
@@ -548,10 +615,7 @@ export default function PodsPage() {
   const refetchPods = podsQuery.refetch;
   const podItems = podsQuery.data?.items ?? EMPTY_WORKLOAD_ITEMS;
 
-  const rows = useMemo<PodRow[]>(
-    () => podItems.map(mapItemToRow),
-    [podItems],
-  );
+  const rows = useMemo<PodRow[]>(() => podItems.map(mapItemToRow), [podItems]);
   const deferredRows = useDeferredValue(rows);
   const deferredMergedFilters = useDeferredValue(mergedFilters);
   const deferredTableFilters = useDeferredValue(tableFilters);
@@ -559,10 +623,7 @@ export default function PodsPage() {
 
   // Extract known namespaces from loaded data for NamespaceSelect suggestions
   const knownNamespaces = useMemo(
-    () =>
-      Array.from(
-        new Set(podItems.map((i) => i.namespace).filter(Boolean)),
-      ),
+    () => Array.from(new Set(podItems.map((i) => i.namespace).filter(Boolean))),
     [podItems],
   );
 
@@ -576,21 +637,29 @@ export default function PodsPage() {
     return deferredRows.filter(
       (row) =>
         textMatches(row.name, nameFilter) &&
-        textMatches(`${row.clusterId} ${getClusterDisplayName(deferredClusterMap, row.clusterId)}`, clusterFilter) &&
+        textMatches(
+          `${row.clusterId} ${getClusterDisplayName(deferredClusterMap, row.clusterId)}`,
+          clusterFilter,
+        ) &&
         textMatches(row.namespace, namespaceFilter) &&
         textMatches(row.podIP, podIpFilter) &&
         textMatches(row.nodeName, nodeNameFilter) &&
         (!phaseFilter || row.phase === phaseFilter) &&
-        (
-          deferredMergedFilters.length === 0 ||
+        (deferredMergedFilters.length === 0 ||
           deferredMergedFilters.every((lf) => {
-            const itemLabels = (row.labels as Record<string, string> | null | undefined) ?? {};
+            const itemLabels =
+              (row.labels as Record<string, string> | null | undefined) ?? {};
             const [k, v] = lf.split("=");
             return v ? itemLabels[k] === v : k in itemLabels;
-          })
-        ),
+          })),
     );
-  }, [deferredClusterMap, deferredMergedFilters, deferredRows, deferredTableFilters, phaseFilter]);
+  }, [
+    deferredClusterMap,
+    deferredMergedFilters,
+    deferredRows,
+    deferredTableFilters,
+    phaseFilter,
+  ]);
   const deferredTableData = useDeferredValue(tableData);
   const displayedRows = useMemo<PodRow[]>(() => {
     const rowsToSort = [...deferredTableData];
@@ -608,7 +677,8 @@ export default function PodsPage() {
       }
       return null;
     };
-    const getString = (value: unknown) => (value === null || value === undefined ? "" : String(value));
+    const getString = (value: unknown) =>
+      value === null || value === undefined ? "" : String(value);
     return rowsToSort.sort((left, right) => {
       const leftValue = (left as unknown as Record<string, unknown>)[sortBy];
       const rightValue = (right as unknown as Record<string, unknown>)[sortBy];
@@ -617,21 +687,33 @@ export default function PodsPage() {
       if (leftNumeric !== null && rightNumeric !== null) {
         return (leftNumeric - rightNumeric) * direction;
       }
-      return getString(leftValue).localeCompare(getString(rightValue), "zh-Hans-CN") * direction;
+      return (
+        getString(leftValue).localeCompare(
+          getString(rightValue),
+          "zh-Hans-CN",
+        ) * direction
+      );
     });
   }, [deferredTableData, sortBy, sortOrder]);
   const displayedTotal = podsQuery.data?.total ?? tableData.length;
   const nameWidth = useMemo(
-    () => getAdaptiveNameWidth(deferredTableData.map((row) => row.name), { max: 340 }),
+    () =>
+      getAdaptiveNameWidth(
+        deferredTableData.map((row) => row.name),
+        { max: 340 },
+      ),
     [deferredTableData],
   );
-  const handleGlobalSearchChange = useCallback((value: string) => {
-    const parsed = parseSearchInput(value);
-    setKeywordInput(value);
-    resetPage();
-    setMergedFilters(parsed.labels);
-    setKeyword(parsed.keyword);
-  }, [resetPage]);
+  const handleGlobalSearchChange = useCallback(
+    (value: string) => {
+      const parsed = parseSearchInput(value);
+      setKeywordInput(value);
+      resetPage();
+      setMergedFilters(parsed.labels);
+      setKeyword(parsed.keyword);
+    },
+    [resetPage],
+  );
   const globalSearch = useMemo(
     () => ({
       value: keywordInput,
@@ -640,14 +722,26 @@ export default function PodsPage() {
     }),
     [handleGlobalSearchChange, keywordInput],
   );
-  const handleFiltersChange = useCallback((nextFilters: HeadlampTableFilters) => {
-    setTableFilters(nextFilters);
-    resetPage();
-  }, [resetPage]);
-  const handleScopeApply = useCallback(({ clusterId: nextClusterId, namespace: nextNamespace }: { clusterId: string; namespace: string }) => {
-    onScopeChange(nextClusterId, nextNamespace);
-    resetPage();
-  }, [onScopeChange, resetPage]);
+  const handleFiltersChange = useCallback(
+    (nextFilters: HeadlampTableFilters) => {
+      setTableFilters(nextFilters);
+      resetPage();
+    },
+    [resetPage],
+  );
+  const handleScopeApply = useCallback(
+    ({
+      clusterId: nextClusterId,
+      namespace: nextNamespace,
+    }: {
+      clusterId: string;
+      namespace: string;
+    }) => {
+      onScopeChange(nextClusterId, nextNamespace);
+      resetPage();
+    },
+    [onScopeChange, resetPage],
+  );
   const handleResourceTableChange = useCallback<PodTableChangeHandler>(
     (paginationInfo, filters, sorter, extra) =>
       handleTableChange(paginationInfo, filters, sorter, extra, tableBusy),
@@ -655,245 +749,286 @@ export default function PodsPage() {
   );
   useSyncResourceFilterUrlState({ clusterId, namespace, keyword });
 
-  const handleDelete = useCallback(async (row: PodRow) => {
-    try {
-      await deleteWorkload(row.id, accessToken);
-      void message.success(`Pod ${row.name} 删除成功`);
-      void refetchPods();
-    } catch (err) {
-      void message.error(err instanceof Error ? err.message : "删除失败，请重试");
-    }
-  }, [accessToken, refetchPods]);
+  const handleDelete = useCallback(
+    async (row: PodRow) => {
+      try {
+        await deleteWorkload(row.id, accessToken);
+        void message.success(`Pod ${row.name} 删除成功`);
+        void refetchPods();
+      } catch (err) {
+        void message.error(
+          err instanceof Error ? err.message : "删除失败，请重试",
+        );
+      }
+    },
+    [accessToken, refetchPods],
+  );
 
-  const buildTerminalParams = useCallback((row: PodRow): string => {
-    return buildTerminalRoute({
-      clusterId: row.clusterId,
-      clusterName: getClusterDisplayName(clusterMap, row.clusterId),
-      namespace: row.namespace,
-      pod: row.name,
-      containerNames: row.containerNames,
-      from: "pods",
-      returnTo: POD_PATH,
-      returnClusterId: clusterId || row.clusterId,
-      returnClusterName: getClusterDisplayName(clusterMap, clusterId || row.clusterId),
-      returnNamespace: namespace || row.namespace,
-      returnKeyword: keyword || row.name,
-      returnPhase: phaseFilter || undefined,
-      returnPage: page,
-    }).replace(/^\/terminal\?/, "");
-  }, [clusterId, clusterMap, keyword, namespace, page, phaseFilter]);
-
-  const buildLogsParams = useCallback((row: PodRow): string => {
-    return buildLogsRoute({
-      clusterId: row.clusterId,
-      clusterName: getClusterDisplayName(clusterMap, row.clusterId),
-      namespace: row.namespace,
-      pod: row.name,
-      containerNames: row.containerNames,
-      resourceKind: POD_KIND,
-      resourceName: row.name,
-      resourceId: row.id,
-      from: "pods",
-      returnTo: POD_PATH,
-      returnClusterId: clusterId || row.clusterId,
-      returnClusterName: getClusterDisplayName(clusterMap, clusterId || row.clusterId),
-      returnNamespace: namespace || row.namespace,
-      returnKeyword: keyword || row.name,
-      returnPhase: phaseFilter || undefined,
-      returnPage: page,
-      tailLines: 200,
-      sinceSeconds: 24 * 60 * 60,
-    }).replace(/^\/logs\?/, "");
-  }, [clusterId, clusterMap, keyword, namespace, page, phaseFilter]);
-
-  const columns: Array<HeadlampResourceTableColumn<PodRow>> = useMemo(() => [
-    {
-      title: "Pod 名称",
-      dataIndex: "name",
-      key: "name",
-      required: true,
-      filter: { type: "text", placeholder: "以名称过滤" },
-      width: nameWidth,
-      align: "left",
-      ellipsis: true,
-      ...getSortableColumnProps("name"),
-      render: (_name: string, row: PodRow) =>
-        row.id ? (
-          <Typography.Link
-            onClick={() => setDetailTarget({ kind: POD_KIND, id: row.id })}
-            style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}
-          >
-            {row.name}
-          </Typography.Link>
-        ) : (
-          <Typography.Text code style={{ fontSize: 12 }}>
-            {row.name}
-          </Typography.Text>
+  const buildTerminalParams = useCallback(
+    (row: PodRow): string => {
+      return buildTerminalRoute({
+        clusterId: row.clusterId,
+        clusterName: getClusterDisplayName(clusterMap, row.clusterId),
+        namespace: row.namespace,
+        pod: row.name,
+        containerNames: row.containerNames,
+        from: "pods",
+        returnTo: POD_PATH,
+        returnClusterId: clusterId || row.clusterId,
+        returnClusterName: getClusterDisplayName(
+          clusterMap,
+          clusterId || row.clusterId,
         ),
+        returnNamespace: namespace || row.namespace,
+        returnKeyword: keyword || row.name,
+        returnPhase: phaseFilter || undefined,
+        returnPage: page,
+      }).replace(/^\/terminal\?/, "");
     },
-    {
-      title: "集群",
-      dataIndex: "clusterId",
-      key: "clusterId",
-      required: true,
-      filter: { type: "text", placeholder: "以集群过滤" },
-      width: TABLE_COL_WIDTH.cluster,
-      align: "left",
-      ellipsis: true,
-      ...getSortableColumnProps("clusterId"),
-      render: (_: unknown, row: PodRow) => getClusterDisplayName(clusterMap, row.clusterId),
+    [clusterId, clusterMap, keyword, namespace, page, phaseFilter],
+  );
+
+  const buildLogsParams = useCallback(
+    (row: PodRow): string => {
+      return buildLogsRoute({
+        clusterId: row.clusterId,
+        clusterName: getClusterDisplayName(clusterMap, row.clusterId),
+        namespace: row.namespace,
+        pod: row.name,
+        containerNames: row.containerNames,
+        resourceKind: POD_KIND,
+        resourceName: row.name,
+        resourceId: row.id,
+        from: "pods",
+        returnTo: POD_PATH,
+        returnClusterId: clusterId || row.clusterId,
+        returnClusterName: getClusterDisplayName(
+          clusterMap,
+          clusterId || row.clusterId,
+        ),
+        returnNamespace: namespace || row.namespace,
+        returnKeyword: keyword || row.name,
+        returnPhase: phaseFilter || undefined,
+        returnPage: page,
+        tailLines: 200,
+        sinceSeconds: 24 * 60 * 60,
+      }).replace(/^\/logs\?/, "");
     },
-    {
-      title: "名称空间",
-      dataIndex: "namespace",
-      key: "namespace",
-      filter: { type: "text", placeholder: "以名称空间过滤" },
-      width: TABLE_COL_WIDTH.namespace,
-      align: "left",
-      ...getSortableColumnProps("namespace"),
-    },
-    {
-      title: "就绪",
-      dataIndex: "readyReplicas",
-      key: "readyReplicas",
-      width: 90,
-      align: "left",
-      ...getSortableColumnProps("readyReplicas"),
-      render: (_: unknown, row: PodRow) => `${row.readyReplicas}/${row.replicas}`,
-    },
-    {
-      title: "状态",
-      dataIndex: "phase",
-      key: "phase",
-      width: TABLE_COL_WIDTH.status,
-      align: "left",
-      filter: {
-        type: "select",
-        placeholder: "以状态过滤",
-        options: PHASE_OPTIONS.filter((item) => item.value).map((item) => ({ label: item.label, value: item.value })),
+    [clusterId, clusterMap, keyword, namespace, page, phaseFilter],
+  );
+
+  const columns: Array<HeadlampResourceTableColumn<PodRow>> = useMemo(
+    () => [
+      {
+        title: "Pod 名称",
+        dataIndex: "name",
+        key: "name",
+        required: true,
+        filter: { type: "text", placeholder: "以名称过滤" },
+        width: nameWidth,
+        align: "left",
+        ellipsis: true,
+        ...getSortableColumnProps("name"),
+        render: (_name: string, row: PodRow) =>
+          row.id ? (
+            <Typography.Link
+              onClick={() => setDetailTarget({ kind: POD_KIND, id: row.id })}
+              style={{
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontSize: 12,
+              }}
+            >
+              {row.name}
+            </Typography.Link>
+          ) : (
+            <Typography.Text code style={{ fontSize: 12 }}>
+              {row.name}
+            </Typography.Text>
+          ),
       },
-      ...getSortableColumnProps("phase"),
-      render: (phase: string) => (
-        <span className={`pod-phase-pill is-${podPhaseClass(phase)}`}>
-          <span className="pod-phase-pill__dot" />
-          <OpsStatusTag tone={podPhaseTone(phase)}>{phase}</OpsStatusTag>
-        </span>
-      ),
-    },
-    {
-      title: "CPU 使用率",
-      dataIndex: "cpuUsage",
-      key: "cpuUsage",
-      width: 160,
-      align: "left",
-      ...getSortableColumnProps("cpuUsage"),
-      render: (_: unknown, row: PodRow) => renderUsageCell(row.cpuUsage ?? row.cpuUsagePercent, row, "cpu"),
-    },
-    {
-      title: "内存使用率",
-      dataIndex: "memoryUsage",
-      key: "memoryUsage",
-      width: 160,
-      align: "left",
-      ...getSortableColumnProps("memoryUsage"),
-      render: (_: unknown, row: PodRow) => renderUsageCell(row.memoryUsage ?? row.memoryUsagePercent, row, "memory"),
-    },
-    {
-      title: <span style={{ whiteSpace: "nowrap" }}>重启次数</span>,
-      dataIndex: "restartCount",
-      key: "restartCount",
-      width: 116,
-      align: "left",
-      ...getSortableColumnProps("restartCount"),
-    },
-    {
-      title: "Pod IP",
-      dataIndex: "podIP",
-      key: "podIP",
-      filter: { type: "text", placeholder: "以 IP 过滤" },
-      width: TABLE_COL_WIDTH.ip,
-      align: "left",
-      ...getSortableColumnProps("podIP"),
-    },
-    {
-      title: "节点",
-      dataIndex: "nodeName",
-      key: "nodeName",
-      filter: { type: "text", placeholder: "以节点过滤" },
-      width: TABLE_COL_WIDTH.node,
-      align: "left",
-      ellipsis: true,
-      ...getSortableColumnProps("nodeName"),
-    },
-    {
-      title: "创建时间",
-      dataIndex: "createdAt",
-      key: "createdAt",
-      width: TABLE_COL_WIDTH.time,
-      align: "left",
-      ...getSortableColumnProps("createdAt"),
-      render: (v: string) => <PodCreatedAtCell value={v} />,
-    },
-    {
-      title: "操作",
-      key: "quick-actions",
-      required: true,
-      width: TABLE_COL_WIDTH.actionCompact,
-      fixed: "right",
-      align: "left",
-      render: (_: unknown, row: PodRow) => (
-        <OpsActionDropdown
-          items={POD_ACTION_ITEMS}
-          onClick={({ key }) => {
-            if (key === "description") {
-              if (row.id) setDetailTarget({ kind: POD_KIND, id: row.id });
-              return;
-            }
-            if (key === "logs") {
-              if (row.id) router.push(`/logs?${buildLogsParams(row)}`);
-              return;
-            }
-            if (key === "terminal") {
-              if (row.id) router.push(`/terminal?${buildTerminalParams(row)}`);
-              return;
-            }
-            if (key === "yaml") {
-              if (row.id) setYamlTarget(resolveIdentity(row));
-              return;
-            }
-            if (key === "delete") {
-              openOpsConfirm({
-                title: "确认删除 Pod",
-                description: `删除 Pod ${row.name} 后将不可恢复。`,
-                impact: "删除后需要由上层控制器重新调度或手动重建。",
-                okText: "确认",
-                cancelText: "取消",
-                danger: true,
-                onOk: () => void handleDelete(row),
-              });
-            }
-          }}
-          ariaLabel="操作"
-          placement="bottomRight"
-        />
-      ),
-    },
-  ], [buildLogsParams, buildTerminalParams, clusterMap, getSortableColumnProps, handleDelete, nameWidth, router]);
+      {
+        title: "集群",
+        dataIndex: "clusterId",
+        key: "clusterId",
+        required: true,
+        filter: { type: "text", placeholder: "以集群过滤" },
+        width: TABLE_COL_WIDTH.cluster,
+        align: "left",
+        ellipsis: true,
+        ...getSortableColumnProps("clusterId"),
+        render: (_: unknown, row: PodRow) =>
+          getClusterDisplayName(clusterMap, row.clusterId),
+      },
+      {
+        title: "名称空间",
+        dataIndex: "namespace",
+        key: "namespace",
+        filter: { type: "text", placeholder: "以名称空间过滤" },
+        width: TABLE_COL_WIDTH.namespace,
+        align: "left",
+        ...getSortableColumnProps("namespace"),
+      },
+      {
+        title: "就绪",
+        dataIndex: "readyReplicas",
+        key: "readyReplicas",
+        width: 90,
+        align: "left",
+        ...getSortableColumnProps("readyReplicas"),
+        render: (_: unknown, row: PodRow) =>
+          `${row.readyReplicas}/${row.replicas}`,
+      },
+      {
+        title: "状态",
+        dataIndex: "phase",
+        key: "phase",
+        width: TABLE_COL_WIDTH.status,
+        align: "left",
+        filter: {
+          type: "select",
+          placeholder: "以状态过滤",
+          options: PHASE_OPTIONS.filter((item) => item.value).map((item) => ({
+            label: item.label,
+            value: item.value,
+          })),
+        },
+        ...getSortableColumnProps("phase"),
+        render: (phase: string) => (
+          <span className={`pod-phase-pill is-${podPhaseClass(phase)}`}>
+            <span className="pod-phase-pill__dot" />
+            <OpsStatusTag tone={podPhaseTone(phase)}>{phase}</OpsStatusTag>
+          </span>
+        ),
+      },
+      {
+        title: "CPU 使用率",
+        dataIndex: "cpuUsage",
+        key: "cpuUsage",
+        width: 160,
+        align: "left",
+        ...getSortableColumnProps("cpuUsage"),
+        render: (_: unknown, row: PodRow) =>
+          renderUsageCell(row.cpuUsage ?? row.cpuUsagePercent, row, "cpu"),
+      },
+      {
+        title: "内存使用率",
+        dataIndex: "memoryUsage",
+        key: "memoryUsage",
+        width: 160,
+        align: "left",
+        ...getSortableColumnProps("memoryUsage"),
+        render: (_: unknown, row: PodRow) =>
+          renderUsageCell(
+            row.memoryUsage ?? row.memoryUsagePercent,
+            row,
+            "memory",
+          ),
+      },
+      {
+        title: <span style={{ whiteSpace: "nowrap" }}>重启次数</span>,
+        dataIndex: "restartCount",
+        key: "restartCount",
+        width: 116,
+        align: "left",
+        ...getSortableColumnProps("restartCount"),
+      },
+      {
+        title: "Pod IP",
+        dataIndex: "podIP",
+        key: "podIP",
+        filter: { type: "text", placeholder: "以 IP 过滤" },
+        width: TABLE_COL_WIDTH.ip,
+        align: "left",
+        ...getSortableColumnProps("podIP"),
+      },
+      {
+        title: "节点",
+        dataIndex: "nodeName",
+        key: "nodeName",
+        filter: { type: "text", placeholder: "以节点过滤" },
+        width: TABLE_COL_WIDTH.node,
+        align: "left",
+        ellipsis: true,
+        ...getSortableColumnProps("nodeName"),
+      },
+      {
+        title: "创建时间",
+        dataIndex: "createdAt",
+        key: "createdAt",
+        width: TABLE_COL_WIDTH.time,
+        align: "left",
+        ...getSortableColumnProps("createdAt"),
+        render: (v: string) => <PodCreatedAtCell value={v} />,
+      },
+      {
+        title: "操作",
+        key: "quick-actions",
+        required: true,
+        width: TABLE_COL_WIDTH.actionCompact,
+        fixed: "right",
+        align: "left",
+        render: (_: unknown, row: PodRow) => (
+          <ResourceActionIsolation>
+            <OpsActionDropdown
+              items={POD_ACTION_ITEMS}
+              onClick={({ key }) => {
+                if (key === "description") {
+                  if (row.id) setDetailTarget({ kind: POD_KIND, id: row.id });
+                  return;
+                }
+                if (key === "logs") {
+                  if (row.id) router.push(`/logs?${buildLogsParams(row)}`);
+                  return;
+                }
+                if (key === "terminal") {
+                  if (row.id)
+                    router.push(`/terminal?${buildTerminalParams(row)}`);
+                  return;
+                }
+                if (key === "yaml") {
+                  if (row.id) setYamlTarget(resolveIdentity(row));
+                  return;
+                }
+                if (key === "delete") {
+                  openOpsConfirm({
+                    title: "确认删除 Pod",
+                    description: `删除 Pod ${row.name} 后将不可恢复。`,
+                    impact: "删除后需要由上层控制器重新调度或手动重建。",
+                    okText: "确认",
+                    cancelText: "取消",
+                    danger: true,
+                    onOk: () => void handleDelete(row),
+                  });
+                }
+              }}
+              ariaLabel="操作"
+              placement="bottomRight"
+            />
+          </ResourceActionIsolation>
+        ),
+      },
+    ],
+    [
+      buildLogsParams,
+      buildTerminalParams,
+      clusterMap,
+      getSortableColumnProps,
+      handleDelete,
+      nameWidth,
+      router,
+    ],
+  );
   const loadingState = useMemo(
     () => ({ spinning: isTableLoading, description: "Pod 数据加载中..." }),
     [isTableLoading],
   );
-  const sortState = useMemo(
-    () => ({ sortBy, sortOrder }),
-    [sortBy, sortOrder],
-  );
+  const sortState = useMemo(() => ({ sortBy, sortOrder }), [sortBy, sortOrder]);
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path={POD_PATH}
-          embedded
           description="查看和管理集群中运行的 Pod 实例。"
           style={{ marginBottom: 12 }}
           titleSuffix={
@@ -903,6 +1038,7 @@ export default function PodsPage() {
             />
           }
         />
+
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
           <ResourceScopeFilterButton
             clusterId={clusterId}
@@ -916,7 +1052,12 @@ export default function PodsPage() {
           />
 
           {!isInitializing && !accessToken ? (
-            <Alert className="workload-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看 Pod 信息。" />
+            <Alert
+              className="workload-resource-state-alert"
+              type="warning"
+              showIcon
+              title="未检测到登录状态，请先登录后再查看 Pod 信息。"
+            />
           ) : null}
 
           {podsQuery.isError ? (
@@ -926,7 +1067,9 @@ export default function PodsPage() {
               showIcon
               title="加载失败"
               description={
-                podsQuery.error instanceof Error ? podsQuery.error.message : "获取 Pod 数据时发生错误"
+                podsQuery.error instanceof Error
+                  ? podsQuery.error.message
+                  : "获取 Pod 数据时发生错误"
               }
             />
           ) : null}

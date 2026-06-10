@@ -569,77 +569,78 @@ export default function PvcPage() {
 
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path="/storage/pvc"
-        titleSuffix={<ResourceAddButton title="创建PVC" onClick={handleOpenCreate} />}
-      />
-
-      <OpsSurface variant="toolbar" padding="sm">
-        <ResourceClusterNamespaceFilters
-          clusterId={clusterId}
-          namespace={namespace}
-          keywordInput={keywordInput}
-          clusterOptions={clusterFilterOptions}
-          clusterLoading={clustersQuery.isLoading}
-          knownNamespaces={knownNamespaces}
-          namespaceDisabled={namespaceDisabled}
-          namespacePlaceholder={namespacePlaceholder}
-          marginBottom={0}
-          onClusterChange={(value) => {
-            onClusterChange(value);
-            resetPage();
-          }}
-          onNamespaceChange={(value) => {
-            onNamespaceChange(value);
-            resetPage();
-          }}
-          onKeywordInputChange={setKeywordInput}
-          onSearch={handleSearch}
-          keywordPlaceholder="按名称/标签搜索（示例：pvc-a app=web env=prod）"
-        />
-      </OpsSurface>
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="storage-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
-      ) : null}
-
-      {isError ? (
-        <Alert
-          className="storage-resource-state-alert"
-          type="error"
-          showIcon
-          title="持久卷声明加载失败"
-          description={error instanceof Error ? error.message : "请求失败"}
-        />
-      ) : null}
-
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<StorageResource>
-          rowKey="id"
-          columns={columns}
-          onResourceNavigate={(request) => setDetailTarget(request)}
-          tableKey="storage.pvc"
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keywordInput,
-            onChange: handleGlobalSearchChange,
-            placeholder: "按名称/标签搜索（示例：pvc-a app=web env=prod）",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            resetPage();
-          }}
-          sort={{ sortBy, sortOrder }}
-          dataSource={tableData}
-          bordered={false}
-          layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 }, actionWidth: 110 }}
-          loading={isLoading && !data}
-          onChange={(nextPagination, filters, sorter, extra) =>
-            handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
-          }
-          pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+        <ResourcePageHeader
+          path="/storage/pvc"
+          style={{ marginBottom: 12 }}
+          titleSuffix={<ResourceAddButton title="创建PVC" onClick={handleOpenCreate} />}
         />
+
+        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+          <ResourceClusterNamespaceFilters
+            clusterId={clusterId}
+            namespace={namespace}
+            keywordInput={keywordInput}
+            clusterOptions={clusterFilterOptions}
+            clusterLoading={clustersQuery.isLoading}
+            knownNamespaces={knownNamespaces}
+            namespaceDisabled={namespaceDisabled}
+            namespacePlaceholder={namespacePlaceholder}
+            marginBottom={0}
+            onClusterChange={(value) => {
+              onClusterChange(value);
+              resetPage();
+            }}
+            onNamespaceChange={(value) => {
+              onNamespaceChange(value);
+              resetPage();
+            }}
+            onKeywordInputChange={setKeywordInput}
+            onSearch={handleSearch}
+            keywordPlaceholder="按名称/标签搜索（示例：pvc-a app=web env=prod）"
+          />
+
+          {!isInitializing && !accessToken ? (
+            <Alert className="storage-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
+          ) : null}
+
+          {isError ? (
+            <Alert
+              className="storage-resource-state-alert"
+              type="error"
+              showIcon
+              title="持久卷声明加载失败"
+              description={error instanceof Error ? error.message : "请求失败"}
+            />
+          ) : null}
+
+          <ResourceTable<StorageResource>
+            rowKey="id"
+            columns={columns}
+            onResourceNavigate={(request) => setDetailTarget(request)}
+            tableKey="storage.pvc"
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keywordInput,
+              onChange: handleGlobalSearchChange,
+              placeholder: "按名称/标签搜索（示例：pvc-a app=web env=prod）",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              resetPage();
+            }}
+            sort={{ sortBy, sortOrder }}
+            dataSource={tableData}
+            bordered
+            layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 }, actionWidth: 110 }}
+            loading={isLoading && !data}
+            onChange={(nextPagination, filters, sorter, extra) =>
+              handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+            }
+            pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+          />
+        </Space>
       </OpsSurface>
 
       <OpsModalShell

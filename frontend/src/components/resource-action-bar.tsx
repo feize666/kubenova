@@ -17,7 +17,7 @@ import {
 } from "@ant-design/icons";
 import { Popconfirm, Space } from "antd";
 import type { MenuProps } from "antd";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { OpsActionDropdown, OpsIconActionButton, openOpsConfirm, renderOpsActionTriggerButton } from "@/components/ops";
 
 export interface ResourceActionItem {
@@ -62,6 +62,10 @@ export interface ParsedResourceSearch {
   labelExpressions: string[];
 }
 
+export interface ParsedResourceFilterQuery extends ParsedResourceSearch {
+  labelExpressionMode: "equals";
+}
+
 export type TopActionBarSlot =
   | "create"
   | "refresh"
@@ -102,6 +106,10 @@ export interface ResourceActionDropdownProps {
   menuClassName?: string;
   trigger?: ReactNode;
   placement?: "bottomLeft" | "bottom" | "bottomRight" | "topLeft" | "top" | "topRight";
+}
+
+interface ResourceActionIsolationProps {
+  children: ReactNode;
 }
 
 export function getResourceActionIcon(actionKey: string): ReactNode | null {
@@ -201,6 +209,23 @@ export function renderPodLikeResourceActionStyles({
   return null;
 }
 
+export function ResourceActionIsolation({ children }: ResourceActionIsolationProps) {
+  const stopRowNavigation = (event: MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+  };
+
+  return (
+    <span
+      className="resource-action-dropdown-isolation"
+      data-resource-table-stop-navigation="true"
+      onClick={stopRowNavigation}
+      onMouseDown={stopRowNavigation}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function ResourceActionDropdown({
   actions,
   ariaLabel = "更多操作",
@@ -219,28 +244,30 @@ export function ResourceActionDropdown({
   );
 
   return (
-    <OpsActionDropdown
-      items={items}
-      ariaLabel={ariaLabel}
-      className={[className, menuClassName].filter(Boolean).join(" ")}
-      placement={placement}
-      trigger={trigger ?? renderResourceActionTriggerButton({ ariaLabel, baseClassName: triggerClassName })}
-      disabledReasonByKey={disabledReasonByKey}
-      onClick={({ key }) => {
-        const action = itemActions.find((item) => item.key === key);
-        if (!action || action.disabled) {
-          return;
-        }
-        if (action.confirm) {
-          if (!action.onClick) {
+    <ResourceActionIsolation>
+      <OpsActionDropdown
+        items={items}
+        ariaLabel={ariaLabel}
+        className={[className, menuClassName].filter(Boolean).join(" ")}
+        placement={placement}
+        trigger={trigger ?? renderResourceActionTriggerButton({ ariaLabel, baseClassName: triggerClassName })}
+        disabledReasonByKey={disabledReasonByKey}
+        onClick={({ key }) => {
+          const action = itemActions.find((item) => item.key === key);
+          if (!action || action.disabled) {
             return;
           }
-          openResourceActionConfirm(action.confirm, action.onClick);
-          return;
-        }
-        action.onClick?.();
-      }}
-    />
+          if (action.confirm) {
+            if (!action.onClick) {
+              return;
+            }
+            openResourceActionConfirm(action.confirm, action.onClick);
+            return;
+          }
+          action.onClick?.();
+        }}
+      />
+    </ResourceActionIsolation>
   );
 }
 
@@ -295,7 +322,7 @@ const ACTION_SLOT_ALIASES: Record<string, TopActionBarSlot> = {
   "delete-selected": "delete",
 };
 
-export function parseResourceSearchInput(input: string): ParsedResourceSearch {
+export function parseResourceFilterQuery(input: string): ParsedResourceFilterQuery {
   const tokens = input
     .trim()
     .split(/\s+/)
@@ -305,12 +332,22 @@ export function parseResourceSearchInput(input: string): ParsedResourceSearch {
   return {
     keyword: keywordTokens.join(" "),
     labelExpressions,
+    labelExpressionMode: "equals",
+  };
+}
+
+export function parseResourceSearchInput(input: string): ParsedResourceSearch {
+  const parsed = parseResourceFilterQuery(input);
+  return {
+    keyword: parsed.keyword,
+    labelExpressions: parsed.labelExpressions,
   };
 }
 
 export function matchLabelExpressions(
   labels: Record<string, string> | null | undefined,
   expressions: string[],
+  options: { missingLabelsMatch?: boolean } = {},
 ): boolean {
   if (expressions.length === 0) {
     return true;
@@ -318,7 +355,7 @@ export function matchLabelExpressions(
 
   // If backend does not provide labels for this resource, keep name search usable.
   if (!labels || typeof labels !== "object") {
-    return true;
+    return options.missingLabelsMatch ?? true;
   }
 
   return expressions.every((expression) => {

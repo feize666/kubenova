@@ -30,7 +30,16 @@ import {
 import type { TablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceDetailDrawer, type ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceTableToolbar } from "@/components/resource-table-toolbar";
-import { OpsEmptyState, OpsErrorState, OpsFilteredEmptyState, OpsLoadingState, OpsPermissionState, OpsState } from "@/components/ops";
+import {
+  OpsEmptyState,
+  OpsErrorState,
+  OpsFilteredEmptyState,
+  OpsLoadingState,
+  OpsMobileResourceCard,
+  OpsPermissionState,
+  OpsState,
+  type OpsMobileResourceCardMeta,
+} from "@/components/ops";
 import { useAuth } from "@/components/auth-context";
 
 export const RESOURCE_TABLE_CLASS_NAME = "resource-table";
@@ -546,6 +555,115 @@ function renderResourceTableState(input: {
   return <OpsEmptyState compact title={stateTitle ?? emptyDescription ?? "暂无资源数据"} description={stateDescription} action={stateAction} />;
 }
 
+function flattenResourceTableColumns<T extends object>(columns: ColumnsType<T>): ColumnType<T>[] {
+  return columns.flatMap((column) => {
+    if (!column || typeof column !== "object") return [];
+    if ("children" in column && column.children) {
+      return flattenResourceTableColumns(column.children as ColumnsType<T>);
+    }
+    return [column as ColumnType<T>];
+  });
+}
+
+function getMobileColumnRole<T extends object>(column: ColumnType<T>) {
+  const identity = `${getColumnIdentity(column)} ${getColumnTitleIdentity(column)}`
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+  if (!identity) return "meta";
+  if (/(action|actions|operation|operations|操作|动作)/i.test(identity)) return "actions";
+  if (/(status|state|phase|ready|health|状态|阶段|健康|就绪)/i.test(identity)) return "status";
+  if (/(name|resourcename|title|名称|资源名称|原始名称)/i.test(identity)) return "title";
+  return "meta";
+}
+
+function getMobileColumnLabel<T extends object>(column: ColumnType<T>) {
+  const title = column.title;
+  if (typeof title === "string" || typeof title === "number") return String(title);
+  return getColumnIdentity(column) || "字段";
+}
+
+function renderMobileColumnValue<T extends object>(column: ColumnType<T>, record: T, index: number): ReactNode {
+  const value = getCellValueFromColumn(column, record);
+  const rendered = column.render ? column.render(value as never, record, index) : value;
+  const content = isRenderedCellLike(rendered) ? rendered.children : rendered;
+  if (content == null || content === "") return "—";
+  return content as ReactNode;
+}
+
+function resolveResourceTableRowKey<T extends object>(
+  rowKey: TableProps<T>["rowKey"] | undefined,
+  record: T,
+  index: number,
+): Key {
+  if (typeof rowKey === "function") return rowKey(record, index);
+  if (typeof rowKey === "string") {
+    const value = (record as Record<string, unknown>)[rowKey];
+    if (typeof value === "string" || typeof value === "number") return value;
+  }
+  return getStableResourceRowKey(record, index);
+}
+
+function buildMobileResourceNavigationRequest<T extends object>(record: T): ResourceTableNavigateRequest | null {
+  const name = getRecordString(record, ["name", "resourceName"]);
+  return buildColumnNavigationRequest("name", record, name);
+}
+
+function renderMobileResourceCards<T extends object>(input: {
+  columns: ColumnsType<T>;
+  dataSource?: readonly T[];
+  onResourceNavigate?: ResourceTableNavigateHandler;
+  rowKey?: TableProps<T>["rowKey"];
+  rowSelection?: TableProps<T>["rowSelection"];
+}) {
+  const { columns, dataSource, onResourceNavigate, rowKey, rowSelection } = input;
+  if (!dataSource?.length) return null;
+
+  const leafColumns = flattenResourceTableColumns(columns);
+  const titleColumn = leafColumns.find((column) => getMobileColumnRole(column) === "title") ?? leafColumns[0];
+  const statusColumn = leafColumns.find((column) => getMobileColumnRole(column) === "status");
+  const actionsColumn = leafColumns.find((column) => getMobileColumnRole(column) === "actions");
+  const metaColumns = leafColumns
+    .filter((column) => column !== titleColumn && column !== statusColumn && column !== actionsColumn)
+    .slice(0, 4);
+  const selectedKeys = new Set(rowSelection?.selectedRowKeys ?? []);
+
+  return (
+    <div className="resource-table-mobile-list" data-resource-table-mobile-list="">
+      {dataSource.map((record, index) => {
+        const key = resolveResourceTableRowKey(rowKey, record, index);
+        const request = onResourceNavigate ? buildMobileResourceNavigationRequest(record) : null;
+        const title: ReactNode = titleColumn
+          ? renderMobileColumnValue(titleColumn, record, index)
+          : getRecordString(record, ["name"]) || String(key);
+        const subtitle = getRecordString(record, ["kind", "resourceKind", "type"]);
+        const namespace = getRecordString(record, ["namespace", "namespaceName"]);
+        const cluster = getRecordString(record, ["clusterId", "cluster", "clusterName"]);
+        const meta: OpsMobileResourceCardMeta[] = metaColumns.map((column) => ({
+          label: getMobileColumnLabel(column),
+          value: renderMobileColumnValue(column, record, index),
+        }));
+
+        return (
+          <OpsMobileResourceCard
+            actions={actionsColumn ? renderMobileColumnValue(actionsColumn, record, index) : undefined}
+            cluster={cluster || undefined}
+            key={key}
+            meta={meta}
+            namespace={namespace || undefined}
+            onSelect={request ? () => onResourceNavigate?.(request) : undefined}
+            selected={selectedKeys.has(key)}
+            status={statusColumn ? renderMobileColumnValue(statusColumn, record, index) : undefined}
+            statusState={!statusColumn ? getRecordString(record, ["status", "state", "phase"]) : undefined}
+            subtitle={subtitle || undefined}
+            title={title}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function StandardResourceTable<T extends object>({
   bordered,
   className,
@@ -598,25 +716,40 @@ function StandardResourceTable<T extends object>({
     [emptyDescription, isLoading, locale, state, stateAction, stateDescription, stateTitle],
   );
   const nextClassName = useMemo(
-    () => getResourceTableClassName(RESOURCE_TABLE_CLASS_NAME, state ? `resource-table--state-${state}` : undefined, className),
-    [className, state],
+    () => getResourceTableClassName(
+      RESOURCE_TABLE_CLASS_NAME,
+      isLoading ? "resource-table--state-loading" : undefined,
+      state ? `resource-table--state-${state}` : undefined,
+      className,
+    ),
+    [className, isLoading, state],
   );
   const nextRowKey = restProps.rowKey ?? getStableResourceRowKey<T>;
+  const mobileCards = renderMobileResourceCards({
+    columns: normalizedColumns,
+    dataSource: restProps.dataSource,
+    onResourceNavigate,
+    rowKey: nextRowKey,
+    rowSelection: restProps.rowSelection,
+  });
 
   return (
-    <Table<T>
-      {...restProps}
-      bordered={bordered}
-      className={nextClassName}
-      columns={normalizedColumns}
-      loading={nextLoading}
-      locale={nextLocale}
-      pagination={pagination}
-      rowKey={nextRowKey}
-      scroll={nextScroll}
-      size={size}
-      tableLayout={restProps.tableLayout ?? "fixed"}
-    />
+    <>
+      {mobileCards}
+      <Table<T>
+        {...restProps}
+        bordered={bordered}
+        className={nextClassName}
+        columns={normalizedColumns}
+        loading={nextLoading}
+        locale={nextLocale}
+        pagination={pagination}
+        rowKey={nextRowKey}
+        scroll={nextScroll}
+        size={size}
+        tableLayout={restProps.tableLayout ?? "fixed"}
+      />
+    </>
   );
 }
 
@@ -729,10 +862,18 @@ function HeadlampResourceTable<T extends object>({
     [className, state, table.filterRowVisible],
   );
   const nextRowKey = restProps.rowKey ?? getStableResourceRowKey<T>;
+  const mobileCards = renderMobileResourceCards({
+    columns: normalizedColumns,
+    dataSource: restProps.dataSource,
+    onResourceNavigate,
+    rowKey: nextRowKey,
+    rowSelection: restProps.rowSelection,
+  });
 
   return (
     <div className="resource-table-shell">
       {showToolbar ? <ResourceTableToolbar<T> table={table} extra={toolbarExtra} /> : null}
+      {mobileCards}
       <Table<T>
         {...restProps}
         bordered={bordered}
