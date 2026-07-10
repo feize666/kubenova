@@ -545,34 +545,63 @@ function readCssVar(name: string, fallback: string): string {
 }
 
 function readOpsTerminalTheme() {
+  const isDark =
+    typeof document !== "undefined" &&
+    document.documentElement.dataset.theme === "dark";
+  if (isDark) {
+    return {
+      background: readCssVar("--ops-terminal-bg", "#0c131d"),
+      foreground: readCssVar("--ops-terminal-fg", "#e8eef7"),
+      cursor: readCssVar("--ops-log-info", "#7dd3fc"),
+      selectionBackground: readCssVar(
+        "--ops-terminal-selection",
+        "rgba(56, 189, 248, 0.28)",
+      ),
+      black: "#020617",
+      brightBlack: "#64748b",
+      blue: "#60a5fa",
+      brightBlue: "#93c5fd",
+      cyan: "#7dd3fc",
+      brightCyan: "#bae6fd",
+      green: "#34d399",
+      brightGreen: "#86efac",
+      red: "#fb7185",
+      brightRed: "#fda4af",
+      yellow: "#fbbf24",
+      brightYellow: "#fde68a",
+      white: "#e8eef7",
+      brightWhite: "#ffffff",
+    };
+  }
+
   return {
     background: readCssVar(
       "--ops-terminal-bg",
-      readCssVar("--kn-surface", "#ffffff"),
+      readCssVar("--kn-surface", "#f8fafc"),
     ),
     foreground: readCssVar(
       "--ops-terminal-fg",
-      readCssVar("--kn-text", "#151922"),
+      readCssVar("--kn-text", "#182230"),
     ),
-    cursor: readCssVar("--ops-log-info", "#67e8f9"),
+    cursor: readCssVar("--ops-log-info", "#0369a1"),
     selectionBackground: readCssVar(
       "--ops-terminal-selection",
-      readCssVar("--kn-primary-subtle", "rgba(35, 92, 255, 0.14)"),
+      readCssVar("--kn-primary-subtle", "rgba(37, 99, 235, 0.16)"),
     ),
     black: "#0f172a",
     brightBlack: "#64748b",
-    blue: "#60a5fa",
-    brightBlue: "#93c5fd",
-    cyan: "#22d3ee",
-    brightCyan: "#67e8f9",
-    green: "#34d399",
-    brightGreen: "#86efac",
-    red: "#fb7185",
-    brightRed: "#fda4af",
-    yellow: "#fbbf24",
-    brightYellow: "#fde68a",
-    white: "#e5edf7",
-    brightWhite: "#ffffff",
+    blue: "#1d4ed8",
+    brightBlue: "#2563eb",
+    cyan: "#0369a1",
+    brightCyan: "#0284c7",
+    green: "#15803d",
+    brightGreen: "#16a34a",
+    red: "#dc2626",
+    brightRed: "#ef4444",
+    yellow: "#b45309",
+    brightYellow: "#d97706",
+    white: "#334155",
+    brightWhite: "#0f172a",
   };
 }
 
@@ -2093,137 +2122,104 @@ export default function LogsPage() {
 
       <style jsx>{`
         :global(html[data-theme="light"]) {
-          --ops-terminal-bg: #050b14;
-          --ops-terminal-fg: #dff6ff;
-          --ops-terminal-selection: rgba(34, 211, 238, 0.34);
+          --ops-terminal-bg: #f8fafc;
+          --ops-terminal-fg: #182230;
+          --ops-terminal-selection: rgba(37, 99, 235, 0.16);
         }
 
         :global(.logs-workbench-shell.ops-frame-shell) {
-          --logs-console-frame-bg: linear-gradient(
-            180deg,
-            #ffffff 0%,
-            #f7f9fc 100%
-          );
-          --logs-console-header-bg: rgba(255, 255, 255, 0.92);
-          --logs-console-chip-bg: rgba(248, 250, 252, 0.9);
-          --logs-console-border: rgba(35, 92, 255, 0.16);
-          --logs-console-divider: rgba(100, 116, 139, 0.16);
-          --logs-console-text: var(--kn-text, #151922);
-          --logs-console-muted: var(--kn-text-secondary, #5d6675);
-          --logs-signal-bg: rgba(255, 255, 255, 0.86);
-          --logs-signal-border: rgba(35, 92, 255, 0.14);
+          --logs-console-frame-bg: #f5f8fc;
+          --logs-console-header-bg: #ffffff;
+          --logs-console-chip-bg: #f8fafc;
+          --logs-console-border: #d9e2ee;
+          --logs-console-divider: #d9e2ee;
+          --logs-console-text: #101827;
+          --logs-console-muted: #64748b;
+          --logs-signal-bg: #ffffff;
+          --logs-signal-border: #d9e2ee;
           --logs-signal-text: #172033;
-          --logs-signal-muted: #5d6675;
+          --logs-signal-muted: #64748b;
           --logs-toolbar-bg: #ffffff;
-          --logs-toolbar-panel-bg: linear-gradient(180deg, #ffffff, #f9fbff);
-          --logs-toolbar-border: rgba(148, 163, 184, 0.26);
+          --logs-toolbar-panel-bg: #ffffff;
+          --logs-toolbar-border: #d9e2ee;
           --logs-control-bg: #ffffff;
-          --logs-control-border: rgba(148, 163, 184, 0.34);
-          --logs-control-text: var(--kn-text, #151922);
-          --logs-control-muted: var(--kn-text-secondary, #5d6675);
-          --logs-terminal-frame-bg:
-            radial-gradient(circle at 16% 0%, rgba(34, 211, 238, 0.14), transparent 30%),
-            linear-gradient(
-              90deg,
-              transparent 0 23px,
-              rgba(56, 189, 248, 0.052) 23px 24px,
-              transparent 24px 48px
-            ),
-            linear-gradient(180deg, #081525 0%, var(--ops-terminal-bg) 100%);
-          --logs-terminal-frame-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.04),
-            inset 0 0 34px rgba(34, 211, 238, 0.1);
-          --logs-terminal-titlebar-bg: rgba(7, 15, 27, 0.96);
-          --logs-terminal-titlebar-border: rgba(56, 189, 248, 0.2);
-          --logs-terminal-telemetry-bg: rgba(8, 18, 31, 0.86);
-          --logs-terminal-telemetry-border: rgba(56, 189, 248, 0.14);
-          --logs-terminal-telemetry-muted: rgba(203, 213, 225, 0.68);
-          --logs-terminal-telemetry-text: rgba(248, 250, 252, 0.94);
-          --logs-terminal-bg: var(--ops-terminal-bg, #050b14);
-          --logs-terminal-fg: var(--ops-terminal-fg, #dff6ff);
-          --logs-empty-bg: rgba(7, 15, 27, 0.94);
-          --logs-empty-border: rgba(56, 189, 248, 0.24);
-          --logs-empty-shadow: 0 12px 24px rgba(2, 8, 23, 0.24);
+          --logs-control-border: #cfd9e6;
+          --logs-control-text: #172033;
+          --logs-control-muted: #64748b;
+          --logs-terminal-frame-bg: var(--ops-terminal-bg);
+          --logs-terminal-frame-shadow: none;
+          --logs-terminal-titlebar-bg: #ffffff;
+          --logs-terminal-titlebar-border: #d9e2ee;
+          --logs-terminal-telemetry-bg: #f8fafc;
+          --logs-terminal-telemetry-border: #d9e2ee;
+          --logs-terminal-telemetry-muted: #64748b;
+          --logs-terminal-telemetry-text: #182230;
+          --logs-terminal-bg: var(--ops-terminal-bg, #f8fafc);
+          --logs-terminal-fg: var(--ops-terminal-fg, #182230);
+          --logs-empty-bg: #ffffff;
+          --logs-empty-border: #d9e2ee;
+          --logs-empty-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
           min-height: calc(100vh - 112px);
           border-color: var(--logs-console-border);
           background: var(--logs-console-frame-bg);
-          box-shadow: var(--kn-shadow-subtle, 0 1px 2px rgba(15, 23, 42, 0.06));
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
         }
 
         :global(html[data-theme="dark"])
           :global(.logs-workbench-shell.ops-frame-shell) {
-          --logs-console-frame-bg: linear-gradient(
-            180deg,
-            rgba(8, 18, 31, 0.98),
-            rgba(3, 10, 20, 0.98)
-          );
-          --logs-console-header-bg: rgba(8, 18, 31, 0.92);
-          --logs-console-chip-bg: rgba(12, 25, 42, 0.86);
-          --logs-console-border: rgba(56, 189, 248, 0.22);
-          --logs-console-divider: rgba(56, 189, 248, 0.14);
-          --logs-console-text: #edf6ff;
-          --logs-console-muted: rgba(203, 213, 225, 0.72);
-          --logs-signal-bg: rgba(8, 18, 31, 0.78);
-          --logs-signal-border: rgba(56, 189, 248, 0.13);
-          --logs-signal-text: rgba(248, 250, 252, 0.94);
-          --logs-signal-muted: rgba(203, 213, 225, 0.68);
-          --logs-toolbar-bg: rgba(9, 18, 31, 0.92);
-          --logs-toolbar-panel-bg: linear-gradient(
-            180deg,
-            rgba(12, 25, 42, 0.96),
-            rgba(8, 17, 31, 0.96)
-          );
-          --logs-toolbar-border: rgba(148, 163, 184, 0.18);
-          --logs-control-bg: rgba(2, 8, 23, 0.34);
-          --logs-control-border: rgba(148, 163, 184, 0.22);
-          --logs-control-text: rgba(248, 250, 252, 0.92);
-          --logs-control-muted: rgba(226, 232, 240, 0.74);
-          --logs-terminal-frame-bg:
-            linear-gradient(
-              90deg,
-              transparent 0 23px,
-              rgba(56, 189, 248, 0.055) 23px 24px,
-              transparent 24px 48px
-            ),
-            linear-gradient(180deg, #081525 0%, var(--ops-terminal-bg) 100%);
-          --logs-terminal-frame-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-          --logs-terminal-titlebar-bg: rgba(8, 18, 31, 0.96);
-          --logs-terminal-titlebar-border: rgba(56, 189, 248, 0.16);
-          --logs-terminal-telemetry-bg: rgba(8, 18, 31, 0.78);
-          --logs-terminal-telemetry-border: rgba(56, 189, 248, 0.12);
-          --logs-terminal-telemetry-muted: rgba(203, 213, 225, 0.68);
-          --logs-terminal-telemetry-text: rgba(248, 250, 252, 0.94);
-          --logs-terminal-bg: var(--ops-terminal-bg, #061120);
-          --logs-terminal-fg: var(--ops-terminal-fg, #eef6ff);
-          --logs-empty-bg: rgba(8, 18, 31, 0.94);
-          --logs-empty-border: rgba(56, 189, 248, 0.2);
-          --logs-empty-shadow: 0 8px 16px rgba(2, 8, 23, 0.28);
+          --logs-console-frame-bg: #0a1018;
+          --logs-console-header-bg: #0f1722;
+          --logs-console-chip-bg: #0f1722;
+          --logs-console-border: #253041;
+          --logs-console-divider: #253041;
+          --logs-console-text: #e8eef7;
+          --logs-console-muted: #93a0b2;
+          --logs-signal-bg: #0f1722;
+          --logs-signal-border: #253041;
+          --logs-signal-text: #e8eef7;
+          --logs-signal-muted: #93a0b2;
+          --logs-toolbar-bg: #0f1722;
+          --logs-toolbar-panel-bg: #0f1722;
+          --logs-toolbar-border: #253041;
+          --logs-control-bg: #111b28;
+          --logs-control-border: #314052;
+          --logs-control-text: #e8eef7;
+          --logs-control-muted: #9aa7b7;
+          --logs-terminal-frame-bg: #0c131d;
+          --logs-terminal-frame-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+          --logs-terminal-titlebar-bg: #0f1722;
+          --logs-terminal-titlebar-border: #253041;
+          --logs-terminal-telemetry-bg: #0f1722;
+          --logs-terminal-telemetry-border: #253041;
+          --logs-terminal-telemetry-muted: #93a0b2;
+          --logs-terminal-telemetry-text: #e8eef7;
+          --logs-terminal-bg: var(--ops-terminal-bg, #0c131d);
+          --logs-terminal-fg: var(--ops-terminal-fg, #e8eef7);
+          --logs-empty-bg: #0f1722;
+          --logs-empty-border: #253041;
+          --logs-empty-shadow: 0 1px 2px rgba(2, 8, 23, 0.28);
           border-color: var(--logs-console-border);
           background: var(--logs-console-frame-bg);
-          box-shadow:
-            0 1px 2px rgba(2, 8, 23, 0.22),
-            inset 0 1px 0 rgba(255, 255, 255, 0.035);
+          box-shadow: 0 1px 2px rgba(2, 8, 23, 0.22);
         }
 
         :global(.logs-workbench-shell .ops-frame-shell__header) {
-          border-bottom-color: var(--kn-border, var(--logs-console-divider));
-          background: color-mix(
-            in srgb,
-            var(--kn-surface, var(--logs-console-header-bg)) 90%,
-            transparent
-          );
-          backdrop-filter: blur(12px) saturate(1.08);
+          padding: 12px 14px;
+          border-bottom-color: var(--logs-console-divider);
+          background: var(--logs-console-header-bg);
+          backdrop-filter: none;
         }
 
         :global(.logs-workbench-shell .ops-frame-shell__title) {
-          color: var(--kn-text, var(--logs-console-text));
+          color: var(--logs-console-text);
         }
 
         :global(.logs-workbench-shell .ops-frame-shell__subtitle) {
-          color: var(--kn-text-secondary, var(--logs-console-muted));
+          color: var(--logs-console-muted);
         }
 
         :global(.logs-workbench-shell .ops-frame-shell__chips) {
+          padding: 8px 14px;
           border-bottom-color: var(--logs-console-divider);
           background: var(--logs-console-chip-bg);
         }
@@ -2241,8 +2237,24 @@ export default function LogsPage() {
           row-gap: 6px;
         }
 
+        :global(.logs-workbench-top-actions .ops-icon-action-button.ant-btn) {
+          min-height: 32px;
+          border-color: var(--logs-control-border);
+          background: var(--logs-control-bg);
+          color: var(--logs-control-text);
+          box-shadow: none;
+        }
+
+        :global(.logs-workbench-top-actions .ops-icon-action-button.ant-btn:hover),
+        :global(.logs-workbench-top-actions .ops-icon-action-button.ant-btn:focus-visible) {
+          border-color: rgba(34, 211, 238, 0.48);
+          background: color-mix(in srgb, var(--logs-control-bg) 92%, var(--kn-primary-subtle));
+          color: var(--ant-color-primary);
+        }
+
         :global(.logs-workbench-chips.ant-space) {
           width: 100%;
+          row-gap: 6px;
         }
 
         :global(.logs-workbench-stack.ant-space) {
@@ -2257,6 +2269,7 @@ export default function LogsPage() {
         }
 
         .logs-signal-card {
+          position: relative;
           display: grid;
           gap: 3px;
           min-width: 0;
@@ -2266,7 +2279,42 @@ export default function LogsPage() {
           background: var(--logs-signal-bg);
           color: var(--logs-signal-text);
           box-shadow: inset 0 1px 0
-            color-mix(in srgb, var(--logs-signal-text) 8%, transparent);
+            color-mix(in srgb, var(--logs-signal-text) 5%, transparent);
+          overflow: hidden;
+          transition:
+            border-color 160ms ease,
+            background-color 160ms ease,
+            box-shadow 160ms ease;
+        }
+
+        .logs-signal-card::before {
+          content: "";
+          position: absolute;
+          right: 10px;
+          top: 10px;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--logs-signal-muted);
+          box-shadow: 0 0 0 4px color-mix(in srgb, var(--logs-signal-muted) 14%, transparent);
+          opacity: 0.7;
+        }
+
+        .logs-signal-card--success,
+        .logs-signal-card--processing {
+          border-color: color-mix(in srgb, var(--ops-log-info) 42%, var(--logs-signal-border));
+          box-shadow:
+            inset 0 1px 0 color-mix(in srgb, var(--logs-signal-text) 10%, transparent),
+            0 0 0 1px color-mix(in srgb, var(--ops-log-info) 8%, transparent);
+        }
+
+        .logs-signal-card--success::before,
+        .logs-signal-card--processing::before {
+          background: var(--ops-log-info);
+          box-shadow:
+            0 0 0 4px color-mix(in srgb, var(--ops-log-info) 14%, transparent),
+            0 0 14px color-mix(in srgb, var(--ops-log-info) 52%, transparent);
+          animation: logs-signal-pulse 180ms var(--ops-motion-ease-out) both;
         }
 
         .logs-signal-card span {
@@ -2311,6 +2359,27 @@ export default function LogsPage() {
           box-shadow: var(--logs-terminal-frame-shadow);
         }
 
+        .logs-terminal-frame::before,
+        .logs-terminal-frame::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          z-index: 2;
+          pointer-events: none;
+          border-radius: inherit;
+        }
+
+        .logs-terminal-frame::before,
+        .logs-terminal-frame::after {
+          display: none;
+        }
+
+        .logs-terminal-frame--streaming::before,
+        .logs-terminal-frame--connecting::before,
+        .logs-terminal-frame--reconnecting::before {
+          animation: none;
+        }
+
         .logs-terminal-frame--error,
         .logs-terminal-frame--expired {
           border-color: rgba(248, 113, 113, 0.38);
@@ -2336,6 +2405,7 @@ export default function LogsPage() {
         :global(.logs-toolbar-card.ops-surface) {
           border-color: var(--logs-toolbar-border);
           background: var(--logs-toolbar-panel-bg);
+          box-shadow: none;
         }
 
         :global(.logs-terminal-card.ops-surface) {
@@ -2346,12 +2416,12 @@ export default function LogsPage() {
 
         .headlamp-log-toolbar {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) 290px;
+          grid-template-columns: minmax(0, 1fr) minmax(172px, 210px);
           grid-template-areas:
-            "main actions"
+            "main main"
             "mode actions";
           justify-content: space-between;
-          gap: 8px;
+          gap: 7px;
           width: 100%;
           align-items: stretch;
           overflow: visible;
@@ -2364,12 +2434,12 @@ export default function LogsPage() {
           gap: 8px;
           flex-wrap: wrap;
           min-width: 0;
-          min-height: 58px;
-          padding: 8px 10px;
+          min-height: 52px;
+          padding: 7px 9px;
           border: 1px solid var(--logs-toolbar-border);
           border-radius: 8px;
-          background: color-mix(in srgb, var(--logs-toolbar-bg) 88%, #eef4ff);
-          backdrop-filter: blur(10px) saturate(1.08);
+          background:
+            var(--logs-toolbar-bg);
         }
 
         .headlamp-log-group-main {
@@ -2386,13 +2456,15 @@ export default function LogsPage() {
 
         .headlamp-log-group-actions {
           grid-area: actions;
-          display: inline-flex;
+          display: grid;
+          grid-template-columns: minmax(112px, 1fr) auto;
+          align-items: end;
           justify-content: flex-end;
-          align-content: end;
-          align-self: stretch;
-          flex-wrap: wrap;
+          align-content: center;
+          align-self: end;
           width: 100%;
-          background: color-mix(in srgb, var(--logs-toolbar-bg) 92%, #eaf2ff);
+          min-height: 42px;
+          background: var(--logs-toolbar-bg);
         }
 
         .headlamp-log-control {
@@ -2431,7 +2503,7 @@ export default function LogsPage() {
           gap: 4px;
           height: 32px;
           flex: 0 0 auto;
-          width: 100%;
+          width: auto;
         }
 
         .headlamp-log-toolbar :global(.ant-select-selector),
@@ -2441,6 +2513,7 @@ export default function LogsPage() {
           border-color: var(--logs-control-border) !important;
           background: var(--logs-control-bg) !important;
           color: var(--logs-control-text) !important;
+          box-shadow: none !important;
         }
 
         .headlamp-log-toolbar :global(.ant-select-arrow),
@@ -2689,31 +2762,19 @@ export default function LogsPage() {
           width: 100%;
           min-height: 58vh;
           max-height: 72vh;
-          background:
-            linear-gradient(
-              180deg,
-              color-mix(in srgb, var(--logs-terminal-fg) 4%, transparent),
-              transparent 42%
-            ),
-            var(--logs-terminal-bg);
+          background: var(--logs-terminal-bg);
           overflow: hidden;
           padding: 14px;
         }
 
         .logs-terminal-host::before {
-          content: "";
-          position: absolute;
-          inset: 11px 14px auto;
-          z-index: 2;
-          height: 1px;
-          pointer-events: none;
-          background: linear-gradient(
-            90deg,
-            transparent,
-            var(--ops-log-info),
-            transparent
-          );
-          opacity: 0.38;
+          display: none;
+        }
+
+        .logs-terminal-frame--streaming .logs-terminal-host::before,
+        .logs-terminal-frame--connecting .logs-terminal-host::before,
+        .logs-terminal-frame--reconnecting .logs-terminal-host::before {
+          animation: none;
         }
 
         .logs-empty-hint {
@@ -2852,6 +2913,35 @@ export default function LogsPage() {
           .logs-terminal-titlebar {
             padding: 0 10px;
             gap: 8px;
+          }
+
+          .logs-terminal-title {
+            min-width: 0;
+          }
+        }
+
+        @keyframes logs-signal-pulse {
+          0%,
+          100% {
+            opacity: 0.7;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1.12);
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .logs-signal-card--success::before,
+          .logs-signal-card--processing::before,
+          .logs-terminal-frame--streaming::before,
+          .logs-terminal-frame--connecting::before,
+          .logs-terminal-frame--reconnecting::before,
+          .logs-terminal-frame--streaming .logs-terminal-host::before,
+          .logs-terminal-frame--connecting .logs-terminal-host::before,
+          .logs-terminal-frame--reconnecting .logs-terminal-host::before {
+            animation: none !important;
           }
         }
       `}</style>

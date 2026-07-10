@@ -151,9 +151,13 @@ export default function SecretsPage() {
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
-  const { sortBy, sortOrder, pagination, resetPage, getPaginationConfig, handleTableChange } =
+  const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ConfigResourceItem>({
       defaultPageSize: 10,
+      storageKey: "configs/secrets/table-sort",
+      defaultSortBy: "updatedAt",
+      defaultSortOrder: "desc",
+      allowedSortBy: ["name", "clusterId", "namespace", "dataCount", "version", "updatedAt"],
     });
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -463,6 +467,7 @@ export default function SecretsPage() {
       filter: { type: "text", placeholder: "以名称过滤" },
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: ConfigResourceItem) =>
         row.id ? (
           <Typography.Link onClick={() => setDetailTarget({ kind: "Secret", id: row.id })}>
@@ -477,6 +482,7 @@ export default function SecretsPage() {
       key: "clusterId",
       filter: { type: "text", placeholder: "以集群过滤" },
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId", isLoading && !data),
       render: (_: unknown, record: ConfigResourceItem) => getClusterDisplayName(clusterMap, record.clusterId),
     },
     {
@@ -485,12 +491,14 @@ export default function SecretsPage() {
       key: "namespace",
       filter: { type: "text", placeholder: "以名称空间过滤" },
       width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace", isLoading && !data),
     },
     {
       title: "密钥项",
       dataIndex: "dataCount",
       key: "dataCount",
       width: TABLE_COL_WIDTH.type,
+      ...getSortableColumnProps("dataCount", isLoading && !data),
       render: (v: number) => <ConfigCountCell value={v} label="items" />,
     },
     {
@@ -499,6 +507,7 @@ export default function SecretsPage() {
       key: "version",
       filter: { type: "text", placeholder: "以版本过滤" },
       width: TABLE_COL_WIDTH.version,
+      ...getSortableColumnProps("version", isLoading && !data),
       render: (v?: number) => <ConfigVersionCell value={v} />,
     },
     {
@@ -506,6 +515,7 @@ export default function SecretsPage() {
       dataIndex: "updatedAt",
       key: "updatedAt",
       width: TABLE_COL_WIDTH.updateTime,
+      ...getSortableColumnProps("updatedAt", isLoading && !data),
       render: (value: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     {

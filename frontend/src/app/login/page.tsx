@@ -1,7 +1,7 @@
 "use client";
 
 import { LockOutlined, LoginOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Checkbox, Divider, Form, Input, Space, Typography } from "antd";
+import { Alert, App, Button, Checkbox, Form, Input, Space, Typography } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -169,61 +169,13 @@ function LoginPageContent() {
     setSubmitting(false);
   };
 
-  // ── 主题相关样式变量 ──────────────────────────────────────
-  const subtitleColor = isDark
-    ? "rgba(180,210,255,0.7)"
-    : "#64748b";
-
-  const labelColor = isDark
-    ? "rgba(200,220,255,0.8)"
-    : "#374151";
-
-  const inputStyle = isDark
-    ? {
-        background: "rgba(255,255,255,0.05)",
-        border: "1px solid rgba(22,119,255,0.25)",
-        borderRadius: 8,
-        color: "#e8f0ff",
-      }
-    : {
-        background: "#ffffff",
-        border: "1px solid rgba(37,99,235,0.2)",
-        borderRadius: 8,
-        color: "#1e293b",
-      };
-
-  const prefixIconColor = isDark ? "rgba(100,160,255,0.6)" : "#6b9cf4";
-
-  const checkboxColor = isDark ? "rgba(150,190,255,0.6)" : "#64748b";
-
-  const dividerColor = isDark ? "rgba(22,119,255,0.15)" : "rgba(37,99,235,0.12)";
-  const dividerTextColor = isDark ? "rgba(150,190,255,0.4)" : "#94a3b8";
-
-  const secondaryBtnStyle = isDark
-    ? {
-        borderRadius: 8,
-        background: "rgba(255,255,255,0.04)",
-        border: "1px solid rgba(22,119,255,0.2)",
-        color: "rgba(150,190,255,0.6)",
-        fontSize: 13,
-      }
-    : {
-        borderRadius: 8,
-        background: "#f8faff",
-        border: "1px solid rgba(37,99,235,0.18)",
-        color: "#64748b",
-        fontSize: 13,
-      };
-
-  const footerColor = isDark ? "rgba(100,140,200,0.35)" : "#94a3b8";
-
-  const brandSubtitleColor = isDark
-    ? "rgba(150,200,255,0.6)"
-    : "#94a3b8";
-
-  const taglineColor = isDark
-    ? "rgba(200,220,255,0.45)"
-    : "#94a3b8";
+  const prefixIconColor = "var(--login-muted)";
+  const inputSurfaceStyle = {
+    background: isDark ? "#0f1722" : "var(--login-surface-muted)",
+    borderColor: isDark ? "#314052" : "var(--login-border-strong)",
+    color: isDark ? "#e8eef7" : "var(--login-text)",
+    boxShadow: "none",
+  };
   const shouldShowApiWarning =
     apiReachable === false &&
     apiProbeFailures >= 3 &&
@@ -242,73 +194,39 @@ function LoginPageContent() {
             className="login-page__intro"
           >
             <div>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+              <div className="login-brand">
                 <KubeNovaLogo size={56} isDark={isDark} />
-                <div style={{ textAlign: "left" }}>
-                  <div
-                    style={{
-                      fontSize: 30,
-                      fontWeight: 800,
-                      letterSpacing: 1,
-                      background: isDark
-                        ? "linear-gradient(135deg, #60c8ff 0%, #1677ff 50%, #00b4d8 100%)"
-                        : "linear-gradient(135deg, #1677ff 0%, #2563eb 50%, #0ea5e9 100%)",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      lineHeight: 1.2,
-                    }}
-                  >
-                    KubeNova
-                  </div>
-                  <div style={{ fontSize: 12, color: brandSubtitleColor, letterSpacing: 2, marginTop: 2 }}>
-                    CLOUD NATIVE OPS
-                  </div>
+                <div className="login-brand__copy">
+                  <div className="login-brand__name">KubeNova</div>
+                  <div className="login-brand__meta">Cloud Native Ops</div>
                 </div>
               </div>
-              <Typography.Title level={2} style={{ color: isDark ? "#e2e8f0" : "#0f172a", marginBottom: 14 }}>
+              <Typography.Title level={2} className="login-title text-balance">
                 运维控制台统一入口
               </Typography.Title>
-              <Typography.Paragraph
-                style={{ color: subtitleColor, marginBottom: 18, maxWidth: 520, fontSize: 14, lineHeight: 1.75 }}
-              >
+              <Typography.Paragraph className="login-copy text-pretty">
                 统一进入集群、工作负载、网络、存储与 AI 运维能力，登录后可直接继续当前上下文。
               </Typography.Paragraph>
-              <Space orientation="vertical" size={12}>
+              <Space className="login-scope-list" orientation="vertical" size={10}>
                 <OpsFilterChip tone="info">统一状态视图</OpsFilterChip>
                 <OpsFilterChip tone="info">终端与 AI 协同</OpsFilterChip>
                 <OpsFilterChip tone="neutral">集群级操作审计</OpsFilterChip>
               </Space>
             </div>
-            <Typography.Text style={{ color: taglineColor, fontSize: 13 }}>
+            <Typography.Text className="login-note">
               仅显示与运维相关的生产信息
             </Typography.Text>
           </div>
         ) : (
-          <div style={{ textAlign: "center", paddingTop: 6 }}>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+          <div className="login-mobile-brand">
+            <div className="login-brand login-brand--compact">
               <KubeNovaLogo size={42} isDark={isDark} />
-              <div style={{ textAlign: "left" }}>
-                <div
-                  style={{
-                    fontSize: 24,
-                    fontWeight: 800,
-                    letterSpacing: 0.8,
-                    background: isDark
-                      ? "linear-gradient(135deg, #60c8ff 0%, #1677ff 50%, #00b4d8 100%)"
-                      : "linear-gradient(135deg, #1677ff 0%, #2563eb 50%, #0ea5e9 100%)",
-                    WebkitBackgroundClip: "text",
-                    WebkitTextFillColor: "transparent",
-                    lineHeight: 1.2,
-                  }}
-                >
-                  KubeNova
-                </div>
-                <div style={{ fontSize: 11, color: brandSubtitleColor, letterSpacing: 1.4, marginTop: 2 }}>
-                  CLOUD NATIVE OPS
-                </div>
+              <div className="login-brand__copy">
+                <div className="login-brand__name login-brand__name--compact">KubeNova</div>
+                <div className="login-brand__meta">Cloud Native Ops</div>
               </div>
             </div>
-            <div style={{ fontSize: 13, color: taglineColor, letterSpacing: 0.4 }}>
+            <div className="login-note">
               企业级 Kubernetes 智能运维平台
             </div>
           </div>
@@ -323,11 +241,11 @@ function LoginPageContent() {
             <Space orientation="vertical" size={0} style={{ width: "100%" }}>
               <Typography.Title
                 level={4}
-                style={{ color: isDark ? "#e2e8f0" : "#0f172a", marginBottom: 6 }}
+                className="login-card__title text-balance"
               >
                 登录控制台
               </Typography.Title>
-              <Typography.Text style={{ color: subtitleColor, fontSize: 13, marginBottom: 20, display: "block" }}>
+              <Typography.Text className="login-card__subtitle text-pretty">
                 输入平台账号以继续操作
               </Typography.Text>
               {shouldShowApiWarning ? (
@@ -341,11 +259,13 @@ function LoginPageContent() {
               ) : null}
 
               <Form<LoginForm>
+                className="login-form"
                 layout="vertical"
                 onFinish={onFinish}
+                autoComplete="off"
               >
                 <Form.Item
-                  label={<span style={{ color: labelColor, fontSize: 13 }}>账号</span>}
+                  label="账号"
                   name="username"
                   rules={[{ required: true, message: "请输入账号" }]}
                 >
@@ -353,12 +273,15 @@ function LoginPageContent() {
                     prefix={<UserOutlined style={{ color: prefixIconColor }} />}
                     placeholder="输入邮箱账号"
                     size="large"
-                    style={inputStyle}
+                    style={inputSurfaceStyle}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                   />
                 </Form.Item>
 
                 <Form.Item
-                  label={<span style={{ color: labelColor, fontSize: 13 }}>密码</span>}
+                  label="密码"
                   name="password"
                   rules={[{ required: true, message: "请输入密码" }]}
                 >
@@ -366,12 +289,15 @@ function LoginPageContent() {
                     prefix={<LockOutlined style={{ color: prefixIconColor }} />}
                     placeholder="输入登录密码"
                     size="large"
-                    style={inputStyle}
+                    style={inputSurfaceStyle}
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck={false}
                   />
                 </Form.Item>
 
                 <Form.Item name="remember" valuePropName="checked" style={{ marginBottom: 20 }}>
-                  <Checkbox style={{ color: checkboxColor, fontSize: 13 }}>保持登录</Checkbox>
+                  <Checkbox>保持登录</Checkbox>
                 </Form.Item>
 
                 <Form.Item style={{ marginBottom: 0 }}>
@@ -382,48 +308,34 @@ function LoginPageContent() {
                     loading={submitting}
                     block
                     size="large"
-                    style={{
-                      borderRadius: 8,
-                      height: 44,
-                      fontSize: 15,
-                      fontWeight: 600,
-                      background: "linear-gradient(135deg, #1677ff, #0ea5e9)",
-                      border: "none",
-                      boxShadow: isDark
-                        ? "0 4px 16px rgba(22,119,255,0.4)"
-                        : "0 4px 16px rgba(22,119,255,0.25)",
-                    }}
+                    className="login-primary-button"
                   >
                     登录控制台
                   </Button>
                 </Form.Item>
               </Form>
 
-              <Divider style={{ borderColor: dividerColor, margin: "20px 0", color: dividerTextColor, fontSize: 12 }}>
-                或使用其他方式
-              </Divider>
-
-              <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+              <div className="login-secondary-section" aria-label="其他登录方式">
                 <Button
                   icon={<SafetyCertificateOutlined />}
                   block
                   size="large"
-                  style={secondaryBtnStyle}
+                  className="login-secondary-button"
                 >
                   OIDC 单点登录
                 </Button>
                 <Button
                   block
                   size="large"
-                  style={secondaryBtnStyle}
+                  className="login-secondary-button"
                 >
                   企业 SSO 登录
                 </Button>
-              </Space>
+              </div>
             </Space>
           </OpsSurface>
 
-          <div style={{ textAlign: "center", marginTop: 18, color: footerColor, fontSize: 12 }}>
+          <div className="login-footer">
             KubeNova v1.0 · 企业级容器云管理平台
           </div>
         </div>

@@ -5,6 +5,8 @@ node_modules/
 dist/
 build/
 coverage/
+*.tsbuildinfo
+frontend/tmp/
 .nuxt/
 .vuepress/dist
 

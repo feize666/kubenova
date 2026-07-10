@@ -37,6 +37,8 @@ export function OpsIconActionButton({
         "ops-icon-action-button",
         `ops-icon-action-button--${opsTone}`,
         `ops-icon-action-button--variant-${opsVariant}`,
+        props.loading ? "is-loading" : undefined,
+        props.disabled ? "is-disabled" : undefined,
         disabledReason ? "ops-icon-action-button--has-disabled-reason" : undefined,
         className,
       ].filter(Boolean).join(" ")}
@@ -101,7 +103,14 @@ export const OpsFilterTriggerButton = forwardRef<HTMLAnchorElement | HTMLButtonE
       {...props}
       aria-label={accessibleLabel}
       ref={ref}
-      className={[baseClassName, active ? "is-active" : undefined, className].filter(Boolean).join(" ")}
+      className={[
+        baseClassName,
+        "ops-filter-trigger-button",
+        active ? "is-active" : undefined,
+        props.loading ? "is-loading" : undefined,
+        props.disabled ? "is-disabled" : undefined,
+        className,
+      ].filter(Boolean).join(" ")}
     >
       {slotClassNames?.lead ? <span className={slotClassNames.lead}>{iconNode}</span> : iconNode}
       <span className={slotClassNames?.copy ?? "resource-scope-filter-copy"}>

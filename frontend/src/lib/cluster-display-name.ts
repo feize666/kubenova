@@ -8,10 +8,21 @@ export function hasKnownCluster(
   }
 
   const mapped = clusterMap[normalizedClusterId];
-  return Boolean(mapped?.trim());
+  return Boolean(mapped?.trim() || clusterDisplayNameCache.get(normalizedClusterId)?.trim());
 }
 
 const UNKNOWN_CLUSTER_LABEL = "未知集群";
+const clusterDisplayNameCache = new Map<string, string>();
+
+export function rememberClusterDisplayNames(items: Array<{ id?: string | null; name?: string | null }>) {
+  items.forEach((item) => {
+    const id = item.id?.trim();
+    const name = normalizeClusterLabel(item.name);
+    if (id && name) {
+      clusterDisplayNameCache.set(id, name);
+    }
+  });
+}
 
 function normalizeClusterLabel(value?: string | null) {
   const normalized = value?.trim();
@@ -32,7 +43,11 @@ export function getClusterDisplayName(
 ) {
   const normalizedClusterId = clusterId?.trim();
   if (normalizedClusterId && hasKnownCluster(clusterMap, normalizedClusterId)) {
-    return normalizeClusterLabel(clusterMap[normalizedClusterId]) || UNKNOWN_CLUSTER_LABEL;
+    return (
+      normalizeClusterLabel(clusterMap[normalizedClusterId]) ||
+      normalizeClusterLabel(clusterDisplayNameCache.get(normalizedClusterId)) ||
+      UNKNOWN_CLUSTER_LABEL
+    );
   }
 
   const fallbackClusterName = normalizeClusterLabel(clusterName);

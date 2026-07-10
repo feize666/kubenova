@@ -176,6 +176,12 @@ bash scripts/service.sh db-init
 bash scripts/service.sh dev up
 ```
 
+`dev up` 默认使用前端 stable 包启动，避免 Next dev/Turbopack 在新环境首次访问各模块时按需编译导致高内存和菜单切换卡顿。需要前端热更新开发时再显式执行：
+
+```bash
+bash scripts/service.sh dev up --dev-frontend
+```
+
 常用入口：
 
 ```bash

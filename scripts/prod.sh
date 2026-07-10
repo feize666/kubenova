@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/_node-toolchain.sh"
+kubenova_prefer_current_node_toolchain
 RUN_DIR="$ROOT_DIR/.run"
 mkdir -p "$RUN_DIR"
 
@@ -212,7 +214,7 @@ case "$cmd" in
 esac
 
 check_dep node "Node.js"
-check_dep npm "npm"
+kubenova_require_node_runtime prod
 check_dep curl "curl"
 check_dep psql "PostgreSQL client"
 check_dep redis-cli "Redis client"

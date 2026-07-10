@@ -229,7 +229,7 @@ export default function AiopsCenterPage() {
   );
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space className="ops-aiops-cockpit" orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path={AIOPS_PATH}
         freshness={summary ? { label: "分析时间", value: summary.timestamp, color: "purple" } : undefined}
@@ -262,7 +262,7 @@ export default function AiopsCenterPage() {
         <Alert className="ops-center-state-alert" type="warning" showIcon title="分析数据降级" description={summary.note || "当前事故队列可能来自派生信号。"} />
       ) : null}
 
-      <Row gutter={[12, 12]}>
+      <Row className="ops-aiops-cockpit__metrics" gutter={[12, 12]}>
         <Col xs={24} md={6}>
           <OpsMetricTile
             icon={<RobotOutlined />}
@@ -296,7 +296,7 @@ export default function AiopsCenterPage() {
         </Col>
       </Row>
 
-      <OpsSurface variant="panel" padding="sm" title="事故队列">
+      <OpsSurface className="ops-aiops-panel ops-aiops-panel--queue" variant="panel" padding="sm" title="事故队列">
         <ResourceTable
           rowKey="id"
           size="small"
@@ -310,10 +310,10 @@ export default function AiopsCenterPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={12}>
-          <OpsSurface variant="panel" padding="sm" title="根因候选">
+          <OpsSurface className="ops-aiops-panel" variant="panel" padding="sm" title="根因候选">
             <Space orientation="vertical" size={10} style={{ width: "100%" }}>
               {rootCauseCandidates.map((item) => (
-                <OpsSurface variant="raised" padding="sm" key={item.incidentId}>
+                <OpsSurface className="ops-aiops-evidence-card" variant="raised" padding="sm" key={item.incidentId}>
                   <Space orientation="vertical" size={4}>
                     <Space>
                       <Typography.Text strong>{item.title}</Typography.Text>
@@ -331,7 +331,7 @@ export default function AiopsCenterPage() {
           </OpsSurface>
         </Col>
         <Col xs={24} xl={12}>
-          <OpsSurface variant="panel" padding="sm" title="推荐动作">
+          <OpsSurface className="ops-aiops-panel" variant="panel" padding="sm" title="推荐动作">
             <ResourceTable
               rowKey="id"
               size="small"

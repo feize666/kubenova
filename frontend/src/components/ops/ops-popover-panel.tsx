@@ -24,7 +24,13 @@ export function OpsPopoverPanel({
   className?: string;
 }) {
   return (
-    <div className={["ops-popover-panel", className].filter(Boolean).join(" ")}>
+    <div
+      className={[
+        "ops-popover-panel",
+        (onReset || onApply) ? "ops-popover-panel--has-footer" : undefined,
+        className,
+      ].filter(Boolean).join(" ")}
+    >
       <div className="ops-popover-panel__header">
         <Typography.Text strong>{title}</Typography.Text>
         {subtitle ? <Typography.Text type="secondary">{subtitle}</Typography.Text> : null}

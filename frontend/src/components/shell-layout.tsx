@@ -30,8 +30,11 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } fro
 import { useAuth } from "@/components/auth-context";
 import { getNavDisplayLabel, getTitleFromPath, filterNavSectionsByRole, navSections } from "@/config/navigation";
 import { useThemeMode } from "@/components/theme-context";
+import { getClusters } from "@/lib/api/clusters";
 import { listCapabilities } from "@/lib/api/capabilities";
+import { getClusterDisplayName, rememberClusterDisplayNames } from "@/lib/cluster-display-name";
 import { buildLoginRoute, buildInternalReturnTo } from "@/lib/login-return";
+import { RESOURCE_SCOPE_CHANGE_EVENT, type ResourceScopeChangeDetail } from "@/lib/resource-scope-events";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
 import { OpsIconActionButton } from "@/components/ops";
 import { QUERY_CACHE_TIMINGS, queryKeys } from "@/lib/query";
@@ -57,6 +60,7 @@ const MAX_REMEMBERED_PREFETCH_PATHS = 48;
 const MAX_IDLE_PREFETCH_PATHS = 5;
 const MAX_OPEN_SIDEBAR_SECTIONS = 1;
 const ROUTE_TRANSITION_QUIET_MS = 650;
+const ENABLE_ROUTE_PREFETCH = process.env.NODE_ENV === "production";
 
 type SidebarOpenSectionKey = string | null;
 
@@ -303,6 +307,7 @@ const AppSider = memo(function AppSider({
   );
   const prefetchPath = useCallback((path: string, timeout = 700) => {
     if (
+      !ENABLE_ROUTE_PREFETCH ||
       !PREFETCHABLE_NAV_PATHS.has(path) ||
       prefetchedPathsRef.current.has(path) ||
       pendingPrefetchPathsRef.current.has(path)
@@ -609,6 +614,18 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     refetchOnReconnect: true,
     refetchOnWindowFocus: false,
   });
+  const shellClustersQuery = useQuery({
+    queryKey: queryKeys.clusters.list({ scope: "shell" }),
+    queryFn: () => getClusters({ page: 1, pageSize: 500 }, accessToken),
+    enabled: !isLoginPage && !isInitializing && isAuthenticated && Boolean(accessToken),
+    staleTime: QUERY_CACHE_TIMINGS.shellCapabilityStaleTimeMs,
+    gcTime: QUERY_CACHE_TIMINGS.shellCapabilityGcTimeMs,
+    refetchInterval: false,
+    refetchIntervalInBackground: false,
+    refetchOnMount: false,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: false,
+  });
   const userItems: MenuProps["items"] = [
     { key: "profile", label: "个人中心" },
     { key: "logout", label: "退出登录" },
@@ -652,13 +669,43 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
       };
     });
   }, [disabledPaths, role]);
-  const shellScope = useMemo(
-    () => ({
-      cluster: searchParams.get("clusterName")?.trim() || searchParams.get("clusterId")?.trim() || "全部集群",
-      namespace: searchParams.get("namespace")?.trim() || "全部名称空间",
-    }),
-    [searchParams],
+  const shellClusterMap = useMemo(
+    () => {
+      const items = shellClustersQuery.data?.items ?? [];
+      rememberClusterDisplayNames(items);
+      return Object.fromEntries(items.map((item) => [item.id, item.name]));
+    },
+    [shellClustersQuery.data?.items],
   );
+  const [resourceScopeOverride, setResourceScopeOverride] = useState<
+    (ResourceScopeChangeDetail & { pathname: string }) | null
+  >(null);
+  useEffect(() => {
+    const handleResourceScopeChange = (event: Event) => {
+      const detail = (event as CustomEvent<ResourceScopeChangeDetail>).detail;
+      if (!detail || typeof detail.clusterId !== "string") {
+        return;
+      }
+      setResourceScopeOverride({
+        clusterId: detail.clusterId,
+        clusterName: detail.clusterName,
+        namespace: detail.namespace,
+        pathname,
+      });
+    };
+    window.addEventListener(RESOURCE_SCOPE_CHANGE_EVENT, handleResourceScopeChange);
+    return () => window.removeEventListener(RESOURCE_SCOPE_CHANGE_EVENT, handleResourceScopeChange);
+  }, [pathname]);
+  const shellScope = useMemo(() => {
+    const activeOverride = resourceScopeOverride?.pathname === pathname ? resourceScopeOverride : null;
+    const clusterId = searchParams.get("clusterId")?.trim() || activeOverride?.clusterId?.trim() || "";
+    const clusterName = searchParams.get("clusterName")?.trim() || activeOverride?.clusterName?.trim() || "";
+    const namespace = searchParams.get("namespace")?.trim() || activeOverride?.namespace?.trim() || "";
+    return {
+      cluster: clusterId || clusterName ? getClusterDisplayName(shellClusterMap, clusterId, clusterName) : "全部集群",
+      namespace: namespace || "全部名称空间",
+    };
+  }, [pathname, resourceScopeOverride, searchParams, shellClusterMap]);
   const capabilityStats = useMemo(() => {
     const items = capabilitiesQuery.data ?? [];
     const enabled = items.filter((item) => item.enabled).length;
@@ -761,11 +808,6 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
         <Header
           className="app-header kn-glass-surface"
           data-shell-region="topbar"
-          style={{
-            background: "color-mix(in srgb, var(--kn-surface) 94%, transparent)",
-            borderBottom: "1px solid var(--kn-border)",
-            boxShadow: "var(--kn-shadow-subtle)",
-          }}
         >
           <Dropdown
             menu={{

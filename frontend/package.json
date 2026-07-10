@@ -1,6 +1,6 @@
 {
   "name": "kubenova-frontend",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "dev": "node --max-old-space-size=1536 ./node_modules/next/dist/bin/next dev --turbo",

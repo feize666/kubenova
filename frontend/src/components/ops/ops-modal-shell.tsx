@@ -33,7 +33,12 @@ export function OpsModalShell({
   return (
     <Modal
       {...props}
-      className={["ops-modal-shell", className].filter(Boolean).join(" ")}
+      className={[
+        "ops-modal-shell",
+        identity ? "ops-modal-shell--has-identity" : undefined,
+        impact ? "ops-modal-shell--has-impact" : undefined,
+        className,
+      ].filter(Boolean).join(" ")}
       title={(
         <div className="ops-modal-shell__heading">
           <div className="ops-modal-shell__title-row">

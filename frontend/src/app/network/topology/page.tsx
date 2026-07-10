@@ -1163,6 +1163,7 @@ function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<So
     if (edgeIds.has(id)) return;
     edgeIds.add(id);
     const isRelated = Boolean(focusedIds?.has(sourceEntity.id) || focusedIds?.has(targetEntity.id));
+    const hasIncident = sourceEntity.status !== "success" || targetEntity.status !== "success";
     edges.push({
       id,
       source,
@@ -1170,7 +1171,7 @@ function buildVisibleGraph(model: GraphModel, options: { selectedSources: Set<So
       type: "smoothstep",
       animated: false,
       label: !isLargeGraph && sourceVisible && targetVisible ? relation.label : undefined,
-      className: `resource-map-edge resource-map-edge--${relation.role} ${isRelated ? "is-related" : ""}`,
+      className: `resource-map-edge resource-map-edge--${relation.role} ${isRelated ? "is-related" : ""} ${hasIncident ? "is-abnormal" : ""}`,
       pathOptions: EDGE_PATH_OPTIONS,
       interactionWidth: 18,
       style: isRelated ? EDGE_STYLE_RELATED : relation.role === "owner" ? EDGE_STYLE_OWNER : EDGE_STYLE_DEFAULT,
@@ -1213,6 +1214,9 @@ function ResourceMapNodeBase({ id, data, selected }: NodeProps<TopologyNodeData>
   return (
     <div
       className={`resource-map-node ${isGroup ? "resource-map-node--group" : ""} is-${data.status} ${selected ? "is-selected" : ""}`}
+      data-resource-kind={data.kind}
+      data-resource-source={data.source}
+      data-resource-status={data.status}
       role="button"
       tabIndex={0}
       style={{ "--node-accent": meta.color } as React.CSSProperties}
@@ -1257,6 +1261,7 @@ function ResourceMapNodeBase({ id, data, selected }: NodeProps<TopologyNodeData>
                     key={child.id}
                     type="button"
                     className={`resource-map-stack-card is-${child.status}`}
+                    data-resource-status={child.status}
                     style={{ "--node-accent": childMeta.color } as React.CSSProperties}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -1513,7 +1518,13 @@ function DetailRail({
                   YAML
                 </OpsIconActionButton>
               </Tooltip>
-              <OpsIconActionButton icon={<LinkOutlined />} onClick={onJump} disabled={!jumpUrl || Boolean(children.length)}>
+              <OpsIconActionButton
+                className={jumpUrl && !children.length ? "resource-map-jump-action is-ready" : "resource-map-jump-action"}
+                icon={<LinkOutlined />}
+                onClick={onJump}
+                disabled={!jumpUrl || Boolean(children.length)}
+                disabledReason={!jumpUrl ? "暂无匹配资源页" : children.length ? "分组不支持直接跳转" : undefined}
+              >
                 资源页
               </OpsIconActionButton>
               <OpsIconActionButton icon={<CopyOutlined />} onClick={() => onCopy(getCopyValue(node))}>

@@ -189,12 +189,32 @@ export function PodMetricCell({
   percent?: number | null;
   kind: "cpu" | "memory";
 }) {
-  const ringValue = MetricUnitFormatter({ kind, value });
-  const displayPercent = typeof percent === "number" && Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
-  const color = kind === "cpu" ? "#3fb950" : "#58a6ff";
+  const metricValue = MetricUnitFormatter({ kind, value });
+  const hasPercent = typeof percent === "number" && Number.isFinite(percent);
+  const displayPercent = hasPercent ? Math.max(0, Math.min(100, percent)) : null;
+  const isHot = displayPercent !== null && displayPercent >= 85;
+  const isWarm = displayPercent !== null && displayPercent >= 65 && displayPercent < 85;
+  const color = isHot ? "#ef4444" : isWarm ? "#f59e0b" : kind === "cpu" ? "#16a34a" : "#2563eb";
+  const label = kind === "cpu" ? "CPU" : "MEM";
+  const percentLabel = displayPercent === null ? "实时值" : `${Math.round(displayPercent)}%`;
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <MetricRingVisual value={ringValue} percent={displayPercent} color={color} size={52} />
+    <div
+      className="pod-metric-cell"
+      style={{
+        ["--pod-metric-color" as string]: color,
+      }}
+    >
+      <div className="pod-metric-cell__main">
+        <span className="pod-metric-cell__label">{label}</span>
+        <strong className="pod-metric-cell__value">{metricValue}</strong>
+      </div>
+      <div className="pod-metric-cell__track" aria-hidden>
+        <span
+          className="pod-metric-cell__fill"
+          style={{ width: `${displayPercent ?? 18}%` }}
+        />
+      </div>
+      <div className="pod-metric-cell__meta">{percentLabel}</div>
     </div>
   );
 }

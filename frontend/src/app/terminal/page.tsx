@@ -135,32 +135,60 @@ function readCssVar(name: string, fallback: string): string {
 }
 
 function readOpsTerminalTheme() {
-  const background = readCssVar("--ops-terminal-bg", "#061120");
-  return {
+  const isDark =
+    typeof document !== "undefined" &&
+    document.documentElement.dataset.theme === "dark";
+  const background = readCssVar("--ops-terminal-bg", "#0c131d");
+  const baseTheme = {
     background,
-    foreground: readCssVar("--ops-terminal-fg", "#eef6ff"),
+    foreground: readCssVar("--ops-terminal-fg", "#e8eef7"),
     cursor: readCssVar("--ops-status-info-text", "#38bdf8"),
     cursorAccent: background,
     selectionBackground: readCssVar(
       "--ops-terminal-selection",
-      "rgba(56, 189, 248, 0.45)",
+      "rgba(56, 189, 248, 0.28)",
     ),
-    black: "#020617",
-    red: "#ef4444",
-    green: "#22c55e",
-    yellow: "#f59e0b",
-    blue: "#3b82f6",
-    magenta: "#a855f7",
-    cyan: "#06b6d4",
-    white: "#e2e8f0",
-    brightBlack: "#475569",
-    brightRed: "#f87171",
-    brightGreen: "#4ade80",
-    brightYellow: "#facc15",
-    brightBlue: "#60a5fa",
-    brightMagenta: "#c084fc",
-    brightCyan: "#67e8f9",
-    brightWhite: "#f8fafc",
+  };
+  if (isDark) {
+    return {
+      ...baseTheme,
+      black: "#020617",
+      red: "#ef4444",
+      green: "#22c55e",
+      yellow: "#f59e0b",
+      blue: "#3b82f6",
+      magenta: "#a855f7",
+      cyan: "#06b6d4",
+      white: "#e2e8f0",
+      brightBlack: "#64748b",
+      brightRed: "#f87171",
+      brightGreen: "#4ade80",
+      brightYellow: "#facc15",
+      brightBlue: "#60a5fa",
+      brightMagenta: "#c084fc",
+      brightCyan: "#67e8f9",
+      brightWhite: "#f8fafc",
+    };
+  }
+
+  return {
+    ...baseTheme,
+    black: "#0f172a",
+    red: "#dc2626",
+    green: "#15803d",
+    yellow: "#b45309",
+    blue: "#1d4ed8",
+    magenta: "#7e22ce",
+    cyan: "#0369a1",
+    white: "#334155",
+    brightBlack: "#64748b",
+    brightRed: "#ef4444",
+    brightGreen: "#16a34a",
+    brightYellow: "#d97706",
+    brightBlue: "#2563eb",
+    brightMagenta: "#9333ea",
+    brightCyan: "#0284c7",
+    brightWhite: "#0f172a",
   };
 }
 
@@ -1049,7 +1077,7 @@ export default function TerminalPage() {
         className="terminal-workbench-shell"
         bodyClassName="terminal-workbench-body"
         state={VISUAL_FRAME_STATE[visualState]}
-        title="Terminal Workbench"
+        title="Pod 终端工作区"
         subtitle={`${clusterDisplayName} / ${targetBase.namespace || "-"} / ${targetBase.pod || "-"} · 来源 ${sourceLabel}`}
         status={
           <OpsStatusTag tone={visualTone}>
@@ -1266,156 +1294,98 @@ export default function TerminalPage() {
       </OpsFrameShell>
       <style jsx global>{`
         .terminal-workbench-shell.ops-frame-shell {
-          --ops-terminal-bg: #050b14;
-          --ops-terminal-fg: #dff6ff;
-          --ops-terminal-selection: rgba(34, 211, 238, 0.34);
+          --ops-terminal-bg: #f8fafc;
+          --ops-terminal-fg: #182230;
+          --ops-terminal-selection: rgba(37, 99, 235, 0.16);
           --terminal-bg: var(--ops-terminal-bg);
-          --terminal-border-glow: rgba(34, 211, 238, 0.18);
-          --terminal-workbench-shell-bg: linear-gradient(
-            180deg,
-            #ffffff,
-            #f8fbff
-          );
-          --terminal-workbench-toolbar-bg: linear-gradient(
-            180deg,
-            rgba(255, 255, 255, 0.98),
-            rgba(246, 249, 255, 0.96)
-          );
-          --terminal-workbench-toolbar-border: rgba(37, 99, 235, 0.16);
+          --terminal-border-glow: rgba(37, 99, 235, 0.08);
+          --terminal-workbench-shell-bg: #f5f8fc;
+          --terminal-workbench-toolbar-bg: #ffffff;
+          --terminal-workbench-toolbar-border: #d8e0ea;
           --terminal-workbench-select-bg: #ffffff;
-          --terminal-workbench-select-text: #162033;
-          --terminal-workbench-select-muted: #5d6675;
-          --terminal-workbench-select-border: #d7e2f1;
-          --terminal-workbench-stage-bg:
-            linear-gradient(
-              90deg,
-              transparent 0 23px,
-              rgba(37, 99, 235, 0.04) 23px 24px,
-              transparent 24px 48px
-            ),
-            var(--ops-terminal-bg);
-          --terminal-workbench-telemetry-bg: rgba(8, 18, 31, 0.86);
-          --terminal-workbench-telemetry-border: rgba(56, 189, 248, 0.14);
-          --terminal-workbench-telemetry-muted: rgba(203, 213, 225, 0.68);
-          --terminal-workbench-telemetry-text: rgba(248, 250, 252, 0.94);
-          --terminal-workbench-stage-border: rgba(37, 99, 235, 0.22);
-          --terminal-workbench-stage-active-border: rgba(14, 165, 233, 0.36);
-          --terminal-workbench-stage-danger-border: rgba(220, 38, 38, 0.32);
-          --terminal-workbench-stage-warning-border: rgba(180, 83, 9, 0.3);
-          --terminal-workbench-titlebar-bg: rgba(7, 15, 27, 0.96);
-          --terminal-workbench-titlebar-border: rgba(56, 189, 248, 0.2);
-          --terminal-workbench-title-color: var(--ops-terminal-fg);
-          --terminal-workbench-dot-ring: rgba(255, 255, 255, 0.08);
-          --terminal-workbench-host-bg:
-            linear-gradient(
-              90deg,
-              transparent 0 23px,
-              rgba(56, 189, 248, 0.052) 23px 24px,
-              transparent 24px 48px
-            ),
-            linear-gradient(
-              180deg,
-              rgba(255, 255, 255, 0.018) 0,
-              transparent 48%
-            ),
-            var(--terminal-bg);
-          --terminal-workbench-host-scanline: rgba(255, 255, 255, 0.035);
-          --terminal-workbench-host-inner-line: rgba(255, 255, 255, 0.026);
-          --terminal-workbench-scrollbar-track: rgba(15, 23, 42, 0.56);
-          --terminal-workbench-scrollbar-thumb: linear-gradient(
-            180deg,
-            rgba(56, 189, 248, 0.72),
-            rgba(59, 130, 246, 0.56)
-          );
+          --terminal-workbench-select-text: #172033;
+          --terminal-workbench-select-muted: #5b6678;
+          --terminal-workbench-select-border: #cfd8e3;
+          --terminal-workbench-stage-bg: #ffffff;
+          --terminal-workbench-telemetry-bg: #f8fafc;
+          --terminal-workbench-telemetry-border: #d9e2ee;
+          --terminal-workbench-telemetry-muted: #64748b;
+          --terminal-workbench-telemetry-text: #182230;
+          --terminal-workbench-stage-border: #d5deea;
+          --terminal-workbench-stage-active-border: #a7c0f7;
+          --terminal-workbench-stage-danger-border: #f0b4b4;
+          --terminal-workbench-stage-warning-border: #efd19a;
+          --terminal-workbench-titlebar-bg: #ffffff;
+          --terminal-workbench-titlebar-border: #d9e2ee;
+          --terminal-workbench-title-color: #182230;
+          --terminal-workbench-dot-ring: rgba(15, 23, 42, 0.08);
+          --terminal-workbench-host-bg: #f8fafc;
+          --terminal-workbench-host-inner-line: rgba(15, 23, 42, 0.08);
+          --terminal-workbench-scrollbar-track: #e6edf5;
+          --terminal-workbench-scrollbar-thumb: #8ab0ff;
           min-height: calc(100vh - 112px);
           border-radius: 8px;
           background: var(--terminal-workbench-shell-bg);
+          border-color: #d8e0ea;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
         }
 
         [data-theme="light"] {
-          --ops-terminal-bg: #050b14;
-          --ops-terminal-fg: #dff6ff;
-          --ops-terminal-selection: rgba(34, 211, 238, 0.34);
+          --ops-terminal-bg: #f8fafc;
+          --ops-terminal-fg: #182230;
+          --ops-terminal-selection: rgba(37, 99, 235, 0.16);
           --terminal-bg: var(--ops-terminal-bg);
-          --terminal-border-glow: rgba(34, 211, 238, 0.18);
+          --terminal-border-glow: rgba(37, 99, 235, 0.08);
         }
 
         [data-theme="dark"] .terminal-workbench-shell.ops-frame-shell {
-          --ops-terminal-bg: #061120;
-          --ops-terminal-fg: #eef6ff;
-          --ops-terminal-selection: rgba(56, 189, 248, 0.45);
+          --ops-terminal-bg: #0c131d;
+          --ops-terminal-fg: #e8eef7;
+          --ops-terminal-selection: rgba(56, 189, 248, 0.28);
           --terminal-bg: var(--ops-terminal-bg);
-          --terminal-border-glow: rgba(56, 189, 248, 0.24);
-          --terminal-workbench-shell-bg: linear-gradient(
-            180deg,
-            rgba(8, 18, 31, 0.98),
-            rgba(3, 10, 20, 0.98)
-          );
-          --terminal-workbench-toolbar-bg: rgba(2, 8, 23, 0.28);
-          --terminal-workbench-toolbar-border: rgba(148, 163, 184, 0.16);
-          --terminal-workbench-select-bg: rgba(2, 8, 23, 0.34);
-          --terminal-workbench-select-text: rgba(248, 250, 252, 0.92);
-          --terminal-workbench-select-muted: rgba(226, 232, 240, 0.74);
-          --terminal-workbench-select-border: rgba(148, 163, 184, 0.22);
-          --terminal-workbench-stage-bg:
-            linear-gradient(
-              90deg,
-              transparent 0 23px,
-              rgba(56, 189, 248, 0.055) 23px 24px,
-              transparent 24px 48px
-            ),
-            var(--ops-terminal-bg);
-          --terminal-workbench-telemetry-bg: rgba(8, 18, 31, 0.78);
-          --terminal-workbench-telemetry-border: rgba(56, 189, 248, 0.12);
-          --terminal-workbench-telemetry-muted: rgba(203, 213, 225, 0.68);
-          --terminal-workbench-telemetry-text: rgba(248, 250, 252, 0.94);
-          --terminal-workbench-stage-border: rgba(56, 189, 248, 0.24);
-          --terminal-workbench-stage-active-border: rgba(34, 211, 238, 0.38);
-          --terminal-workbench-stage-danger-border: rgba(248, 113, 113, 0.4);
-          --terminal-workbench-stage-warning-border: rgba(251, 191, 36, 0.36);
-          --terminal-workbench-titlebar-bg: rgba(8, 18, 31, 0.96);
-          --terminal-workbench-titlebar-border: rgba(56, 189, 248, 0.16);
+          --terminal-border-glow: rgba(56, 189, 248, 0.16);
+          --terminal-workbench-shell-bg: #0a1018;
+          --terminal-workbench-toolbar-bg: #0f1722;
+          --terminal-workbench-toolbar-border: #253041;
+          --terminal-workbench-select-bg: #0f1722;
+          --terminal-workbench-select-text: #e8eef7;
+          --terminal-workbench-select-muted: #8d9aab;
+          --terminal-workbench-select-border: #314052;
+          --terminal-workbench-stage-bg: #0c131d;
+          --terminal-workbench-telemetry-bg: #0f1722;
+          --terminal-workbench-telemetry-border: #253041;
+          --terminal-workbench-telemetry-muted: #93a0b2;
+          --terminal-workbench-telemetry-text: #e8eef7;
+          --terminal-workbench-stage-border: #253041;
+          --terminal-workbench-stage-active-border: #365780;
+          --terminal-workbench-stage-danger-border: #7a3740;
+          --terminal-workbench-stage-warning-border: #7a5a26;
+          --terminal-workbench-titlebar-bg: #0f1722;
+          --terminal-workbench-titlebar-border: #253041;
           --terminal-workbench-title-color: var(--ops-terminal-fg);
           --terminal-workbench-dot-ring: rgba(255, 255, 255, 0.06);
-          --terminal-workbench-host-bg:
-            linear-gradient(
-              90deg,
-              transparent 0 23px,
-              rgba(56, 189, 248, 0.052) 23px 24px,
-              transparent 24px 48px
-            ),
-            linear-gradient(
-              180deg,
-              rgba(255, 255, 255, 0.018) 0,
-              transparent 48%
-            ),
-            var(--terminal-bg);
-          --terminal-workbench-host-scanline: rgba(255, 255, 255, 0.035);
-          --terminal-workbench-host-inner-line: rgba(255, 255, 255, 0.026);
-          --terminal-workbench-scrollbar-track: rgba(15, 23, 42, 0.56);
-          --terminal-workbench-scrollbar-thumb: linear-gradient(
-            180deg,
-            rgba(56, 189, 248, 0.72),
-            rgba(59, 130, 246, 0.56)
-          );
+          --terminal-workbench-host-bg: #0c131d;
+          --terminal-workbench-host-inner-line: rgba(255, 255, 255, 0.02);
+          --terminal-workbench-scrollbar-track: #1b2430;
+          --terminal-workbench-scrollbar-thumb: #4f7fd6;
         }
 
         .terminal-workbench-shell .ops-frame-shell__header {
           align-items: center;
           gap: 14px;
-          border-bottom-color: var(--kn-border);
-          background: color-mix(in srgb, var(--kn-surface) 90%, transparent);
-          backdrop-filter: blur(12px) saturate(1.08);
+          padding: 12px 14px;
+          border-bottom-color: var(--terminal-workbench-titlebar-border);
+          background: var(--terminal-workbench-toolbar-bg);
         }
 
         .terminal-workbench-shell .ops-frame-shell__title {
-          color: var(--kn-text);
+          color: var(--terminal-workbench-title-color);
           font-size: 16px;
           letter-spacing: 0;
         }
 
         .terminal-workbench-shell .ops-frame-shell__subtitle {
-          color: var(--kn-text-secondary);
+          color: var(--terminal-workbench-telemetry-muted);
         }
 
         .terminal-workbench-body {
@@ -1438,11 +1408,26 @@ export default function TerminalPage() {
         }
 
         .terminal-workbench-toolbar__group {
-          padding: 3px;
+          padding: 4px;
           border: 1px solid var(--terminal-workbench-toolbar-border);
           border-radius: 8px;
           background: var(--terminal-workbench-toolbar-bg);
-          backdrop-filter: blur(10px) saturate(1.08);
+          box-shadow: none;
+        }
+
+        .terminal-workbench-toolbar :global(.ops-icon-action-button.ant-btn) {
+          min-height: 32px;
+          border-color: var(--terminal-workbench-select-border);
+          background: var(--terminal-workbench-select-bg);
+          color: var(--terminal-workbench-select-text);
+          box-shadow: none;
+        }
+
+        .terminal-workbench-toolbar :global(.ops-icon-action-button.ant-btn:hover),
+        .terminal-workbench-toolbar :global(.ops-icon-action-button.ant-btn:focus-visible) {
+          border-color: var(--terminal-workbench-stage-active-border);
+          background: color-mix(in srgb, var(--terminal-workbench-select-bg) 92%, var(--kn-primary-subtle));
+          color: var(--ant-color-primary);
         }
 
         .terminal-workbench-toolbar__group--utility {
@@ -1469,19 +1454,37 @@ export default function TerminalPage() {
           position: relative;
           display: grid;
           grid-template-rows: auto auto minmax(0, 1fr);
-          min-height: 72vh;
+          min-height: 70vh;
           overflow: hidden;
           border: 1px solid var(--terminal-workbench-stage-border);
           border-radius: 8px;
           background: var(--terminal-workbench-stage-bg);
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.035),
-            0 1px 2px rgba(15, 23, 42, 0.12);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+        }
+
+        .terminal-workbench-stage::before,
+        .terminal-workbench-stage::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          z-index: 2;
+          pointer-events: none;
+          border-radius: inherit;
+        }
+
+        .terminal-workbench-stage::before,
+        .terminal-workbench-stage::after {
+          display: none;
         }
 
         .terminal-workbench-stage--connecting,
         .terminal-workbench-stage--connected {
           border-color: var(--terminal-workbench-stage-active-border);
+        }
+
+        .terminal-workbench-stage--connecting::before,
+        .terminal-workbench-stage--connected::before {
+          animation: none;
         }
 
         .terminal-workbench-stage--expired,
@@ -1498,8 +1501,8 @@ export default function TerminalPage() {
           align-items: center;
           justify-content: space-between;
           gap: 12px;
-          min-height: 40px;
-          padding: 8px 12px;
+          min-height: 38px;
+          padding: 7px 12px;
           border-bottom: 1px solid var(--terminal-workbench-titlebar-border);
           background: var(--terminal-workbench-titlebar-bg);
         }
@@ -1528,6 +1531,14 @@ export default function TerminalPage() {
           flex: 0 0 auto;
           border-radius: 50%;
           box-shadow: 0 0 0 1px var(--terminal-workbench-dot-ring);
+        }
+
+        .terminal-workbench-stage--connecting .terminal-workbench-dot--info,
+        .terminal-workbench-stage--connected .terminal-workbench-dot--success {
+          box-shadow:
+            0 0 0 1px var(--terminal-workbench-dot-ring),
+            0 0 14px color-mix(in srgb, var(--ops-status-info-text) 58%, transparent);
+          animation: terminal-signal-pulse 180ms var(--ops-motion-ease-out) both;
         }
 
         .terminal-workbench-dot--warn {
@@ -1613,34 +1624,28 @@ export default function TerminalPage() {
         }
 
         .terminal-workbench-terminal-area {
-          height: 68vh;
-          max-height: 68vh;
+          height: 66vh;
+          max-height: 66vh;
           min-height: 0;
           overflow: hidden;
         }
 
         .terminal-workbench-terminal-area .terminal-xterm-host {
           background: var(--terminal-workbench-host-bg);
-          box-shadow:
-            inset 0 0 0 1px var(--terminal-workbench-host-inner-line),
-            inset 0 0 28px
-              color-mix(in srgb, var(--terminal-border-glow) 36%, transparent);
+          box-shadow: inset 0 0 0 1px var(--terminal-workbench-host-inner-line);
         }
 
         .terminal-workbench-terminal-area .terminal-xterm-host::before {
-          background:
-            linear-gradient(
-              180deg,
-              var(--terminal-workbench-host-scanline),
-              transparent 38%
-            ),
-            linear-gradient(
-              90deg,
-              transparent,
-              var(--terminal-workbench-host-inner-line),
-              transparent
-            );
-          opacity: 0.16;
+          display: none;
+        }
+
+        .terminal-workbench-stage--connecting
+          .terminal-workbench-terminal-area
+          .terminal-xterm-host::before,
+        .terminal-workbench-stage--connected
+          .terminal-workbench-terminal-area
+          .terminal-xterm-host::before {
+          animation: none;
         }
 
         .terminal-workbench-terminal-area .terminal-xterm-host .xterm,
@@ -1668,9 +1673,7 @@ export default function TerminalPage() {
         }
 
         [data-theme="dark"] .terminal-workbench-stage {
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.035),
-            0 1px 2px rgba(2, 8, 23, 0.16);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
         }
 
         @media (max-width: 900px) {
@@ -1681,6 +1684,23 @@ export default function TerminalPage() {
           .terminal-workbench-titlebar {
             align-items: flex-start;
             flex-direction: column;
+          }
+
+          .terminal-workbench-toolbar.ant-space,
+          .terminal-workbench-toolbar__select,
+          .terminal-workbench-toolbar__group {
+            width: 100%;
+          }
+
+          .terminal-workbench-toolbar__group {
+            flex-wrap: wrap;
+            justify-content: flex-start;
+          }
+
+          .terminal-workbench-live-state {
+            width: 100%;
+            justify-content: space-between;
+            flex-wrap: wrap;
           }
 
           .terminal-workbench-container-select.ant-select {
@@ -1694,6 +1714,33 @@ export default function TerminalPage() {
           .terminal-workbench-terminal-area {
             height: 58vh;
             max-height: 58vh;
+          }
+        }
+
+        @keyframes terminal-signal-pulse {
+          0%,
+          100% {
+            opacity: 0.72;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1.12);
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .terminal-workbench-stage--connecting::before,
+          .terminal-workbench-stage--connected::before,
+          .terminal-workbench-stage--connecting .terminal-workbench-dot--info,
+          .terminal-workbench-stage--connected .terminal-workbench-dot--success,
+          .terminal-workbench-stage--connecting
+            .terminal-workbench-terminal-area
+            .terminal-xterm-host::before,
+          .terminal-workbench-stage--connected
+            .terminal-workbench-terminal-area
+            .terminal-xterm-host::before {
+            animation: none !important;
           }
         }
       `}</style>

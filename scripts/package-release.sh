@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/_node-toolchain.sh"
+kubenova_prefer_current_node_toolchain
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/tmp/release}"
 SKIP_BUILD="${SKIP_BUILD:-false}"
 PACKAGE_NAME="kubenova-ubuntu"
@@ -43,6 +45,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$SKIP_BUILD" != "true" ]]; then
+  kubenova_require_node_package_tools package-release
+fi
 
 require_cmd() {
   local cmd="$1" hint="${2:-$1}"

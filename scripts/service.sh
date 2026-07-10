@@ -3,6 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/_node-toolchain.sh"
+kubenova_prefer_current_node_toolchain
 
 usage() {
   cat <<'USAGE'
@@ -47,9 +49,9 @@ Environment:
   START_GATEWAY, USE_TMUX, RELEASE_ROOT, SYSTEMD_ENV_DIR
 
 Notes:
-  --stable-frontend runs the frontend from the Next standalone build. Prefer it
-  for release/browser regression because Next dev can restart under memory
-  pressure during large route sweeps.
+  dev up defaults to --stable-frontend to avoid Next dev/Turbopack first-hit
+  compilation and high RSS on fresh environments. Use --dev-frontend only when
+  frontend hot reload is required.
 USAGE
 }
 
@@ -91,6 +93,7 @@ preflight_dev() {
   preflight_common
   require_command dev node "安装 Node.js"
   require_command dev npm "安装 npm"
+  kubenova_require_node_package_tools dev
   require_command dev curl "安装 curl"
   ensure_dir frontend "$ROOT_DIR/frontend"
   ensure_dir control-api "$ROOT_DIR/backend/control-api"
@@ -100,6 +103,7 @@ preflight_dev() {
 preflight_prod() {
   preflight_common
   require_command prod node "安装 Node.js"
+  kubenova_require_node_runtime prod
   require_command prod curl "安装 curl"
   local release_root="${RELEASE_ROOT:-/opt/kubenova/current}"
   if [[ "${1:-}" == "start" || "${1:-}" == "up" ]]; then
@@ -129,6 +133,7 @@ run_prod() {
 }
 
 install_deps() {
+  kubenova_require_node_package_tools install-deps
   echo "[安装] 正在安装前端依赖..."
   npm --prefix "$ROOT_DIR/frontend" install
 
@@ -145,6 +150,7 @@ install_deps() {
 }
 
 db_init() {
+  kubenova_require_node_package_tools db-init
   local control_api_dir="$ROOT_DIR/backend/control-api"
   local db_name="${DB_NAME:-k8s_aiops}"
   local db_user="${DB_USER:-kubenova}"
@@ -355,10 +361,12 @@ case "$cmd" in
     shift || true
     case "$sub" in
       frontend)
-        exec bash -lc "cd $(printf '%q' "$ROOT_DIR/frontend") && npm run build:stable"
+        kubenova_require_node_package_tools build-frontend
+        exec bash -c "cd $(printf '%q' "$ROOT_DIR/frontend") && npm run build:stable"
         ;;
       control-api)
-        exec bash -lc "cd $(printf '%q' "$ROOT_DIR/backend/control-api") && npm run build"
+        kubenova_require_node_package_tools build-control-api
+        exec bash -c "cd $(printf '%q' "$ROOT_DIR/backend/control-api") && npm run build"
         ;;
       runtime-gateway)
         exec bash -lc "cd $(printf '%q' "$ROOT_DIR/backend/runtime-gateway") && go build -o ../../.release/runtime-gateway ./cmd/runtime-gateway"

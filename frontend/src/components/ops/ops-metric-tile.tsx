@@ -41,6 +41,7 @@ export function OpsMetricTile({
         <strong className="ops-metric-tile__value-main">{value}</strong>
         {suffix ? <span className="ops-metric-tile__value-suffix">{suffix}</span> : null}
       </div>
+      <span className="ops-metric-tile__rail" aria-hidden />
       {meta ? <div className="ops-metric-tile__meta">{meta}</div> : null}
     </div>
   );

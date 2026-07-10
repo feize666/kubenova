@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 
+source "$ROOT_DIR/scripts/_node-toolchain.sh"
+
 load_dev_env_defaults() {
   local file line key value
+  kubenova_prefer_current_node_toolchain
+
   local files=(
     "$ROOT_DIR/.env"
     "$ROOT_DIR/backend/control-api/.env"

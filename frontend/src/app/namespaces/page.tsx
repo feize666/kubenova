@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import {
   Alert,
   App,
@@ -32,6 +33,10 @@ import { ResourceTable } from "@/components/resource-table";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import {
+  readResourceFilterFromSearchParams,
+  useSyncResourceFilterUrlState,
+} from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
 import {
   createNamespace,
@@ -108,12 +113,17 @@ function buildNamespaceDetailTarget(
 export default function NamespacesPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
+  const initialFilters = useMemo(
+    () => readResourceFilterFromSearchParams(searchParams),
+    [searchParams],
+  );
 
-  const { clusterId, onClusterChange } = useClusterNamespaceFilter();
-  const [keyword, setKeyword] = useState("");
-  const [keywordInput, setKeywordInput] = useState("");
+  const { clusterId, onClusterChange } = useClusterNamespaceFilter(initialFilters.clusterId);
+  const [keyword, setKeyword] = useState(initialFilters.keyword);
+  const [keywordInput, setKeywordInput] = useState(initialFilters.keyword);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const {
     sortBy,
@@ -184,6 +194,7 @@ export default function NamespacesPage() {
     [clustersQuery.data],
   );
   const clusterUnavailable = Boolean(clustersQuery.data?.selectableUnavailable);
+  useSyncResourceFilterUrlState({ clusterId, namespace: "", keyword });
   const clusterMap = useMemo(
     () =>
       Object.fromEntries(

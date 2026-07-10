@@ -265,15 +265,6 @@ function extractObjectKeys(text, variableName) {
   });
 }
 
-function extractCssBlock(cssText, selector) {
-  const selectorIndex = cssText.indexOf(selector);
-  if (selectorIndex === -1) return "";
-  const openIndex = cssText.indexOf("{", selectorIndex);
-  if (openIndex === -1) return "";
-  const closeIndex = findMatching(cssText, openIndex, "{", "}");
-  return cssText.slice(openIndex + 1, closeIndex);
-}
-
 function extractCssVariables(cssText, selector, prefix) {
   const variables = new Map();
   const variablePattern = new RegExp(`(${prefix}[A-Za-z0-9_-]+)\\s*:\\s*([^;]+);`, "g");

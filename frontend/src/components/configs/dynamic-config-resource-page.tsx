@@ -362,9 +362,13 @@ export function DynamicConfigResourcePage({
   const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [form] = Form.useForm<CreateConfigPolicyFormValues>();
   const watchedLimitType = Form.useWatch("limitType", form) ?? "Container";
-  const { sortBy, sortOrder, pagination, resetPage, getPaginationConfig, handleTableChange } =
+  const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<DynamicResourceItem>({
       defaultPageSize: 10,
+      storageKey: `${tableKey}/table-sort`,
+      defaultSortBy: "updatedAt",
+      defaultSortOrder: "desc",
+      allowedSortBy: ["name", "clusterId", "namespace", "updatedAt"],
     });
 
   const clustersQuery = useQuery({
@@ -736,6 +740,7 @@ export function DynamicConfigResourcePage({
       key: "name",
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name", listQuery.isLoading && !listQuery.data),
       render: (name: string, row) => (
         <Typography.Link onClick={() => setDetailTarget(buildDetailTarget(row))}>{name}</Typography.Link>
       ),
@@ -744,6 +749,7 @@ export function DynamicConfigResourcePage({
       title: "集群",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId", listQuery.isLoading && !listQuery.data),
       render: (_: unknown, row) => getClusterDisplayName(clusterMap, row.clusterId),
     },
     {
@@ -751,6 +757,7 @@ export function DynamicConfigResourcePage({
       dataIndex: "namespace",
       key: "namespace",
       width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace", listQuery.isLoading && !listQuery.data),
       render: (value: string) => value || "-",
     },
     ...summaryColumns,
@@ -759,6 +766,7 @@ export function DynamicConfigResourcePage({
       dataIndex: "updatedAt",
       key: "updatedAt",
       width: TABLE_COL_WIDTH.updateTime,
+      ...getSortableColumnProps("updatedAt", listQuery.isLoading && !listQuery.data),
       render: (value?: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     {

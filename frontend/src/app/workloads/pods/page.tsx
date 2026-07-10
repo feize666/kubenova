@@ -402,11 +402,7 @@ function renderUsageCell(
     <PodMetricCell
       kind={kind}
       value={value}
-      percent={
-        kind === "cpu"
-          ? Math.min(100, Math.max(0, value * 100))
-          : Math.min(100, (value / 1024 ** 3) * 100)
-      }
+      percent={kind === "cpu" ? row.cpuUsagePercent : row.memoryUsagePercent}
     />
   );
 }

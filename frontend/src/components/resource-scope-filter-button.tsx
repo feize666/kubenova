@@ -6,6 +6,9 @@ import { useMemo, useState } from "react";
 import { ClusterSelect, type ClusterOption } from "@/components/cluster-select";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { OpsFilterTriggerButton, OpsPopoverPanel } from "@/components/ops";
+import { useClusterDisplayMap } from "@/hooks/use-cluster-display-map";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { emitResourceScopeChange } from "@/lib/resource-scope-events";
 
 type ResourceScopeFilterButtonProps = {
   clusterId: string;
@@ -48,11 +51,7 @@ export function ResourceScopeFilterButton({
     setOpen(nextOpen);
   };
 
-  const clusterNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    clusterOptions.forEach((option) => map.set(option.value, option.label));
-    return map;
-  }, [clusterOptions]);
+  const clusterNameById = useClusterDisplayMap(clusterOptions, clusterId);
 
   const hasConcreteDraftCluster = draftClusterId.trim().length > 0;
   const parentKeepsDraftDisabled = Boolean(namespaceDisabled && draftClusterId === clusterId);
@@ -63,19 +62,28 @@ export function ResourceScopeFilterButton({
 
   const summary = useMemo(() => {
     if (!clusterId && !namespace) return "全部资源";
-    const clusterLabel = clusterId ? clusterNameById.get(clusterId) ?? clusterId : "全部集群";
+    const clusterLabel = clusterId
+      ? getClusterDisplayName(Object.fromEntries(clusterNameById), clusterId)
+      : "全部集群";
     if (namespaceVisible && namespace) return `${clusterLabel} / ${namespace}`;
     return clusterLabel;
   }, [clusterId, clusterNameById, namespace, namespaceVisible]);
 
   const applyDraft = () => {
-    onApply({ clusterId: draftClusterId, namespace: namespaceVisible ? draftNamespace : "" });
+    const nextNamespace = namespaceVisible ? draftNamespace : "";
+    emitResourceScopeChange({
+      clusterId: draftClusterId,
+      clusterName: draftClusterId ? getClusterDisplayName(Object.fromEntries(clusterNameById), draftClusterId) : "",
+      namespace: nextNamespace,
+    });
+    onApply({ clusterId: draftClusterId, namespace: nextNamespace });
     setOpen(false);
   };
 
   const resetAndApply = () => {
     setDraftClusterId("");
     setDraftNamespace("");
+    emitResourceScopeChange({ clusterId: "", namespace: "" });
     onApply({ clusterId: "", namespace: "" });
     setOpen(false);
   };

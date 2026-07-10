@@ -199,7 +199,7 @@ export default function ObservabilityCenterPage() {
   );
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space className="ops-observability-cockpit" orientation="vertical" size={16} style={{ width: "100%" }}>
       <ResourcePageHeader
         path={OBSERVABILITY_PATH}
         freshness={summary ? { label: "采集时间", value: summary.timestamp, color: "blue" } : undefined}
@@ -228,7 +228,7 @@ export default function ObservabilityCenterPage() {
           description={summaryQuery.error instanceof Error ? summaryQuery.error.message : "请求失败，请稍后重试"}
         />
       ) : null}
-      <Row gutter={[12, 12]}>
+      <Row className="ops-observability-cockpit__metrics" gutter={[12, 12]}>
         <Col xs={24} md={6}>
           <OpsMetricTile
             label="健康分"
@@ -260,7 +260,7 @@ export default function ObservabilityCenterPage() {
         </Col>
       </Row>
 
-      <OpsSurface variant="panel" padding="sm" title="数据源状态">
+      <OpsSurface className="ops-observability-panel ops-observability-panel--sources" variant="panel" padding="sm" title="数据源状态">
         {sourceStatus.length ? (
           <Row gutter={[12, 12]}>
             {sourceStatus.map((item) => (
@@ -284,7 +284,7 @@ export default function ObservabilityCenterPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={10}>
-          <OpsSurface variant="panel" padding="sm" title="实体健康">
+          <OpsSurface className="ops-observability-panel" variant="panel" padding="sm" title="实体健康">
             <ResourceTable
               rowKey="scope"
               size="small"
@@ -297,7 +297,7 @@ export default function ObservabilityCenterPage() {
           </OpsSurface>
         </Col>
         <Col xs={24} xl={14}>
-          <OpsSurface variant="panel" padding="sm" title="信号联动">
+          <OpsSurface className="ops-observability-panel" variant="panel" padding="sm" title="信号联动">
             <ResourceTable
               rowKey="key"
               size="small"
@@ -311,7 +311,7 @@ export default function ObservabilityCenterPage() {
         </Col>
       </Row>
 
-      <OpsSurface variant="panel" padding="sm" title="最近事件">
+      <OpsSurface className="ops-observability-panel ops-observability-panel--events" variant="panel" padding="sm" title="最近事件">
         <ResourceTable
           rowKey="id"
           size="small"

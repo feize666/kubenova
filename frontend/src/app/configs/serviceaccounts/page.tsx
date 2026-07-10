@@ -194,9 +194,13 @@ export default function ServiceAccountsPage() {
   const [keyword, setKeyword] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const { sortBy, sortOrder, pagination, resetPage, getPaginationConfig, handleTableChange } =
+  const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ServiceAccountRecord>({
       defaultPageSize: 10,
+      storageKey: "configs/serviceaccounts/table-sort",
+      defaultSortBy: "updatedAt",
+      defaultSortOrder: "desc",
+      allowedSortBy: ["name", "clusterId", "namespace", "updatedAt"],
     });
 
   const [yamlOpen, setYamlOpen] = useState(false);
@@ -574,6 +578,7 @@ export default function ServiceAccountsPage() {
       key: "name",
       width: nameWidth,
       ellipsis: true,
+      ...getSortableColumnProps("name", listQuery.isLoading && !listQuery.data),
       render: (name: string, row: ServiceAccountRecord) =>
         row.id ? (
           <Typography.Link
@@ -600,6 +605,7 @@ export default function ServiceAccountsPage() {
       title: "集群",
       key: "clusterId",
       width: TABLE_COL_WIDTH.cluster,
+      ...getSortableColumnProps("clusterId", listQuery.isLoading && !listQuery.data),
       render: (_: unknown, record: ServiceAccountRecord) => getClusterDisplayName(clusterMap, record.clusterId),
     },
     {
@@ -607,6 +613,7 @@ export default function ServiceAccountsPage() {
       dataIndex: "namespace",
       key: "namespace",
       width: TABLE_COL_WIDTH.namespace,
+      ...getSortableColumnProps("namespace", listQuery.isLoading && !listQuery.data),
       render: (value: string) => value || "-",
     },
     {
@@ -614,6 +621,7 @@ export default function ServiceAccountsPage() {
       dataIndex: "updatedAt",
       key: "updatedAt",
       width: TABLE_COL_WIDTH.updateTime,
+      ...getSortableColumnProps("updatedAt", listQuery.isLoading && !listQuery.data),
       render: (value?: string) => <ResourceTimeCell value={value} now={now} mode="relative" />,
     },
     {

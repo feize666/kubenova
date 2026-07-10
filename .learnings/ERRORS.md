@@ -151,3 +151,35 @@ Frontend has Playwright package but browser executable missing from `/root/.cach
 
 ### Suggested Action
 Use system Chrome executable when present, or run `npx playwright install chromium` before Node Playwright verification.
+
+---
+
+## [ERR-20260710-001] WSL Node toolchain path pollution
+
+**Logged**: 2026-07-10T13:18:00+08:00
+**Priority**: high
+**Status**: resolved
+**Area**: config
+
+### Summary
+KubeNova dev commands used Linux `node` but Windows-side `npm/npx`, causing `npm run` env syntax failures and broken `.bin` shims.
+
+### Error
+```text
+'PERF_SAMPLE_COUNT' 不是内部或外部命令，也不是可运行的程序
+Error: Cannot find module '../package.json'
+Require stack:
+- frontend/node_modules/.bin/eslint
+```
+
+### Context
+- `which node` resolved to `/usr/local/node-v24.14.1-linux-x64/bin/node`
+- `which npm` and `which npx` resolved to `/mnt/f/nodejs`
+- This also made `npx --no-install nest start --watch` fail during dev API startup.
+
+### Suggested Fix
+Prepend the current Linux node bin directory to `PATH` during dev environment initialization, then reinstall dependencies with Linux npm if existing shims are damaged.
+
+### Metadata
+- Reproducible: yes
+- Related Files: scripts/_dev-env.sh, frontend/node_modules

@@ -21,7 +21,7 @@ RUNTIME_TOKEN_SECRET="${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret}"
 RUNTIME_GATEWAY_GOPROXY="${RUNTIME_GATEWAY_GOPROXY:-https://goproxy.cn,direct}"
 START_GATEWAY="${START_GATEWAY:-true}"
 USE_TMUX="${USE_TMUX:-false}"
-FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-dev}"
+FRONTEND_BOOT_MODE="${FRONTEND_BOOT_MODE:-stable}"
 CONTROL_API_BOOT_MODE="${CONTROL_API_BOOT_MODE:-dev}"
 FRONTEND_DEV_BUNDLER="${FRONTEND_DEV_BUNDLER:-turbopack}"
 FRONTEND_NODE_OPTIONS="${FRONTEND_NODE_OPTIONS:---max-old-space-size=1536}"
@@ -128,6 +128,7 @@ done
 
 check_dep node "Node.js (https://nodejs.org)"
 check_dep npm  "npm"
+kubenova_require_node_package_tools dev
 check_dep curl "curl"
 check_dep psql "PostgreSQL client (apt install postgresql-client)"
 check_dep redis-cli "Redis (apt install redis)"

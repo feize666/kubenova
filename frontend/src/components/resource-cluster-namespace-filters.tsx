@@ -4,6 +4,9 @@ import { SearchOutlined } from "@ant-design/icons";
 import { Space } from "antd";
 import type { ReactNode } from "react";
 import { OpsIconActionButton, type OpsActiveFilter } from "@/components/ops";
+import { useClusterDisplayMap } from "@/hooks/use-cluster-display-map";
+import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { emitResourceScopeChange } from "@/lib/resource-scope-events";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
@@ -55,15 +58,16 @@ export function ResourceClusterNamespaceFilters({
   onSearch,
   extraFilters,
   keywordPlaceholder = "按名称/标签搜索",
-  marginBottom = 12,
+  marginBottom = 8,
   showKeywordSearch = false,
 }: ResourceClusterNamespaceFiltersProps) {
   const hasConcreteCluster = clusterId.trim().length > 0;
   const resolvedNamespaceDisabled = namespaceDisabled ?? !hasConcreteCluster;
   const resolvedNamespacePlaceholder =
     namespacePlaceholder ?? (hasConcreteCluster ? "全部名称空间" : "请先选择具体集群");
+  const clusterNameById = useClusterDisplayMap(clusterOptions, clusterId);
   const clusterLabel = clusterId
-    ? clusterOptions.find((option) => option.value === clusterId)?.label ?? clusterId
+    ? getClusterDisplayName(Object.fromEntries(clusterNameById), clusterId)
     : "";
   const activeFilters: OpsActiveFilter[] = [
     clusterId
@@ -73,6 +77,7 @@ export function ResourceClusterNamespaceFilters({
           value: clusterLabel,
           tone: "info",
           onClear: () => {
+            emitResourceScopeChange({ clusterId: "", namespace: "" });
             if (onScopeChange) {
               onScopeChange("", "");
             } else {
@@ -89,6 +94,7 @@ export function ResourceClusterNamespaceFilters({
           value: namespace,
           tone: "neutral",
           onClear: () => {
+            emitResourceScopeChange({ clusterId, clusterName: clusterLabel, namespace: "" });
             if (onScopeChange) {
               onScopeChange(clusterId, "");
             } else {
@@ -112,7 +118,7 @@ export function ResourceClusterNamespaceFilters({
   ].filter(Boolean) as OpsActiveFilter[];
 
   return (
-    <div style={{ marginBottom }}>
+    <div className="resource-cluster-namespace-filters" style={{ marginBottom }}>
       <ResourceFilterToolbar
         activeFilters={activeFilters}
         actions={
@@ -136,6 +142,14 @@ export function ResourceClusterNamespaceFilters({
             namespacePlaceholder={resolvedNamespacePlaceholder}
             namespaceVisible={namespaceVisible}
             onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+              const nextClusterLabel = nextClusterId
+                ? getClusterDisplayName(Object.fromEntries(clusterNameById), nextClusterId)
+                : "";
+              emitResourceScopeChange({
+                clusterId: nextClusterId,
+                clusterName: nextClusterLabel,
+                namespace: nextNamespace,
+              });
               if (onScopeChange) {
                 onScopeChange(nextClusterId, nextNamespace);
               } else {
