@@ -683,7 +683,7 @@
   .resource-map-shell--workbench .resource-map-workbench,
   .resource-map-shell--workbench .resource-map-canvas-state { min-height: 520px; }
   .topology-kubejojo { min-height: 520px; border-radius: 0; }
-  .topology-kubejojo__focus { top: 61px; right: 10px; left: 10px; }
+  .topology-kubejojo__focus { top: 66px; right: 10px; left: 10px; }
   .topology-kubejojo__zoom { top: 10px; right: 10px; }
   .topology-kubejojo__zoom button,
   .topology-kubejojo__zoom button:last-child { width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
