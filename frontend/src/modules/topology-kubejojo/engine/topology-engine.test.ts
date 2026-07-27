@@ -9,7 +9,7 @@ import { applyTopologyCapacity, projectTopologyNeighborhood, TOPOLOGY_CAPACITY_L
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
 import { getKubejojoRelationSemantics, makeKubejojoRelationId, makeKubejojoStableId } from "./relations.ts";
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
-import { collapseKubejojoGraph, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, groupKubejojoGraph, KUBEJOJO_LAYOUT_METRICS, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
+import { collapseKubejojoGraph, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, groupKubejojoGraph, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
 
 const progressiveDisclosureResources: KubejojoResource[] = [
   { id: "deployment", kind: "Deployment", name: "checkout", namespace: "demo", instanceName: "checkout" },
@@ -121,6 +121,7 @@ test("progressive disclosure folds scope, then component, then reveals resources
   );
   const scopeId = "scope:namespace:demo";
   const componentId = "component:deployment";
+  const isolatedId = `isolated:${scopeId}:ConfigMap`;
 
   const global = collapseKubejojoGraph(grouped);
   assert.deepEqual(global.nodes?.map((node) => [node.id, node.collapsed]), [
@@ -131,7 +132,8 @@ test("progressive disclosure folds scope, then component, then reveals resources
   const focusedScope = collapseKubejojoGraph(grouped, scopeId);
   assert.deepEqual(focusedScope.nodes?.map((node) => node.id), [scopeId]);
   assert.equal(focusedScope.nodes?.[0].collapsed, false);
-  assert.equal(findGraphNode(focusedScope, componentId)?.collapsed, true);
+  assert.equal(findGraphNode(focusedScope, componentId)?.collapsed, false);
+  assert.equal(findGraphNode(focusedScope, isolatedId)?.collapsed, true);
   assert.equal(findGraphNode(focusedScope, "config")?.collapsed, false);
 
   const focusedComponent = collapseKubejojoGraph(grouped, componentId);
@@ -142,9 +144,78 @@ test("progressive disclosure folds scope, then component, then reveals resources
     [["deployment", false], ["service", false], ["pod", false]],
   );
 
+  const focusedIsolated = collapseKubejojoGraph(grouped, isolatedId);
+  assert.deepEqual(focusedIsolated.nodes?.map((node) => node.id), [isolatedId]);
+  assert.equal(focusedIsolated.nodes?.[0].collapsed, false);
+  assert.deepEqual(focusedIsolated.nodes?.[0].nodes?.map((node) => node.id), ["config"]);
+
   const expanded = collapseKubejojoGraph(grouped, null, true);
   assert.equal(findGraphNode(expanded, scopeId)?.collapsed, false);
   assert.equal(findGraphNode(expanded, componentId)?.collapsed, false);
+  assert.equal(findGraphNode(expanded, isolatedId)?.collapsed, false);
+
+  const globalFromRootSelection = collapseKubejojoGraph(grouped, "root");
+  assert.equal(findGraphNode(globalFromRootSelection, scopeId)?.collapsed, true);
+});
+
+test("scope focus expands connected resources and folds isolated resources by kind", async () => {
+  const connectedResources: KubejojoResource[] = Array.from({ length: 130 }, (_, index) => ({
+    id: `connected-${String(index).padStart(3, "0")}`,
+    kind: index === 0 ? "Deployment" : "Pod",
+    name: index === 0 ? "api" : `api-${String(index).padStart(3, "0")}`,
+    namespace: "prod",
+    instanceName: "api",
+  }));
+  const isolatedReplicaSets: KubejojoResource[] = Array.from({ length: 122 }, (_, index) => ({
+    id: `isolated-rs-${String(index).padStart(3, "0")}`,
+    kind: "ReplicaSet",
+    name: `api-${String(index).padStart(3, "0")}`,
+    namespace: "prod",
+    instanceName: "api",
+  }));
+  const isolatedConfigMaps: KubejojoResource[] = Array.from({ length: 35 }, (_, index) => ({
+    id: `isolated-config-${String(index).padStart(3, "0")}`,
+    kind: "ConfigMap",
+    name: `config-${String(index).padStart(3, "0")}`,
+    namespace: "prod",
+    instanceName: "api",
+  }));
+  const relations: KubejojoRelation[] = Array.from({ length: 339 }, (_, index) => ({
+    id: `relation-${String(index).padStart(3, "0")}`,
+    source: connectedResources[index % connectedResources.length].id,
+    target: connectedResources[(index + 1) % connectedResources.length].id,
+    type: "OWNS",
+  }));
+  const scopeId = "scope:namespace:prod";
+  const grouped = groupKubejojoGraph(
+    [...connectedResources, ...isolatedReplicaSets, ...isolatedConfigMaps],
+    relations,
+    "namespace",
+  );
+
+  assert.deepEqual(collapseKubejojoGraph(grouped).nodes?.map((node) => [node.id, node.collapsed]), [
+    [scopeId, true],
+  ]);
+
+  const focusedScope = collapseKubejojoGraph(grouped, scopeId);
+  const scope = focusedScope.nodes?.[0];
+  const connectedComponent = scope?.nodes?.find((node) => node.groupKind === "component");
+  const isolatedGroups = scope?.nodes?.filter((node) => node.groupKind === "isolated") ?? [];
+
+  assert.equal(connectedComponent?.nodes?.length, 130);
+  assert.equal(connectedComponent?.collapsed, false);
+  assert.deepEqual(
+    isolatedGroups.map((node) => [node.label, node.nodes?.length, node.collapsed]),
+    [
+      ["ReplicaSet（无关联）", 122, true],
+      ["ConfigMap（无关联）", 35, true],
+    ],
+  );
+
+  const layout = await layoutKubejojoGraph(focusedScope, 1.6);
+  assert.ok(layout.edges.length > 0, "a focused connected component must produce visible layout edges");
+  assert.ok(layout.nodes.some((node) => node.id === `isolated:${scopeId}:ReplicaSet`));
+  assert.ok(!layout.nodes.some((node) => node.id === isolatedReplicaSets[0].id));
 });
 
 test("selection paths and grouped identities remain deterministic", () => {
@@ -167,6 +238,15 @@ test("selection paths and grouped identities remain deterministic", () => {
       { id: "scope:namespace:demo", kind: "scope", resourceCount: 4 },
       { id: "component:deployment", kind: "component", resourceCount: 3 },
       { id: "pod", kind: "resource", resourceCount: 1 },
+    ],
+  );
+  assert.deepEqual(
+    getKubejojoSelectionPath(forward, "config").map(({ id, kind, resourceCount }) => ({ id, kind, resourceCount })),
+    [
+      { id: "root", kind: "root", resourceCount: 5 },
+      { id: "scope:namespace:demo", kind: "scope", resourceCount: 4 },
+      { id: "isolated:scope:namespace:demo:ConfigMap", kind: "isolated", resourceCount: 1 },
+      { id: "config", kind: "resource", resourceCount: 1 },
     ],
   );
   assert.deepEqual(getKubejojoSelectionPath(forward, "missing").map((item) => item.id), ["root"]);

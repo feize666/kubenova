@@ -201,6 +201,41 @@ function scopeSubtitle(groupBy: KubejojoGroupBy) {
   return "实例";
 }
 
+function groupIsolatedResources(
+  scopeId: string,
+  componentNodes: KubejojoGraphNode[],
+) {
+  const connected: KubejojoGraphNode[] = [];
+  const isolatedByKind = new Map<string, KubejojoGraphNode[]>();
+
+  componentNodes.forEach((node) => {
+    if (node.groupKind === "component" || (node.edges?.length ?? 0) > 0) {
+      connected.push(node);
+      return;
+    }
+    const kind = node.resource?.kind?.trim() || "Unknown";
+    isolatedByKind.set(kind, [...(isolatedByKind.get(kind) ?? []), node]);
+  });
+
+  const isolated = [...isolatedByKind.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, "en"))
+    .map(([kind, nodes]) => {
+      const sortedNodes = [...nodes].sort(compareNodes);
+      return {
+        id: `isolated:${scopeId}:${encodeURIComponent(kind)}`,
+        label: `${kind}（无关联）`,
+        subtitle: `${sortedNodes.length} 个无关联资源`,
+        nodes: sortedNodes,
+        edges: [],
+        weight: Math.max(...sortedNodes.map(weight), 0),
+        groupKind: "isolated" as const,
+        collapsedPreferred: true,
+      };
+    });
+
+  return [...connected, ...isolated];
+}
+
 /**
  * Follow KubeJojo's resource-map hierarchy: calculate connected components
  * first, then use a representative runtime resource as visual context. This
@@ -221,11 +256,12 @@ export function groupKubejojoGraph(
   [...componentsByScope.entries()]
     .sort(([left], [right]) => left.localeCompare(right, "zh-CN"))
     .forEach(([key, componentNodes]) => {
+      const scopeId = `scope:${groupBy}:${key}`;
       root.nodes!.push({
-        id: `scope:${groupBy}:${key}`,
+        id: scopeId,
         label: key,
         subtitle: scopeSubtitle(groupBy),
-        nodes: componentNodes,
+        nodes: groupIsolatedResources(scopeId, componentNodes),
         edges: [],
         groupKind: "scope",
         collapsedPreferred: true,
@@ -286,14 +322,17 @@ export function getKubejojoSelectionPath(
 }
 
 export function collapseKubejojoGraph(root: KubejojoGraphNode, focusedId?: string | null, expandAll = false): KubejojoGraphNode {
-  const selected = findKubejojoNode(root, focusedId);
+  const resolvedSelection = findKubejojoNode(root, focusedId);
+  const selected = resolvedSelection?.id === "root" ? undefined : resolvedSelection;
   const clone = (node: KubejojoGraphNode): KubejojoGraphNode => {
     let collapsed = false;
     if (!expandAll && node.id !== "root") {
       if (!selected) {
-        collapsed = node.groupKind === "scope" || node.groupKind === "component";
+        collapsed = node.collapsedPreferred ?? false;
       } else if (selected.groupKind === "scope") {
-        collapsed = node.groupKind === "component";
+        // A focused scope should immediately reveal its relationship graph.
+        // Only relation-free summaries stay folded to avoid a name matrix.
+        collapsed = node.groupKind === "isolated";
       }
     }
     return {
