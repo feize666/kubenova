@@ -30,6 +30,31 @@ function representedCount(node: TopologyRendererGraphNode): number {
   return Math.max(1, node.resource?.aggregation?.memberCount ?? 1);
 }
 
+type GraphNodeRelation = {
+  id?: string;
+  aggregation?: { memberCount?: number };
+};
+
+function representedRelationshipCount(node: TopologyRendererGraphNode): number {
+  const seen = new Set<string>();
+  let anonymousCount = 0;
+
+  const visit = (item: TopologyRendererGraphNode) => {
+    const relations = (item as TopologyRendererGraphNode & { edges?: GraphNodeRelation[] }).edges ?? [];
+    relations.forEach((relation) => {
+      if (relation.id) {
+        if (seen.has(relation.id)) return;
+        seen.add(relation.id);
+      }
+      anonymousCount += Math.max(1, relation.aggregation?.memberCount ?? 1);
+    });
+    getChildren(item).forEach(visit);
+  };
+
+  visit(node);
+  return anonymousCount;
+}
+
 function statusOf(node: TopologyRendererGraphNode): "healthy" | "warning" | "critical" | "unknown" {
   const status = node.resource?.status;
   if (status === "healthy" || status === "warning" || status === "critical" || status === "unknown") return status;
@@ -195,7 +220,15 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
         : graphNode.label);
   const title = graphNode.label ?? resource?.name ?? "Unknown resource";
   const viewState = data.viewState ?? "default";
-  const groupType = isScopePreview ? "名称空间" : graphNode.groupKind === "component" ? "关联组件" : "资源集合";
+  const relationshipCount = representedRelationshipCount(graphNode);
+  const groupType = isScopePreview
+    ? graphNode.subtitle ?? "资源范围"
+    : graphNode.groupKind === "component"
+      ? "关联组件"
+      : graphNode.groupKind === "isolated"
+        ? "未关联资源"
+        : "资源集合";
+  const groupClass = graphNode.groupKind ? `is-group-${graphNode.groupKind}` : undefined;
 
   return (
     <div
@@ -205,48 +238,62 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
         `is-${viewState}`,
         selected ? "is-selected" : undefined,
         isCollapsedGroup ? "is-collapsed" : undefined,
+        isCollapsedGroup ? groupClass : undefined,
       ].filter(Boolean).join(" ")}
       role="button"
       tabIndex={0}
-      aria-label={`${nodeKind ?? "资源"} ${title}，状态${STATUS_META[status].label}`}
+      aria-label={isCollapsedGroup
+        ? `${groupType} ${title}，${resourceCount} 个资源，${relationshipCount} 条关系，状态${STATUS_META[status].label}，按回车进入`
+        : `${nodeKind ?? "资源"} ${title}，状态${STATUS_META[status].label}`}
       aria-pressed={selected}
       aria-expanded={isCollapsedGroup ? false : undefined}
       onKeyDown={activateOnKeyboard}
     >
-      {isCollapsedGroup ? (
-        <>
-          <div className="topology-kubejojo__node-stack topology-kubejojo__node-stack--back" />
-          <div className="topology-kubejojo__node-stack topology-kubejojo__node-stack--middle" />
-        </>
-      ) : null}
-      <div className="topology-kubejojo__node-card">
+      <div className={[
+        "topology-kubejojo__node-card",
+        isCollapsedGroup ? "topology-kubejojo__node-card--summary" : undefined,
+      ].filter(Boolean).join(" ")}>
         {hiddenHandle(Position.Top)}
         {hiddenHandle(Position.Bottom)}
-        <div className="topology-kubejojo__node-icon">
-          {kindCode(nodeKind)}
-          {isCollapsedGroup ? <span className="topology-kubejojo__node-number">{resourceCount}</span> : null}
-        </div>
-        <div className="topology-kubejojo__node-copy">
-          <div className="topology-kubejojo__node-kind">
-            {isCollapsedGroup ? `${groupType} · 已折叠` : nodeKind}
+        {isCollapsedGroup ? (
+          <div className="topology-kubejojo__summary">
+            <div className="topology-kubejojo__summary-header">
+              <span className="topology-kubejojo__summary-kind">
+                <span className="topology-kubejojo__summary-code" aria-hidden="true">{kindCode(nodeKind)}</span>
+                {groupType}
+              </span>
+              <span className="topology-kubejojo__summary-enter" aria-hidden="true">进入 <span>→</span></span>
+            </div>
+            <strong className="topology-kubejojo__summary-title" title={title}>{title}</strong>
+            <div className="topology-kubejojo__summary-metrics">
+              <span><strong>{resourceCount}</strong> 资源</span>
+              <span><strong>{relationshipCount}</strong> 关系</span>
+              <span className="topology-kubejojo__summary-health">
+                <span className="topology-kubejojo__summary-status" aria-hidden="true">{STATUS_META[status].symbol}</span>
+                {STATUS_META[status].label}
+              </span>
+            </div>
           </div>
-          <strong className="topology-kubejojo__node-title" title={title}>{title}</strong>
-          <div className="topology-kubejojo__node-meta">
-            <span
-              className="topology-kubejojo__node-status"
-              role="img"
-              aria-label={`状态：${STATUS_META[status].label}`}
-              title={`状态：${STATUS_META[status].label}`}
-            >
-              {STATUS_META[status].symbol}
-            </span>
-            {isCollapsedGroup ? (
-              <span className="topology-kubejojo__node-resource-count">{resourceCount} 个资源 · {statusSummary(graphNode)}</span>
-            ) : (
-              <span className="topology-kubejojo__node-status-label">{STATUS_META[status].label}</span>
-            )}
-          </div>
-        </div>
+        ) : (
+          <>
+            <div className="topology-kubejojo__node-icon">{kindCode(nodeKind)}</div>
+            <div className="topology-kubejojo__node-copy">
+              <div className="topology-kubejojo__node-kind">{nodeKind}</div>
+              <strong className="topology-kubejojo__node-title" title={title}>{title}</strong>
+              <div className="topology-kubejojo__node-meta">
+                <span
+                  className="topology-kubejojo__node-status"
+                  role="img"
+                  aria-label={`状态：${STATUS_META[status].label}`}
+                  title={`状态：${STATUS_META[status].label}`}
+                >
+                  {STATUS_META[status].symbol}
+                </span>
+                <span className="topology-kubejojo__node-status-label">{STATUS_META[status].label}</span>
+              </div>
+            </div>
+          </>
+        )}
       </div>
       <Glance graphNode={graphNode} grouped={isCollapsedGroup} />
     </div>
@@ -261,6 +308,9 @@ function GroupNode({ data }: NodeProps<Node<TopologyRendererNodeData>>) {
   const title = graphNode.label ?? graphNode.resource?.name ?? "Resource group";
   const subtitle = graphNode.subtitle ?? "Group";
   const isComponent = graphNode.groupKind === "component";
+  const isIsolated = graphNode.groupKind === "isolated";
+  const groupType = isComponent ? "关联组件" : isIsolated ? "未关联资源" : subtitle;
+  const relationshipCount = representedRelationshipCount(graphNode);
 
   return (
     <div
@@ -271,7 +321,7 @@ function GroupNode({ data }: NodeProps<Node<TopologyRendererNodeData>>) {
         isComponent ? "is-component" : undefined,
       ].filter(Boolean).join(" ")}
       role="group"
-      aria-label={`${isComponent ? "关联组件" : subtitle} ${title}，${resourceCount} 个资源，状态${STATUS_META[status].label}`}
+      aria-label={`${groupType} ${title}，${resourceCount} 个资源，${relationshipCount} 条关系，状态${STATUS_META[status].label}`}
     >
       {hiddenHandle(Position.Top)}
       {hiddenHandle(Position.Bottom)}
@@ -285,12 +335,12 @@ function GroupNode({ data }: NodeProps<Node<TopologyRendererNodeData>>) {
           {STATUS_META[status].symbol}
         </span>
         <span className="topology-kubejojo__group-copy">
-          <span className="topology-kubejojo__group-subtitle">{isComponent ? "关联组件" : subtitle} · 已展开</span>
+          <span className="topology-kubejojo__group-subtitle">{groupType} · 拓扑范围</span>
           <strong title={title}>{title}</strong>
         </span>
         <span className="topology-kubejojo__group-metrics">
-          <strong>{resourceCount} 个资源</strong>
-          <span>{statusSummary(graphNode)}</span>
+          <strong>{resourceCount} 资源 · {relationshipCount} 关系</strong>
+          <span>{STATUS_META[status].label}</span>
         </span>
       </div>
       <Glance graphNode={graphNode} grouped />

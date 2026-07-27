@@ -253,20 +253,6 @@
 .topology-kubejojo__node.is-focused,
 .topology-kubejojo__node.is-selected { opacity: 1; }
 
-.topology-kubejojo__node-stack {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 220px;
-  height: 88px;
-  border: 1px solid var(--tk-status-border, var(--tk-border));
-  border-radius: 6px;
-  background: var(--tk-surface);
-  pointer-events: none;
-}
-.topology-kubejojo__node-stack--back { transform: translate(8px, 8px); opacity: 0.72; }
-.topology-kubejojo__node-stack--middle { transform: translate(4px, 4px); opacity: 0.88; }
-
 .topology-kubejojo__node-card {
   position: relative;
   z-index: 1;
@@ -279,12 +265,122 @@
   background: var(--tk-surface);
   padding: 10px 11px;
 }
+.topology-kubejojo__node-card--summary {
+  display: block;
+  border-color: var(--tk-border-strong);
+  border-left: 3px solid var(--tk-primary);
+  background: var(--tk-surface);
+  padding: 8px 10px 8px 11px;
+}
+.topology-kubejojo__node.is-group-component .topology-kubejojo__node-card--summary { border-left-color: var(--tk-edge); }
+.topology-kubejojo__node.is-group-isolated .topology-kubejojo__node-card--summary { border-left-color: var(--tk-unknown); }
 .topology-kubejojo__node:hover .topology-kubejojo__node-card { border-color: var(--tk-primary); }
 .topology-kubejojo__node.is-selected .topology-kubejojo__node-card,
 .topology-kubejojo__node.is-focused .topology-kubejojo__node-card {
   border: 2px solid var(--tk-focus);
   box-shadow: 0 0 0 2px var(--tk-primary-weak);
   padding: 9px 10px;
+}
+.topology-kubejojo__node.is-selected .topology-kubejojo__node-card--summary,
+.topology-kubejojo__node.is-focused .topology-kubejojo__node-card--summary { padding: 7px 9px 7px 10px; }
+
+.topology-kubejojo__summary {
+  display: grid;
+  min-width: 0;
+  height: 100%;
+  grid-template-rows: 18px 24px 20px;
+  gap: 1px;
+}
+.topology-kubejojo__summary-header,
+.topology-kubejojo__summary-metrics {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+.topology-kubejojo__summary-header { justify-content: space-between; gap: 8px; }
+.topology-kubejojo__summary-kind {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--tk-muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topology-kubejojo__summary-code {
+  display: inline-grid;
+  min-width: 26px;
+  height: 16px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--tk-border);
+  border-radius: 3px;
+  background: var(--tk-surface-subtle);
+  color: var(--tk-primary);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1;
+  padding: 0 4px;
+}
+.topology-kubejojo__summary-enter {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  color: var(--tk-primary);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 16px;
+}
+.topology-kubejojo__summary-enter span { font-size: 13px; line-height: 1; }
+.topology-kubejojo__summary-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tk-text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topology-kubejojo__summary-metrics {
+  gap: 0;
+  overflow: hidden;
+  color: var(--tk-muted);
+  font-size: 10px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.topology-kubejojo__summary-metrics > span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+.topology-kubejojo__summary-metrics > span + span::before {
+  width: 1px;
+  height: 10px;
+  margin: 0 7px;
+  background: var(--tk-border);
+  content: "";
+}
+.topology-kubejojo__summary-metrics strong { color: var(--tk-text); font-size: 11px; font-weight: 700; }
+.topology-kubejojo__summary-health { color: var(--tk-status-color, var(--tk-muted)); font-weight: 650; }
+.topology-kubejojo__summary-status {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  margin-right: 3px;
+  place-items: center;
+  border: 1px solid var(--tk-status-border, var(--tk-border));
+  border-radius: 50%;
+  background: var(--tk-status-surface, var(--tk-surface-subtle));
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .topology-kubejojo__node-icon {
@@ -301,22 +397,6 @@
   color: var(--tk-status-color, var(--tk-primary));
   font-size: 11px;
   font-weight: 700;
-}
-.topology-kubejojo__node-number {
-  position: absolute;
-  top: -7px;
-  right: -8px;
-  display: grid;
-  min-width: 20px;
-  height: 20px;
-  place-items: center;
-  border: 1px solid var(--tk-border);
-  border-radius: 999px;
-  background: var(--tk-surface);
-  color: var(--tk-muted);
-  font-size: 10px;
-  font-weight: 700;
-  padding: 0 5px;
 }
 .topology-kubejojo__node-copy {
   display: flex;
