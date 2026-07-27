@@ -17,6 +17,11 @@ SHELL_LAYOUT_FILE="$ROOT_DIR/frontend/src/components/shell-layout.tsx"
 REALTIME_BRIDGE_FILE="$ROOT_DIR/frontend/src/components/realtime-sync-bridge.tsx"
 REALTIME_UTILS_FILE="$ROOT_DIR/frontend/src/components/realtime-sync-utils.ts"
 RESOURCE_REFRESH_FILE="$ROOT_DIR/frontend/src/lib/resource-list-refresh.ts"
+TOPOLOGY_V2_CAPACITY_SPEC="$ROOT_DIR/backend/control-api/src/topology-graph/topology-graph.capacity.spec.ts"
+TOPOLOGY_V2_CAPACITY_SCRIPT="$ROOT_DIR/frontend/scripts/topology-v2-capacity.mjs"
+TOPOLOGY_V2_API_FILE="$ROOT_DIR/frontend/src/lib/api/topology-graph.ts"
+TOPOLOGY_V2_CANVAS_FILE="$ROOT_DIR/frontend/src/modules/topology-kubejojo/TopologyCanvas.tsx"
+TOPOLOGY_V2_CAPACITY_FILE="$ROOT_DIR/frontend/src/modules/topology-kubejojo/engine/capacity.ts"
 
 echo "[拓扑校验] 根目录=$ROOT_DIR"
 
@@ -69,6 +74,20 @@ check_no_pattern() {
 
   echo "[拓扑校验] 失败：$label 命中禁用模式 /$pattern/" >&2
   echo "$matches" >&2
+  failures=$((failures + 1))
+  return 1
+}
+
+check_node_script() {
+  local label="$1"
+  local file="$2"
+
+  if node --check "$file" >/dev/null && node "$file" >/dev/null; then
+    echo "[拓扑校验] 正常：$label"
+    return 0
+  fi
+
+  echo "[拓扑校验] 失败：$label 无法通过 Node.js 语法/执行检查 -> $file" >&2
   failures=$((failures + 1))
   return 1
 }
@@ -207,10 +226,8 @@ while (true) {
 
 const requiredKeys = [
   "clusters",
-  "namespace-summary",
-  "workloads",
-  "network",
-  "dynamic",
+  "namespaces",
+  "graph",
 ];
 for (const key of requiredKeys) {
   if (!queryBlocks.some(({ block }) => block.includes(`"${key}"`) || block.includes(`'${key}'`))) {
@@ -230,8 +247,7 @@ for (const { block, line } of queryBlocks) {
     if (pattern.test(block)) failures.push(`Unstable topology queryKey at line ${line}: ${reason}: ${compact}`);
   }
   if (
-    /"topology-map"|'topology-map'/.test(block) &&
-    /"workloads"|'workloads'|"network"|'network'|"dynamic"|'dynamic'/.test(block) &&
+    /"graph"|'graph'/.test(block) &&
     !block.includes("selectedNamespace")
   ) {
     failures.push(`Topology queryKey at line ${line} must include selectedNamespace or stable namespace value: ${compact}`);
@@ -262,19 +278,30 @@ check_file "shell layout" "$SHELL_LAYOUT_FILE"
 check_file "realtime bridge" "$REALTIME_BRIDGE_FILE"
 check_file "realtime utils" "$REALTIME_UTILS_FILE"
 check_file "resource refresh policy" "$RESOURCE_REFRESH_FILE"
+check_file "Topology Graph V2 capacity contract" "$TOPOLOGY_V2_CAPACITY_SPEC"
+check_file "Topology Graph V2 capacity script" "$TOPOLOGY_V2_CAPACITY_SCRIPT"
+check_file "Topology Graph V2 API client" "$TOPOLOGY_V2_API_FILE"
+check_file "Topology Graph V2 canvas" "$TOPOLOGY_V2_CANVAS_FILE"
+check_file "Topology Graph V2 capacity engine" "$TOPOLOGY_V2_CAPACITY_FILE"
 
 if [[ "$failures" -eq 0 ]]; then
-  check_pattern "topology graph/detail functions" "makeDetail|buildGraphModel|buildRelations|buildVisibleGraph|layoutView" "$TOPOLOGY_FILE"
-  check_pattern "connected graph internals" "getConnectedEntityIds|selectedNodeId|isRelated|relations" "$TOPOLOGY_FILE"
-  check_pattern "focus / layout / detail paths" "selectedNodeId|detailRequest|setDetailRequest|ResourceDetailDrawer|layoutView" "$TOPOLOGY_FILE"
+  check_pattern "Topology Graph V2 backend limits" "10_000|30_000|enforceTopologyGraphV2Capacity" "$TOPOLOGY_V2_CAPACITY_SPEC"
+  check_pattern "Topology Graph V2 frontend limits" "10_000|30_000|1_500|5_000|600|2_000|300|1_000" "$TOPOLOGY_V2_CAPACITY_SCRIPT"
+  check_pattern "Topology Graph V2 explicit over-limit behavior" "semantic-aggregation|RangeError|capacity exceeded" "$TOPOLOGY_V2_CAPACITY_SCRIPT" "$TOPOLOGY_V2_CAPACITY_FILE"
+  check_node_script "Topology Graph V2 capacity script is executable" "$TOPOLOGY_V2_CAPACITY_SCRIPT"
+  check_pattern "Topology Graph V2 request path" "getTopologyGraphV2|/api/topology/graph/v2" "$TOPOLOGY_FILE" "$TOPOLOGY_V2_API_FILE"
+  check_pattern "topology graph/detail functions" "filterGraph|detailRequest|yamlTarget" "$TOPOLOGY_FILE"
+  check_pattern "connected graph internals" "selectedResourceId|selectedRelations|resourcesById|KubejojoTopologyCanvas" "$TOPOLOGY_FILE"
+  check_pattern "focus / layout / detail paths" "selectedResourceId|setDetail|ResourceDetailDrawer|KubejojoTopologyCanvas" "$TOPOLOGY_FILE" "$TOPOLOGY_V2_CANVAS_FILE"
+  check_pattern "semantic capacity projection" "applyTopologyCapacity|semantic-aggregation|aggregation" "$TOPOLOGY_V2_CANVAS_FILE" "$TOPOLOGY_V2_CAPACITY_FILE"
   check_pattern "resource detail drawer symbol" "ResourceDetailDrawer" "$TOPOLOGY_FILE"
   check_pattern "resource yaml drawer symbol" "ResourceYamlDrawer" "$TOPOLOGY_FILE"
-  check_pattern "gateway resource helpers" "getGatewayKindParam|GatewayClass|Gateway|HTTPRoute" "$TOPOLOGY_FILE"
-  check_pattern "topology namespace query key" "namespace-summary|selectedNamespace|ALL_NAMESPACE" "$TOPOLOGY_FILE"
-  check_pattern "dynamic partial coverage handling" "missingAsEmpty|catch\\(\\(\\) => \\[\\]\\)" "$TOPOLOGY_FILE"
+  check_pattern "gateway resource helpers" "yamlTarget|GatewayClass|Gateway|HTTPRoute" "$TOPOLOGY_FILE"
+  check_pattern "topology namespace query key" "namespaces|selectedNamespace|ALL_NAMESPACE" "$TOPOLOGY_FILE"
+  check_pattern "partial and stale coverage handling" "partialSources|coverage|freshness|unavailable" "$TOPOLOGY_FILE"
   check_pattern "fallback / timeout / auth-expired symbols" "service-unavailable|network-timeout|集群服务暂不可达|网络或超时异常|拓扑数据不可用|导航超时，点击重试|navigationTimeoutRef|navigationRetryRef|AUTH_EXPIRED_EVENT|aiops:auth-expired|authExpiredHandled|resetAuthExpiryState" \
     "$TOPOLOGY_FILE" "$AUTH_CLIENT_FILE" "$AUTH_CONTEXT_FILE" "$SHELL_LAYOUT_FILE"
-  check_pattern "topology memoized graph/view work" "useMemo|buildGraphModel|buildVisibleGraph|layoutView" "$TOPOLOGY_FILE"
+  check_pattern "topology memoized graph/view work" "useMemo|filterGraph|canvasResources|canvasRelations" "$TOPOLOGY_FILE"
   check_pattern "topology realtime invalidation prefixes" "getTopologyQueryPrefixes|topologyQueryKeyForResource|topologyKinds|queryClient\\.invalidateQueries|INVALIDATE_BATCH_DELAY_MS" "$REALTIME_BRIDGE_FILE" "$REALTIME_UTILS_FILE"
   check_no_pattern "topology page must not own SSE stream" "EventSource|text/event-stream|/api/v1/clusters/events/stream" "$TOPOLOGY_FILE"
   check_no_pattern "topology queries must not poll by interval" "refetchInterval|setInterval\\(" "$TOPOLOGY_FILE"

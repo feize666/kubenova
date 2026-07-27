@@ -1,0 +1,643 @@
+/*
+ * Resource topology workbench surface.
+ * Markup contract: topology-kubejojo, __canvas, __zoom, __focus,
+ * __node and __group. All surfaces are deliberately opaque.
+ */
+.topology-kubejojo {
+  --tk-canvas: #f3f6f9;
+  --tk-surface: #ffffff;
+  --tk-surface-subtle: #f8fafc;
+  --tk-border: #d5dee8;
+  --tk-border-strong: #aab9c9;
+  --tk-text: #172033;
+  --tk-muted: #65758b;
+  --tk-primary: #0b6db6;
+  --tk-primary-weak: #e9f4fd;
+  --tk-focus: #0b6db6;
+  --tk-grid: #cbd6e1;
+  --tk-edge: #69839b;
+  --tk-success: #177a43;
+  --tk-success-surface: #eaf7ef;
+  --tk-success-border: #88c5a0;
+  --tk-warning: #9b5f00;
+  --tk-warning-surface: #fff6dc;
+  --tk-warning-border: #deb968;
+  --tk-danger: #be3030;
+  --tk-danger-surface: #fff0ee;
+  --tk-danger-border: #e19a94;
+  --tk-unknown: #526477;
+  --tk-unknown-surface: #edf2f6;
+  --tk-unknown-border: #b9c6d2;
+  position: relative;
+  height: 100%;
+  min-height: 540px;
+  overflow: hidden;
+  border: 1px solid var(--tk-border);
+  border-radius: 6px;
+  background: var(--tk-surface);
+  color: var(--tk-text);
+  isolation: isolate;
+}
+
+/* The legacy resource-map decoration is painted after its canvas children.
+ * Keep the ELK surface above it and explicitly opt this view out of the old
+ * translucent treatment. */
+.resource-map-shell.resource-map-shell--workbench .resource-map-canvas:has(> .topology-kubejojo) {
+  background: var(--tk-surface) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.resource-map-shell.resource-map-shell--workbench .resource-map-canvas:has(> .topology-kubejojo)::before,
+.resource-map-shell.resource-map-shell--workbench .resource-map-canvas:has(> .topology-kubejojo)::after { display: none !important; }
+.resource-map-canvas > .topology-kubejojo { z-index: 1; }
+
+[data-theme="dark"] .topology-kubejojo {
+  --tk-canvas: #101820;
+  --tk-surface: #17222d;
+  --tk-surface-subtle: #1d2a36;
+  --tk-border: #384b5e;
+  --tk-border-strong: #5c7185;
+  --tk-text: #edf3f8;
+  --tk-muted: #a7b8c8;
+  --tk-primary: #62bdf9;
+  --tk-primary-weak: #17384d;
+  --tk-focus: #8bd0ff;
+  --tk-grid: #33485a;
+  --tk-edge: #7590a8;
+  --tk-success: #54c77d;
+  --tk-success-surface: #173728;
+  --tk-success-border: #397759;
+  --tk-warning: #f3bd52;
+  --tk-warning-surface: #3c3018;
+  --tk-warning-border: #896f32;
+  --tk-danger: #ff8585;
+  --tk-danger-surface: #422224;
+  --tk-danger-border: #8c4b4f;
+  --tk-unknown: #b5c3d0;
+  --tk-unknown-surface: #293744;
+  --tk-unknown-border: #526679;
+}
+
+.topology-kubejojo *,
+.topology-kubejojo *::before,
+.topology-kubejojo *::after { box-sizing: border-box; }
+
+.topology-kubejojo__canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--tk-canvas);
+}
+.topology-kubejojo__canvas > .react-flow { position: absolute; inset: 0; z-index: 1; }
+
+.topology-kubejojo__canvas .react-flow,
+.topology-kubejojo__canvas .react-flow__renderer,
+.topology-kubejojo__canvas .react-flow__pane { background: var(--tk-canvas); }
+.topology-kubejojo__canvas .react-flow__pane { cursor: grab; }
+.topology-kubejojo__canvas .react-flow__pane:active { cursor: grabbing; }
+.topology-kubejojo__canvas .react-flow__attribution { display: none; }
+.topology-kubejojo__canvas .react-flow__background { opacity: 0.58; }
+.topology-kubejojo__canvas .react-flow__nodes { pointer-events: auto; }
+.topology-kubejojo__canvas .react-flow__edges { pointer-events: none; }
+.topology-kubejojo__canvas .react-flow__edges { z-index: 5; }
+.topology-kubejojo__canvas .react-flow__node { z-index: 8; }
+.topology-kubejojo__canvas .react-flow__node:has(.topology-kubejojo__node:hover),
+.topology-kubejojo__canvas .react-flow__node:has(.topology-kubejojo__node:focus-visible),
+.topology-kubejojo__canvas .react-flow__node:has(.topology-kubejojo__group:focus-visible),
+.topology-kubejojo__canvas .react-flow__node:has(.topology-kubejojo__group-label:hover) { z-index: 20; }
+.topology-kubejojo__canvas .react-flow__edge-path { stroke: var(--tk-edge); stroke-width: 1.5px; opacity: 0.9; }
+.topology-kubejojo__edge-path { stroke-linecap: round; stroke-linejoin: round; transition: stroke 180ms ease, stroke-width 180ms ease, opacity 180ms ease; }
+.topology-kubejojo__edge-label {
+  position: absolute;
+  border-radius: 4px;
+  background: var(--tk-surface);
+  box-shadow: 0 1px 4px rgba(27, 45, 65, 0.18);
+  color: var(--tk-text);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 20px;
+  padding: 0 6px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.topology-kubejojo__zoom,
+.topology-kubejojo__focus {
+  position: absolute;
+  z-index: 10;
+  border: 1px solid var(--tk-border);
+  border-radius: 5px;
+  background: var(--tk-surface);
+  box-shadow: 0 2px 6px rgba(27, 45, 65, 0.14);
+}
+
+.topology-kubejojo__capacity,
+.topology-kubejojo__layout-error {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 10;
+  display: flex;
+  max-width: min(520px, calc(100% - 24px));
+  align-items: flex-start;
+  gap: 7px;
+  border: 1px solid var(--tk-warning-border);
+  border-radius: 4px;
+  background: var(--tk-warning-surface);
+  color: var(--tk-warning);
+  font-size: 12px;
+  line-height: 20px;
+  padding: 6px 9px;
+}
+.topology-kubejojo__capacity .anticon,
+.topology-kubejojo__layout-error .anticon { flex: 0 0 auto; margin-top: 3px; }
+.topology-kubejojo__layout-error { top: 50%; bottom: auto; left: 50%; transform: translate(-50%, -50%); }
+.topology-kubejojo__layout-error button {
+  min-height: 24px;
+  flex: 0 0 auto;
+  border: 1px solid var(--tk-warning-border);
+  border-radius: 3px;
+  background: var(--tk-surface);
+  color: var(--tk-warning);
+  font: inherit;
+  padding: 0 8px;
+}
+
+.topology-kubejojo__zoom button,
+.topology-kubejojo__focus button {
+  min-height: 28px;
+  border: 1px solid var(--tk-surface);
+  border-radius: 3px;
+  background: var(--tk-surface);
+  color: var(--tk-muted);
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+
+.topology-kubejojo__zoom button.is-active {
+  border-color: color-mix(in srgb, var(--tk-primary) 42%, var(--tk-border));
+  background: var(--tk-primary-weak);
+  color: var(--tk-primary);
+}
+
+.topology-kubejojo__zoom button:hover,
+.topology-kubejojo__focus button:hover { border-color: var(--tk-primary); color: var(--tk-primary); }
+
+.topology-kubejojo__focus {
+  top: 62px;
+  left: 14px;
+  display: flex;
+  max-width: min(560px, calc(100% - 28px));
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 5px 8px;
+}
+
+.topology-kubejojo__focus-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tk-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.topology-kubejojo__focus-label strong { color: var(--tk-text); font-weight: 650; }
+.topology-kubejojo__focus-count {
+  flex: 0 0 auto;
+  border: 1px solid var(--tk-border);
+  border-radius: 999px;
+  background: var(--tk-surface-subtle);
+  color: var(--tk-muted);
+  font-size: 11px;
+  line-height: 20px;
+  padding: 0 8px;
+}
+
+.topology-kubejojo__zoom {
+  top: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 3px;
+}
+
+.topology-kubejojo__zoom button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 0 8px;
+}
+.topology-kubejojo__zoom button + button { border-left-color: var(--tk-border); }
+.topology-kubejojo__zoom button:last-child { min-width: 76px; }
+
+.topology-kubejojo__node {
+  position: relative;
+  width: 228px;
+  height: 96px;
+  color: var(--tk-text);
+  cursor: pointer;
+  transition: opacity 160ms ease, transform 160ms ease;
+  writing-mode: horizontal-tb;
+  touch-action: manipulation;
+}
+.topology-kubejojo__node.is-collapsed { width: 228px; height: 96px; }
+.topology-kubejojo__node.is-muted { opacity: 0.26; }
+.topology-kubejojo__node.is-context { opacity: 0.74; }
+.topology-kubejojo__node.is-focused,
+.topology-kubejojo__node.is-selected { opacity: 1; }
+
+.topology-kubejojo__node-stack {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 220px;
+  height: 88px;
+  border: 1px solid var(--tk-status-border, var(--tk-border));
+  border-radius: 6px;
+  background: var(--tk-surface);
+  pointer-events: none;
+}
+.topology-kubejojo__node-stack--back { transform: translate(8px, 8px); opacity: 0.72; }
+.topology-kubejojo__node-stack--middle { transform: translate(4px, 4px); opacity: 0.88; }
+
+.topology-kubejojo__node-card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 220px;
+  height: 88px;
+  gap: 10px;
+  border: 1px solid var(--tk-status-border, var(--tk-border-strong));
+  border-radius: 6px;
+  background: var(--tk-surface);
+  padding: 10px 11px;
+}
+.topology-kubejojo__node:hover .topology-kubejojo__node-card { border-color: var(--tk-primary); }
+.topology-kubejojo__node.is-selected .topology-kubejojo__node-card,
+.topology-kubejojo__node.is-focused .topology-kubejojo__node-card {
+  border: 2px solid var(--tk-focus);
+  box-shadow: 0 0 0 2px var(--tk-primary-weak);
+  padding: 9px 10px;
+}
+
+.topology-kubejojo__node-icon {
+  position: relative;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  align-self: center;
+  place-items: center;
+  border: 1px solid var(--tk-status-border, var(--tk-border));
+  border-radius: 4px;
+  background: var(--tk-status-surface, var(--tk-primary-weak));
+  color: var(--tk-status-color, var(--tk-primary));
+  font-size: 11px;
+  font-weight: 700;
+}
+.topology-kubejojo__node-number {
+  position: absolute;
+  top: -7px;
+  right: -8px;
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--tk-border);
+  border-radius: 999px;
+  background: var(--tk-surface);
+  color: var(--tk-muted);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 5px;
+}
+.topology-kubejojo__node-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+}
+.topology-kubejojo__node-kind {
+  overflow: hidden;
+  color: var(--tk-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topology-kubejojo__node-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tk-text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 19px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topology-kubejojo__node-meta { display: flex; min-width: 0; align-items: center; gap: 5px; margin-top: 3px; }
+.topology-kubejojo__node-status,
+.topology-kubejojo__group-status {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  place-items: center;
+  border: 1px solid var(--tk-status-border, var(--tk-border));
+  border-radius: 50%;
+  background: var(--tk-status-surface, var(--tk-surface-subtle));
+  color: var(--tk-status-color, var(--tk-muted));
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+.topology-kubejojo__node-status-label,
+.topology-kubejojo__node-resource-count {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tk-status-color, var(--tk-muted));
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topology-kubejojo__node-resource-count { color: var(--tk-muted); font-weight: 550; }
+.topology-kubejojo :is(.is-healthy) { --tk-status-color: var(--tk-success); --tk-status-surface: var(--tk-success-surface); --tk-status-border: var(--tk-success-border); }
+.topology-kubejojo :is(.is-warning) { --tk-status-color: var(--tk-warning); --tk-status-surface: var(--tk-warning-surface); --tk-status-border: var(--tk-warning-border); }
+.topology-kubejojo :is(.is-critical) { --tk-status-color: var(--tk-danger); --tk-status-surface: var(--tk-danger-surface); --tk-status-border: var(--tk-danger-border); }
+.topology-kubejojo :is(.is-unknown) { --tk-status-color: var(--tk-unknown); --tk-status-surface: var(--tk-unknown-surface); --tk-status-border: var(--tk-unknown-border); }
+
+.topology-kubejojo__node-glance {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: 280px;
+  max-width: min(280px, calc(100vw - 32px));
+  visibility: hidden;
+  border: 1px solid var(--tk-border-strong);
+  border-radius: 6px;
+  background: var(--tk-surface);
+  box-shadow: 0 3px 8px rgba(18, 35, 52, 0.18);
+  color: var(--tk-text);
+  opacity: 0;
+  padding: 10px 11px;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity 120ms ease-out, transform 120ms ease-out, visibility 0s linear 120ms;
+  writing-mode: horizontal-tb;
+}
+.topology-kubejojo__node:hover > .topology-kubejojo__node-glance,
+.topology-kubejojo__node:focus-visible > .topology-kubejojo__node-glance,
+.topology-kubejojo__group:focus-visible > .topology-kubejojo__node-glance,
+.topology-kubejojo__group-label:hover ~ .topology-kubejojo__node-glance {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 400ms;
+}
+.topology-kubejojo__node-glance-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.topology-kubejojo__node-glance-title strong { font-size: 12px; line-height: 18px; }
+.topology-kubejojo__node-glance-title span { overflow: hidden; color: var(--tk-muted); font-size: 10px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.topology-kubejojo__node-glance dl { display: flex; flex-direction: column; gap: 3px; margin: 7px 0 0; }
+.topology-kubejojo__node-glance dl > div { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 7px; }
+.topology-kubejojo__node-glance dt { color: var(--tk-muted); font-size: 11px; line-height: 17px; }
+.topology-kubejojo__node-glance dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--tk-text); font-size: 11px; line-height: 17px; }
+.topology-kubejojo__node-glance-aggregation {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 7px;
+  border-radius: 4px;
+  background: var(--tk-surface-subtle);
+  padding: 6px 7px;
+}
+.topology-kubejojo__node-glance-aggregation strong { color: var(--tk-text); font-size: 11px; line-height: 16px; }
+.topology-kubejojo__node-glance-aggregation span { color: var(--tk-muted); font-size: 10px; line-height: 16px; overflow-wrap: anywhere; }
+.topology-kubejojo__node-glance-warning { margin-top: 7px; color: var(--tk-warning); font-size: 11px; line-height: 17px; overflow-wrap: anywhere; }
+
+.topology-kubejojo__group {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 268px;
+  min-height: 184px;
+  border: 1px solid var(--tk-status-border, var(--tk-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--tk-status-surface, var(--tk-primary-weak)) 34%, var(--tk-surface));
+  transition: opacity 160ms ease, border-color 160ms ease;
+  writing-mode: horizontal-tb;
+}
+.topology-kubejojo__group.is-component { border-style: dashed; background: transparent; }
+.topology-kubejojo__group.is-muted { opacity: 0.32; }
+.topology-kubejojo__group.is-context { opacity: 0.76; }
+.topology-kubejojo__group.is-focused,
+.topology-kubejojo__group.is-selected { border: 2px solid var(--tk-focus); }
+.topology-kubejojo__group-label {
+  position: absolute;
+  top: 13px;
+  left: 14px;
+  z-index: 2;
+  display: grid;
+  width: min(520px, calc(100% - 28px));
+  max-width: calc(100% - 28px);
+  min-height: 50px;
+  grid-template-columns: 16px minmax(82px, 1fr) minmax(88px, auto);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--tk-border);
+  border-radius: 5px;
+  background: var(--tk-surface);
+  color: var(--tk-muted);
+  font-size: 12px;
+  line-height: normal;
+  padding: 7px 9px;
+}
+.topology-kubejojo__group-copy,
+.topology-kubejojo__group-metrics { display: flex; min-width: 0; flex-direction: column; }
+.topology-kubejojo__group-copy strong { overflow: hidden; color: var(--tk-text); font-size: 12px; font-weight: 700; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.topology-kubejojo__group-subtitle { overflow: hidden; color: var(--tk-muted); font-size: 10px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.topology-kubejojo__group-metrics { align-items: flex-end; }
+.topology-kubejojo__group-metrics strong { color: var(--tk-text); font-size: 11px; line-height: 17px; white-space: nowrap; }
+.topology-kubejojo__group-metrics span { max-width: 180px; overflow: hidden; color: var(--tk-muted); font-size: 10px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.topology-kubejojo__group > .topology-kubejojo__node-glance { top: 70px; left: 14px; }
+
+.topology-kubejojo__handle { width: 8px !important; height: 8px !important; border: 0 !important; background: transparent !important; opacity: 0 !important; }
+
+.topology-kubejojo button:focus-visible,
+.topology-kubejojo [role="button"]:focus-visible,
+.topology-kubejojo .react-flow__node:focus-visible { outline: 2px solid var(--tk-focus); outline-offset: 2px; }
+
+/* The page scope is the sole source of truth for topology. Keep its controls
+ * visible in two deliberate rows rather than clipping source filters at
+ * ordinary desktop widths. */
+.resource-map-shell--workbench .resource-map-toolbar {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  gap: 8px 12px;
+}
+.resource-map-shell--workbench .resource-map-toolbar__scope {
+  grid-column: 1;
+  grid-row: 1;
+}
+.resource-map-shell--workbench .resource-map-toolbar__actions {
+  grid-column: 2;
+  grid-row: 1;
+}
+.resource-map-shell--workbench .resource-map-toolbar__filters {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-content: space-between;
+  overflow: visible;
+}
+.resource-map-shell--workbench .resource-map-source-chips,
+.resource-map-shell--workbench .resource-map-segments {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+.resource-map-shell--workbench .resource-map-source-chips button,
+.resource-map-shell--workbench .resource-map-segments button {
+  min-width: 0;
+}
+.resource-map-shell--workbench .resource-map-source-chips button {
+  --source-color: var(--source-color-light);
+}
+[data-theme="dark"] .resource-map-shell--workbench .resource-map-source-chips button {
+  --source-color: var(--source-color-dark);
+}
+.resource-map-shell--workbench .resource-map-workbench {
+  min-height: 540px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.resource-map-shell--workbench .resource-map-canvas-state {
+  width: 100%;
+  min-height: 540px;
+  pointer-events: auto;
+}
+.resource-map-shell--workbench .resource-map-status-alert { border-radius: 6px; }
+.resource-map-detail-drawer .ant-drawer-body {
+  display: block;
+  overflow: auto;
+  padding: 16px;
+}
+.resource-map-detail-drawer .topology-aggregation-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.resource-map-detail-drawer .topology-aggregation-summary strong {
+  margin: 0 4px;
+}
+.resource-map-detail-drawer .topology-aggregation-summary__kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.resource-map-detail-drawer .topology-detail-relations {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.resource-map-detail-drawer .topology-detail-relations > strong {
+  color: var(--ops-text, #172033);
+  font-size: 13px;
+}
+.resource-map-detail-drawer .topology-detail-relations button {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--ops-border-subtle, #d5dee8);
+  border-radius: 5px;
+  background: var(--ops-surface-muted, #f8fafc);
+  color: var(--ops-text-muted, #65758b);
+  padding: 7px 9px;
+  text-align: left;
+}
+.resource-map-detail-drawer .topology-detail-relations button:hover {
+  border-color: var(--ops-accent, #0b6db6);
+}
+.resource-map-detail-drawer .topology-detail-relations button strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ops-text, #172033);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resource-map-detail-drawer .topology-detail-relations__empty {
+  color: var(--ops-text-muted, #65758b);
+  font-size: 12px;
+  padding: 8px 0;
+}
+.resource-map-detail-drawer .topology-detail-relations button:focus-visible { outline: 2px solid var(--ops-accent, #0b6db6); outline-offset: 2px; }
+
+@media (max-width: 760px) {
+  .resource-map-shell--workbench .resource-map-toolbar {
+    grid-template-columns: 1fr;
+  }
+  .resource-map-shell--workbench .resource-map-toolbar__scope,
+  .resource-map-shell--workbench .resource-map-toolbar__actions,
+  .resource-map-shell--workbench .resource-map-toolbar__filters {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .resource-map-shell--workbench .resource-map-toolbar__filters {
+    justify-content: flex-start;
+  }
+  .resource-map-shell--workbench .resource-map-toolbar__scope,
+  .resource-map-shell--workbench .resource-map-toolbar__actions { align-items: stretch; }
+  .resource-map-shell--workbench .resource-map-toolbar__actions .ant-input-affix-wrapper { flex: 1 1 100%; }
+  .resource-map-shell--workbench .resource-map-workbench,
+  .resource-map-shell--workbench .resource-map-canvas-state { min-height: 520px; }
+  .topology-kubejojo { min-height: 520px; border-radius: 0; }
+  .topology-kubejojo__focus { top: 61px; right: 10px; left: 10px; }
+  .topology-kubejojo__zoom { top: 10px; right: 10px; }
+  .topology-kubejojo__zoom button,
+  .topology-kubejojo__zoom button:last-child { width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
+  .topology-kubejojo__zoom button > span:not(.anticon) { display: none; }
+  .topology-kubejojo__focus { min-height: 44px; }
+  .topology-kubejojo__focus button { min-width: 44px; min-height: 44px; }
+  .topology-kubejojo__node-glance { width: min(272px, calc(100vw - 32px)); }
+  .topology-kubejojo__node,
+  .topology-kubejojo__node *,
+  .topology-kubejojo__group,
+  .topology-kubejojo__group * {
+    max-inline-size: 100%;
+    word-break: normal;
+    writing-mode: horizontal-tb;
+  }
+  .topology-kubejojo__capacity { right: 10px; bottom: 10px; left: 10px; max-width: none; }
+  .resource-map-detail-drawer .topology-detail-relations button { min-height: 44px; }
+  .resource-map-detail-drawer .ant-drawer-content-wrapper { width: 100% !important; max-width: 100vw; }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .topology-kubejojo__node:hover > .topology-kubejojo__node-glance,
+  .topology-kubejojo__group-label:hover ~ .topology-kubejojo__node-glance {
+    visibility: hidden;
+    opacity: 0;
+  }
+  .topology-kubejojo__node:focus-visible > .topology-kubejojo__node-glance,
+  .topology-kubejojo__group:focus-visible > .topology-kubejojo__node-glance {
+    visibility: visible;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topology-kubejojo *, .topology-kubejojo *::before, .topology-kubejojo *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  .topology-kubejojo__node-glance { transform: none; }
+}
