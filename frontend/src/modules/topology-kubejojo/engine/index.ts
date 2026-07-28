@@ -47,6 +47,7 @@ export type KubejojoGraphNode = Omit<TopologyRendererGraphNode, "resource" | "no
   resource?: KubejojoResource;
   nodes?: KubejojoGraphNode[];
   edges?: KubejojoRelation[];
+  overlayEdges?: KubejojoRelation[];
   weight?: number;
   groupKind?: KubejojoGroupKind;
   collapsedPreferred?: boolean;
@@ -138,10 +139,31 @@ export function makeKubejojoGraph(resources: KubejojoResource[]) {
   }));
 }
 
-function components(nodes: KubejojoGraphNode[], relations: KubejojoRelation[]) {
+export function isKubejojoBackboneRelation(relation: KubejojoRelation): boolean {
+  const domain = getKubejojoRelationSemantics(relation.type, relation.role, relation.label).domain;
+  return domain === "workload" || domain === "network" || domain === "storage";
+}
+
+export function partitionKubejojoRelations(relations: KubejojoRelation[]) {
+  const backbone: KubejojoRelation[] = [];
+  const overlays: KubejojoRelation[] = [];
+  relations.forEach((relation) => {
+    (isKubejojoBackboneRelation(relation) ? backbone : overlays).push(relation);
+  });
+  return {
+    backbone: backbone.sort((left, right) => left.id.localeCompare(right.id, "en")),
+    overlays: overlays.sort((left, right) => left.id.localeCompare(right.id, "en")),
+  };
+}
+
+function components(
+  nodes: KubejojoGraphNode[],
+  backboneRelations: KubejojoRelation[],
+  overlayRelations: KubejojoRelation[],
+) {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const adjacent = new Map<string, string[]>();
-  [...relations].sort((left, right) => left.id.localeCompare(right.id, "en")).forEach((edge) => {
+  backboneRelations.forEach((edge) => {
     adjacent.set(edge.source, [...(adjacent.get(edge.source) ?? []), edge.target]);
     adjacent.set(edge.target, [...(adjacent.get(edge.target) ?? []), edge.source]);
   });
@@ -165,7 +187,10 @@ function components(nodes: KubejojoGraphNode[], relations: KubejojoRelation[]) {
     const items = [...ids]
       .flatMap((id) => byId.get(id) ? [byId.get(id)!] : [])
       .sort(compareNodes);
-    const edges = relations
+    const edges = backboneRelations
+      .filter((edge) => ids.has(edge.source) && ids.has(edge.target))
+      .sort((left, right) => left.id.localeCompare(right.id, "en"));
+    const overlayEdges = overlayRelations
       .filter((edge) => ids.has(edge.source) && ids.has(edge.target))
       .sort((left, right) => left.id.localeCompare(right.id, "en"));
     return items.length === 1
@@ -176,6 +201,7 @@ function components(nodes: KubejojoGraphNode[], relations: KubejojoRelation[]) {
         subtitle: `${items.length} 个关联资源`,
         nodes: items,
         edges,
+        overlayEdges,
         weight: weight(items[0]),
         groupKind: "component" as const,
         collapsedPreferred: true,
@@ -247,8 +273,9 @@ export function groupKubejojoGraph(
   relations: KubejojoRelation[],
   groupBy: KubejojoGroupBy,
 ): KubejojoGraphNode {
+  const { backbone, overlays } = partitionKubejojoRelations(relations);
   const componentsByScope = new Map<string, KubejojoGraphNode[]>();
-  components(makeKubejojoGraph(resources), relations).forEach((component) => {
+  components(makeKubejojoGraph(resources), backbone, overlays).forEach((component) => {
     const key = componentScope(component, groupBy);
     componentsByScope.set(key, [...(componentsByScope.get(key) ?? []), component]);
   });
@@ -257,12 +284,14 @@ export function groupKubejojoGraph(
     .sort(([left], [right]) => left.localeCompare(right, "zh-CN"))
     .forEach(([key, componentNodes]) => {
       const scopeId = `scope:${groupBy}:${key}`;
+      const scopeResourceIds = new Set(componentNodes.flatMap((component) => leaves(component).map((node) => node.id)));
       root.nodes!.push({
         id: scopeId,
         label: key,
         subtitle: scopeSubtitle(groupBy),
         nodes: groupIsolatedResources(scopeId, componentNodes),
         edges: [],
+        overlayEdges: overlays.filter((edge) => scopeResourceIds.has(edge.source) && scopeResourceIds.has(edge.target)),
         groupKind: "scope",
         collapsedPreferred: true,
         weight: Math.max(...componentNodes.map(weight), 0),
@@ -330,9 +359,9 @@ export function collapseKubejojoGraph(root: KubejojoGraphNode, focusedId?: strin
       if (!selected) {
         collapsed = node.collapsedPreferred ?? false;
       } else if (selected.groupKind === "scope") {
-        // A focused scope should immediately reveal its relationship graph.
-        // Only relation-free summaries stay folded to avoid a name matrix.
-        collapsed = node.groupKind === "isolated";
+        // Scope focus reveals the next level only. Components remain summaries
+        // until the operator explicitly enters one, avoiding a resource-name matrix.
+        collapsed = node.id !== selected.id && (node.collapsedPreferred ?? false);
       }
     }
     return {
