@@ -862,6 +862,16 @@ export class ClusterSyncService {
         const createdAt = rs.metadata?.creationTimestamp?.toISOString() ?? null;
         const images = resolvedImages.images;
         const image = resolvedImages.image;
+        const ownerReferences = (rs.metadata?.ownerReferences ?? []).map(
+          (owner) => ({
+            apiVersion: owner.apiVersion ?? null,
+            kind: owner.kind ?? null,
+            name: owner.name ?? null,
+            uid: owner.uid ?? null,
+            controller: owner.controller ?? false,
+            blockOwnerDeletion: owner.blockOwnerDeletion ?? false,
+          }),
+        );
         if (!image) {
           this.logMissingImage('ReplicaSet', clusterId, namespace, name);
         }
@@ -897,6 +907,7 @@ export class ClusterSyncService {
               image,
               images,
               imageResolution: resolvedImages.imageResolution,
+              ownerReferences,
               creationTimestamp: createdAt,
             }),
           },
@@ -918,6 +929,7 @@ export class ClusterSyncService {
               image,
               images,
               imageResolution: resolvedImages.imageResolution,
+              ownerReferences,
               creationTimestamp: createdAt,
             }),
           },
@@ -1151,6 +1163,16 @@ export class ClusterSyncService {
 
         const createdAt =
           job.metadata?.creationTimestamp?.toISOString() ?? null;
+        const ownerReferences = (job.metadata?.ownerReferences ?? []).map(
+          (owner) => ({
+            apiVersion: owner.apiVersion ?? null,
+            kind: owner.kind ?? null,
+            name: owner.name ?? null,
+            uid: owner.uid ?? null,
+            controller: owner.controller ?? false,
+            blockOwnerDeletion: owner.blockOwnerDeletion ?? false,
+          }),
+        );
         await this.prisma.workloadRecord.upsert({
           where: {
             clusterId_namespace_kind_name: {
@@ -1178,6 +1200,7 @@ export class ClusterSyncService {
               active: job.status?.active,
               succeeded: job.status?.succeeded,
               failed: job.status?.failed,
+              ownerReferences,
               creationTimestamp: createdAt,
             }),
           },
@@ -1195,6 +1218,7 @@ export class ClusterSyncService {
               active: job.status?.active,
               succeeded: job.status?.succeeded,
               failed: job.status?.failed,
+              ownerReferences,
               creationTimestamp: createdAt,
             }),
           },
