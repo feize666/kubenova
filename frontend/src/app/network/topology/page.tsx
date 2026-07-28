@@ -42,6 +42,7 @@ import {
   type KubejojoRelation,
   type KubejojoResource,
 } from "@/modules/topology-kubejojo/engine";
+import { getIncompleteTopologySources } from "@/modules/topology-kubejojo/coverage";
 
 const ALL_NAMESPACE = "__all__";
 const QUERY_STALE_MS = 30_000;
@@ -470,10 +471,9 @@ export default function NetworkTopologyPage() {
     );
   }, [graphQuery.data?.resources, namespaceQuery.data?.items]);
 
-  const partialSources = requestedSources.filter((source) => {
-    const status = graphQuery.data?.coverage.sources[source].status;
-    return Boolean(status && status !== "complete");
-  });
+  const incompleteSources = graphQuery.data
+    ? getIncompleteTopologySources(graphQuery.data.coverage.sources, requestedSources)
+    : [];
   const warningCount = (graphQuery.data?.resources ?? []).filter(
     (resource) => resource.warnings > 0 || resourceStatus(resource) !== "healthy",
   ).length;
@@ -696,13 +696,13 @@ export default function NetworkTopologyPage() {
           action={<Button size="small" onClick={refresh}>重新获取</Button>}
         />
       ) : null}
-      {partialSources.length ? (
+      {incompleteSources.length ? (
         <Alert
           className="resource-map-status-alert"
           type="warning"
           showIcon
           title="拓扑覆盖不完整"
-          description={`${partialSources.map((source) => SOURCE_META[source].label).join("、")}暂未完整同步。`}
+          description={`${incompleteSources.map((source) => SOURCE_META[source].label).join("、")}存在采集缺失或仅部分完成。`}
         />
       ) : null}
       {graphQuery.data && graphQuery.data.coverage.warningRecords > 0 ? (
