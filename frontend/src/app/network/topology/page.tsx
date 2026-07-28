@@ -751,6 +751,7 @@ export default function NetworkTopologyPage() {
               focusedId={focusedGroupId}
               selectedNodeId={topologySelection?.canvasId ?? null}
               expandAll={canvasExpandAll}
+              includeOverlays={Boolean(neighborhoodResourceId)}
               onFocus={setFocusedGroupId}
               onSelectResource={selectTopologyResource}
               onOpen={(id) => {

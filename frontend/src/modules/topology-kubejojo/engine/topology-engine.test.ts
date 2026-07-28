@@ -261,6 +261,15 @@ test("configuration relations stay as overlays and do not merge backbone compone
     scope?.nodes?.filter((node) => node.groupKind === "isolated").map((node) => node.label),
     ["ConfigMap（无关联）", "ServiceAccount（无关联）"],
   );
+
+  const neighborhood = groupKubejojoGraph(resources, relations, "namespace", true);
+  const neighborhoodScope = neighborhood.nodes?.[0];
+  const neighborhoodComponents = neighborhoodScope?.nodes?.filter((node) => node.groupKind === "component") ?? [];
+  assert.equal(neighborhoodComponents.length, 1);
+  assert.deepEqual(
+    neighborhoodComponents[0]?.edges?.map((edge) => edge.id),
+    ["config-a", "config-b", "owns-a", "owns-b", "sa-a", "sa-b", "scope-only"],
+  );
 });
 
 test("selection paths and grouped identities remain deterministic", () => {

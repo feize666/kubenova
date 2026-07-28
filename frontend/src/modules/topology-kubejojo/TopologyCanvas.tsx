@@ -45,6 +45,7 @@ type Props = {
   focusedId: string | null;
   selectedNodeId: string | null;
   expandAll: boolean;
+  includeOverlays?: boolean;
   onFocus: (id: string | null) => void;
   onSelectResource: (selection: KubejojoTopologySelection | null) => void;
   onOpen: (id: string) => void;
@@ -74,6 +75,7 @@ function projectCanvasCapacity(
   groupBy: KubejojoGroupBy,
   focusedId: string | null,
   expandAll: boolean,
+  includeOverlays: boolean,
 ) {
   const mode = expandAll || Boolean(focusedId) ? "expanded" : "defaultCanvas";
   const renderedNodeLimit = TOPOLOGY_CAPACITY_LIMITS[mode].nodes;
@@ -83,7 +85,12 @@ function projectCanvasCapacity(
     const projected = applyTopologyCapacity(resources, relations, mode, {
       maxVisibleNodes: resourceNodeBudget,
     });
-    const groupedGraph = groupKubejojoGraph(projected.resources, projected.relations, groupBy);
+    const groupedGraph = groupKubejojoGraph(
+      projected.resources,
+      projected.relations,
+      groupBy,
+      includeOverlays,
+    );
     groupedGraph.capacity = projected.capacity;
     const focusedGroup = findKubejojoNode(groupedGraph, focusedId);
     const graph = collapseKubejojoGraph(groupedGraph, focusedGroup?.id, expandAll);
@@ -117,6 +124,7 @@ function Canvas({
   focusedId,
   selectedNodeId,
   expandAll,
+  includeOverlays = false,
   onFocus,
   onSelectResource,
   onOpen,
@@ -134,8 +142,8 @@ function Canvas({
   const [layoutError, setLayoutError] = useState(false);
   const [layoutRetry, setLayoutRetry] = useState(0);
   const capacityProjection = useMemo(
-    () => projectCanvasCapacity(resources, relations, groupBy, focusedId, expandAll),
-    [expandAll, focusedId, groupBy, relations, resources],
+    () => projectCanvasCapacity(resources, relations, groupBy, focusedId, expandAll, includeOverlays),
+    [expandAll, focusedId, groupBy, includeOverlays, relations, resources],
   );
   const { projected, groupedGraph, focusedGroup, graph, renderedNodeCount } = capacityProjection;
   const selectionPath = useMemo(

@@ -272,8 +272,11 @@ export function groupKubejojoGraph(
   resources: KubejojoResource[],
   relations: KubejojoRelation[],
   groupBy: KubejojoGroupBy,
+  includeOverlays = false,
 ): KubejojoGraphNode {
-  const { backbone, overlays } = partitionKubejojoRelations(relations);
+  const partitioned = partitionKubejojoRelations(relations);
+  const backbone = includeOverlays ? [...relations].sort((left, right) => left.id.localeCompare(right.id, "en")) : partitioned.backbone;
+  const overlays = includeOverlays ? [] : partitioned.overlays;
   const componentsByScope = new Map<string, KubejojoGraphNode[]>();
   components(makeKubejojoGraph(resources), backbone, overlays).forEach((component) => {
     const key = componentScope(component, groupBy);
