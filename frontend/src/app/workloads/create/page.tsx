@@ -510,7 +510,7 @@ export default function WorkloadCreateWorkspacePage() {
   const mountPvc = Form.useWatch("mountPvc", watchOptions);
   const createService = Form.useWatch("createService", watchOptions);
   const createIngress = Form.useWatch("createIngress", watchOptions);
-  const networkMode = (Form.useWatch("networkMode", watchOptions) ?? "ingress") as "ingress" | "ingressroute";
+  const networkMode = "ingress" as "ingress" | "ingressroute";
   const useExistingPvc = Form.useWatch(["pvcMount", "useExistingPvc"], watchOptions);
   const storageSourceType = (Form.useWatch(["pvcMount", "storageSourceType"], watchOptions) ?? "PVC") as "PVC" | "PV" | "SC";
   const supportsReplicas = kind === "Deployment" || kind === "StatefulSet" || kind === "ReplicaSet";
@@ -1316,7 +1316,7 @@ export default function WorkloadCreateWorkspacePage() {
           ) : null}
 
           {currentStep === 3 ? (
-            <OpsFormSection title="网络配置" description="可同时创建 Service、Ingress 或 Traefik IngressRoute。">
+            <OpsFormSection title="网络配置" description="可同时创建 Service 与 Kubernetes Ingress。">
               <Form.Item name="createService" valuePropName="checked">
                 <Switch checkedChildren="同时创建 Service" unCheckedChildren="不创建 Service" />
               </Form.Item>
@@ -1362,10 +1362,7 @@ export default function WorkloadCreateWorkspacePage() {
                 <OpsSurface className="workload-create-workspace__subsurface" variant="raised" padding="sm">
                   <Form.Item name="networkMode" label="网络模式" rules={[{ required: true, message: "请选择网络模式" }]}>
                     <Select
-                      options={[
-                        { label: "Ingress", value: "ingress" },
-                        { label: "IngressRoute (Traefik CRD)", value: "ingressroute" },
-                      ]}
+                      options={[{ label: "Ingress", value: "ingress" }]}
                     />
                   </Form.Item>
                   {networkMode === "ingressroute" ? (

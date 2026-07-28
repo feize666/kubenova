@@ -14,9 +14,13 @@ describe('ClusterHealthService', () => {
     const clustersService = {
       findById: jest.fn(),
       getKubeconfig: jest.fn(),
+      updateDetectedConnectionInfo: jest.fn(),
     } as any;
     const k8sClientService = {
       createClient: jest.fn(),
+      inspectKubeconfig: jest.fn().mockReturnValue({
+        apiServer: 'https://api.example.test:6443',
+      }),
     } as any;
     return new ClusterHealthService(prisma, clustersService, k8sClientService);
   }
@@ -98,7 +102,7 @@ describe('ClusterHealthService', () => {
     expect(b.clusterId).toBe('c1');
   });
 
-  it('assertClusterOnlineForRead accepts stale running snapshot and probes in background', async () => {
+  it('assertClusterOnlineForRead verifies stale snapshot before allowing a live read', async () => {
     const service = createService() as any;
     service.requireCluster = jest.fn().mockResolvedValue({
       id: 'c1',
@@ -139,6 +143,34 @@ describe('ClusterHealthService', () => {
       source: 'auto',
       timeoutMs: 5000,
     });
+  });
+
+  it('assertClusterOnlineForRead rejects a known offline cluster before reading resources', async () => {
+    const service = createService() as any;
+    service.requireCluster = jest.fn().mockResolvedValue({
+      id: 'c1',
+      state: 'active',
+      hasKubeconfig: true,
+    });
+    service.getLatestSnapshot = jest.fn().mockResolvedValue({
+      clusterId: 'c1',
+      ok: false,
+      status: 'offline',
+      latencyMs: 5000,
+      checkedAt: new Date().toISOString(),
+      reason: 'PROBE_TIMEOUT',
+      source: 'auto',
+      timeoutMs: 5000,
+      failureCount: 1,
+      detailJson: null,
+      isStale: false,
+    });
+    service.probeCluster = jest.fn();
+
+    await expect(service.assertClusterOnlineForRead('c1')).rejects.toThrow(
+      '集群当前离线，无法读取真实资源数据：PROBE_TIMEOUT',
+    );
+    expect(service.probeCluster).not.toHaveBeenCalled();
   });
 
   it('listSelectableClusterIdsForResourceRead keeps only running clusters', async () => {
@@ -318,5 +350,65 @@ describe('ClusterHealthService', () => {
         status: 'offline-mode',
       }),
     );
+  });
+
+  it('successful probe persists detected API Server and Kubernetes version', async () => {
+    const service = createService() as any;
+    service.clustersService.findById.mockResolvedValue({
+      id: 'c1',
+      state: 'active',
+      hasKubeconfig: true,
+      apiServer: 'https://old.invalid',
+    });
+    service.clustersService.getKubeconfig.mockResolvedValue('valid config');
+    service.fetchClusterVersionAndNodeCount = jest.fn().mockResolvedValue({
+      version: 'v1.31.8-aliyun.1',
+      nodeCount: 3,
+    });
+    service.prisma.clusterHealthSnapshot.findUnique.mockResolvedValue(null);
+    service.prisma.clusterHealthSnapshot.upsert.mockImplementation(
+      async ({ create }: any) => ({ ...create, checkedAt: new Date() }),
+    );
+
+    const result = await service.probeCluster('c1', { source: 'manual' });
+
+    expect(result.ok).toBe(true);
+    expect(
+      service.clustersService.updateDetectedConnectionInfo,
+    ).toHaveBeenCalledWith('c1', {
+      apiServer: 'https://api.example.test:6443',
+      kubernetesVersion: 'v1.31.8-aliyun.1',
+    });
+  });
+
+  it('first probe of legacy record replaces fake endpoint and clears unverified version', async () => {
+    const service = createService() as any;
+    service.clustersService.findById.mockResolvedValue({
+      id: 'c1',
+      state: 'active',
+      hasKubeconfig: true,
+      apiServer: 'https://cluster-name',
+    });
+    service.clustersService.getKubeconfig.mockResolvedValue('valid config');
+    service.fetchClusterVersionAndNodeCount = jest
+      .fn()
+      .mockReturnValue(new Promise(() => undefined));
+    service.withTimeout = jest
+      .fn()
+      .mockRejectedValue(new Error('PROBE_TIMEOUT'));
+    service.prisma.clusterHealthSnapshot.findUnique.mockResolvedValue(null);
+    service.prisma.clusterHealthSnapshot.upsert.mockImplementation(
+      async ({ create }: any) => ({ ...create, checkedAt: new Date() }),
+    );
+
+    const result = await service.probeCluster('c1', { source: 'manual' });
+
+    expect(result.ok).toBe(false);
+    expect(
+      service.clustersService.updateDetectedConnectionInfo,
+    ).toHaveBeenCalledWith('c1', {
+      apiServer: 'https://api.example.test:6443',
+      kubernetesVersion: 'unknown',
+    });
   });
 });

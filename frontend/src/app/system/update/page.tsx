@@ -7,7 +7,8 @@ import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsIconActionButton, OpsPageHeader, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { OpsFilterChip, OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -208,21 +209,32 @@ export default function SystemUpdatePage() {
   ]);
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsPageHeader
-        className="resource-page-header"
-        title="更新管理"
-        subtitle="系统管理 / 更新管理"
-        scope={(
-          <>
-            <OpsFilterChip tone="neutral">运行 {status?.runningVersion ?? "-"}</OpsFilterChip>
-            <OpsFilterChip tone={status?.installable ? "success" : "warning"}>
-              {status?.installable ? "可安装" : "暂不可安装"}
-            </OpsFilterChip>
-            {status ? statusTag(status.installStatus) : <OpsStatusTag tone="neutral">加载中</OpsStatusTag>}
-          </>
-        )}
-      />
+    <Space className="resource-workbench system-update-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourcePageHeader
+          path="/system/update"
+          embedded
+          className="resource-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">System Update</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                更新管理
+              </OpsFilterChip>
+            </span>
+          }
+          description="系统管理 / 更新管理"
+          actions={(
+            <>
+              <OpsFilterChip tone="neutral">运行 {status?.runningVersion ?? "-"}</OpsFilterChip>
+              <OpsFilterChip tone={status?.installable ? "success" : "warning"}>
+                {status?.installable ? "可安装" : "暂不可安装"}
+              </OpsFilterChip>
+              {status ? statusTag(status.installStatus) : <OpsStatusTag tone="neutral">加载中</OpsStatusTag>}
+            </>
+          )}
+        />
+      </OpsSurface>
 
       <Alert
         className="system-resource-state-alert"
@@ -373,18 +385,20 @@ export default function SystemUpdatePage() {
       </Row>
 
       <OpsSurface variant="panel" padding="sm" title="更新历史">
-        <ResourceTable<SystemUpdateHistoryItem>
-          rowKey={(row, idx) => `${row.timestamp}-${row.operationType}-${idx}`}
-          tableKey="business.system.updateHistory"
-          columns={columns as ColumnsType<SystemUpdateHistoryItem>}
-          dataSource={historyRows}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          filters={tableFilters}
-          onFiltersChange={setTableFilters}
-          loading={statusQuery.isLoading || historyQuery.isLoading}
-          pagination={false}
-          scroll={{ x: 1100 }}
-        />
+        <div className="resource-workbench__table-zone">
+          <ResourceTable<SystemUpdateHistoryItem>
+            rowKey={(row, idx) => `${row.timestamp}-${row.operationType}-${idx}`}
+            tableKey="business.system.updateHistory"
+            columns={columns as ColumnsType<SystemUpdateHistoryItem>}
+            dataSource={historyRows}
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            filters={tableFilters}
+            onFiltersChange={setTableFilters}
+            loading={statusQuery.isLoading || historyQuery.isLoading}
+            pagination={false}
+            scroll={{ x: 1100 }}
+          />
+        </div>
       </OpsSurface>
       <BusinessDetailDrawer
         open={Boolean(detailRecord)}

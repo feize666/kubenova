@@ -1,7 +1,6 @@
 "use client";
 
-import type { TablePaginationConfig } from "antd";
-import type { TableProps } from "antd/es/table";
+import type { TablePaginationConfig, TableProps } from "antd";
 import { buildResourceTablePagination, createPaginationChangeHandler } from "./pagination";
 import { useTableSortPaginationState, type TableSortPaginationOptions } from "./use-table-sort-pagination";
 
@@ -30,7 +29,7 @@ export function useAntdTableSortPagination<T = unknown>(options: UseAntdTableSor
       const nextPage = nextPagination?.current ?? pagination.pageIndex + 1;
       const nextPageSize = nextPagination?.pageSize ?? pagination.pageSize;
       setPagination({
-        pageIndex: Math.max(0, nextPage - 1),
+        pageIndex: nextPageSize !== pagination.pageSize ? 0 : Math.max(0, nextPage - 1),
         pageSize: nextPageSize,
       });
       return;

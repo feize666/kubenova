@@ -79,6 +79,7 @@ export interface ClusterBatchStateRequest {
 export interface ClusterItemResponse {
   id: string;
   name: string;
+  apiServer: string | null;
   environment: string;
   status: string;
   cpuUsage: number;
@@ -478,6 +479,7 @@ export class ClustersService implements OnModuleInit {
 
   async create(input: ClusterMutationInput): Promise<ClusterItemResponse> {
     const payload = this.validateCreate(input);
+    const connection = this.inspectKubeconfig(payload.kubeconfig);
     await this.ensureNameAvailable(payload.name);
     const now = new Date().toISOString();
 
@@ -488,6 +490,8 @@ export class ClustersService implements OnModuleInit {
       version: 1,
       createdAt: now,
       updatedAt: now,
+      apiServer: connection?.apiServer ?? '',
+      kubernetesVersion: 'unknown',
       ...payload,
     };
 
@@ -505,6 +509,11 @@ export class ClustersService implements OnModuleInit {
     }
 
     const patch = this.validateUpdate(input);
+    if (input.kubeconfig !== undefined) {
+      const connection = this.inspectKubeconfig(patch.kubeconfig);
+      patch.apiServer = connection?.apiServer ?? '';
+      patch.kubernetesVersion = 'unknown';
+    }
     if (patch.name && patch.name !== record.name) {
       await this.ensureNameAvailable(patch.name, record.id);
     }
@@ -521,6 +530,30 @@ export class ClustersService implements OnModuleInit {
       updated,
       await this.getProfileByClusterId(updated.id),
     );
+  }
+
+  /** 健康探测成功后回写自动识别信息。 */
+  async updateDetectedConnectionInfo(
+    id: string,
+    detected: { apiServer?: string; kubernetesVersion?: string },
+  ): Promise<void> {
+    const record = await this.mustFind(id);
+    const apiServer = detected.apiServer?.trim() || record.apiServer;
+    const kubernetesVersion =
+      detected.kubernetesVersion?.trim() || record.kubernetesVersion;
+    if (
+      apiServer === record.apiServer &&
+      kubernetesVersion === record.kubernetesVersion
+    ) {
+      return;
+    }
+    await this.repository.update({
+      ...record,
+      apiServer,
+      kubernetesVersion,
+      version: record.version + 1,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   async remove(id: string): Promise<ClusterItemResponse> {
@@ -941,12 +974,17 @@ export class ClustersService implements OnModuleInit {
     input: ClusterMutationInput,
   ): Omit<
     ClusterRecord,
-    'id' | 'state' | 'version' | 'createdAt' | 'updatedAt'
+    | 'id'
+    | 'apiServer'
+    | 'kubernetesVersion'
+    | 'state'
+    | 'version'
+    | 'createdAt'
+    | 'updatedAt'
   > {
     const name = input.name?.trim();
     const environment = input.environment?.trim();
     const provider = input.provider?.trim();
-    const kubernetesVersion = input.kubernetesVersion?.trim();
 
     if (!name) {
       throw new BadRequestException('name 不能为空');
@@ -957,15 +995,10 @@ export class ClustersService implements OnModuleInit {
     if (!provider) {
       throw new BadRequestException('provider 不能为空');
     }
-    if (!kubernetesVersion) {
-      throw new BadRequestException('kubernetesVersion 不能为空');
-    }
-
     return {
       name,
       environment,
       provider,
-      kubernetesVersion,
       status: input.status?.trim() || '正常',
       cpuUsage: this.normalizeUsage(input.cpuUsage, 'cpuUsage', 0),
       memoryUsage: this.normalizeUsage(input.memoryUsage, 'memoryUsage', 0),
@@ -1005,14 +1038,6 @@ export class ClustersService implements OnModuleInit {
       patch.provider = value;
     }
 
-    if (input.kubernetesVersion !== undefined) {
-      const value = input.kubernetesVersion.trim();
-      if (!value) {
-        throw new BadRequestException('kubernetesVersion 不能为空');
-      }
-      patch.kubernetesVersion = value;
-    }
-
     if (input.status !== undefined) {
       const value = input.status.trim();
       if (!value) {
@@ -1046,6 +1071,19 @@ export class ClustersService implements OnModuleInit {
     return patch;
   }
 
+  private inspectKubeconfig(kubeconfig?: string): { apiServer: string } | null {
+    if (!kubeconfig) {
+      return null;
+    }
+    try {
+      return this.k8sClientService.inspectKubeconfig(kubeconfig);
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : '无法解析 kubeconfig';
+      throw new BadRequestException(`kubeconfig 无效：${message}`);
+    }
+  }
+
   private normalizeUsage(
     value: number | undefined,
     field: string,
@@ -1072,6 +1110,7 @@ export class ClustersService implements OnModuleInit {
     return {
       id: record.id,
       name: record.name,
+      apiServer: record.apiServer || null,
       environment: record.environment,
       status: record.status,
       cpuUsage: record.cpuUsage,

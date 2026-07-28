@@ -19,9 +19,10 @@ stream_match() {
 }
 
 check_dep() {
-  local cmd="$1" pkg="${2:-$1}"
+  local cmd="$1"
+  local pkg="${2:-$cmd}"
   if ! command -v "$cmd" &>/dev/null; then
-    echo "[错误] 未找到 '$cmd'，请先安装 $pkg。" >&2
+    echo "[错误] 未找到 '$cmd'，请先安装 ${pkg}。" >&2
     exit 1
   fi
 }

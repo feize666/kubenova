@@ -431,6 +431,13 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     () => policiesQuery.data?.items ?? [],
     [policiesQuery.data?.items],
   );
+  const policyOverview = policiesQuery.data?.overview;
+  const policyTotal = policyOverview?.totalPolicies ?? 0;
+  const hpaCount = policyOverview?.hpaPolicies ?? 0;
+  const vpaCount = policyOverview?.vpaPolicies ?? 0;
+  const coveredCount = policyOverview?.coveredWorkloads ?? 0;
+  const uncoveredCount = policyOverview?.uncoveredWorkloads ?? 0;
+  const coverageRate = coveredCount + uncoveredCount > 0 ? Math.round((coveredCount / (coveredCount + uncoveredCount)) * 100) : 0;
   const selectedItem = useMemo(
     () => visiblePolicies.find((item) => item.id === selectedRowId) ?? null,
     [selectedRowId, visiblePolicies],
@@ -879,34 +886,48 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     { title: "原因", dataIndex: "reason", key: "reason", width: 180 },
     { title: "消息", dataIndex: "message", key: "message" },
   ];
+  const scopeFilterControl = (
+    <div className="resource-workbench__scope">
+      <ResourceScopeFilterButton
+        clusterId={clusterId}
+        namespace={namespace}
+        clusterOptions={clusterOptions}
+        clusterLoading={clustersQuery.isLoading}
+        knownNamespaces={knownNamespaces}
+        namespaceDisabled={namespaceDisabled}
+        namespacePlaceholder={namespacePlaceholder}
+        onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+          onScopeChange(nextClusterId, nextNamespace);
+          resetPage();
+        }}
+      />
+    </div>
+  );
+  const titleKind = defaultType === "VPA" ? "VerticalPodAutoscaler" : "HorizontalPodAutoscaler";
+  const titleBadge = defaultType === "VPA" ? "垂直自动扩缩容" : "水平自动扩缩容";
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space className="resource-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path={defaultType === "VPA" ? "/workloads/autoscaling/vpa" : "/workloads/autoscaling/hpa"}
-          titleSuffix={<ResourceAddButton onClick={openCreatePolicyModal} aria-label="创建伸缩策略" />}
+          embedded
+          className="resource-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">{titleKind}</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                {titleBadge}
+              </OpsFilterChip>
+            </span>
+          }
+          extra={<ResourceAddButton onClick={openCreatePolicyModal} aria-label="创建伸缩策略" />}
           description={pageDescription}
           style={{ marginBottom: 12 }}
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+        <Space className="resource-workbench__content delivery-workbench__autoscaling-content" orientation="vertical" size={12} style={{ width: "100%" }}>
           <ResourceFilterToolbar>
-            <ResourceFilterToolbarItem width="auto">
-              <ResourceScopeFilterButton
-                clusterId={clusterId}
-                namespace={namespace}
-                clusterOptions={clusterOptions}
-                clusterLoading={clustersQuery.isLoading}
-                knownNamespaces={knownNamespaces}
-                namespaceDisabled={namespaceDisabled}
-                namespacePlaceholder={namespacePlaceholder}
-                onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-                  onScopeChange(nextClusterId, nextNamespace);
-                  resetPage();
-                }}
-              />
-            </ResourceFilterToolbarItem>
             <ResourceFilterToolbarItem width="sm">
               <ResourceFacetFilterButton
                 label="类型"
@@ -941,55 +962,69 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
 
           <Row gutter={[12, 12]}>
             <Col xs={12} md={6}>
-              <OpsMetricTile label="策略总数" tone="neutral" value={policiesQuery.data?.overview.totalPolicies ?? 0} />
+              <OpsMetricTile label="策略总数" meta="按当前筛选范围统计" tone="neutral" value={policyTotal} />
             </Col>
             <Col xs={12} md={6}>
-              <OpsMetricTile label="HPA / VPA" tone="info" value={`${policiesQuery.data?.overview.hpaPolicies ?? 0} / ${policiesQuery.data?.overview.vpaPolicies ?? 0}`} />
+              <OpsMetricTile
+                label="HPA / VPA"
+                meta={`HPA ${hpaCount} · VPA ${vpaCount}`}
+                tone="info"
+                value={`${hpaCount} / ${vpaCount}`}
+              />
             </Col>
             <Col xs={12} md={6}>
               <OpsMetricTile
                 label="未覆盖资源"
+                meta={coverageRate ? `覆盖率 ${coverageRate}%` : "暂无可计算覆盖率"}
                 tone={(policiesQuery.data?.overview.uncoveredWorkloads ?? 0) > 0 ? "warning" : "success"}
-                value={policiesQuery.data?.overview.uncoveredWorkloads ?? 0}
+                value={uncoveredCount}
               />
             </Col>
             <Col xs={12} md={6}>
-              <OpsMetricTile label="资源总数" tone="success" value={policiesQuery.data?.overview.coveredWorkloads ?? 0} />
+              <OpsMetricTile
+                label="已覆盖资源"
+                meta={policyTotal ? `覆盖 ${coveredCount} / ${coveredCount + uncoveredCount || coveredCount}` : "当前视图无策略"}
+                tone="success"
+                value={coveredCount}
+              />
             </Col>
           </Row>
 
-          <ResourceTable<AutoscalingPolicyItem>
-            tableKey="workloads.autoscaling.policies"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按资源名称搜索",
-            }}
-            sort={{ sortBy, sortOrder }}
-            rowKey="id"
-            columns={columns}
-            onResourceNavigate={(request) => setDetailRequest(request)}
-            dataSource={visiblePolicies}
-            bordered
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, queryEnabled && !policiesQuery.data && policiesQuery.isLoading)
-            }
-            onRow={(record) => ({
-              onClick: () => setSelectedRowId(record.id),
-            })}
-            loading={queryEnabled && !policiesQuery.data && policiesQuery.isLoading}
-            pagination={getPaginationConfig(
-              policiesQuery.data?.total ?? policiesQuery.data?.items?.length ?? 0,
-              queryEnabled && !policiesQuery.data && policiesQuery.isLoading,
-            )}
-            locale={{ emptyText: policiesEmptyText }}
-            scroll={{ x: getTableScrollX(columns) }}
-          />
+          <div className="resource-workbench__table-zone">
+            <ResourceTable<AutoscalingPolicyItem>
+              tableKey="workloads.autoscaling.policies"
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleGlobalSearchChange,
+                placeholder: "按资源名称搜索",
+              }}
+              sort={{ sortBy, sortOrder }}
+              rowKey="id"
+              columns={columns}
+              onResourceNavigate={(request) => setDetailRequest(request)}
+              dataSource={visiblePolicies}
+              bordered
+              toolbarExtra={scopeFilterControl}
+              onChange={(nextPagination, filters, sorter, extra) =>
+                handleTableChange(nextPagination, filters, sorter, extra, queryEnabled && !policiesQuery.data && policiesQuery.isLoading)
+              }
+              onRow={(record) => ({
+                onClick: () => setSelectedRowId(record.id),
+              })}
+              loading={queryEnabled && !policiesQuery.data && policiesQuery.isLoading}
+              pagination={getPaginationConfig(
+                policiesQuery.data?.total ?? policiesQuery.data?.items?.length ?? 0,
+                queryEnabled && !policiesQuery.data && policiesQuery.isLoading,
+              )}
+              locale={{ emptyText: policiesEmptyText }}
+              scroll={{ x: getTableScrollX(columns) }}
+            />
+          </div>
         </Space>
       </OpsSurface>
 
-      <OpsSurface variant="panel" padding="sm" title="选中资源摘要">
+      <OpsSurface className="delivery-workbench__summary-panel" variant="panel" padding="sm" title="选中资源摘要">
         <Space orientation="vertical" size={8} style={{ width: "100%" }}>
           {selectedItem ? (
             <>
@@ -1009,7 +1044,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         </Space>
       </OpsSurface>
 
-      <OpsSurface variant="panel" padding="sm">
+      <OpsSurface className="delivery-workbench__event-panel" variant="panel" padding="sm">
         <Space orientation="vertical" size={8} style={{ width: "100%" }}>
           <Typography.Title level={5} style={{ margin: 0 }}>
             策略事件（最近 24 小时）
@@ -1019,19 +1054,21 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
               ? `${getAutoscalingResourceName(selectedItem)} · ${getClusterDisplayName(clusterMap, selectedItem.clusterId)}/${selectedItem.namespace}`
               : ""}
           </Typography.Text>
-          <ResourceTable<AutoscalingEventItem>
-            rowKey={(item) => `${item.timestamp}-${item.reason}`}
-            tableKey="workloads.autoscaling.events"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            columns={eventColumns}
-            onResourceNavigate={(request) => setDetailRequest(request)}
-            dataSource={selectedItem ? eventsQuery.data?.items ?? [] : []}
-            bordered
-            loading={queryEnabled && Boolean(selectedItem) && !eventsQuery.data && eventsQuery.isLoading}
-            pagination={false}
-            locale={{ emptyText: eventsEmptyText }}
-            scroll={{ x: 1000 }}
-          />
+          <div className="resource-workbench__table-zone">
+            <ResourceTable<AutoscalingEventItem>
+              rowKey={(item) => `${item.timestamp}-${item.reason}`}
+              tableKey="workloads.autoscaling.events"
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              columns={eventColumns}
+              onResourceNavigate={(request) => setDetailRequest(request)}
+              dataSource={selectedItem ? eventsQuery.data?.items ?? [] : []}
+              bordered
+              loading={queryEnabled && Boolean(selectedItem) && !eventsQuery.data && eventsQuery.isLoading}
+              pagination={false}
+              locale={{ emptyText: eventsEmptyText }}
+              scroll={{ x: 1000 }}
+            />
+          </div>
         </Space>
       </OpsSurface>
 
@@ -1145,7 +1182,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                   onChange={(event) => setCreateYaml(event.target.value)}
                   autoSize={{ minRows: 14, maxRows: 24 }}
                   placeholder="apiVersion: autoscaling/v2&#10;kind: HorizontalPodAutoscaler&#10;metadata:&#10;  name: web-hpa&#10;  namespace: default"
-                  style={{ fontFamily: "\"JetBrains Mono\", \"IBM Plex Mono\", SFMono-Regular, monospace", fontSize: 12 }}
+                  style={{ fontFamily: "var(--kn-font-mono)", fontSize: 12 }}
                   disabled={yamlSubmitting}
                 />
               </Form.Item>

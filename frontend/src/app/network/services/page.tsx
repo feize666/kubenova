@@ -25,7 +25,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceRowActions } from "@/components/resource-row-actions";
-import { OpsModalShell, OpsSurface } from "@/components/ops";
+import { OpsFilterChip, OpsModalShell, OpsSurface } from "@/components/ops";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
 import {
   applyNetworkResourceYaml,
@@ -646,35 +646,62 @@ export default function ServicesPage() {
     [clusterMap, deleteService, handleOpenEdit, isTableBusy, nameWidth, sortBy, sortOrder],
   );
 
+  const scopeFilterControl = (
+    <div className="workload-workbench__scope">
+      <NetworkResourcePageFilters
+        clusterId={clusterId}
+        namespace={namespace}
+        keywordInput={keywordInput}
+        clusterOptions={clusterOptions}
+        clusterLoading={clustersQuery.isLoading}
+        clusterUnavailable={clusterUnavailable}
+        knownNamespaces={knownNamespaces}
+        namespaceDisabled={namespaceDisabled}
+        namespacePlaceholder={namespaceDisabled ? "请先选择集群" : "全部名称空间"}
+        onClusterChange={handleClusterChange}
+        onNamespaceChange={handleNamespaceChange}
+        onKeywordInputChange={setKeywordInput}
+        onSearch={handleSearch}
+        keywordPlaceholder="按名称/标签搜索（示例：svc-a app=web env=prod）"
+        marginBottom={0}
+      />
+    </div>
+  );
+
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space
+      className="workload-workbench"
+      orientation="vertical"
+      size={16}
+      style={{ width: "100%" }}
+    >
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path={SERVICE_PATH}
+          embedded
+          className="workload-workbench__header"
+          title={
+            <span className="workload-workbench__title-row">
+              <span className="workload-workbench__title">Service</span>
+              <OpsFilterChip
+                tone="info"
+                className="workload-workbench__kind-chip"
+                style={{ margin: 0 }}
+              >
+                服务发现
+              </OpsFilterChip>
+            </span>
+          }
           description="管理集群 Service 访问策略、端口映射与服务暴露方式。"
-          style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建Service" onClick={handleOpenCreate} />}
+          extra={<ResourceAddButton title="创建Service" onClick={handleOpenCreate} />}
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <NetworkResourcePageFilters
-            clusterId={clusterId}
-            namespace={namespace}
-            keywordInput={keywordInput}
-            clusterOptions={clusterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            clusterUnavailable={clusterUnavailable}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespaceDisabled ? "请先选择集群" : "全部名称空间"}
-            onClusterChange={handleClusterChange}
-            onNamespaceChange={handleNamespaceChange}
-            onKeywordInputChange={setKeywordInput}
-            onSearch={handleSearch}
-            keywordPlaceholder="按名称/标签搜索（示例：svc-a app=web env=prod）"
-            marginBottom={0}
-          />
-
+        <Space
+          className="workload-workbench__content"
+          orientation="vertical"
+          size={12}
+          style={{ width: "100%" }}
+        >
           {!isInitializing && !accessToken ? (
             <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
           ) : null}
@@ -689,24 +716,27 @@ export default function ServicesPage() {
             />
           ) : null}
 
-          <ServiceTimeProvider>
-            <ResourceTable<NetworkResource>
-              rowKey="id"
-              columns={columns}
-              onResourceNavigate={(request) => setDetailTarget(request)}
-              tableKey={SERVICE_TABLE_KEY}
-              preferencesClient={preferencesClient}
-              globalSearch={globalSearch}
-              filters={tableFilters}
-              onFiltersChange={handleFiltersChange}
-              sort={sortState}
-              dataSource={tableData}
-              bordered
-              loading={isTableBusy}
-              onChange={handleResourceTableChange}
-              pagination={getPaginationConfig(data?.total ?? 0, isTableBusy)}
-            />
-          </ServiceTimeProvider>
+          <div className="workload-workbench__table-zone">
+            <ServiceTimeProvider>
+              <ResourceTable<NetworkResource>
+                rowKey="id"
+                columns={columns}
+                onResourceNavigate={(request) => setDetailTarget(request)}
+                tableKey={SERVICE_TABLE_KEY}
+                preferencesClient={preferencesClient}
+                globalSearch={globalSearch}
+                filters={tableFilters}
+                onFiltersChange={handleFiltersChange}
+                toolbarExtra={scopeFilterControl}
+                sort={sortState}
+                dataSource={tableData}
+                bordered
+                loading={isTableBusy}
+                onChange={handleResourceTableChange}
+                pagination={getPaginationConfig(data?.total ?? 0, isTableBusy)}
+              />
+            </ServiceTimeProvider>
+          </div>
         </Space>
       </OpsSurface>
 

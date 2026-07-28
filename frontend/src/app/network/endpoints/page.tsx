@@ -24,7 +24,7 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
-import { OpsModalShell, OpsSurface } from "@/components/ops";
+import { OpsFilterChip, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
 import { useAuth } from "@/components/auth-context";
@@ -421,14 +421,59 @@ export default function EndpointsPage() {
     },
   ];
 
+  const scopeFilterControl = (
+    <div className="workload-workbench__scope">
+      <NetworkResourcePageFilters
+        clusterId={clusterId}
+        namespace={namespace}
+        keywordInput={keywordInput}
+        clusterOptions={clusterFilterOptions}
+        clusterLoading={clustersQuery.isLoading}
+        knownNamespaces={knownNamespaces}
+        namespaceDisabled={namespaceDisabled}
+        namespacePlaceholder={namespacePlaceholder}
+        onClusterChange={(value) => {
+          onClusterChange(value);
+          resetPage();
+        }}
+        onNamespaceChange={(value) => {
+          onNamespaceChange(value);
+          resetPage();
+        }}
+        onKeywordInputChange={setKeywordInput}
+        onSearch={handleSearch}
+        keywordPlaceholder="按名称/标签搜索（示例：ep-a app=web env=prod）"
+        marginBottom={0}
+      />
+    </div>
+  );
+
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space
+      className="workload-workbench"
+      orientation="vertical"
+      size={16}
+      style={{ width: "100%" }}
+    >
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/network/endpoints"
+          embedded
+          className="workload-workbench__header"
+          title={
+            <span className="workload-workbench__title-row">
+              <span className="workload-workbench__title">Endpoints</span>
+              <OpsFilterChip
+                tone="info"
+                className="workload-workbench__kind-chip"
+                style={{ margin: 0 }}
+              >
+                后端地址
+              </OpsFilterChip>
+            </span>
+          }
           description="查看 Service 后端地址集合、端口与实际连通目标。"
-          style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建Endpoints" onClick={() => {
+          extra={<ResourceAddButton title="创建Endpoints" onClick={() => {
               const nextClusterId = clusterId || clusterOptions[0]?.value || "";
               const nextNamespace = namespace || "default";
               form.resetFields();
@@ -441,30 +486,12 @@ export default function EndpointsPage() {
             }} />}
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <NetworkResourcePageFilters
-            clusterId={clusterId}
-            namespace={namespace}
-            keywordInput={keywordInput}
-            clusterOptions={clusterFilterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onClusterChange={(value) => {
-              onClusterChange(value);
-              resetPage();
-            }}
-            onNamespaceChange={(value) => {
-              onNamespaceChange(value);
-              resetPage();
-            }}
-            onKeywordInputChange={setKeywordInput}
-            onSearch={handleSearch}
-            keywordPlaceholder="按名称/标签搜索（示例：ep-a app=web env=prod）"
-            marginBottom={0}
-          />
-
+        <Space
+          className="workload-workbench__content"
+          orientation="vertical"
+          size={12}
+          style={{ width: "100%" }}
+        >
           {!isInitializing && !accessToken ? (
             <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
           ) : null}
@@ -479,31 +506,34 @@ export default function EndpointsPage() {
             />
           ) : null}
 
-          <ResourceTable<EndpointsResource>
-            rowKey="id"
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            tableKey="network.endpoints"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称/标签搜索（示例：ep-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            dataSource={tableData}
-            bordered
-            loading={isLoading && !data}
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
-            }
-            pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          />
+          <div className="workload-workbench__table-zone">
+            <ResourceTable<EndpointsResource>
+              rowKey="id"
+              columns={columns}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              tableKey="network.endpoints"
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleGlobalSearchChange,
+                placeholder: "按名称/标签搜索（示例：ep-a app=web env=prod）",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              toolbarExtra={scopeFilterControl}
+              sort={{ sortBy, sortOrder }}
+              dataSource={tableData}
+              bordered
+              loading={isLoading && !data}
+              onChange={(nextPagination, filters, sorter, extra) =>
+                handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+              }
+              pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+            />
+          </div>
         </Space>
       </OpsSurface>
 

@@ -6,10 +6,13 @@ import { OpsFilterChip, OpsPageHeader, type OpsFilterChipTone } from "@/componen
 
 type ResourcePageHeaderProps = {
   path: string;
+  className?: string;
+  title?: ReactNode;
   titleEn?: string;
   titleZh?: string;
   description?: string;
   extra?: ReactNode;
+  actions?: ReactNode;
   titleSuffix?: ReactNode;
   freshness?: {
     label: string;
@@ -30,10 +33,13 @@ function mapFreshnessColor(color?: string): OpsFilterChipTone {
 
 export function ResourcePageHeader({
   path,
+  className,
+  title: titleOverride,
   titleEn,
   titleZh,
   description,
   extra,
+  actions,
   titleSuffix,
   freshness,
   embedded = false,
@@ -44,9 +50,22 @@ export function ResourcePageHeader({
   const resolvedTitleZh = titleZh ?? navItem?.canonicalNameZh;
   const resolvedDescription = description ?? navItem?.description ?? "";
   const title =
-    resolvedTitleEn && resolvedTitleZh
+    titleOverride ??
+    (resolvedTitleEn && resolvedTitleZh
       ? `${resolvedTitleEn}（${resolvedTitleZh}）`
-      : resolvedTitleEn ?? navItem?.label ?? "资源";
+      : resolvedTitleEn ?? navItem?.label ?? "资源");
+  const freshnessAction = freshness ? (
+    <OpsFilterChip tone={mapFreshnessColor(freshness.color)} style={{ margin: 0 }}>
+      {freshness.label}：{freshness.value ?? "-"}
+    </OpsFilterChip>
+  ) : null;
+  const secondaryActions =
+    actions || freshnessAction ? (
+      <>
+        {actions}
+        {freshnessAction}
+      </>
+    ) : null;
 
   return (
     <OpsPageHeader
@@ -57,14 +76,10 @@ export function ResourcePageHeader({
         </>
       )}
       subtitle={resolvedDescription}
-      actions={freshness ? (
-        <OpsFilterChip tone={mapFreshnessColor(freshness.color)} style={{ margin: 0 }}>
-          {freshness.label}：{freshness.value ?? "-"}
-        </OpsFilterChip>
-      ) : null}
+      actions={secondaryActions}
       primaryAction={extra}
       surface={!embedded}
-      className="resource-page-header"
+      className={["resource-page-header", className].filter(Boolean).join(" ")}
       style={style}
     />
   );

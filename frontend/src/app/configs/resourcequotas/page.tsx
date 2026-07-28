@@ -8,6 +8,7 @@ export default function ResourceQuotasPage() {
       path="/configs/resourcequotas"
       tableKey="configs.resourcequotas"
       titleKind="ResourceQuota"
+      titleBadge="资源配额"
       version="v1"
       resource="resourcequotas"
       kind="ResourceQuota"

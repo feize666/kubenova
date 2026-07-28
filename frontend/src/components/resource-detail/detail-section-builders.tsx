@@ -151,16 +151,14 @@ export function buildAnnotationsSection({ detail }: DetailSectionBuilderContext)
   );
 }
 
-export function buildSpecSection({ detail, specSnapshot }: DetailSectionBuilderContext): ReactNode {
-  const fields = getOrderedFields(detail, "runtime", getRenderProfile(detail).runtimeFields);
-  const runtimeValues = buildRuntimeFieldMap(detail.runtime);
+export function buildSpecSection({ specSnapshot }: DetailSectionBuilderContext): ReactNode {
+  if (!specSnapshot || getObjectEntries(specSnapshot).length === 0) {
+    return null;
+  }
+
   return (
-    <DetailSection title="Spec" subtitle={specSnapshot ? "Kubernetes spec 只读摘要" : "当前仅展示可用运行/配置摘要"}>
-      {specSnapshot ? (
-        renderReadonlyObjectSummary(specSnapshot, "暂无 Spec 摘要")
-      ) : (
-        <DetailDescriptions items={toDescriptionItems(fields, runtimeValues)} emptyText="暂无 Spec 摘要" />
-      )}
+    <DetailSection title="Spec" subtitle="Kubernetes spec 只读摘要">
+      {renderReadonlyObjectSummary(specSnapshot, "暂无 Spec 摘要")}
     </DetailSection>
   );
 }
@@ -247,14 +245,7 @@ export function buildEventsSection({ detail }: DetailSectionBuilderContext): Rea
 }
 
 export function buildHeadlampDetailSections(context: DetailSectionBuilderContext): ReactNode[] {
-  const sections: ReactNode[] = [
-    buildOverviewSection(context),
-    buildMetadataSection(context),
-    buildLabelsSection(context),
-    buildAnnotationsSection(context),
-    buildSpecSection(context),
-    buildStatusSection(context),
-  ];
+  const sections: ReactNode[] = [];
   if (context.detail.descriptor.sections.includes("events")) {
     sections.push(buildEventsSection(context));
   }

@@ -84,6 +84,9 @@ export default function ObservabilityCenterPage() {
   const entities = summary?.entities ?? EMPTY_ENTITIES;
   const signalPanels = summary?.signalPanels ?? EMPTY_SIGNAL_PANELS;
   const recentEvents = summary?.recentEvents ?? EMPTY_EVENTS;
+  const availableSources = sourceStatus.filter((item) => item.available).length;
+  const degradedSources = sourceStatus.filter((item) => item.available && item.degraded).length;
+  const activeAlertTotal = (summary?.activeAlerts.critical ?? 0) + (summary?.activeAlerts.warning ?? 0);
   const selectedEntity = useMemo(
     () => entities.find((item) => item.scope === selectedScope) ?? null,
     [entities, selectedScope],
@@ -199,24 +202,37 @@ export default function ObservabilityCenterPage() {
   );
 
   return (
-    <Space className="ops-observability-cockpit" orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path={OBSERVABILITY_PATH}
-        freshness={summary ? { label: "采集时间", value: summary.timestamp, color: "blue" } : undefined}
-        extra={
-          <Space wrap>
-            <Select
-              value={range}
-              style={{ width: 120 }}
-              onChange={setRange}
-              options={OBSERVABILITY_RANGE_OPTIONS}
-            />
-            <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
-              刷新
-            </OpsIconActionButton>
-          </Space>
-        }
-      />
+    <Space className="resource-workbench ops-observability-cockpit" orientation="vertical" size={16} style={{ width: "100%" }}>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourcePageHeader
+          path={OBSERVABILITY_PATH}
+          embedded
+          className="resource-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">Observability</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                可观测性中心
+              </OpsFilterChip>
+            </span>
+          }
+          description="统一查看数据源状态、实体健康、信号联动与最近事件。"
+          freshness={summary ? { label: "最近采集", value: summary.timestamp, color: "blue" } : undefined}
+          extra={
+            <Space wrap>
+              <Select
+                value={range}
+                style={{ width: 120 }}
+                onChange={setRange}
+                options={OBSERVABILITY_RANGE_OPTIONS}
+              />
+              <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
+                刷新
+              </OpsIconActionButton>
+            </Space>
+          }
+        />
+      </OpsSurface>
 
       {!enabled ? <Alert className="ops-center-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后查看可观测性中心。" /> : null}
       {summaryQuery.isError ? (
@@ -232,6 +248,7 @@ export default function ObservabilityCenterPage() {
         <Col xs={24} md={6}>
           <OpsMetricTile
             label="健康分"
+            meta={`覆盖 ${entities.length} 个实体 · ${availableSources}/${sourceStatus.length} 数据源可用`}
             suffix="/ 100"
             tone="success"
             value={summary?.healthScore ?? 0}
@@ -240,6 +257,7 @@ export default function ObservabilityCenterPage() {
         <Col xs={24} md={6}>
           <OpsMetricTile
             label="活跃告警"
+            meta={summary ? `当前窗口 ${activeAlertTotal} 条` : undefined}
             tone="info"
             value={summary?.activeAlerts.total ?? 0}
           />
@@ -247,6 +265,7 @@ export default function ObservabilityCenterPage() {
         <Col xs={24} md={6}>
           <OpsMetricTile
             label="严重"
+            meta={degradedSources > 0 ? `${degradedSources} 个数据源处于降级` : "暂无严重源级降级"}
             tone="danger"
             value={summary?.activeAlerts.critical ?? 0}
           />
@@ -254,6 +273,7 @@ export default function ObservabilityCenterPage() {
         <Col xs={24} md={6}>
           <OpsMetricTile
             label="风险"
+            meta={`关联 ${signalPanels.length} 个信号面板`}
             tone="warning"
             value={summary?.activeAlerts.warning ?? 0}
           />
@@ -285,42 +305,48 @@ export default function ObservabilityCenterPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={10}>
           <OpsSurface className="ops-observability-panel" variant="panel" padding="sm" title="实体健康">
-            <ResourceTable
-              rowKey="scope"
-              size="small"
-              columns={entityColumns}
-              dataSource={entities}
-              pagination={false}
-              loading={summaryQuery.isLoading}
-              emptyDescription="暂无实体健康数据"
-            />
+            <div className="resource-workbench__table-zone">
+              <ResourceTable
+                rowKey="scope"
+                size="small"
+                columns={entityColumns}
+                dataSource={entities}
+                pagination={false}
+                loading={summaryQuery.isLoading}
+                emptyDescription="暂无实体健康数据"
+              />
+            </div>
           </OpsSurface>
         </Col>
         <Col xs={24} xl={14}>
           <OpsSurface className="ops-observability-panel" variant="panel" padding="sm" title="信号联动">
-            <ResourceTable
-              rowKey="key"
-              size="small"
-              columns={signalColumns}
-              dataSource={signalPanels}
-              pagination={false}
-              loading={summaryQuery.isLoading}
-              emptyDescription="暂无信号联动数据"
-            />
+            <div className="resource-workbench__table-zone">
+              <ResourceTable
+                rowKey="key"
+                size="small"
+                columns={signalColumns}
+                dataSource={signalPanels}
+                pagination={false}
+                loading={summaryQuery.isLoading}
+                emptyDescription="暂无信号联动数据"
+              />
+            </div>
           </OpsSurface>
         </Col>
       </Row>
 
       <OpsSurface className="ops-observability-panel ops-observability-panel--events" variant="panel" padding="sm" title="最近事件">
-        <ResourceTable
-          rowKey="id"
-          size="small"
-          columns={eventColumns}
-          dataSource={recentEvents}
-          pagination={false}
-          loading={summaryQuery.isLoading}
-          emptyDescription="暂无最近事件"
-        />
+        <div className="resource-workbench__table-zone">
+          <ResourceTable
+            rowKey="id"
+            size="small"
+            columns={eventColumns}
+            dataSource={recentEvents}
+            pagination={false}
+            loading={summaryQuery.isLoading}
+            emptyDescription="暂无最近事件"
+          />
+        </div>
       </OpsSurface>
 
       <OpsDrawerShell

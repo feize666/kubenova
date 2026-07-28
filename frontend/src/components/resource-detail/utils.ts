@@ -174,6 +174,16 @@ const RENDER_PROFILES: Record<string, ResourceDetailRenderProfile> = {
     overviewFields: ["clusterId", "kind", "name", "state", "createdAt", "updatedAt"],
     runtimeFields: ["phase"],
   },
+  limitrange: {
+    title: "LimitRange 详情",
+    overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
+    runtimeFields: ["phase", "limits"],
+  },
+  resourcequota: {
+    title: "ResourceQuota 详情",
+    overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
+    runtimeFields: ["phase", "hard", "used", "scopes", "scopeSelector"],
+  },
   dynamic: {
     title: "自定义资源详情",
     overviewFields: ["clusterId", "namespace", "kind", "name", "state", "createdAt", "updatedAt"],
@@ -254,11 +264,25 @@ export function normalizeKind(kind: string): string {
       return "storageclass";
     case "configmaps":
       return "configmap";
+    case "helm":
+    case "helmapplication":
     case "helmapplications":
+    case "helmrelease":
     case "helmreleases":
       return "helmrelease";
+    case "helmrepository":
     case "helmrepositories":
+    case "helmrepo":
+    case "helmrepos":
       return "helmrepository";
+    case "limitrange":
+    case "limitranges":
+      return "limitrange";
+    case "resourcequota":
+    case "resourcequotas":
+    case "quota":
+    case "quotas":
+      return "resourcequota";
     case "dynamic":
     case "dynamicresource":
     case "customresource":
@@ -378,6 +402,11 @@ export function humanizeFieldLabel(field: string): string {
     backendRefs: "BackendRefs",
     policyTypes: "策略类型",
     podSelector: "Pod Selector",
+    limits: "限制项",
+    hard: "硬配额",
+    used: "已使用",
+    scopes: "作用域",
+    scopeSelector: "作用域选择器",
     id: "资源 ID",
   };
 
@@ -442,6 +471,11 @@ export function buildRuntimeFieldMap(runtime: ResourceDetailRuntime): Record<str
     unschedulable: runtime.unschedulable,
     policyTypes: runtime.policyTypes?.join(", "),
     podSelector: runtime.podSelector,
+    limits: runtime.limits,
+    hard: runtime.hard,
+    used: runtime.used,
+    scopes: runtime.scopes?.join(", "),
+    scopeSelector: runtime.scopeSelector,
   };
 }
 

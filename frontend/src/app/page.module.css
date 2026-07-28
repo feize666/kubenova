@@ -2,19 +2,19 @@
   --background: #fafafa;
   --foreground: #fff;
 
-  --text-primary: #000;
-  --text-secondary: #666;
+  --text-primary: #1f2937;
+  --text-secondary: #667085;
 
-  --button-primary-hover: #383838;
-  --button-secondary-hover: #f2f2f2;
-  --button-secondary-border: #ebebeb;
+  --button-primary-hover: #174ce0;
+  --button-secondary-hover: #eff6ff;
+  --button-secondary-border: #dde2ea;
 
   display: flex;
   flex: 1;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-geist-sans);
+  font-family: var(--kn-font-sans);
   background-color: var(--background);
 }
 
@@ -43,7 +43,7 @@
   font-size: 40px;
   font-weight: 600;
   line-height: 48px;
-  letter-spacing: -2.4px;
+  letter-spacing: 0;
   text-wrap: balance;
   color: var(--text-primary);
 }
@@ -119,7 +119,7 @@ a.secondary {
   .intro h1 {
     font-size: 32px;
     line-height: 40px;
-    letter-spacing: -1.92px;
+    letter-spacing: 0;
   }
 }
 
@@ -129,8 +129,8 @@ a.secondary {
   }
 
   .page {
-    --background: #000;
-    --foreground: #000;
+    --background: #1f2937;
+    --foreground: #1f2937;
 
     --text-primary: #ededed;
     --text-secondary: #999;

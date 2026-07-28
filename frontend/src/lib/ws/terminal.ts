@@ -160,7 +160,7 @@ export function buildGatewayWsCandidates(gatewayWsUrl: string): string[] {
   const ordered: string[] = [];
   const pushOrdered = (candidate: URL) => {
     const raw = candidate.toString();
-    if (!candidates.has(raw)) {
+    if (ordered.includes(raw)) {
       return;
     }
     ordered.push(raw);
@@ -172,13 +172,6 @@ export function buildGatewayWsCandidates(gatewayWsUrl: string): string[] {
     const browserPreferred = new URL(parsed.toString());
     browserPreferred.protocol = browserWsProtocol;
 
-    if (browserHost) {
-      const sameOrigin = new URL(parsed.toString());
-      sameOrigin.protocol = browserWsProtocol;
-      sameOrigin.host = browserHost;
-      pushOrdered(sameOrigin);
-    }
-
     // Local dev: Next websocket rewrite may not be active or stable.
     // When page runs on localhost/127.0.0.1, always keep direct gateway :4100 fallback.
     if (parsedIsLoopback && isBrowserLoopback) {
@@ -187,6 +180,13 @@ export function buildGatewayWsCandidates(gatewayWsUrl: string): string[] {
       directGateway.hostname = browserHostname;
       directGateway.port = DEFAULT_RUNTIME_GATEWAY_PORT;
       pushOrdered(directGateway);
+
+      if (browserHost) {
+        const sameOrigin = new URL(parsed.toString());
+        sameOrigin.protocol = browserWsProtocol;
+        sameOrigin.host = browserHost;
+        pushOrdered(sameOrigin);
+      }
     }
 
     // Remote browser + loopback gateway URL:

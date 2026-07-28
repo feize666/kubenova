@@ -183,3 +183,33 @@ Prepend the current Linux node bin directory to `PATH` during dev environment in
 ### Metadata
 - Reproducible: yes
 - Related Files: scripts/_dev-env.sh, frontend/node_modules
+
+---
+
+## [ERR-20260711-001] playwright_browser_missing
+
+**Logged**: 2026-07-11T10:15:46.1543351+08:00
+**Priority**: low
+**Status**: pending
+**Area**: tests
+
+### Summary
+`npm run e2e:filters:matrix` could not start Playwright Chromium because the project browser binary is not installed locally.
+
+### Error
+```text
+browserType.launch: Executable doesn't exist at C:\Users\admin\AppData\Local\ms-playwright\chromium_headless_shell-1223\chrome-headless-shell-win64\chrome-headless-shell.exe
+```
+
+### Context
+- Command attempted: `FILTER_BASE_URL=http://127.0.0.1:3000 FILTER_CASES=workloads-pods npm run e2e:filters:matrix`
+- Workaround used in this session: direct Playwright script with system Chrome at `C:\Program Files\Google\Chrome\Application\chrome.exe`.
+
+### Suggested Fix
+Run `npx playwright install chromium` for the project environment, or allow filter regression scripts to respect a `CHROME_BIN` executable override.
+
+### Metadata
+- Reproducible: yes
+- Related Files: frontend/scripts/filter-regression-matrix.mjs
+
+---

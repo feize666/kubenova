@@ -1,0 +1,124 @@
+/* Shared business-layout rhythm. Special workbenches retain their own density. */
+.ops-surface:not(.logs-terminal-card) > :is(.ops-surface__header, .ops-surface__footer) {
+  gap: var(--ops-space-12);
+}
+
+.ops-surface:not(.logs-terminal-card) .ops-surface__title-group {
+  gap: var(--ops-space-4);
+}
+
+.ops-surface--pad-xs > .ops-surface__body {
+  padding: var(--ops-space-8);
+}
+
+.ops-surface--pad-sm > .ops-surface__body {
+  padding: var(--ops-space-12);
+}
+
+.ops-surface--pad-md > .ops-surface__body {
+  padding: var(--ops-space-16);
+}
+
+.ops-surface--pad-lg > .ops-surface__body {
+  padding: var(--ops-space-24);
+}
+
+.ops-filter-bar,
+.resource-filter-toolbar {
+  gap: var(--ops-space-12);
+}
+
+.ops-filter-bar__controls,
+.ops-filter-bar__actions,
+.ops-filter-bar__active,
+.resource-filter-toolbar-actions.ant-space {
+  gap: var(--ops-space-8);
+}
+
+.ops-filter-bar__item,
+.ops-form-section__header,
+.ops-form-section__body {
+  gap: var(--ops-space-4);
+}
+
+.ops-form-section {
+  gap: var(--ops-space-12);
+}
+
+.ops-form-section + .ops-form-section {
+  margin-top: var(--ops-space-24);
+}
+
+.ops-form-section__body .ant-form,
+.ops-modal-shell__body .ant-form,
+.ops-drawer-shell .ant-drawer-body .ant-form {
+  gap: var(--ops-space-12);
+}
+
+.ops-form-section__body .ant-form-item,
+.ops-modal-shell__body .ant-form-item,
+.ops-drawer-shell .ant-drawer-body .ant-form-item {
+  margin-bottom: 0;
+}
+
+.ops-surface .ant-descriptions-row > :is(th, td),
+.ops-drawer-shell .ant-descriptions-row > :is(th, td),
+.ops-modal-shell .ant-descriptions-row > :is(th, td) {
+  padding: var(--ops-space-8) var(--ops-space-12);
+}
+
+.ops-surface .ant-tabs,
+.ops-drawer-shell .ant-tabs,
+.ops-modal-shell .ant-tabs {
+  gap: var(--ops-space-12);
+}
+
+.ops-surface .ant-tabs-nav,
+.ops-drawer-shell .ant-tabs-nav,
+.ops-modal-shell .ant-tabs-nav {
+  margin: 0;
+}
+
+.ops-surface .ant-tabs-tab,
+.ops-drawer-shell .ant-tabs-tab,
+.ops-modal-shell .ant-tabs-tab {
+  margin: 0;
+  padding: var(--ops-space-8) 0;
+}
+
+.ops-surface .ant-list,
+.ops-drawer-shell .ant-list,
+.ops-modal-shell .ant-list {
+  gap: var(--ops-space-4);
+}
+
+.ops-surface .ant-list-item,
+.ops-drawer-shell .ant-list-item,
+.ops-modal-shell .ant-list-item {
+  padding-block: var(--ops-space-8);
+}
+
+.ops-drawer-shell__footer-actions,
+.ops-modal-shell__footer-actions {
+  gap: var(--ops-space-8);
+}
+
+@media (max-width: 640px) {
+  .ops-surface--pad-md > .ops-surface__body,
+  .ops-surface--pad-lg > .ops-surface__body {
+    padding: var(--ops-space-12);
+  }
+
+  .ops-surface > .ops-surface__header,
+  .ops-filter-bar__main,
+  .ops-modal-shell__title-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ops-filter-bar__actions,
+  .ops-drawer-shell__footer-actions,
+  .ops-modal-shell__footer-actions {
+    width: 100%;
+  }
+}

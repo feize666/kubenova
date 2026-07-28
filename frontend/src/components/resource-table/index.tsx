@@ -43,6 +43,7 @@ import {
 import { useAuth } from "@/components/auth-context";
 
 export const RESOURCE_TABLE_CLASS_NAME = "resource-table";
+const RESOURCE_TABLE_VIEWPORT_SCROLL_Y = "clamp(240px, calc(100dvh - 420px), 560px)";
 
 type ResourceTableNavigateRequest = NonNullable<ResourceDetailDrawerProps["request"]>;
 type ResourceTableNavigateHandler = (request: ResourceTableNavigateRequest) => void;
@@ -418,6 +419,11 @@ export type ResourceTableProps<T extends object> = Omit<
   stateAction?: ReactNode;
   layoutOptions?: StandardTableLayoutOptions<T>;
   scroll?: TableProps<T>["scroll"];
+  /**
+   * Keeps long resource lists inside the table body while leaving the page
+   * header, filters, and pagination in their normal document flow.
+   */
+  viewportScroll?: boolean;
   locale?: TableProps<T>["locale"];
 };
 
@@ -449,6 +455,7 @@ export function ResourceTable<T extends object>({
   stateTitle,
   tableKey,
   toolbarExtra,
+  viewportScroll = true,
   ...restProps
 }: ResourceTableProps<T>) {
   const { accessToken } = useAuth();
@@ -488,6 +495,7 @@ export function ResourceTable<T extends object>({
         stateTitle={stateTitle}
         tableKey={tableKey}
         toolbarExtra={toolbarExtra}
+        viewportScroll={viewportScroll}
       />
   ) : (
     <StandardResourceTable<T>
@@ -508,6 +516,7 @@ export function ResourceTable<T extends object>({
       stateAction={stateAction}
       stateDescription={stateDescription}
       stateTitle={stateTitle}
+      viewportScroll={viewportScroll}
     />
   );
 
@@ -681,6 +690,7 @@ function StandardResourceTable<T extends object>({
   stateAction,
   stateDescription,
   stateTitle,
+  viewportScroll,
   ...restProps
 }: ResourceTableProps<T>) {
   const normalizedLayoutOptions = useMemo(
@@ -698,8 +708,12 @@ function StandardResourceTable<T extends object>({
     [columns, normalizedLayoutOptions, onResourceNavigate],
   );
   const nextScroll = useMemo(
-    () => scroll ?? { x: getStandardResourceTableScrollX(normalizedColumns) },
-    [normalizedColumns, scroll],
+    () => ({
+      x: getStandardResourceTableScrollX(normalizedColumns),
+      ...scroll,
+      ...(viewportScroll ? { y: scroll?.y ?? RESOURCE_TABLE_VIEWPORT_SCROLL_Y } : {}),
+    }),
+    [normalizedColumns, scroll, viewportScroll],
   );
   const nextLoading = useMemo(
     () => loading ?? buildResourceTableLoading(loadingOptions),
@@ -734,7 +748,7 @@ function StandardResourceTable<T extends object>({
   });
 
   return (
-    <>
+    <div className={viewportScroll ? "resource-table-viewport resource-table-viewport--viewport-scroll" : "resource-table-viewport"}>
       {mobileCards}
       <Table<T>
         {...restProps}
@@ -749,7 +763,7 @@ function StandardResourceTable<T extends object>({
         size={size}
         tableLayout={restProps.tableLayout ?? "fixed"}
       />
-    </>
+    </div>
   );
 }
 
@@ -781,6 +795,7 @@ function HeadlampResourceTable<T extends object>({
   stateTitle,
   tableKey,
   toolbarExtra,
+  viewportScroll,
   ...restProps
 }: ResourceTableProps<T> & { tableKey: string }) {
   const headlampColumns = useMemo(
@@ -817,8 +832,12 @@ function HeadlampResourceTable<T extends object>({
     [normalizedLayoutOptions, onResourceNavigate, table.columns],
   );
   const nextScroll = useMemo(
-    () => scroll ?? { x: getStandardResourceTableScrollX(normalizedColumns) },
-    [normalizedColumns, scroll],
+    () => ({
+      x: getStandardResourceTableScrollX(normalizedColumns),
+      ...scroll,
+      ...(viewportScroll ? { y: scroll?.y ?? RESOURCE_TABLE_VIEWPORT_SCROLL_Y } : {}),
+    }),
+    [normalizedColumns, scroll, viewportScroll],
   );
   const nextLoading = useMemo(
     () => loading ?? buildResourceTableLoading(loadingOptions),
@@ -871,7 +890,10 @@ function HeadlampResourceTable<T extends object>({
   });
 
   return (
-    <div className="resource-table-shell">
+    <div className={getResourceTableClassName(
+      "resource-table-shell",
+      viewportScroll ? "resource-table-shell--viewport-scroll" : undefined,
+    )}>
       {showToolbar ? <ResourceTableToolbar<T> table={table} extra={toolbarExtra} /> : null}
       {mobileCards}
       <Table<T>

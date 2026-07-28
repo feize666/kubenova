@@ -8,6 +8,7 @@ export default function LimitRangesPage() {
       path="/configs/limitranges"
       tableKey="configs.limitranges"
       titleKind="LimitRange"
+      titleBadge="资源限制"
       version="v1"
       resource="limitranges"
       kind="LimitRange"

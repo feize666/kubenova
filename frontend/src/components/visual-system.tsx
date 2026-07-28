@@ -7,11 +7,11 @@ type SeverityLevel = "critical" | "warning" | "info" | "success" | "unknown";
 type RuntimeStatus = "Running" | "Pending" | "Failed" | "Unknown";
 
 const SEVERITY_STYLE: Record<SeverityLevel, { color: string; bg: string; border: string; label: string }> = {
-  critical: { color: "#ef4444", bg: "rgba(239,68,68,0.14)", border: "rgba(239,68,68,0.35)", label: "严重" },
-  warning: { color: "#f59e0b", bg: "rgba(245,158,11,0.14)", border: "rgba(245,158,11,0.35)", label: "警告" },
-  info: { color: "#3b82f6", bg: "rgba(59,130,246,0.14)", border: "rgba(59,130,246,0.35)", label: "提示" },
-  success: { color: "#22c55e", bg: "rgba(34,197,94,0.14)", border: "rgba(34,197,94,0.35)", label: "正常" },
-  unknown: { color: "#94a3b8", bg: "rgba(148,163,184,0.14)", border: "rgba(148,163,184,0.35)", label: "未知" },
+  critical: { color: "#dc2626", bg: "rgba(220,38,38,0.12)", border: "rgba(220,38,38,0.28)", label: "严重" },
+  warning: { color: "#c26a00", bg: "rgba(194,106,0,0.12)", border: "rgba(194,106,0,0.28)", label: "警告" },
+  info: { color: "#2563eb", bg: "rgba(37,99,235,0.12)", border: "rgba(37,99,235,0.28)", label: "提示" },
+  success: { color: "#15803d", bg: "rgba(21,128,61,0.12)", border: "rgba(21,128,61,0.28)", label: "正常" },
+  unknown: { color: "#7c8794", bg: "rgba(124,135,148,0.12)", border: "rgba(124,135,148,0.28)", label: "未知" },
 };
 
 const STATUS_TO_LEVEL: Record<RuntimeStatus, SeverityLevel> = {

@@ -38,10 +38,10 @@ const ACTIVITY_ITEMS: ActivityItem[] = [
 ];
 
 const LEVEL_COLOR: Record<ActivityItem["level"], string> = {
-  critical: "#ef4444",
-  warning:  "#f59e0b",
-  info:     "#3b82f6",
-  success:  "#10b981",
+  critical: "#dc2626",
+  warning:  "#c26a00",
+  info:     "#2563eb",
+  success:  "#15803d",
 };
 
 const LEVEL_LABEL: Record<ActivityItem["level"], string> = {
@@ -64,9 +64,9 @@ function TrendChart({ isDark }: { isDark: boolean }) {
     backgroundColor: "transparent",
     tooltip: {
       trigger: "axis",
-      backgroundColor: isDark ? "#1a2234" : "#fff",
-      borderColor: isDark ? "rgba(59,130,246,0.3)" : "#e2e8f0",
-      textStyle: { color: isDark ? "#e2e8f0" : "#1e293b", fontSize: 12 },
+      backgroundColor: isDark ? "#223247" : "#ffffff",
+      borderColor: isDark ? "rgba(91,141,239,0.28)" : "#d8e0ea",
+      textStyle: { color: isDark ? "#eef3f8" : "#17202b", fontSize: 12 },
       formatter: (params: unknown) => {
         const items = params as Array<{ seriesName: string; value: number; marker: string }>;
         if (!items?.length) return "";
@@ -78,7 +78,7 @@ function TrendChart({ isDark }: { isDark: boolean }) {
     legend: {
       top: 4,
       right: 8,
-      textStyle: { color: isDark ? "#94a3b8" : "#64748b", fontSize: 12 },
+      textStyle: { color: isDark ? "#8190a0" : "#7c8794", fontSize: 12 },
       icon: "circle",
       itemWidth: 8,
       itemHeight: 8,
@@ -88,9 +88,9 @@ function TrendChart({ isDark }: { isDark: boolean }) {
       type: "category",
       data: TREND_TIME,
       boundaryGap: false,
-      axisLine: { lineStyle: { color: isDark ? "rgba(59,130,246,0.2)" : "#e2e8f0" } },
+      axisLine: { lineStyle: { color: isDark ? "rgba(91,141,239,0.2)" : "#d8e0ea" } },
       axisTick: { show: false },
-      axisLabel: { color: isDark ? "#64748b" : "#94a3b8", fontSize: 11 },
+      axisLabel: { color: isDark ? "#8190a0" : "#7c8794", fontSize: 11 },
       splitLine: { show: false },
     },
     yAxis: {
@@ -98,11 +98,11 @@ function TrendChart({ isDark }: { isDark: boolean }) {
       name: "%",
       min: 0,
       max: 100,
-      nameTextStyle: { color: isDark ? "#64748b" : "#94a3b8", fontSize: 11 },
+      nameTextStyle: { color: isDark ? "#8190a0" : "#7c8794", fontSize: 11 },
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: isDark ? "#64748b" : "#94a3b8", fontSize: 11 },
-      splitLine: { lineStyle: { color: isDark ? "rgba(59,130,246,0.07)" : "rgba(0,0,0,0.06)", type: "dashed" } },
+      axisLabel: { color: isDark ? "#8190a0" : "#7c8794", fontSize: 11 },
+      splitLine: { lineStyle: { color: isDark ? "rgba(91,141,239,0.08)" : "rgba(23,32,43,0.06)", type: "dashed" } },
     },
     series: [
       {
@@ -111,12 +111,12 @@ function TrendChart({ isDark }: { isDark: boolean }) {
         smooth: true,
         showSymbol: false,
         data: CPU_TREND,
-        lineStyle: { color: "#3b82f6", width: 2 },
+        lineStyle: { color: "#2563eb", width: 2 },
         areaStyle: {
           color: isDark
             ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: "rgba(59,130,246,0.45)" },
-                { offset: 1, color: "rgba(59,130,246,0.03)" },
+                { offset: 0, color: "rgba(91,141,239,0.34)" },
+                { offset: 1, color: "rgba(91,141,239,0.03)" },
               ])
             : new echarts.graphic.LinearGradient(0, 0, 0, 1, [
                 { offset: 0, color: "rgba(37,99,235,0.18)" },
@@ -131,16 +131,16 @@ function TrendChart({ isDark }: { isDark: boolean }) {
         smooth: true,
         showSymbol: false,
         data: MEMORY_TREND,
-        lineStyle: { color: "#a855f7", width: 2 },
+        lineStyle: { color: "#0891b2", width: 2 },
         areaStyle: {
           color: isDark
             ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: "rgba(168,85,247,0.35)" },
-                { offset: 1, color: "rgba(168,85,247,0.02)" },
+                { offset: 0, color: "rgba(32,191,209,0.28)" },
+                { offset: 1, color: "rgba(32,191,209,0.02)" },
               ])
             : new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: "rgba(124,58,237,0.14)" },
-                { offset: 1, color: "rgba(124,58,237,0.01)" },
+                { offset: 0, color: "rgba(8,145,178,0.12)" },
+                { offset: 1, color: "rgba(8,145,178,0.01)" },
               ]),
         },
         emphasis: { focus: "series" },
@@ -170,16 +170,16 @@ function ClusterHealthNumbers({
   if (total === 0) {
     return (
       <div style={{ height: 280, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Empty description={<span style={{ color: "#64748b" }}>暂无集群数据</span>} />
+        <Empty description={<span style={{ color: isDark ? "#8190a0" : "#7c8794" }}>暂无集群数据</span>} />
       </div>
     );
   }
 
   const healthPct = total > 0 ? Math.round((healthy / total) * 100) : 0;
   const items = [
-    { label: "健康", value: healthy, color: "#10b981", glow: "rgba(16,185,129,0.5)", bg: "rgba(16,185,129,0.08)" },
-    { label: "告警", value: warning, color: "#f59e0b", glow: "rgba(245,158,11,0.5)", bg: "rgba(245,158,11,0.08)" },
-    { label: "故障", value: faulted, color: "#ef4444", glow: "rgba(239,68,68,0.5)", bg: "rgba(239,68,68,0.08)" },
+    { label: "健康", value: healthy, color: "#15803d", glow: "rgba(21,128,61,0.42)", bg: "rgba(21,128,61,0.08)" },
+    { label: "告警", value: warning, color: "#c26a00", glow: "rgba(194,106,0,0.42)", bg: "rgba(194,106,0,0.08)" },
+    { label: "故障", value: faulted, color: "#dc2626", glow: "rgba(220,38,38,0.42)", bg: "rgba(220,38,38,0.08)" },
   ];
 
   return (
@@ -219,7 +219,7 @@ function ClusterHealthNumbers({
                   lineHeight: 1,
                   color: item.color,
                   fontVariantNumeric: "tabular-nums",
-                  letterSpacing: "-2px",
+                  letterSpacing: 0,
                   filter: isDark ? `drop-shadow(0 0 10px ${item.glow})` : "none",
                   textShadow: isDark ? `0 0 20px ${item.color}60` : "none",
                 }}
@@ -238,7 +238,7 @@ function ClusterHealthNumbers({
       <div style={{ marginTop: 24, padding: "0 8px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12, color: token.colorTextSecondary }}>
           <span>集群健康率</span>
-          <span style={{ fontWeight: 700, color: healthPct >= 80 ? "#10b981" : "#f59e0b" }}>{healthPct}%</span>
+          <span style={{ fontWeight: 700, color: healthPct >= 80 ? "#15803d" : "#c26a00" }}>{healthPct}%</span>
         </div>
         <div
           style={{
@@ -258,11 +258,11 @@ function ClusterHealthNumbers({
               width: `${healthPct}%`,
               borderRadius: 4,
               background: healthPct >= 80
-                ? "linear-gradient(90deg, #10b981, #34d399)"
+                ? "linear-gradient(90deg, #15803d, #38c172)"
                 : healthPct >= 50
-                ? "linear-gradient(90deg, #f59e0b, #fbbf24)"
-                : "linear-gradient(90deg, #ef4444, #f87171)",
-              boxShadow: healthPct >= 80 ? "0 0 10px rgba(16,185,129,0.6)" : "0 0 10px rgba(245,158,11,0.5)",
+                ? "linear-gradient(90deg, #c26a00, #e69a2e)"
+                : "linear-gradient(90deg, #dc2626, #ef5b5b)",
+              boxShadow: healthPct >= 80 ? "0 0 10px rgba(21,128,61,0.28)" : "0 0 10px rgba(194,106,0,0.24)",
               transition: "width 0.8s ease",
             }}
           />
@@ -673,7 +673,7 @@ export function DashboardCharts({ stats }: { stats?: DashboardStats }) {
                 { label: "在线节点", value: "42", unit: "个", color: "#3b82f6" },
                 { label: "运行 Pod", value: "1,286", unit: "个", color: "#10b981" },
                 { label: "高优告警", value: stats?.alerts.critical?.toString() ?? "0", unit: "条", color: "#ef4444" },
-                { label: "SLA 达成", value: "99.94", unit: "%", color: "#6d28d9" },
+                { label: "SLA 达成", value: "99.94", unit: "%", color: "#2563eb" },
               ].map(({ label, value, unit, color }) => (
                 <Col xs={12} key={label}>
                   <div

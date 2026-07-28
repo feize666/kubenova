@@ -182,15 +182,6 @@ export const navSections: NavSection[] = [
         domain: "network",
       },
       {
-        key: "network-ingressroute",
-        path: "/network/ingressroute",
-        label: "IngressRoute（Traefik 路由）",
-        canonicalNameEn: "IngressRoute",
-        canonicalNameZh: "Traefik 路由",
-        description: "管理 Traefik IngressRoute 入口规则、匹配表达式与中间件。",
-        domain: "network",
-      },
-      {
         key: "network-networkpolicy",
         path: "/network/networkpolicy",
         label: "NetworkPolicy（网络策略）",
@@ -301,24 +292,6 @@ export const navSections: NavSection[] = [
     key: "section-app-delivery",
     label: "应用交付",
     items: [
-      {
-        key: "helm-apps",
-        path: "/workloads/helm",
-        label: "Helm 应用",
-        canonicalNameEn: "Helm Release",
-        canonicalNameZh: "Helm 应用",
-        description: "管理 Helm 应用发布、升级、回滚与卸载。",
-        domain: "workloads",
-      },
-      {
-        key: "helm-repositories",
-        path: "/workloads/helm/repositories",
-        label: "Helm 仓库",
-        canonicalNameEn: "Helm Repository",
-        canonicalNameZh: "Helm 仓库",
-        description: "管理 Helm Chart 仓库来源、同步状态与访问凭据。",
-        domain: "workloads",
-      },
       {
         key: "workloads-autoscaling-hpa",
         path: "/workloads/autoscaling/hpa",

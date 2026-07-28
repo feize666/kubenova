@@ -12,7 +12,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
-import { OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
+import { OpsFilterChip, OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
@@ -1056,15 +1056,33 @@ export default function GatewayApiPage() {
   ];
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space
+      className="workload-workbench"
+      orientation="vertical"
+      size={16}
+      style={{ width: "100%" }}
+    >
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/network/gateway-api"
+          embedded
+          className="workload-workbench__header"
+          title={
+            <span className="workload-workbench__title-row">
+              <span className="workload-workbench__title">Gateway API</span>
+              <OpsFilterChip
+                tone="info"
+                className="workload-workbench__kind-chip"
+                style={{ margin: 0 }}
+              >
+                网关资源
+              </OpsFilterChip>
+            </span>
+          }
           titleZh="Gateway API"
           titleEn="Gateway API"
           description="管理 Gateway API 资源。"
-          style={{ marginBottom: 12 }}
-          titleSuffix={
+          extra={
             <ResourceAddButton
               compact={false}
               label="新增资源"
@@ -1074,10 +1092,15 @@ export default function GatewayApiPage() {
           }
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+        <Space
+          className="workload-workbench__content"
+          orientation="vertical"
+          size={12}
+          style={{ width: "100%" }}
+        >
           <div className="network-gateway-toolbar">
             <Row gutter={[12, 12]}>
-              <Col span={24}>
+              <Col xs={24} md={8} xl={6}>
                 <Select
                   value={kind}
                   options={gatewayKindOptions}
@@ -1130,39 +1153,41 @@ export default function GatewayApiPage() {
             />
           ) : null}
 
-          <ResourceTable<GatewayRow>
-            rowKey="id"
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            tableKey="network.gateway-api"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称/标签搜索（示例：gw-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            dataSource={tableData}
-            bordered
-            loading={listQuery.isLoading}
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading)
-            }
-            pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading)}
-            onRow={(record) => ({
-              onClick: (event: ReactMouseEvent<HTMLElement>) => {
-                if (isGatewayRowInteractiveTarget(event.target)) return;
-                if (record.id) {
-                  setDetailTarget(buildGatewayDynamicDetailTarget(kindMeta, record));
-                }
-              },
-            })}
-          />
+          <div className="workload-workbench__table-zone">
+            <ResourceTable<GatewayRow>
+              rowKey="id"
+              columns={columns}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              tableKey="network.gateway-api"
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleGlobalSearchChange,
+                placeholder: "按名称/标签搜索（示例：gw-a app=web env=prod）",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              sort={{ sortBy, sortOrder }}
+              dataSource={tableData}
+              bordered
+              loading={listQuery.isLoading}
+              onChange={(nextPagination, filters, sorter, extra) =>
+                handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading)
+              }
+              pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading)}
+              onRow={(record) => ({
+                onClick: (event: ReactMouseEvent<HTMLElement>) => {
+                  if (isGatewayRowInteractiveTarget(event.target)) return;
+                  if (record.id) {
+                    setDetailTarget(buildGatewayDynamicDetailTarget(kindMeta, record));
+                  }
+                },
+              })}
+            />
+          </div>
         </Space>
       </OpsSurface>
 

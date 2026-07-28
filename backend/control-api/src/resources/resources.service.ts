@@ -69,6 +69,8 @@ type DetailResourceRecord = {
   updatedAt: Date;
   spec: Prisma.JsonValue | null;
   statusJson: Prisma.JsonValue | null;
+  rawSpec?: Prisma.JsonValue | null;
+  rawStatus?: Prisma.JsonValue | null;
   labels: Prisma.JsonValue | null;
   annotations: Prisma.JsonValue | null;
   replicas: number | null;
@@ -311,6 +313,123 @@ const RESOURCE_DETAIL_SECTION_PROFILES: Record<
   vpa: ['overview', 'runtime', 'associations', 'events', 'metadata'],
   helmrelease: ['overview', 'runtime', 'associations', 'events', 'metadata'],
   helmrepository: ['overview', 'runtime', 'associations', 'events', 'metadata'],
+  node: ['overview', 'runtime', 'associations', 'events', 'metadata'],
+  networkpolicy: ['overview', 'runtime', 'associations', 'events', 'metadata'],
+};
+
+const RESOURCE_DETAIL_RUNTIME_FIELDS_BY_KIND: Record<string, string[]> = {
+  pod: [
+    'phase',
+    'restartCount',
+    'image',
+    'images',
+    'podIP',
+    'nodeName',
+    'serviceAccountName',
+    'restartPolicy',
+    'dnsPolicy',
+    'schedulerName',
+    'priorityClassName',
+    'nodeSelector',
+    'tolerations',
+    'containerDetails',
+    'conditions',
+  ],
+  deployment: [
+    'phase',
+    'replicas',
+    'readyReplicas',
+    'availableReplicas',
+    'images',
+    'selector',
+    'serviceAccountName',
+    'restartPolicy',
+    'dnsPolicy',
+    'schedulerName',
+    'priorityClassName',
+    'nodeSelector',
+    'tolerations',
+    'containerDetails',
+    'conditions',
+  ],
+  statefulset: [
+    'phase',
+    'replicas',
+    'readyReplicas',
+    'availableReplicas',
+    'images',
+    'selector',
+    'containerDetails',
+    'conditions',
+  ],
+  daemonset: [
+    'phase',
+    'replicas',
+    'readyReplicas',
+    'availableReplicas',
+    'images',
+    'selector',
+    'containerDetails',
+    'conditions',
+  ],
+  replicaset: [
+    'phase',
+    'replicas',
+    'readyReplicas',
+    'availableReplicas',
+    'images',
+    'selector',
+    'containerDetails',
+    'conditions',
+  ],
+  job: [
+    'phase',
+    'replicas',
+    'readyReplicas',
+    'images',
+    'containerDetails',
+    'conditions',
+  ],
+  cronjob: ['phase', 'images', 'containerDetails', 'conditions'],
+  service: ['phase', 'selector', 'conditions'],
+  ingress: ['phase', 'conditions'],
+  ingressroute: ['phase', 'conditions'],
+  gatewayclass: ['phase', 'controllerName', 'conditions'],
+  gateway: ['phase', 'gatewayClassName', 'hostnames', 'conditions'],
+  httproute: ['phase', 'hostnames', 'parentRefs', 'backendRefs', 'conditions'],
+  middleware: ['phase', 'conditions'],
+  networkpolicy: [
+    'phase',
+    'policyTypes',
+    'podSelector',
+    'ingressRules',
+    'egressRules',
+  ],
+  node: [
+    'phase',
+    'ready',
+    'roles',
+    'internalIP',
+    'externalIP',
+    'osImage',
+    'kernelVersion',
+    'containerRuntimeVersion',
+    'cpuCapacity',
+    'memoryCapacity',
+    'taints',
+    'unschedulable',
+    'conditions',
+  ],
+  persistentvolume: ['phase', 'conditions'],
+  pv: ['phase', 'conditions'],
+  persistentvolumeclaim: ['phase', 'conditions'],
+  pvc: ['phase', 'conditions'],
+  storageclass: ['phase', 'conditions'],
+  sc: ['phase', 'conditions'],
+  horizontalpodautoscaler: ['phase', 'replicas', 'readyReplicas', 'conditions'],
+  hpa: ['phase', 'replicas', 'readyReplicas', 'conditions'],
+  verticalpodautoscaler: ['phase', 'conditions'],
+  vpa: ['phase', 'conditions'],
 };
 
 const RELATIONSHIP_GROUP_META: Record<
@@ -1212,6 +1331,11 @@ export class ResourcesService {
           events: ['items'],
           metadata: ['labels', 'annotations', 'ownerReferences'],
         },
+        capabilities: {
+          rawSpec: Object.keys(spec).length > 0,
+          rawStatus: Object.keys(status).length > 0,
+          relationships: associations.length > 0,
+        },
         version: RESOURCE_DETAIL_DESCRIPTOR_VERSION,
       },
       overview: this.buildOverview(base),
@@ -1908,8 +2032,12 @@ export class ResourcesService {
       descriptor,
       overview,
       runtime,
-      rawSpec: this.toObject(base.spec),
-      rawStatus: this.toObject(base.statusJson),
+      rawSpec: this.toObject(
+        base.rawSpec === undefined ? base.spec : base.rawSpec,
+      ),
+      rawStatus: this.toObject(
+        base.rawStatus === undefined ? base.statusJson : base.rawStatus,
+      ),
       associations,
       network,
       storage,
@@ -2092,13 +2220,37 @@ export class ResourcesService {
       resourceKind: kind,
       sections: [...sections],
       fieldsBySection: {
-        overview: [...RESOURCE_DETAIL_FIELDS_BY_SECTION.overview],
-        runtime: [...RESOURCE_DETAIL_FIELDS_BY_SECTION.runtime],
-        associations: [...RESOURCE_DETAIL_FIELDS_BY_SECTION.associations],
-        network: [...RESOURCE_DETAIL_FIELDS_BY_SECTION.network],
-        storage: [...RESOURCE_DETAIL_FIELDS_BY_SECTION.storage],
-        events: [...RESOURCE_DETAIL_FIELDS_BY_SECTION.events],
-        metadata: [...RESOURCE_DETAIL_FIELDS_BY_SECTION.metadata],
+        overview: sections.includes('overview')
+          ? [...RESOURCE_DETAIL_FIELDS_BY_SECTION.overview]
+          : [],
+        runtime: sections.includes('runtime')
+          ? [
+              ...(RESOURCE_DETAIL_RUNTIME_FIELDS_BY_KIND[normalizedKind] ?? [
+                'phase',
+                'conditions',
+              ]),
+            ]
+          : [],
+        associations: sections.includes('associations')
+          ? [...RESOURCE_DETAIL_FIELDS_BY_SECTION.associations]
+          : [],
+        network: sections.includes('network')
+          ? [...RESOURCE_DETAIL_FIELDS_BY_SECTION.network]
+          : [],
+        storage: sections.includes('storage')
+          ? [...RESOURCE_DETAIL_FIELDS_BY_SECTION.storage]
+          : [],
+        events: sections.includes('events')
+          ? [...RESOURCE_DETAIL_FIELDS_BY_SECTION.events]
+          : [],
+        metadata: sections.includes('metadata')
+          ? [...RESOURCE_DETAIL_FIELDS_BY_SECTION.metadata]
+          : [],
+      },
+      capabilities: {
+        rawSpec: true,
+        rawStatus: true,
+        relationships: sections.includes('associations'),
       },
       version: RESOURCE_DETAIL_DESCRIPTOR_VERSION,
     };
@@ -2124,11 +2276,11 @@ export class ResourcesService {
       ? this.extractPodSpec(base.kind, base.spec)
       : {};
     const networkPolicyRuntime =
-      base.kind === 'NetworkPolicy'
-        ? this.buildNetworkPolicyRuntime(spec, status)
-        : {};
+      base.kind === 'NetworkPolicy' ? this.buildNetworkPolicyRuntime(spec) : {};
     const nodeRuntime =
-      base.kind === 'Node' ? this.buildNodeRuntime(spec, status) : {};
+      base.kind === 'Node'
+        ? this.buildNodeRuntime(spec, status, this.toStringMap(base.labels))
+        : {};
     const gatewayRuntime = this.buildGatewayRuntime(base.kind, spec);
     const images = this.toStringArray(status.images ?? status.containerImages);
     const conditions = this.toArray(status.conditions)
@@ -2144,7 +2296,11 @@ export class ResourcesService {
         ),
       }));
     return {
-      phase: this.toMaybeString(status.phase),
+      phase:
+        this.toMaybeString(status.phase) ??
+        (base.kind === 'Node' || base.kind === 'NetworkPolicy'
+          ? base.state
+          : undefined),
       replicas: base.replicas ?? this.toMaybeNumber(status.replicas),
       readyReplicas:
         base.readyReplicas ?? this.toMaybeNumber(status.readyReplicas),
@@ -2283,20 +2439,28 @@ export class ResourcesService {
         if (networkResource.namespace !== namespace) {
           continue;
         }
-        const serviceNames =
+        const serviceRefs: Array<{ name: string; namespace?: string }> =
           networkResource.kind === 'Ingress'
-            ? this.extractIngressServiceNames(networkResource.spec)
+            ? this.extractIngressServiceNames(networkResource.spec).map(
+                (name) => ({ name }),
+              )
             : networkResource.kind === 'IngressRoute'
-              ? this.extractIngressRouteServiceNames(networkResource.spec)
+              ? this.extractIngressRouteServiceRefs(networkResource.spec)
               : networkResource.kind === 'Endpoints'
-                ? [networkResource.name]
+                ? [{ name: networkResource.name }]
                 : networkResource.kind === 'EndpointSlice'
                   ? this.extractEndpointSliceServiceNames(
                       networkResource.spec,
                       networkResource.statusJson,
-                    )
+                    ).map((name) => ({ name }))
                   : [];
-        if (serviceNames.includes(base.name)) {
+        if (
+          serviceRefs.some(
+            (service) =>
+              service.name === base.name &&
+              (service.namespace ?? networkResource.namespace) === namespace,
+          )
+        ) {
           add(
             networkResource.kind,
             networkResource.name,
@@ -2321,10 +2485,13 @@ export class ResourcesService {
     }
 
     if (base.kind === 'IngressRoute') {
-      for (const serviceName of this.extractIngressRouteServiceNames(
-        base.spec,
-      )) {
-        add('Service', serviceName, namespace, 'backend-service');
+      for (const service of this.extractIngressRouteServiceRefs(base.spec)) {
+        add(
+          'Service',
+          service.name,
+          service.namespace ?? namespace,
+          'backend-service',
+        );
       }
       const specObj = this.toObject(base.spec);
       const tlsObj = this.toObject(specObj.tls);
@@ -2379,12 +2546,17 @@ export class ResourcesService {
             'Gateway',
             parentName,
             this.toMaybeString(parent.namespace) ?? namespace,
-            'owner',
+            'parent-ref',
           );
         }
       }
-      for (const serviceName of this.extractHttpRouteServiceNames(base.spec)) {
-        add('Service', serviceName, namespace, 'backend-service');
+      for (const service of this.extractHttpRouteServiceRefs(base.spec)) {
+        add(
+          'Service',
+          service.name,
+          service.namespace ?? namespace,
+          'backend-service',
+        );
       }
     }
 
@@ -3355,7 +3527,14 @@ export class ResourcesService {
             for (const backendService of this.toArray(routeObj.services)) {
               const backendServiceObj = this.toObject(backendService);
               const serviceName = this.toMaybeString(backendServiceObj.name);
-              if (serviceName !== base.name) {
+              const serviceNamespace =
+                this.toMaybeString(backendServiceObj.namespace) ??
+                networkResource.namespace ??
+                undefined;
+              if (
+                serviceName !== base.name ||
+                serviceNamespace !== base.namespace
+              ) {
                 continue;
               }
               addServicePipelines({
@@ -3366,7 +3545,7 @@ export class ResourcesService {
                 path: this.toMaybeString(routeObj.match),
                 port: this.toMaybeNumber(backendServiceObj.port) ?? undefined,
                 serviceName: base.name,
-                serviceNamespace: base.namespace ?? undefined,
+                serviceNamespace,
                 servicePort: this.valueToString(backendServiceObj.port),
               });
             }
@@ -3534,6 +3713,10 @@ export class ResourcesService {
         for (const service of services) {
           const serviceObj = this.toObject(service);
           const serviceName = this.toMaybeString(serviceObj.name) ?? undefined;
+          const serviceNamespace =
+            this.toMaybeString(serviceObj.namespace) ??
+            base.namespace ??
+            undefined;
           const servicePort = this.valueToString(serviceObj.port);
           summary.endpoints.push({
             kind: 'ingress-rule',
@@ -3542,7 +3725,7 @@ export class ResourcesService {
             sourceKind: 'IngressRoute',
             sourceName: base.name,
             sourceId: serviceName
-              ? resolveNetworkTargetId('Service', serviceName, base.namespace)
+              ? resolveNetworkTargetId('Service', serviceName, serviceNamespace)
               : undefined,
             host: entryPoints.join(', ') || undefined,
             path: this.toMaybeString(routeObj.match),
@@ -3558,7 +3741,7 @@ export class ResourcesService {
             path: this.toMaybeString(routeObj.match),
             port: this.toMaybeNumber(serviceObj.port) ?? undefined,
             serviceName,
-            serviceNamespace: base.namespace ?? undefined,
+            serviceNamespace,
             servicePort,
           });
         }
@@ -3903,6 +4086,7 @@ export class ResourcesService {
         'service-endpoints',
         'service-endpointslice',
         'backend-service',
+        'parent-ref',
         'route-middleware',
       ].includes(association.associationType)
     ) {
@@ -3942,6 +4126,7 @@ export class ResourcesService {
       'service-endpoints': '服务端点',
       'service-endpointslice': '端点切片',
       'backend-service': '后端服务',
+      'parent-ref': '父引用',
       'gateway-class': 'GatewayClass',
       'uses-gateway-class': '使用 GatewayClass',
       'tls-secret': 'TLS 证书',
@@ -3970,6 +4155,7 @@ export class ResourcesService {
       'service-endpoints': 'gold',
       'service-endpointslice': 'volcano',
       'backend-service': 'blue',
+      'parent-ref': 'gold',
       'gateway-class': 'geekblue',
       'uses-gateway-class': 'geekblue',
       'tls-secret': 'magenta',
@@ -4921,6 +5107,8 @@ export class ResourcesService {
 
     let spec: unknown = null;
     let statusJson: unknown = null;
+    let rawSpec: Prisma.JsonValue | null | undefined;
+    let rawStatus: Prisma.JsonValue | null | undefined;
     let labels: Record<string, string> | null = null;
     let annotations: Record<string, string> | null = null;
     let createdAt = new Date();
@@ -5046,6 +5234,7 @@ export class ResourcesService {
         this.toObject(this.toObject(item.spec).podSelector).matchLabels,
       );
       spec = item.spec ?? null;
+      rawSpec = (item.spec ?? null) as unknown as Prisma.JsonValue | null;
       statusJson = {
         phase: item.metadata?.deletionTimestamp ? 'Terminating' : 'Active',
         policyTypes,
@@ -5053,6 +5242,7 @@ export class ResourcesService {
         ingressRules,
         egressRules,
       };
+      rawStatus = (item as { status?: unknown }).status ?? null;
       labels = item.metadata?.labels ?? null;
       annotations = item.metadata?.annotations ?? null;
       createdAt = item.metadata?.creationTimestamp ?? createdAt;
@@ -5072,7 +5262,9 @@ export class ResourcesService {
         name: ref.name,
       });
       spec = { subsets: item.subsets ?? [] };
-      statusJson = item as unknown;
+      statusJson = null;
+      rawSpec = (item as { spec?: unknown }).spec ?? null;
+      rawStatus = (item as { status?: unknown }).status ?? null;
       labels = item.metadata?.labels ?? null;
       annotations = item.metadata?.annotations ?? null;
       createdAt = item.metadata?.creationTimestamp ?? createdAt;
@@ -5087,7 +5279,9 @@ export class ResourcesService {
         endpoints: item.endpoints,
         metadataLabels: item.metadata?.labels ?? null,
       };
-      statusJson = item as unknown;
+      statusJson = null;
+      rawSpec = (item as { spec?: unknown }).spec ?? null;
+      rawStatus = (item as { status?: unknown }).status ?? null;
       labels = item.metadata?.labels ?? null;
       annotations = item.metadata?.annotations ?? null;
       createdAt = item.metadata?.creationTimestamp ?? createdAt;
@@ -5104,6 +5298,12 @@ export class ResourcesService {
       updatedAt: createdAt,
       spec: (spec as Prisma.JsonValue | null) ?? null,
       statusJson: (statusJson as Prisma.JsonValue | null) ?? null,
+      ...(rawSpec !== undefined
+        ? { rawSpec: rawSpec as Prisma.JsonValue | null }
+        : {}),
+      ...(rawStatus !== undefined
+        ? { rawStatus: rawStatus as Prisma.JsonValue | null }
+        : {}),
       labels: (labels as Prisma.JsonValue | null) ?? null,
       annotations: (annotations as Prisma.JsonValue | null) ?? null,
       replicas: null,
@@ -5183,6 +5383,8 @@ export class ResourcesService {
         unschedulable: Boolean(spec.unschedulable),
         conditions: status.conditions ?? [],
       } as unknown as Prisma.JsonValue,
+      rawSpec: (item.spec ?? null) as unknown as Prisma.JsonValue | null,
+      rawStatus: (item.status ?? null) as unknown as Prisma.JsonValue | null,
       labels: labels as Prisma.JsonValue,
       annotations: (metadata.annotations ?? null) as Prisma.JsonValue | null,
       replicas: null,
@@ -5752,12 +5954,15 @@ export class ResourcesService {
     );
   }
 
-  private extractIngressRouteServiceNames(
+  private extractIngressRouteServiceRefs(
     spec: Prisma.JsonValue | null,
-  ): string[] {
+  ): Array<{ name: string; namespace?: string }> {
     const specObj = this.toObject(spec);
     const routes = this.toArray(specObj.routes);
-    const names = new Set<string>();
+    const servicesByKey = new Map<
+      string,
+      { name: string; namespace?: string }
+    >();
     for (const route of routes) {
       const routeObj = this.toObject(route);
       const services = this.toArray(routeObj.services);
@@ -5765,19 +5970,26 @@ export class ResourcesService {
         const serviceObj = this.toObject(service);
         const name = this.toMaybeString(serviceObj.name);
         if (name) {
-          names.add(name);
+          const namespace = this.toMaybeString(serviceObj.namespace);
+          servicesByKey.set(`${namespace ?? ''}/${name}`, {
+            name,
+            ...(namespace ? { namespace } : {}),
+          });
         }
       }
     }
-    return Array.from(names);
+    return Array.from(servicesByKey.values());
   }
 
-  private extractHttpRouteServiceNames(
+  private extractHttpRouteServiceRefs(
     spec: Prisma.JsonValue | null,
-  ): string[] {
+  ): Array<{ name: string; namespace?: string }> {
     const specObj = this.toObject(spec);
     const rules = this.toArray(specObj.rules);
-    const names = new Set<string>();
+    const servicesByKey = new Map<
+      string,
+      { name: string; namespace?: string }
+    >();
     for (const rule of rules) {
       const ruleObj = this.toObject(rule);
       for (const backendRef of this.toArray(ruleObj.backendRefs)) {
@@ -5785,11 +5997,15 @@ export class ResourcesService {
         const kind = this.toMaybeString(backend.kind) ?? 'Service';
         const name = this.toMaybeString(backend.name);
         if (kind === 'Service' && name) {
-          names.add(name);
+          const namespace = this.toMaybeString(backend.namespace);
+          servicesByKey.set(`${namespace ?? ''}/${name}`, {
+            name,
+            ...(namespace ? { namespace } : {}),
+          });
         }
       }
     }
-    return Array.from(names);
+    return Array.from(servicesByKey.values());
   }
 
   private extractNodeRoles(labels: Record<string, string>): string[] {
@@ -7223,24 +7439,20 @@ export class ResourcesService {
 
   private buildNetworkPolicyRuntime(
     spec: Record<string, unknown>,
-    status: Record<string, unknown>,
   ): Pick<
     ResourceDetailRuntime,
     'policyTypes' | 'podSelector' | 'ingressRules' | 'egressRules'
   > {
-    const policyTypes = this.toStringArray(
-      spec.policyTypes ?? status.policyTypes,
+    const policyTypes = this.toStringArray(spec.policyTypes);
+    const ingressRules = this.toArray(spec.ingress).map((rule) =>
+      this.summarizeNetworkPolicyRule(this.toObject(rule), 'ingress'),
     );
-    const ingressRules = this.toArray(spec.ingress ?? status.ingressRules).map(
-      (rule) => this.summarizeNetworkPolicyRule(this.toObject(rule), 'ingress'),
+    const egressRules = this.toArray(spec.egress).map((rule) =>
+      this.summarizeNetworkPolicyRule(this.toObject(rule), 'egress'),
     );
-    const egressRules = this.toArray(spec.egress ?? status.egressRules).map(
-      (rule) => this.summarizeNetworkPolicyRule(this.toObject(rule), 'egress'),
+    const podSelector = this.toSelectorString(
+      this.toObject(this.toObject(spec.podSelector).matchLabels),
     );
-    const podSelector =
-      this.toSelectorString(
-        this.toObject(this.toObject(spec.podSelector).matchLabels),
-      ) ?? this.toMaybeString(status.podSelector);
 
     return {
       policyTypes,
@@ -7253,6 +7465,7 @@ export class ResourcesService {
   private buildNodeRuntime(
     spec: Record<string, unknown>,
     status: Record<string, unknown>,
+    labels: Record<string, string>,
   ): Pick<
     ResourceDetailRuntime,
     | 'ready'
@@ -7267,19 +7480,60 @@ export class ResourcesService {
     | 'taints'
     | 'unschedulable'
   > {
+    const addresses = this.toArray(status.addresses).map((item) =>
+      this.toObject(item),
+    );
+    const findAddress = (type: string) =>
+      addresses.find((address) => this.toMaybeString(address.type) === type);
+    const nodeInfo = this.toObject(status.nodeInfo);
+    const readyCondition = this.toArray(status.conditions)
+      .map((condition) => this.toObject(condition))
+      .find((condition) => this.toMaybeString(condition.type) === 'Ready');
+    const taints = this.toArray(spec.taints)
+      .map((taint) => this.toObject(taint))
+      .map((taint) => {
+        const key = this.toMaybeString(taint.key);
+        const effect = this.toMaybeString(taint.effect);
+        if (!key || !effect) return undefined;
+        const value = this.toMaybeString(taint.value);
+        return `${key}${value ? `=${value}` : ''}:${effect}`;
+      })
+      .filter((taint): taint is string => Boolean(taint));
     return {
-      ready: this.toMaybeBoolean(status.ready),
-      roles: this.toStringArray(status.roles),
-      internalIP: this.toMaybeString(status.internalIP),
-      externalIP: this.toMaybeString(status.externalIP),
-      osImage: this.toMaybeString(status.osImage),
-      kernelVersion: this.toMaybeString(status.kernelVersion),
-      containerRuntimeVersion: this.toMaybeString(
-        status.containerRuntimeVersion,
-      ),
-      cpuCapacity: this.valueToString(status.cpuCapacity),
-      memoryCapacity: this.valueToString(status.memoryCapacity),
-      taints: this.toStringArray(status.taints),
+      ready:
+        this.toMaybeBoolean(status.ready) ??
+        (this.toMaybeString(readyCondition?.status) === 'True'
+          ? true
+          : this.toMaybeString(readyCondition?.status) === 'False'
+            ? false
+            : undefined),
+      roles: this.toStringArray(status.roles).length
+        ? this.toStringArray(status.roles)
+        : this.extractNodeRoles(labels),
+      internalIP:
+        this.toMaybeString(status.internalIP) ??
+        this.toMaybeString(findAddress('InternalIP')?.address),
+      externalIP:
+        this.toMaybeString(status.externalIP) ??
+        this.toMaybeString(findAddress('ExternalIP')?.address),
+      osImage:
+        this.toMaybeString(status.osImage) ??
+        this.toMaybeString(nodeInfo.osImage),
+      kernelVersion:
+        this.toMaybeString(status.kernelVersion) ??
+        this.toMaybeString(nodeInfo.kernelVersion),
+      containerRuntimeVersion:
+        this.toMaybeString(status.containerRuntimeVersion) ??
+        this.toMaybeString(nodeInfo.containerRuntimeVersion),
+      cpuCapacity:
+        this.valueToString(status.cpuCapacity) ??
+        this.valueToString(this.toObject(status.capacity).cpu),
+      memoryCapacity:
+        this.valueToString(status.memoryCapacity) ??
+        this.valueToString(this.toObject(status.capacity).memory),
+      taints: this.toStringArray(status.taints).length
+        ? this.toStringArray(status.taints)
+        : taints,
       unschedulable:
         this.toMaybeBoolean(status.unschedulable) ??
         this.toMaybeBoolean(spec.unschedulable),

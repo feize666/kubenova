@@ -41,11 +41,11 @@ import {
   OpsFormSection,
   OpsMetricTile,
   OpsModalShell,
-  OpsPageHeader,
   OpsSurface,
   openOpsConfirm,
   type OpsFilterChipTone,
 } from "@/components/ops";
+import { ResourcePageHeader } from "@/components/resource-page-header";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
@@ -491,7 +491,6 @@ export default function ClustersPage() {
       name: row.name,
       environment: row.environment,
       provider: row.provider,
-      kubernetesVersion: row.kubernetesVersion,
       status: row.status,
       // 编辑时不回填 kubeconfig 原文（敏感字段）
       kubeconfig: undefined,
@@ -644,14 +643,14 @@ export default function ClustersPage() {
           >
             {name}
           </Typography.Link>
-          {row.hasKubeconfig && (
+          {row.apiServer && (
             <Tooltip title="查看 API Server 地址">
               <Typography.Text
                 type="secondary"
-                style={{ fontSize: 11, fontFamily: "monospace" }}
+                style={{ fontSize: 11, fontFamily: "var(--kn-font-mono)" }}
                 copyable
               >
-                {`https://${name}`}
+                {row.apiServer}
               </Typography.Text>
             </Tooltip>
           )}
@@ -680,6 +679,8 @@ export default function ClustersPage() {
       key: "kubernetesVersion",
       width: 120,
       filter: { type: "text", placeholder: "以版本过滤" },
+      render: (version: string) =>
+        version && version !== "unknown" ? version : "待探测",
     },
     {
       title: "资源使用率",
@@ -901,41 +902,44 @@ export default function ClustersPage() {
   ]);
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space className="resource-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
-        <OpsPageHeader
-          className="resource-page-header"
+        <ResourcePageHeader
+          path="/clusters"
+          embedded
+          className="resource-workbench__header"
           style={{ marginBottom: 12 }}
           title={(
-            <>
-              集群管理
-              <span className="resource-page-header__title-suffix">
-                <ResourceAddButton onClick={openAddModal} aria-label="创建集群" />
-              </span>
-            </>
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">Cluster</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                集群管理
+              </OpsFilterChip>
+            </span>
           )}
-          subtitle="查看集群版本、资源使用率和运行状态。系统自动健康探测与资源同步，支持禁用/启用。"
+          description="查看集群版本、资源使用率和运行状态。系统自动健康探测与资源同步，支持禁用/启用。"
+          extra={<ResourceAddButton onClick={openAddModal} aria-label="创建集群" />}
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+        <Space className="resource-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
           <Row gutter={[12, 12]}>
             <Col xs={24} md={6} xl={4}>
-              <OpsMetricTile label="集群总数" tone="neutral" value={healthStats.total} />
+              <OpsMetricTile label="集群总数" meta="当前筛选范围内的集群" tone="neutral" value={healthStats.total} />
             </Col>
             <Col xs={24} md={6} xl={4}>
-              <OpsMetricTile label="运行中" tone="success" value={healthStats.running} />
+              <OpsMetricTile label="运行中" meta="健康探测通过" tone="success" value={healthStats.running} />
             </Col>
             <Col xs={24} md={6} xl={4}>
-              <OpsMetricTile label="离线" tone="danger" value={healthStats.offline} />
+              <OpsMetricTile label="离线" meta="需要人工介入" tone="danger" value={healthStats.offline} />
             </Col>
             <Col xs={24} md={6} xl={4}>
-              <OpsMetricTile label="探测中" tone="info" value={healthStats.checking} />
+              <OpsMetricTile label="探测中" meta="健康数据同步中" tone="info" value={healthStats.checking} />
             </Col>
             <Col xs={24} md={6} xl={4}>
-              <OpsMetricTile label="离线模式" tone="warning" value={healthStats["offline-mode"]} />
+              <OpsMetricTile label="离线模式" meta="未接入 kubeconfig" tone="warning" value={healthStats["offline-mode"]} />
             </Col>
             <Col xs={24} md={6} xl={4}>
-              <OpsMetricTile label="已停用" tone="neutral" value={healthStats.disabled} />
+              <OpsMetricTile label="已停用" meta="已从运行态剔除" tone="neutral" value={healthStats.disabled} />
             </Col>
           </Row>
 
@@ -966,30 +970,32 @@ export default function ClustersPage() {
             />
           ) : null}
 
-          <ResourceTable<ClusterTableRecord>
-            rowKey="key"
-            tableKey={CLUSTERS_TABLE_KEY}
-            columns={columns as ColumnsType<ClusterTableRecord>}
-            columnSettings={CLUSTER_COLUMN_SETTINGS}
-            dataSource={visibleTableData}
-            preferencesClient={preferencesClient}
-            globalSearch={globalSearch}
-            filters={tableFilters}
-            onFiltersChange={handleFiltersChange}
-            onResourceNavigate={(request) => {
-              if (request.kind !== "Cluster") return;
-              const targetId = String(request.id || request.name || "");
-              const target = visibleTableData.find((item) => item.id === targetId || item.name === targetId);
-              if (!target) return;
-              setSelectedCluster(target);
-              setDetailOpen(true);
-            }}
-            bordered
-            loading={loadingState}
-            onChange={handleResourceTableChange}
-            pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, isTableBusy)}
-            emptyDescription="暂无符合条件的集群数据"
-          />
+          <div className="resource-workbench__table-zone">
+            <ResourceTable<ClusterTableRecord>
+              rowKey="key"
+              tableKey={CLUSTERS_TABLE_KEY}
+              columns={columns as ColumnsType<ClusterTableRecord>}
+              columnSettings={CLUSTER_COLUMN_SETTINGS}
+              dataSource={visibleTableData}
+              preferencesClient={preferencesClient}
+              globalSearch={globalSearch}
+              filters={tableFilters}
+              onFiltersChange={handleFiltersChange}
+              onResourceNavigate={(request) => {
+                if (request.kind !== "Cluster") return;
+                const targetId = String(request.id || request.name || "");
+                const target = visibleTableData.find((item) => item.id === targetId || item.name === targetId);
+                if (!target) return;
+                setSelectedCluster(target);
+                setDetailOpen(true);
+              }}
+              bordered
+              loading={loadingState}
+              onChange={handleResourceTableChange}
+              pagination={getPaginationConfig(query.data?.total ?? visibleTableData.length, isTableBusy)}
+              emptyDescription="暂无符合条件的集群数据"
+            />
+          </div>
         </Space>
       </OpsSurface>
 
@@ -1059,7 +1065,7 @@ export default function ClustersPage() {
                   marginBottom: 0,
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-all",
-                  fontFamily: "monospace",
+                  fontFamily: "var(--kn-font-mono)",
                   fontSize: 12,
                 }}
               >
@@ -1113,13 +1119,6 @@ export default function ClustersPage() {
             >
               <Input placeholder="例如：AWS / 阿里云 / 自建" />
             </Form.Item>
-            <Form.Item
-              label="K8s 版本"
-              name="kubernetesVersion"
-              rules={[{ required: true, message: "请输入 K8s 版本" }]}
-            >
-              <Input placeholder="例如：v1.28.4" />
-            </Form.Item>
             <Form.Item label="状态" name="status">
               <Select
                 placeholder="请选择状态（可选）"
@@ -1133,6 +1132,25 @@ export default function ClustersPage() {
             </Form.Item>
           </OpsFormSection>
           <OpsFormSection title="接入配置" description="不填写 KubeConfig 时，集群以离线模式管理。">
+            {editingCluster ? (
+              <Descriptions size="small" column={1} style={{ marginBottom: 16 }}>
+                <Descriptions.Item label="API Server（自动识别）">
+                  {editingCluster.apiServer ?? "待配置"}
+                </Descriptions.Item>
+                <Descriptions.Item label="K8s 版本（自动探测）">
+                  {editingCluster.kubernetesVersion !== "unknown"
+                    ? editingCluster.kubernetesVersion
+                    : "待探测"}
+                </Descriptions.Item>
+              </Descriptions>
+            ) : (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="API Server 将从 KubeConfig 自动识别，K8s 版本将在连通后自动探测。"
+              />
+            )}
             <Form.Item
               label="KubeConfig（YAML 格式）"
               name="kubeconfig"
@@ -1145,7 +1163,7 @@ export default function ClustersPage() {
               <Input.TextArea
                 rows={6}
                 placeholder={`粘贴 kubectl config view --raw 的输出内容，用于接入真实集群。\n\n示例：\napiVersion: v1\nclusters:\n- cluster:\n    server: https://...\n  name: my-cluster\n...`}
-                style={{ fontFamily: "monospace", fontSize: 12 }}
+                style={{ fontFamily: "var(--kn-font-mono)", fontSize: 12 }}
               />
             </Form.Item>
           </OpsFormSection>

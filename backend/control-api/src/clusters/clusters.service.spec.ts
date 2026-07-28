@@ -9,6 +9,7 @@ import type { K8sClientService } from './k8s-client.service';
 const BASE_RECORD: ClusterRecord = {
   id: 'c-001',
   name: 'prod-cn-hz',
+  apiServer: 'https://api.example.test:6443',
   environment: '公有云',
   status: '正常',
   cpuUsage: 10,
@@ -40,6 +41,9 @@ function buildService() {
   } as unknown as PrismaService;
   const k8sClientService = {
     getCoreApi: jest.fn(),
+    inspectKubeconfig: jest.fn().mockReturnValue({
+      apiServer: 'https://api.example.test:6443',
+    }),
   } as unknown as K8sClientService;
   const service = new ClustersService(prismaMock, k8sClientService);
   (
@@ -63,6 +67,64 @@ function buildService() {
 }
 
 describe('ClustersService detail', () => {
+  it('creates cluster with API Server parsed from kubeconfig and ignores manual version', async () => {
+    const { service, k8sClientService } = buildService();
+    const repository = (
+      service as unknown as {
+        repository: { findByName: jest.Mock; create: jest.Mock };
+      }
+    ).repository;
+    repository.findByName.mockResolvedValue(null);
+    repository.create.mockImplementation(async (record: ClusterRecord) => ({
+      ...record,
+      id: 'c-created',
+    }));
+
+    const created = await service.create({
+      name: 'ack-prod',
+      environment: '公有云',
+      provider: 'ACK',
+      kubernetesVersion: 'manual-value-must-be-ignored',
+      kubeconfig: 'apiVersion: v1',
+    });
+
+    expect(k8sClientService.inspectKubeconfig).toHaveBeenCalledWith(
+      'apiVersion: v1',
+    );
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiServer: 'https://api.example.test:6443',
+        kubernetesVersion: 'unknown',
+      }),
+    );
+    expect(created).toEqual(
+      expect.objectContaining({
+        apiServer: 'https://api.example.test:6443',
+        kubernetesVersion: 'unknown',
+      }),
+    );
+  });
+
+  it('rejects malformed kubeconfig before saving cluster', async () => {
+    const { service, k8sClientService } = buildService();
+    const repository = (
+      service as unknown as { repository: { create: jest.Mock } }
+    ).repository;
+    (k8sClientService.inspectKubeconfig as jest.Mock).mockImplementation(() => {
+      throw new Error('当前 context 不存在');
+    });
+
+    await expect(
+      service.create({
+        name: 'ack-prod',
+        environment: '公有云',
+        provider: 'ACK',
+        kubeconfig: 'bad config',
+      }),
+    ).rejects.toThrow('kubeconfig 无效：当前 context 不存在');
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
   it('builds detail from cluster, profile, health and node inventory', async () => {
     const { service, prismaMock, k8sClientService } = buildService();
     const repository = (

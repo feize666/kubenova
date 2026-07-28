@@ -1,6 +1,6 @@
 import { apiRequest } from "./client";
 import type { CreateRuntimeSessionResponse } from "./runtime";
-import { buildRuntimeTargetParams, resolveRuntimeContainer, type RuntimeTargetBase } from "./runtime";
+import { buildRuntimeTargetParams, type RuntimeTargetBase } from "./runtime";
 
 export type LogLevel = "INFO" | "WARN" | "ERROR";
 export type LogsTimeMode = "quick" | "relative" | "absolute" | "recent";
@@ -78,7 +78,7 @@ export function buildLogsQueryParams(params: LogsQueryParams): URLSearchParams {
   if (params.clusterId) query.set("clusterId", params.clusterId);
   if (params.namespace) query.set("namespace", params.namespace);
   if (params.pod) query.set("pod", params.pod);
-  if (params.container) query.set("container", resolveRuntimeContainer(params.container));
+  if (params.container?.trim()) query.set("container", params.container.trim());
   if (params.level) query.set("level", params.level);
   if (params.keyword) query.set("keyword", params.keyword);
   if (params.tailLines !== undefined) query.set("tailLines", String(params.tailLines));
@@ -100,10 +100,7 @@ export function buildLogsQueryParams(params: LogsQueryParams): URLSearchParams {
 }
 
 export function buildLogsRoute(target: LogsRouteTarget): string {
-  const params = buildRuntimeTargetParams({
-    ...target,
-    container: resolveRuntimeContainer(target.container, target.containerNames),
-  });
+  const params = buildRuntimeTargetParams(target);
   if (target.clusterName) params.set("clusterName", target.clusterName);
   if (target.resourceKind) params.set("resourceKind", target.resourceKind);
   if (target.resourceName) params.set("resourceName", target.resourceName);
@@ -179,13 +176,14 @@ export function getLogs(params: LogsQueryParams, token?: string) {
 }
 
 export function createLogsStreamSession(params: LogsQueryParams, token?: string) {
+  const container = params.container?.trim();
   return apiRequest<CreateRuntimeSessionResponse, Record<string, unknown>>("/api/logs/stream", {
     method: "POST",
     body: {
       clusterId: params.clusterId,
       namespace: params.namespace,
       pod: params.pod,
-      container: resolveRuntimeContainer(params.container),
+      ...(container ? { container } : {}),
       level: params.level,
       keyword: params.keyword,
       tailLines: params.tailLines,

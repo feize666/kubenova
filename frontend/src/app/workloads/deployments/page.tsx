@@ -47,6 +47,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
 import { OpsFormSection, OpsModalShell } from "@/components/ops";
+import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
 import { OpsSurface } from "@/components/ops/ops-surface";
 import {
   applyWorkloadActionById,
@@ -1025,14 +1026,62 @@ export default function DeploymentsPage() {
       ),
     },
   ];
+  const scopeFilterControl = useMemo(
+    () => (
+      <div className="workload-workbench__scope">
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          namespace={namespace}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+            onScopeChange(nextClusterId, nextNamespace);
+            resetPage();
+          }}
+        />
+      </div>
+    ),
+    [
+      clusterId,
+      clusterOptions,
+      clustersQuery.isLoading,
+      knownNamespaces,
+      namespace,
+      namespaceDisabled,
+      namespacePlaceholder,
+      onScopeChange,
+      resetPage,
+    ],
+  );
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space
+      className="workload-workbench"
+      orientation="vertical"
+      size={16}
+      style={{ width: "100%" }}
+    >
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/workloads/deployments"
-          style={{ marginBottom: 12 }}
-          titleSuffix={
+          embedded
+          className="workload-workbench__header"
+          title={
+            <span className="workload-workbench__title-row">
+              <span className="workload-workbench__title">Deployment</span>
+              <OpsFilterChip
+                tone="info"
+                className="workload-workbench__kind-chip"
+                style={{ margin: 0 }}
+              >
+                无状态部署
+              </OpsFilterChip>
+            </span>
+          }
+          extra={
             <ResourceAddButton
               onClick={openAddModal}
               aria-label="创建Deployment"
@@ -1040,24 +1089,12 @@ export default function DeploymentsPage() {
           }
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            namespace={namespace}
-            clusterOptions={clusterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onApply={({
-              clusterId: nextClusterId,
-              namespace: nextNamespace,
-            }) => {
-              onScopeChange(nextClusterId, nextNamespace);
-              resetPage();
-            }}
-          />
-
+        <Space
+          className="workload-workbench__content"
+          orientation="vertical"
+          size={12}
+          style={{ width: "100%" }}
+        >
           {!isInitializing && !accessToken ? (
             <Alert
               className="workload-resource-state-alert"
@@ -1107,43 +1144,46 @@ export default function DeploymentsPage() {
             />
           ) : null}
 
-          <ResourceTable<DeploymentRow>
-            bordered
-            rowKey="key"
-            tableKey="workloads.deployments"
-            preferencesClient={createTablePreferencesClient(
-              accessToken || undefined,
-            )}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            columns={antd列}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            dataSource={表格数据}
-            loading={{
-              spinning: query.isLoading && !query.data,
-              description: "Deployment 数据加载中...",
-            }}
-            onChange={(paginationInfo, filters, sorter, extra) =>
-              handleTableChange(
-                paginationInfo,
-                filters,
-                sorter,
-                extra,
-                tableBusy,
-              )
-            }
-            pagination={getPaginationConfig(query.data?.total ?? 0, tableBusy)}
-            emptyDescription="暂无数据"
-          />
+          <div className="workload-workbench__table-zone">
+            <ResourceTable<DeploymentRow>
+              bordered
+              rowKey="key"
+              tableKey="workloads.deployments"
+              preferencesClient={createTablePreferencesClient(
+                accessToken || undefined,
+              )}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleGlobalSearchChange,
+                placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              toolbarExtra={scopeFilterControl}
+              sort={{ sortBy, sortOrder }}
+              columns={antd列}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              dataSource={表格数据}
+              loading={{
+                spinning: query.isLoading && !query.data,
+                description: "Deployment 数据加载中...",
+              }}
+              onChange={(paginationInfo, filters, sorter, extra) =>
+                handleTableChange(
+                  paginationInfo,
+                  filters,
+                  sorter,
+                  extra,
+                  tableBusy,
+                )
+              }
+              pagination={getPaginationConfig(query.data?.total ?? 0, tableBusy)}
+              emptyDescription="暂无数据"
+            />
+          </div>
         </Space>
       </OpsSurface>
 

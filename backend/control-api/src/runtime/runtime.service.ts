@@ -21,7 +21,7 @@ export interface CreateRuntimeSessionRequest {
   clusterId: string;
   namespace: string;
   pod: string;
-  container: string;
+  container?: string;
   previous?: boolean;
   level?: 'INFO' | 'WARN' | 'ERROR';
   keyword?: string;
@@ -117,61 +117,73 @@ export class RuntimeService {
   ): Promise<RuntimeSessionBootstrapResponse> {
     this.validateInput(input);
     const target = await this.validateTarget(input);
+    const runtimeInput: CreateRuntimeSessionRequest & { container: string } = {
+      ...input,
+      container: target.container,
+    };
 
     const sessionId = randomUUID();
-    const path = this.resolveGatewayPath(input.type);
+    const path = this.resolveGatewayPath(runtimeInput.type);
     const expiresAtEpochSeconds =
       Math.floor(Date.now() / 1000) + this.sessionTtlSeconds;
     const expiresAtDate = new Date(expiresAtEpochSeconds * 1000);
     const expiresAt = expiresAtDate.toISOString();
     const runtimeToken = this.runtimeSessionService.createRuntimeToken({
       sessionId,
-      userId: input.userId?.trim() || 'unknown-user',
-      type: input.type,
-      clusterId: input.clusterId,
-      namespace: input.namespace,
-      pod: input.pod,
-      container: input.container,
+      userId: runtimeInput.userId?.trim() || 'unknown-user',
+      type: runtimeInput.type,
+      clusterId: runtimeInput.clusterId,
+      namespace: runtimeInput.namespace,
+      pod: runtimeInput.pod,
+      container: target.container,
       availableContainers: target.availableContainers,
       podPhase: target.podPhase,
-      level: input.type === 'logs' ? input.level : undefined,
-      keyword: input.type === 'logs' ? input.keyword?.trim() : undefined,
-      tailLines: input.type === 'logs' ? input.tailLines : undefined,
+      level: runtimeInput.type === 'logs' ? runtimeInput.level : undefined,
+      keyword:
+        runtimeInput.type === 'logs' ? runtimeInput.keyword?.trim() : undefined,
+      tailLines:
+        runtimeInput.type === 'logs' ? runtimeInput.tailLines : undefined,
       sinceSeconds:
-        input.type === 'logs' && !input.sinceTime
-          ? input.sinceSeconds
+        runtimeInput.type === 'logs' && !runtimeInput.sinceTime
+          ? runtimeInput.sinceSeconds
           : undefined,
-      sinceTime: input.type === 'logs' ? input.sinceTime : undefined,
-      untilTime: input.type === 'logs' ? input.untilTime : undefined,
+      sinceTime:
+        runtimeInput.type === 'logs' ? runtimeInput.sinceTime : undefined,
+      untilTime:
+        runtimeInput.type === 'logs' ? runtimeInput.untilTime : undefined,
       refreshIntervalSeconds:
-        input.type === 'logs' ? input.refreshIntervalSeconds : undefined,
-      follow: input.type === 'logs' ? input.follow : undefined,
-      previous: input.type === 'logs' ? input.previous : undefined,
-      timestamps: input.type === 'logs' ? input.timestamps : undefined,
+        runtimeInput.type === 'logs'
+          ? runtimeInput.refreshIntervalSeconds
+          : undefined,
+      follow: runtimeInput.type === 'logs' ? runtimeInput.follow : undefined,
+      previous:
+        runtimeInput.type === 'logs' ? runtimeInput.previous : undefined,
+      timestamps:
+        runtimeInput.type === 'logs' ? runtimeInput.timestamps : undefined,
       path,
       exp: expiresAtEpochSeconds,
     } satisfies RuntimeTokenPayload);
 
     await this.runtimeSessionService.persistSession({
       id: sessionId,
-      clusterId: input.clusterId,
-      userId: input.userId,
-      type: input.type,
-      namespace: input.namespace,
-      pod: input.pod,
-      container: input.container,
+      clusterId: runtimeInput.clusterId,
+      userId: runtimeInput.userId,
+      type: runtimeInput.type,
+      namespace: runtimeInput.namespace,
+      pod: runtimeInput.pod,
+      container: target.container,
       expiresAt: expiresAtDate,
     });
 
     this.logger.log(
-      `runtime session created: sessionId=${sessionId}, type=${input.type}, clusterId=${input.clusterId}, namespace=${input.namespace}, pod=${input.pod}, container=${input.container}`,
+      `runtime session created: sessionId=${sessionId}, type=${runtimeInput.type}, clusterId=${runtimeInput.clusterId}, namespace=${runtimeInput.namespace}, pod=${runtimeInput.pod}, container=${target.container}`,
     );
 
     return {
       sessionId,
       runtimeToken,
       gatewayWsUrl: this.buildGatewayUrl(
-        input,
+        runtimeInput,
         sessionId,
         runtimeToken,
         path,
@@ -270,7 +282,6 @@ export class RuntimeService {
     this.assertRequiredString(input.clusterId, 'clusterId');
     this.assertRequiredString(input.namespace, 'namespace');
     this.assertRequiredString(input.pod, 'pod');
-    this.assertRequiredString(input.container, 'container');
     if (input.type !== 'terminal' && input.type !== 'logs') {
       throw new BadRequestException('type 必须为 terminal 或 logs');
     }
@@ -424,10 +435,13 @@ export class RuntimeService {
       });
     }
 
-    if (!availableContainers.includes(input.container)) {
+    const requestedContainer = input.container?.trim();
+    const selectedContainer = requestedContainer || availableContainers[0];
+
+    if (requestedContainer && !availableContainers.includes(requestedContainer)) {
       throw new BadRequestException({
         code: 'RUNTIME_CONTAINER_NOT_FOUND',
-        message: `容器 ${input.container} 不存在于 Pod ${input.namespace}/${input.pod}`,
+        message: `容器 ${requestedContainer} 不存在于 Pod ${input.namespace}/${input.pod}`,
         details: {
           availableContainers,
         },
@@ -449,7 +463,7 @@ export class RuntimeService {
       clusterId: input.clusterId,
       namespace: input.namespace,
       pod: input.pod,
-      container: input.container,
+      container: selectedContainer,
       availableContainers,
       podPhase,
     };
@@ -471,7 +485,7 @@ export class RuntimeService {
   }
 
   private buildGatewayUrl(
-    input: CreateRuntimeSessionRequest,
+    input: CreateRuntimeSessionRequest & { container: string },
     sessionId: string,
     runtimeToken: string,
     path: '/ws/terminal' | '/ws/logs',
@@ -551,6 +565,35 @@ export class RuntimeService {
     return trimmed;
   }
 
+  private extractHostFromOrigin(origin?: string): string | undefined {
+    if (!origin) {
+      return undefined;
+    }
+    try {
+      return new URL(origin).host || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private extractProtocolFromOrigin(
+    origin?: string,
+  ): RuntimeGatewayAccessContext['requestProtocol'] | undefined {
+    if (!origin) {
+      return undefined;
+    }
+    try {
+      const protocol = new URL(origin).protocol.replace(':', '');
+      return protocol === 'https'
+        ? 'https'
+        : protocol === 'http'
+          ? 'http'
+          : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private resolveGatewayBaseForClient(
     access?: RuntimeGatewayAccessContext,
   ): string {
@@ -575,118 +618,13 @@ export class RuntimeService {
       }
       return configuredBase;
     }
-    let configured: URL;
     try {
-      configured = new URL(configuredBase);
+      const configured = new URL(configuredBase);
+      // Keep absolute gateway URLs stable. The browser decides whether to
+      // prefer the direct runtime-gateway host or the same-origin /ws proxy.
+      return configured.toString().replace(/\/+$/, '');
     } catch {
       return configuredBase;
-    }
-
-    const requestHost = access?.requestHost?.trim();
-    const requestProtocol = access?.requestProtocol;
-    const requestOrigin = access?.requestOrigin?.trim();
-    let parsedOrigin: URL | null = null;
-    if (requestOrigin) {
-      try {
-        parsedOrigin = new URL(requestOrigin);
-      } catch {
-        parsedOrigin = null;
-      }
-    }
-
-    if (requestProtocol === 'https') {
-      configured.protocol = 'wss:';
-    } else if (requestProtocol === 'http') {
-      configured.protocol = 'ws:';
-    } else if (parsedOrigin) {
-      configured.protocol = parsedOrigin.protocol === 'https:' ? 'wss:' : 'ws:';
-    }
-
-    const requestHostName = this.extractHostName(requestHost);
-    const requestHostWithPort = this.extractHostWithPort(requestHost);
-    const requestOriginHost = parsedOrigin?.hostname ?? undefined;
-    const requestOriginHostWithPort = parsedOrigin?.host ?? undefined;
-
-    const isConfiguredLoopback =
-      configured.hostname === 'localhost' ||
-      configured.hostname === '127.0.0.1' ||
-      configured.hostname === '::1';
-    const isOriginLoopback =
-      requestOriginHost === 'localhost' ||
-      requestOriginHost === '127.0.0.1' ||
-      requestOriginHost === '::1';
-    // If the page called control-api through the frontend host, prefer that exact
-    // host:port so browsers can reuse the same-origin /ws proxy instead of direct
-    // access to the gateway port.
-    if (isConfiguredLoopback && requestHostWithPort) {
-      configured.host = requestHostWithPort;
-    } else if (
-      isConfiguredLoopback &&
-      requestOriginHostWithPort &&
-      !isOriginLoopback
-    ) {
-      configured.host = requestOriginHostWithPort;
-    }
-
-    return configured.toString().replace(/\/+$/, '');
-  }
-
-  private extractHostName(value: string | undefined): string {
-    if (!value) {
-      return '';
-    }
-    const normalized = value.trim();
-    if (!normalized) {
-      return '';
-    }
-    if (normalized.startsWith('[')) {
-      const closing = normalized.indexOf(']');
-      if (closing > 1) {
-        return normalized.slice(1, closing);
-      }
-    }
-    const lastColon = normalized.lastIndexOf(':');
-    if (lastColon > 0 && normalized.indexOf(':') === lastColon) {
-      return normalized.slice(0, lastColon);
-    }
-    return normalized;
-  }
-
-  private extractHostWithPort(value: string | undefined): string {
-    if (!value) {
-      return '';
-    }
-    return value.trim();
-  }
-
-  private extractHostFromOrigin(value: string | undefined): string {
-    if (!value) {
-      return '';
-    }
-    try {
-      return new URL(value).host;
-    } catch {
-      return '';
-    }
-  }
-
-  private extractProtocolFromOrigin(
-    value: string | undefined,
-  ): 'http' | 'https' | undefined {
-    if (!value) {
-      return undefined;
-    }
-    try {
-      const protocol = new URL(value).protocol;
-      if (protocol === 'https:') {
-        return 'https';
-      }
-      if (protocol === 'http:') {
-        return 'http';
-      }
-      return undefined;
-    } catch {
-      return undefined;
     }
   }
 

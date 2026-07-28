@@ -9,6 +9,7 @@ export interface BaseResource {
 }
 
 export interface ClusterModel extends BaseResource {
+  apiServer: string | null;
   environment: string;
   status: string;
   cpuUsage: number;

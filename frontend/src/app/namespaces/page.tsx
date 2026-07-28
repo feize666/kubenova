@@ -419,15 +419,23 @@ export default function NamespacesPage() {
     mutateCreate.isPending ||
     mutateUpdate.isPending ||
     mutateApplyYaml.isPending;
-
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space className="resource-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/namespaces"
-          style={{ marginBottom: 12 }}
+          embedded
+          className="resource-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">Namespace</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                名称空间
+              </OpsFilterChip>
+            </span>
+          }
           description="统一管理名称空间、标签与资源隔离范围。"
-          titleSuffix={
+          extra={
             <ResourceAddButton
               onClick={() => {
                 setEditing(null);
@@ -445,7 +453,7 @@ export default function NamespacesPage() {
           }
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+        <Space className="resource-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
           <ResourceClusterNamespaceFilters
             clusterId={clusterId}
             keywordInput={keywordInput}
@@ -488,43 +496,45 @@ export default function NamespacesPage() {
             />
           ) : null}
 
-          <ResourceTable<NamespaceListItem>
-            rowKey="id"
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            tableKey="namespaces"
-            preferencesClient={createTablePreferencesClient(
-              accessToken || undefined,
-            )}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称空间搜索",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            dataSource={tableData}
-            loading={namespacesQuery.isLoading}
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(
-                nextPagination,
-                filters,
-                sorter,
-                extra,
+          <div className="resource-workbench__table-zone">
+            <ResourceTable<NamespaceListItem>
+              rowKey="id"
+              columns={columns}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              tableKey="namespaces"
+              preferencesClient={createTablePreferencesClient(
+                accessToken || undefined,
+              )}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleGlobalSearchChange,
+                placeholder: "按名称空间搜索",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              sort={{ sortBy, sortOrder }}
+              dataSource={tableData}
+              loading={namespacesQuery.isLoading}
+              onChange={(nextPagination, filters, sorter, extra) =>
+                handleTableChange(
+                  nextPagination,
+                  filters,
+                  sorter,
+                  extra,
+                  namespacesQuery.isLoading && !namespacesQuery.data,
+                )
+              }
+              pagination={getPaginationConfig(
+                namespacesQuery.data?.total ??
+                  namespacesQuery.data?.items?.length ??
+                  0,
                 namespacesQuery.isLoading && !namespacesQuery.data,
-              )
-            }
-            pagination={getPaginationConfig(
-              namespacesQuery.data?.total ??
-                namespacesQuery.data?.items?.length ??
-                0,
-              namespacesQuery.isLoading && !namespacesQuery.data,
-            )}
-          />
+              )}
+            />
+          </div>
         </Space>
       </OpsSurface>
 

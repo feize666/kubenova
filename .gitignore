@@ -60,5 +60,8 @@ pnpm-debug.log*
 .playwright-mcp/
 .run/
 artifacts/
+/output/
+/frontend/output/
+/frontend/frontend/
 AGENTS.md
 DESIGN.md

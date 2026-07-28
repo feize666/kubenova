@@ -8,7 +8,8 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { useModuleTableState } from "@/components/module-page";
-import { OpsFilterChip, OpsFormSection, OpsIconActionButton, OpsModalShell, OpsPageHeader, OpsSurface } from "@/components/ops";
+import { OpsFilterChip, OpsFormSection, OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
+import { ResourcePageHeader } from "@/components/resource-page-header";
 import {
   ResourceActionDropdown,
   type ResourceActionItem,
@@ -502,82 +503,93 @@ export default function UsersPage() {
   ];
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsPageHeader
-        className="resource-page-header"
-        title="用户管理"
-        subtitle="管理平台用户账号、角色权限与账号状态。用户创建后可使用用户名+密码登录。"
-      />
-
-      {!isInitializing && !accessToken ? (
-        <Alert className="identity-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录。" />
-      ) : null}
-
-      {query.isError ? (
-        <Alert
-          className="identity-resource-state-alert"
-          type="error"
-          showIcon
-          title="加载失败"
-          description={query.error instanceof Error ? query.error.message : "获取用户数据时发生错误"}
-        />
-      ) : null}
-
+    <Space className="resource-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<UserTableRecord>
-          rowKey="key"
-          tableKey="business.users"
-          columns={columns as ColumnsType<UserTableRecord>}
-          dataSource={rows}
-          layoutOptions={{ nameValues: rows.map((row) => row.name || row.username), actionWidth: TABLE_COL_WIDTH.actionCompact }}
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: tableState.keywordInput,
-            onChange: (value) => {
-              tableState.setKeywordInput(value);
-              tableState.setPage(1);
-            },
-            placeholder: "搜索用户名/角色",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            setStatus(typeof nextFilters.state === "string" ? nextFilters.state : "");
-            tableState.setPage(1);
-          }}
-          toolbarExtra={
-            <Space size={8} wrap>
-              <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void query.refetch()}>
-                刷新
-              </OpsIconActionButton>
-              <ResourceAddButton compact={false} label="新建用户" onClick={() => setCreateOpen(true)} aria-label="新建用户" />
-            </Space>
+        <ResourcePageHeader
+          path="/users"
+          embedded
+          className="resource-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">Users</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                用户管理
+              </OpsFilterChip>
+            </span>
           }
-          loading={{ spinning: query.isLoading, description: "用户数据加载中..." }}
-          onChange={(pagination, filters, sorter, extra) => {
-            handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
-            if (pagination.current && pagination.current !== tableState.page) {
-              tableState.setPage(pagination.current);
-            }
-            if (pagination.pageSize && pagination.pageSize !== tableState.pageSize) {
-              tableState.setPageSize(pagination.pageSize);
-            }
-          }}
-          pagination={buildTablePagination({
-            current: tableState.page,
-            pageSize: tableState.pageSize,
-            total: query.data?.total ?? filtered.length,
-            onChange: (nextPage, nextPageSize) => {
-              if (nextPageSize !== tableState.pageSize) {
-                tableState.setPageSize(nextPageSize);
-                return;
-              }
-              tableState.setPage(nextPage);
-            },
-            showTotal: (total) => `共 ${total} 位用户`,
-          })}
-          emptyDescription="暂无用户数据"
+          description="管理平台用户账号、角色权限与账号状态。用户创建后可使用用户名+密码登录。"
+          extra={<ResourceAddButton compact={false} label="新建用户" onClick={() => setCreateOpen(true)} aria-label="新建用户" />}
         />
+
+        <Space className="resource-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
+          {!isInitializing && !accessToken ? (
+            <Alert className="identity-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录。" />
+          ) : null}
+
+          {query.isError ? (
+            <Alert
+              className="identity-resource-state-alert"
+              type="error"
+              showIcon
+              title="加载失败"
+              description={query.error instanceof Error ? query.error.message : "获取用户数据时发生错误"}
+            />
+          ) : null}
+
+          <div className="resource-workbench__table-zone">
+            <ResourceTable<UserTableRecord>
+              rowKey="key"
+              tableKey="business.users"
+              columns={columns as ColumnsType<UserTableRecord>}
+              dataSource={rows}
+              layoutOptions={{ nameValues: rows.map((row) => row.name || row.username), actionWidth: TABLE_COL_WIDTH.actionCompact }}
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: tableState.keywordInput,
+                onChange: (value) => {
+                  tableState.setKeywordInput(value);
+                  tableState.setPage(1);
+                },
+                placeholder: "搜索用户名/角色",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                setStatus(typeof nextFilters.state === "string" ? nextFilters.state : "");
+                tableState.setPage(1);
+              }}
+              toolbarExtra={
+                <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void query.refetch()}>
+                  刷新
+                </OpsIconActionButton>
+              }
+              loading={{ spinning: query.isLoading, description: "用户数据加载中..." }}
+              onChange={(pagination, filters, sorter, extra) => {
+                handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
+                if (pagination.current && pagination.current !== tableState.page) {
+                  tableState.setPage(pagination.current);
+                }
+                if (pagination.pageSize && pagination.pageSize !== tableState.pageSize) {
+                  tableState.setPageSize(pagination.pageSize);
+                }
+              }}
+              pagination={buildTablePagination({
+                current: tableState.page,
+                pageSize: tableState.pageSize,
+                total: query.data?.total ?? filtered.length,
+                onChange: (nextPage, nextPageSize) => {
+                  if (nextPageSize !== tableState.pageSize) {
+                    tableState.setPageSize(nextPageSize);
+                    return;
+                  }
+                  tableState.setPage(nextPage);
+                },
+                showTotal: (total) => `共 ${total} 位用户`,
+              })}
+              emptyDescription="暂无用户数据"
+            />
+          </div>
+        </Space>
       </OpsSurface>
 
       <CreateUserModal

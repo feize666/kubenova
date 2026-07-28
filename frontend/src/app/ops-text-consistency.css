@@ -1,0 +1,271 @@
+/* Shared business UI text colors. Console and topology canvases stay isolated. */
+@scope (body) to (.logs-workbench-shell, .terminal-workbench-shell, .ops-terminal, .resource-map-shell, .ops-workbench-shell--ai) {
+  :is(
+    .ops-page-header__title,
+    .ops-frame-shell__title,
+    .ops-surface__title,
+    .ops-form-section__title,
+    .ant-result-title,
+    .ant-typography h1,
+    .ant-typography h2,
+    h1.ant-typography,
+    h2.ant-typography
+  ) {
+    color: var(--ops-text-primary, #182230);
+  }
+
+  :is(
+    .ops-page-header__subtitle,
+    .ops-frame-shell__subtitle,
+    .ops-surface__subtitle,
+    .ops-form-section__description,
+    .ops-modal-shell__description,
+    .ant-typography-secondary
+  ) {
+    color: var(--ops-text-secondary, #5f6b7a);
+  }
+
+  :is(
+    .resource-table .ant-table-title,
+    .pod-table .ant-table-title,
+    .ant-table-wrapper .ant-table-title,
+    .ant-table-wrapper .ant-table-thead > tr > th
+  ) {
+    color: var(--ops-text-primary, #182230);
+  }
+
+  :is(
+    .ant-table-wrapper .ant-table-cell .ant-typography-secondary,
+    .ant-table-wrapper .ant-table-cell .table-cell-meta,
+    .ant-table-wrapper .ant-table-cell .table-cell-helper,
+    .resource-filter-toolbar-label,
+    .ops-filter-bar__label,
+    .ops-filter-bar__active-label
+  ) {
+    color: var(--ops-text-tertiary, #7b8794);
+  }
+
+  :is(
+    .ant-form-item .ant-form-item-label > label,
+    .ant-form-item .ant-form-item-extra,
+    .ant-form-item .ant-form-item-explain,
+    .ops-state__description,
+    .ant-empty-description,
+    .ant-result-subtitle,
+    .ant-spin-text
+  ) {
+    color: var(--ops-text-secondary, #5f6b7a);
+  }
+
+  :is(.ant-result-success .ant-result-title, .status-success) {
+    color: var(--ops-text-status-success, #16a34a);
+  }
+
+  :is(.ant-result-warning .ant-result-title, .status-warning) {
+    color: var(--ops-text-status-warning, #d97706);
+  }
+
+  :is(.ant-result-error .ant-result-title, .status-error) {
+    color: var(--ops-text-status-danger, #dc2626);
+  }
+
+  :is(.ant-result-info .ant-result-title, .status-info) {
+    color: var(--ops-text-status-info, #2563eb);
+  }
+
+  :is(
+    .app-sidebar-menu.ant-menu .ant-menu-item,
+    .app-sidebar-menu.ant-menu .ant-menu-submenu-title,
+    .app-header .ant-breadcrumb,
+    .app-header .ant-breadcrumb a,
+    .ant-breadcrumb a
+  ) {
+    color: var(--ops-text-secondary, #5f6b7a);
+  }
+
+  :is(
+    .app-sidebar-menu.ant-menu .ant-menu-item-selected,
+    .app-header .ant-breadcrumb li:last-child,
+    .ant-breadcrumb li:last-child
+  ) {
+    color: var(--ops-text-primary, #182230);
+  }
+
+  :is(.app-sidebar-menu.ant-menu .ant-menu-item-disabled, .ant-breadcrumb-separator) {
+    color: var(--ops-text-disabled, #9aa5b1);
+  }
+
+  :is(
+    .ant-tag:not(.ant-tag-has-color),
+    .ant-descriptions .ant-descriptions-item-label,
+    .description-list__label
+  ) {
+    color: var(--ops-text-secondary, #5f6b7a);
+  }
+
+  :is(.ant-descriptions .ant-descriptions-item-content, .description-list__value) {
+    color: var(--ops-text-primary, #182230);
+  }
+
+  :is(.ant-typography a, a.ant-typography, .ant-breadcrumb a:hover) {
+    color: var(--ops-text-link, #2563eb);
+  }
+}
+
+/* Enterprise typography baseline for functional pages. */
+@scope (body) to (.logs-workbench-shell, .terminal-workbench-shell, .ops-terminal, .resource-map-shell, .ops-workbench-shell--ai) {
+  :is(
+    body,
+    .ant-layout,
+    .ant-typography,
+    .ant-table,
+    .ant-form,
+    .ant-modal,
+    .ant-drawer,
+    .ops-surface,
+    .resource-workbench,
+    .workload-workbench,
+    .pod-workbench
+  ) {
+    color: var(--ops-text-primary);
+    font-family: var(--ops-font-family-sans);
+    font-size: var(--ops-font-size-body);
+    font-weight: var(--ops-font-weight-body);
+    line-height: var(--ops-line-height-body);
+  }
+
+  :is(.ops-page-header__title, h1.ant-typography, .ant-typography h1) {
+    color: var(--ops-text-primary);
+    font-size: var(--ops-font-size-page-title);
+    font-weight: var(--ops-font-weight-title);
+    line-height: var(--ops-line-height-title);
+    letter-spacing: 0;
+  }
+
+  :is(
+    .resource-workbench__title,
+    .workload-workbench__title,
+    .pod-workbench__title,
+    .ops-overview-title
+  ) {
+    color: var(--ops-text-primary);
+    font-size: var(--ops-font-size-page-title);
+    font-weight: var(--ops-font-weight-title);
+    letter-spacing: 0;
+  }
+
+  :is(
+    .ops-surface__title,
+    .ops-frame-shell__title,
+    .ops-form-section__title,
+    .ops-modal-shell__title,
+    .ant-drawer-title,
+    .ant-modal-title,
+    h2.ant-typography,
+    h3.ant-typography,
+    .ant-typography h2,
+    .ant-typography h3
+  ) {
+    color: var(--ops-text-primary);
+    font-size: var(--ops-font-size-section-title);
+    font-weight: var(--ops-font-weight-section);
+    line-height: 1.34;
+    letter-spacing: 0;
+  }
+
+  :is(
+    .ops-overview-card__title,
+    .ops-metric-tile__label,
+    .dashboard-live-metric-tile__title,
+    .ant-card-head-title,
+    .ant-collapse-header
+  ) {
+    color: var(--ops-text-secondary);
+    font-size: var(--ops-font-size-card-title);
+    font-weight: 660;
+    line-height: 1.35;
+    letter-spacing: 0;
+  }
+
+  :is(
+    .ops-page-header__subtitle,
+    .ops-page-header__scope,
+    .ops-page-header__freshness,
+    .ops-surface__subtitle,
+    .ops-modal-shell__description,
+    .ops-form-section__description,
+    .ant-typography-secondary,
+    .ant-form-item-extra,
+    .ant-empty-description,
+    .ant-result-subtitle
+  ) {
+    color: var(--ops-text-secondary);
+    font-size: var(--ops-font-size-meta);
+    font-weight: 450;
+    line-height: 1.45;
+    letter-spacing: 0;
+  }
+
+  :is(
+    .ant-table-wrapper .ant-table,
+    .ant-table-wrapper .ant-table-cell,
+    .ant-descriptions .ant-descriptions-item-content,
+    .ant-list,
+    .ant-select,
+    .ant-input,
+    .ant-btn
+  ) {
+    font-size: var(--ops-font-size-body);
+    letter-spacing: 0;
+  }
+
+  :is(.ant-table-wrapper .ant-table-thead > tr > th) {
+    color: var(--ops-text-secondary);
+    font-size: var(--ops-font-size-meta);
+    font-weight: 660;
+    letter-spacing: 0;
+  }
+
+  :is(
+    .ant-table-wrapper .ant-table-cell .ant-typography-secondary,
+    .table-cell-meta,
+    .table-cell-helper,
+    .resource-filter-toolbar-label,
+    .ops-filter-bar__label,
+    .ops-filter-bar__active-label,
+    .ant-descriptions .ant-descriptions-item-label
+  ) {
+    color: var(--ops-text-tertiary);
+    font-size: var(--ops-font-size-meta);
+    font-weight: 450;
+    line-height: 1.42;
+  }
+
+  :is(
+    code,
+    .ant-typography code,
+    .ops-metric-tile__value-main,
+    .ops-overview-big-number,
+    .ops-overview-chart-value strong,
+    .ops-overview-summary-metric strong
+  ) {
+    font-family: var(--ops-font-family-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+  }
+
+  :is(.ant-typography a, a.ant-typography, .ant-table-wrapper a, .ops-overview-card-link) {
+    color: var(--ops-text-link);
+    font-weight: 600;
+  }
+
+  :is(.ant-typography a:hover, a.ant-typography:hover, .ant-table-wrapper a:hover, .ops-overview-card-link:hover) {
+    color: var(--ops-text-link-hover);
+  }
+
+  :is(.ant-tag:not(.ant-tag-has-color), .ops-filter-chip, .ops-status-tag) {
+    font-size: var(--ops-font-size-caption);
+    font-weight: 650;
+    letter-spacing: 0;
+  }
+}

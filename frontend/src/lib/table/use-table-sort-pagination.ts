@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { PaginationProps, TableProps } from "antd";
 import type { ColumnFiltersState, PaginationState, VisibilityState } from "@tanstack/react-table";
-import { buildTablePagination } from "./pagination";
+import { buildTablePagination, type PageSizeOptions } from "./pagination";
 import {
   type PersistentTableSortStateOptions,
   usePersistentTableSortState,
@@ -13,7 +13,7 @@ export interface TableSortPaginationOptions extends PersistentTableSortStateOpti
   defaultPageSize?: number;
   defaultKeyword?: string;
   initialVisibility?: VisibilityState;
-  pageSizeOptions?: readonly string[];
+  pageSizeOptions?: PageSizeOptions;
 }
 
 type TableChangeHandler<T> = NonNullable<TableProps<T>["onChange"]>;
@@ -69,9 +69,7 @@ export function useTableSortPaginationState(options: TableSortPaginationOptions 
     overrides: Partial<PaginationProps> = {},
   ): PaginationProps {
     const { pageSizeOptions: overridePageSizeOptions, ...restOverrides } = overrides;
-    const pageSizeOptions =
-      (overridePageSizeOptions as readonly string[] | readonly number[] | undefined) ??
-      options.pageSizeOptions;
+    const pageSizeOptions = overridePageSizeOptions ?? options.pageSizeOptions;
     return buildTablePagination({
       current: pagination.pageIndex + 1,
       pageSize: pagination.pageSize,

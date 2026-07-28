@@ -123,7 +123,7 @@ export function ResourceCreateMethodTabs({
                     onChange={(event) => onYamlChange(event.target.value)}
                     placeholder="apiVersion: v1&#10;kind: ConfigMap&#10;metadata:&#10;  name: example&#10;  namespace: default"
                     autoSize={{ minRows: 12, maxRows: 22 }}
-                    style={{ fontFamily: "\"JetBrains Mono\", \"IBM Plex Mono\", SFMono-Regular, monospace", fontSize: 12 }}
+                    style={{ fontFamily: "var(--kn-font-mono)", fontSize: 12 }}
                     disabled={disabled}
                   />
                 </Form.Item>

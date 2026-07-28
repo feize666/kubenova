@@ -12,6 +12,10 @@ export interface ExportKubeconfigInput {
   token: string;
 }
 
+export interface KubeconfigConnectionInfo {
+  apiServer: string;
+}
+
 @Injectable()
 export class K8sClientService {
   private readonly logger = new Logger(K8sClientService.name);
@@ -21,6 +25,28 @@ export class K8sClientService {
     const kc = new k8s.KubeConfig();
     kc.loadFromString(kubeconfigYaml);
     return kc;
+  }
+
+  /** 解析 kubeconfig 当前 context，不发起网络请求。 */
+  inspectKubeconfig(kubeconfigYaml: string): KubeconfigConnectionInfo {
+    const kc = this.createClient(kubeconfigYaml);
+    const cluster = kc.getCurrentCluster();
+    const apiServer = cluster?.server?.trim();
+    if (!apiServer) {
+      throw new Error('kubeconfig 当前 context 未配置 API Server');
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(apiServer);
+    } catch {
+      throw new Error(`kubeconfig API Server 地址无效: ${apiServer}`);
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error(`kubeconfig API Server 协议不受支持: ${parsed.protocol}`);
+    }
+
+    return { apiServer: parsed.toString().replace(/\/$/, '') };
   }
 
   /** 获取 CoreV1Api */
@@ -72,14 +98,22 @@ export class K8sClientService {
   }
 
   /** 测试集群连通性，返回服务器版本 */
-  async testConnection(
-    kubeconfigYaml: string,
-  ): Promise<{ ok: boolean; version?: string; error?: string }> {
+  async testConnection(kubeconfigYaml: string): Promise<{
+    ok: boolean;
+    apiServer?: string;
+    version?: string;
+    error?: string;
+  }> {
     try {
+      const { apiServer } = this.inspectKubeconfig(kubeconfigYaml);
       const kc = this.createClient(kubeconfigYaml);
       const versionApi = kc.makeApiClient(k8s.VersionApi);
       const resp = await versionApi.getCode();
-      return { ok: true, version: `${resp.major}.${resp.minor}` };
+      return {
+        ok: true,
+        apiServer,
+        version: resp.gitVersion ?? `v${resp.major}.${resp.minor}`,
+      };
     } catch (err) {
       this.logger.warn(`testConnection failed: ${(err as Error).message}`);
       return { ok: false, error: (err as Error).message };

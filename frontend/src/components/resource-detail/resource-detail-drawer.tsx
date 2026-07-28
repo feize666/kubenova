@@ -7,7 +7,6 @@ import { useCallback, useMemo, useState } from "react";
 import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
 import type { DynamicResourceIdentity, ResourceIdentity, ResourceDetailResponse } from "@/lib/api/resources";
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { OpsCommandPreview, OpsDegradedState, OpsDrawerShell, OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState } from "@/components/ops";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceDetailContent } from "./renderers";
@@ -324,11 +323,6 @@ export function ResourceDetailDrawer({
           </Space>
         ) : query.data ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <Typography.Text type="secondary">
-              集群 {getClusterDisplayName(clusterMap, query.data.overview.clusterId)}
-              {query.data.overview.namespace ? ` · 名称空间 ${query.data.overview.namespace}` : ""}
-              {` · 资源 ${query.data.overview.kind}/${query.data.overview.name}`}
-            </Typography.Text>
             <ResourceDetailContent
               key={activeRequestKey}
               detail={query.data}

@@ -72,7 +72,6 @@ export interface ClusterPayload {
   name: string;
   environment: string;
   provider: string;
-  kubernetesVersion: string;
   status: string;
   /** kubeconfig YAML 原文，用于接入真实集群。不填时集群以离线模式管理。 */
   kubeconfig?: string;

@@ -28,6 +28,17 @@ FRONTEND_NODE_OPTIONS="${FRONTEND_NODE_OPTIONS:---max-old-space-size=1536}"
 CONTROL_API_NODE_OPTIONS="${CONTROL_API_NODE_OPTIONS:---max-old-space-size=768}"
 RUNTIME_GATEWAY_DEPS_STAMP="$CACHE_DIR/runtime-gateway-go-mod.download.stamp"
 SERVICE_LOG_SUFFIX="dev"
+
+# A Windows browser cannot always reach a WSL listener through localhost.
+# Publish the WSL IPv4 gateway address for local browser clients unless the
+# developer has already supplied an explicit public gateway base.
+if [[ -z "${RUNTIME_GATEWAY_PUBLIC_BASE_URL:-}" ]] && grep -qiE 'microsoft|wsl' /proc/sys/kernel/osrelease 2>/dev/null; then
+  WSL_GATEWAY_HOST="$(hostname -I 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && $i !~ /^127\./) { print $i; exit }}')"
+  if [[ -n "$WSL_GATEWAY_HOST" ]]; then
+    RUNTIME_GATEWAY_PUBLIC_BASE_URL="ws://${WSL_GATEWAY_HOST}:${RUNTIME_GATEWAY_PORT}"
+    export RUNTIME_GATEWAY_PUBLIC_BASE_URL
+  fi
+fi
 source "$ROOT_DIR/scripts/_service-lib.sh"
 service_lib_init
 
@@ -242,6 +253,22 @@ prepare_control_api_deps() {
   echo "[预检] control-api 依赖安装完成"
 }
 
+sync_frontend_standalone_assets() {
+  if [[ ! -d "$FRONTEND_DIR/.next/static" ]]; then
+    echo "[错误] 缺少前端静态资源目录：$FRONTEND_DIR/.next/static，请先完成前端构建。" >&2
+    exit 1
+  fi
+
+  echo "[预检] 正在同步前端静态资源到 standalone 包..."
+  rm -rf "$FRONTEND_DIR/.next/standalone/.next/static" "$FRONTEND_DIR/.next/standalone/public"
+  mkdir -p "$FRONTEND_DIR/.next/standalone/.next"
+  cp -a "$FRONTEND_DIR/.next/static" "$FRONTEND_DIR/.next/standalone/.next/"
+  if [[ -d "$FRONTEND_DIR/public" ]]; then
+    cp -a "$FRONTEND_DIR/public" "$FRONTEND_DIR/.next/standalone/"
+  fi
+  echo "[预检] 前端静态资源同步完成"
+}
+
 prepare_frontend_standalone() {
   if [[ "$FRONTEND_BOOT_MODE" != "stable" ]]; then
     return
@@ -253,31 +280,13 @@ prepare_frontend_standalone() {
       echo "[预检] 检测到前端源码比 standalone 包更新，正在重建稳定包..."
       rm -rf "$FRONTEND_DIR/.next/standalone"
     else
-      if [[ ! -d "$FRONTEND_DIR/.next/standalone/.next/static" || ! -d "$FRONTEND_DIR/.next/standalone/public" ]]; then
-        echo "[预检] 正在同步前端静态资源到 standalone 包..."
-        rm -rf "$FRONTEND_DIR/.next/standalone/.next/static" "$FRONTEND_DIR/.next/standalone/public"
-        mkdir -p "$FRONTEND_DIR/.next/standalone/.next"
-        cp -a "$FRONTEND_DIR/.next/static" "$FRONTEND_DIR/.next/standalone/.next/"
-        if [[ -d "$FRONTEND_DIR/public" ]]; then
-          cp -a "$FRONTEND_DIR/public" "$FRONTEND_DIR/.next/standalone/"
-        fi
-        echo "[预检] 前端静态资源同步完成"
-      fi
+      sync_frontend_standalone_assets
       return
     fi
   fi
 
   if [[ -f "$server_js" ]]; then
-    if [[ ! -d "$FRONTEND_DIR/.next/standalone/.next/static" || ! -d "$FRONTEND_DIR/.next/standalone/public" ]]; then
-      echo "[预检] 正在同步前端静态资源到 standalone 包..."
-      rm -rf "$FRONTEND_DIR/.next/standalone/.next/static" "$FRONTEND_DIR/.next/standalone/public"
-      mkdir -p "$FRONTEND_DIR/.next/standalone/.next"
-      cp -a "$FRONTEND_DIR/.next/static" "$FRONTEND_DIR/.next/standalone/.next/"
-      if [[ -d "$FRONTEND_DIR/public" ]]; then
-        cp -a "$FRONTEND_DIR/public" "$FRONTEND_DIR/.next/standalone/"
-      fi
-      echo "[预检] 前端静态资源同步完成"
-    fi
+    sync_frontend_standalone_assets
     return
   fi
 
@@ -301,16 +310,7 @@ prepare_frontend_standalone() {
 
   for _ in $(seq 1 10); do
     if [[ -f "$server_js" ]]; then
-      if [[ ! -d "$FRONTEND_DIR/.next/standalone/.next/static" || ! -d "$FRONTEND_DIR/.next/standalone/public" ]]; then
-        echo "[预检] 正在同步前端静态资源到 standalone 包..."
-        rm -rf "$FRONTEND_DIR/.next/standalone/.next/static" "$FRONTEND_DIR/.next/standalone/public"
-        mkdir -p "$FRONTEND_DIR/.next/standalone/.next"
-        cp -a "$FRONTEND_DIR/.next/static" "$FRONTEND_DIR/.next/standalone/.next/"
-        if [[ -d "$FRONTEND_DIR/public" ]]; then
-          cp -a "$FRONTEND_DIR/public" "$FRONTEND_DIR/.next/standalone/"
-        fi
-        echo "[预检] 前端静态资源同步完成"
-      fi
+      sync_frontend_standalone_assets
       echo "[预检] 前端 standalone 包正常"
       return
     fi
@@ -645,9 +645,9 @@ start_if_not_running "control-api" \
   "$CONTROL_API_DIR" \
   "$CONTROL_API_PORT" \
   "$(if [[ "$CONTROL_API_BOOT_MODE" == "stable" ]]; then
-      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' node dist/src/main.js"
+      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_GATEWAY_PUBLIC_BASE_URL=${RUNTIME_GATEWAY_PUBLIC_BASE_URL:-} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' node dist/src/main.js"
     else
-      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' npx --no-install nest start --watch"
+      printf '%s' "PORT=$CONTROL_API_PORT DATABASE_URL=${DATABASE_URL:-postgresql://kubenova:kubenova_dev@localhost:5432/k8s_aiops} REDIS_URL=${REDIS_URL:-redis://localhost:6379} JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production} CONTROL_API_BASE_URL=http://127.0.0.1:$CONTROL_API_PORT RUNTIME_GATEWAY_BASE_URL=${RUNTIME_GATEWAY_BASE_URL:-ws://127.0.0.1:$RUNTIME_GATEWAY_PORT} RUNTIME_GATEWAY_PUBLIC_BASE_URL=${RUNTIME_GATEWAY_PUBLIC_BASE_URL:-} RUNTIME_TOKEN_SECRET=${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret} NODE_OPTIONS='$CONTROL_API_NODE_OPTIONS' npx --no-install nest start --watch"
     fi)"
 
 if [[ "$START_GATEWAY" == "true" ]]; then

@@ -102,6 +102,8 @@ export default function AiopsCenterPage() {
   const recommendations = summary?.recommendations ?? EMPTY_RECOMMENDATIONS;
   const rootCauseCandidates = summary?.rootCauseCandidates ?? EMPTY_ROOT_CAUSES;
   const correlationGroups = summary?.correlationGroups ?? EMPTY_CORRELATION_GROUPS;
+  const openIncidents = incidentQueue.filter((item) => item.status === "open").length;
+  const investigatingIncidents = incidentQueue.filter((item) => item.status === "investigating").length;
   const selectedIncident = useMemo(
     () => incidentQueue.find((item) => item.id === selectedIncidentId) ?? null,
     [incidentQueue, selectedIncidentId],
@@ -229,24 +231,37 @@ export default function AiopsCenterPage() {
   );
 
   return (
-    <Space className="ops-aiops-cockpit" orientation="vertical" size={16} style={{ width: "100%" }}>
-      <ResourcePageHeader
-        path={AIOPS_PATH}
-        freshness={summary ? { label: "分析时间", value: summary.timestamp, color: "purple" } : undefined}
-        extra={
-          <Space wrap>
-            <Select
-              value={range}
-              style={{ width: 120 }}
-              onChange={setRange}
-              options={AIOPS_RANGE_OPTIONS}
-            />
-            <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
-              刷新
-            </OpsIconActionButton>
-          </Space>
-        }
-      />
+    <Space className="resource-workbench ops-aiops-cockpit" orientation="vertical" size={16} style={{ width: "100%" }}>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourcePageHeader
+          path={AIOPS_PATH}
+          embedded
+          className="resource-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">AIOps</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                智能运维
+              </OpsFilterChip>
+            </span>
+          }
+          description="聚合异常检测、根因候选、关联分组与审批建议。"
+          freshness={summary ? { label: "分析时间", value: summary.timestamp, color: "blue" } : undefined}
+          extra={
+            <Space wrap>
+              <Select
+                value={range}
+                style={{ width: 120 }}
+                onChange={setRange}
+                options={AIOPS_RANGE_OPTIONS}
+              />
+              <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
+                刷新
+              </OpsIconActionButton>
+            </Space>
+          }
+        />
+      </OpsSurface>
 
       {!enabled ? <Alert className="ops-center-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后查看 KubeNova 中台。" /> : null}
       {summaryQuery.isError ? (
@@ -267,6 +282,7 @@ export default function AiopsCenterPage() {
           <OpsMetricTile
             icon={<RobotOutlined />}
             label="异常总数"
+            meta={`当前窗口 ${incidentQueue.length} 起事故 / ${correlationGroups.length} 组关联`}
             tone="info"
             value={summary?.anomalyOverview.total ?? 0}
           />
@@ -275,6 +291,7 @@ export default function AiopsCenterPage() {
           <OpsMetricTile
             icon={<WarningOutlined />}
             label="严重异常"
+            meta={openIncidents > 0 ? `${openIncidents} 起待处理 · ${investigatingIncidents} 起诊断中` : "暂无待处理事故"}
             tone="danger"
             value={summary?.anomalyOverview.critical ?? 0}
           />
@@ -282,6 +299,7 @@ export default function AiopsCenterPage() {
         <Col xs={24} md={6}>
           <OpsMetricTile
             label="关联分组"
+            meta={`根因候选 ${rootCauseCandidates.length} 个`}
             tone="warning"
             value={summary?.correlationGroups.length ?? 0}
           />
@@ -290,6 +308,7 @@ export default function AiopsCenterPage() {
           <OpsMetricTile
             icon={<SafetyOutlined />}
             label="审计状态"
+            meta={summary?.auditState.auditTrailReady ? "审计链路已连通" : "审计链路待补齐"}
             tone={summary?.auditState.auditTrailReady ? "success" : "warning"}
             value={summary?.auditState.auditTrailReady ? "就绪" : "缺失"}
           />
@@ -297,15 +316,17 @@ export default function AiopsCenterPage() {
       </Row>
 
       <OpsSurface className="ops-aiops-panel ops-aiops-panel--queue" variant="panel" padding="sm" title="事故队列">
-        <ResourceTable
-          rowKey="id"
-          size="small"
-          columns={incidentColumns}
-          dataSource={incidentQueue}
-          pagination={false}
-          loading={summaryQuery.isLoading}
-          emptyDescription="暂无事故"
-        />
+        <div className="resource-workbench__table-zone">
+          <ResourceTable
+            rowKey="id"
+            size="small"
+            columns={incidentColumns}
+            dataSource={incidentQueue}
+            pagination={false}
+            loading={summaryQuery.isLoading}
+            emptyDescription="暂无事故"
+          />
+        </div>
       </OpsSurface>
 
       <Row gutter={[16, 16]}>
@@ -331,22 +352,24 @@ export default function AiopsCenterPage() {
           </OpsSurface>
         </Col>
         <Col xs={24} xl={12}>
-          <OpsSurface className="ops-aiops-panel" variant="panel" padding="sm" title="推荐动作">
-            <ResourceTable
-              rowKey="id"
-              size="small"
-              columns={recommendationColumns}
-              dataSource={recommendations}
-              pagination={false}
-              loading={summaryQuery.isLoading}
-              emptyDescription="暂无推荐动作"
-            />
+          <OpsSurface className="ops-aiops-panel" variant="panel" padding="sm" title="处置建议">
+            <div className="resource-workbench__table-zone">
+              <ResourceTable
+                rowKey="id"
+                size="small"
+                columns={recommendationColumns}
+                dataSource={recommendations}
+                pagination={false}
+                loading={summaryQuery.isLoading}
+                emptyDescription="暂无处置建议"
+              />
+            </div>
           </OpsSurface>
         </Col>
       </Row>
 
       <OpsDrawerShell
-        title="Incident Workbench"
+        title="事故工作台"
         open={Boolean(selectedIncident)}
         variant="workbench"
         onClose={closeIncidentDrawer}

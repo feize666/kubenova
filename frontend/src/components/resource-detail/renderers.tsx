@@ -21,7 +21,6 @@ import {
 import {
   buildHeadlampDetailSections,
   buildSpecSection,
-  buildStatusSection,
 } from "./detail-section-builders";
 import type { ResourceDetailRendererProps } from "./types";
 import {
@@ -43,7 +42,7 @@ type NavigateRequest =
     ? T
     : never;
 
-function renderSpecStatusSections({
+function renderSpecSections({
   detail,
   snapshot,
   clusterMap,
@@ -57,10 +56,7 @@ function renderSpecStatusSections({
     clusterMap,
     onNavigateRequest,
   };
-  return [
-    buildSpecSection(context),
-    buildStatusSection(context),
-  ];
+  return [buildSpecSection(context)];
 }
 
 const ASSOCIATION_TYPE_META: Record<string, { label: string; color: string }> =
@@ -68,18 +64,22 @@ const ASSOCIATION_TYPE_META: Record<string, { label: string; color: string }> =
     "routes-to-service": { label: "Ingress 转发", color: "green" },
     "traefik-routes-to-service": { label: "IngressRoute 转发", color: "cyan" },
     "selects-service": { label: "后端发现", color: "orange" },
-    "service-endpoints": { label: "服务端点", color: "gold" },
-    "service-endpointslice": { label: "端点切片", color: "volcano" },
+    "service-endpoints": { label: "服务端点", color: "orange" },
+    "service-endpointslice": { label: "端点切片", color: "red" },
     "backend-service": { label: "后端服务", color: "blue" },
-    "gateway-class": { label: "GatewayClass", color: "geekblue" },
-    "uses-gateway-class": { label: "使用 GatewayClass", color: "geekblue" },
-    "tls-secret": { label: "TLS 证书", color: "magenta" },
-    "route-middleware": { label: "路由中间件", color: "geekblue" },
-    "owned-pod": { label: "拥有 Pod", color: "purple" },
-    owner: { label: "上级控制器", color: "purple" },
+    "gateway-class": { label: "GatewayClass", color: "blue" },
+    "uses-gateway-class": { label: "使用 GatewayClass", color: "blue" },
+    "tls-secret": { label: "TLS 证书", color: "cyan" },
+    "route-middleware": { label: "路由中间件", color: "blue" },
+    "owned-pod": { label: "拥有 Pod", color: "cyan" },
+    owner: { label: "上级控制器", color: "blue" },
+    "parent-ref": { label: "父引用", color: "orange" },
+    parentref: { label: "父引用", color: "orange" },
+    "backend-ref": { label: "后端引用", color: "cyan" },
+    backendref: { label: "后端引用", color: "cyan" },
     "uses-configmap": { label: "使用 ConfigMap", color: "blue" },
-    "uses-secret": { label: "使用 Secret", color: "magenta" },
-    "secret-ref": { label: "Secret 引用", color: "purple" },
+    "uses-secret": { label: "使用 Secret", color: "cyan" },
+    "secret-ref": { label: "Secret 引用", color: "blue" },
   };
 
 function renderConditionsSection(
@@ -106,7 +106,7 @@ function renderConditionsSection(
             <Space wrap size={8}>
               {item.type ? <DetailTag color="blue">{item.type}</DetailTag> : null}
               {item.status ? <StatusTag state={item.status} /> : null}
-              {item.reason ? <DetailTag color="geekblue">{item.reason}</DetailTag> : null}
+              {item.reason ? <DetailTag color="blue">{item.reason}</DetailTag> : null}
             </Space>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {[item.message, item.lastTransitionTime]
@@ -158,7 +158,7 @@ function SimpleList<T>({
   );
 }
 
-const RELATIONSHIP_ITEMS_VISIBLE_LIMIT = 8;
+const RELATIONSHIP_ITEMS_VISIBLE_LIMIT = 4;
 
 function LimitedList<T>({
   items,
@@ -191,12 +191,12 @@ const AUTOSCALING_KINDS = new Set([
 
 const CONFIG_USAGE_META: Record<string, { label: string; color: string }> = {
   volume: { label: "volume", color: "blue" },
-  env: { label: "env", color: "geekblue" },
+  env: { label: "env", color: "blue" },
   envFrom: { label: "envFrom", color: "cyan" },
-  projected: { label: "projected", color: "gold" },
-  imagePullSecret: { label: "imagePullSecret", color: "purple" },
-  token: { label: "token", color: "volcano" },
-  tls: { label: "tls", color: "magenta" },
+  projected: { label: "projected", color: "orange" },
+  imagePullSecret: { label: "imagePullSecret", color: "cyan" },
+  token: { label: "token", color: "red" },
+  tls: { label: "tls", color: "cyan" },
   unknown: { label: "unknown", color: "default" },
 };
 
@@ -342,7 +342,7 @@ function renderContainerSummaries(
           <SimpleListItem>
             <Space orientation="vertical" size={4} style={{ width: "100%" }}>
               <Space wrap size={8}>
-                <DetailTag color="geekblue">{container.name}</DetailTag>
+                <DetailTag color="blue">{container.name}</DetailTag>
                 {container.image ? (
                   <Typography.Text strong>{container.image}</Typography.Text>
                 ) : null}
@@ -749,7 +749,7 @@ function EndpointHighlightsSection({ detail }: ResourceDetailRendererProps) {
               <div style={{ marginTop: 8 }}>
                 <DetailChipList
                   items={portLabels}
-                  color={kind === "endpointslice" ? "volcano" : "gold"}
+                  color={kind === "endpointslice" ? "red" : "orange"}
                 />
               </div>
             </div>
@@ -771,7 +771,7 @@ function EndpointHighlightsSection({ detail }: ResourceDetailRendererProps) {
                     >
                       <Space wrap size={8}>
                         <DetailTag
-                          color={kind === "endpointslice" ? "volcano" : "gold"}
+                          color={kind === "endpointslice" ? "red" : "orange"}
                         >
                           {kind === "endpointslice"
                             ? "EndpointSlice"
@@ -1072,8 +1072,13 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
 
 function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps) {
   const allowedRuntimeFields = new Set(getAllowedRuntimeFields(detail));
+  const isPod =
+    normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) ===
+    "pod";
+  const overviewState =
+    isPod && detail.runtime.phase ? detail.runtime.phase : detail.overview.state;
   const runtimeHighlights = [
-    allowedRuntimeFields.has("phase") && detail.runtime.phase
+    !isPod && allowedRuntimeFields.has("phase") && detail.runtime.phase
       ? {
           label: "阶段",
           value: renderFieldValue("phase", detail.runtime.phase),
@@ -1103,14 +1108,14 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
     <OpsSurface className="resource-detail-overview" variant="raised" padding="lg">
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         <Space wrap size={[8, 8]}>
-          <DetailTag color="geekblue">{detail.overview.kind}</DetailTag>
+          <DetailTag color="blue">{detail.overview.kind}</DetailTag>
           {detail.overview.namespace ? (
             <DetailTag>{detail.overview.namespace}</DetailTag>
           ) : (
             <DetailTag>集群级</DetailTag>
           )}
-          <StatusTag state={detail.overview.state} />
-          {allowedRuntimeFields.has("phase") && detail.runtime.phase ? (
+          <StatusTag state={overviewState} />
+          {!isPod && allowedRuntimeFields.has("phase") && detail.runtime.phase ? (
             <StatusTag state={detail.runtime.phase} />
           ) : null}
         </Space>
@@ -1196,6 +1201,21 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
 }
 
 function StatusSnapshotSection({ detail }: ResourceDetailRendererProps) {
+  const isPod =
+    normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) ===
+    "pod";
+  if (isPod) {
+    if (!detail.runtime.conditions || detail.runtime.conditions.length === 0) {
+      return null;
+    }
+
+    return (
+      <DetailSection title="状态摘要" subtitle="状态条件与异常信息">
+        {renderConditionsSection(detail.runtime.conditions)}
+      </DetailSection>
+    );
+  }
+
   const allowedRuntimeFields = new Set(getAllowedRuntimeFields(detail));
   const items = [
     {
@@ -1266,22 +1286,6 @@ function PodHighlightsSection({
   }
 
   const items = [
-    detail.runtime.nodeName
-      ? { key: "nodeName", label: "节点", value: detail.runtime.nodeName }
-      : null,
-    detail.runtime.podIP
-      ? { key: "podIP", label: "Pod IP", value: detail.runtime.podIP }
-      : null,
-    detail.runtime.restartCount !== undefined
-      ? {
-          key: "restartCount",
-          label: "重启次数",
-          value: detail.runtime.restartCount,
-        }
-      : null,
-    detail.runtime.image
-      ? { key: "image", label: "主镜像", value: detail.runtime.image }
-      : null,
     detail.runtime.serviceAccountName
       ? {
           key: "serviceAccountName",
@@ -1299,11 +1303,28 @@ function PodHighlightsSection({
     detail.runtime.dnsPolicy
       ? { key: "dnsPolicy", label: "DNS 策略", value: detail.runtime.dnsPolicy }
       : null,
+    detail.runtime.schedulerName
+      ? { key: "schedulerName", label: "调度器", value: detail.runtime.schedulerName }
+      : null,
+    detail.runtime.priorityClassName
+      ? {
+          key: "priorityClassName",
+          label: "优先级类",
+          value: detail.runtime.priorityClassName,
+        }
+      : null,
     formatStringMap(detail.runtime.nodeSelector)
       ? {
           key: "nodeSelector",
           label: "节点选择器",
           value: formatStringMap(detail.runtime.nodeSelector),
+        }
+      : null,
+    detail.runtime.tolerations && detail.runtime.tolerations.length > 0
+      ? {
+          key: "tolerations",
+          label: "容忍",
+          value: `${detail.runtime.tolerations.length} 条`,
         }
       : null,
   ].filter(Boolean) as Array<{
@@ -1313,17 +1334,9 @@ function PodHighlightsSection({
   }>;
 
   return (
-    <DetailSection title="Pod 高频区" subtitle="先看节点、IP、镜像与运行策略">
+    <DetailSection title="运行配置" subtitle="身份、策略与调度配置">
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-        <DetailDescriptions items={items} emptyText="暂无 Pod 运行摘要" />
-        {detail.runtime.images.length > 0 ? (
-          <div>
-            <Typography.Text strong>镜像列表</Typography.Text>
-            <div style={{ marginTop: 8 }}>
-              <DetailChipList items={detail.runtime.images} color="blue" />
-            </div>
-          </div>
-        ) : null}
+        <DetailDescriptions items={items} emptyText="暂无 Pod 运行配置" />
         {renderContainerSummaries(detail.runtime.containerDetails)}
       </Space>
     </DetailSection>
@@ -1400,7 +1413,7 @@ function NodeHighlightsSection({ detail }: ResourceDetailRendererProps) {
           <div>
             <Typography.Text strong>Taints</Typography.Text>
             <div style={{ marginTop: 8 }}>
-              <DetailChipList items={taints} color="gold" />
+              <DetailChipList items={taints} color="orange" />
             </div>
           </div>
         ) : null}
@@ -1420,8 +1433,7 @@ function WorkloadHighlightsSection({
     return null;
   }
 
-  const selectorText =
-    detail.runtime.selector ?? formatStringMap(detail.metadata.labels) ?? "";
+  const selectorText = detail.runtime.selector ?? "";
 
   const ownedPods = detail.associations.filter(
     (item) => item.associationType === "owned-pod",
@@ -1497,13 +1509,7 @@ function ReplicaSetHighlightsSection({
   const ownedPods = detail.associations.filter(
     (item) => item.associationType === "owned-pod",
   );
-  const selectorText =
-    Object.keys(detail.metadata.labels).length > 0
-      ? Object.entries(detail.metadata.labels)
-          .slice(0, 6)
-          .map(([key, value]) => `${key}=${value}`)
-          .join(", ")
-      : "";
+  const selectorText = detail.runtime.selector ?? "";
 
   const items = [
     detail.runtime.replicas !== undefined
@@ -1732,10 +1738,10 @@ function NamespaceHighlightsSection({ detail }: ResourceDetailRendererProps) {
             <Typography.Text strong>关键资源分布</Typography.Text>
             <Space wrap size={8} style={{ marginTop: 8 }}>
               {relatedPolicies.length > 0 ? (
-                <DetailTag color="purple">NetworkPolicy {relatedPolicies.length}</DetailTag>
+                <DetailTag color="blue">NetworkPolicy {relatedPolicies.length}</DetailTag>
               ) : null}
               {relatedClaims.length > 0 ? (
-                <DetailTag color="gold">PVC {relatedClaims.length}</DetailTag>
+                <DetailTag color="orange">PVC {relatedClaims.length}</DetailTag>
               ) : null}
               {relatedConfigs.length > 0 ? (
                 <DetailTag color="blue">配置对象 {relatedConfigs.length}</DetailTag>
@@ -1945,10 +1951,7 @@ function ServiceHighlightsSection({
     (item) =>
       item.sourceKind === "Endpoints" || item.sourceKind === "EndpointSlice",
   );
-  const selectorText =
-    detail.network.service?.selector ??
-    formatStringMap(detail.metadata.labels) ??
-    "";
+  const selectorText = detail.network.service?.selector ?? "";
 
   return (
     <DetailSection
@@ -2105,7 +2108,7 @@ function NetworkPolicyHighlightsSection({
                     if (peer.namespaceSelector) {
                       tags.push(
                         <DetailTag
-                          color="purple"
+                          color="blue"
                           key={`ns-${index}-${peer.namespaceSelector}`}
                         >
                           NS: {peer.namespaceSelector}
@@ -2124,7 +2127,7 @@ function NetworkPolicyHighlightsSection({
                     }
                     if (peer.ipBlock) {
                       tags.push(
-                        <DetailTag color="gold" key={`ip-${index}-${peer.ipBlock}`}>
+                        <DetailTag color="orange" key={`ip-${index}-${peer.ipBlock}`}>
                           IPBlock: {peer.ipBlock}
                         </DetailTag>,
                       );
@@ -2545,7 +2548,7 @@ function GatewayHighlightsSection({ detail }: ResourceDetailRendererProps) {
                 ? {
                     key: "allowedRoutes",
                     label: "允许路由方式",
-                    value: <DetailChipList items={allowedRoutesFrom} color="gold" />,
+                    value: <DetailChipList items={allowedRoutesFrom} color="orange" />,
                   }
                 : null,
               routeNames.length > 0
@@ -2587,7 +2590,7 @@ function GatewayHighlightsSection({ detail }: ResourceDetailRendererProps) {
                         <DetailTag color="green">{item.hostname}</DetailTag>
                       ) : null}
                       {item.allowedRoutesFrom ? (
-                        <DetailTag color="gold">
+                        <DetailTag color="orange">
                           允许路由: {item.allowedRoutesFrom}
                         </DetailTag>
                       ) : null}
@@ -2743,33 +2746,151 @@ type RelationshipItem = {
   chain: RelationshipNode[];
 };
 
+type RelationshipSemantic = "owner" | "parentRef" | "backendRef";
+
 const RELATIONSHIP_GROUP_META = {
   control: {
     title: "控制关系",
-    description: "Owner、控制器与被控制对象",
   },
   network: {
     title: "网络关系",
-    description: "入口、服务、端点与后端 Pod/IP",
   },
   storage: {
     title: "存储关系",
-    description: "容器挂载、Volume、PVC、PV 与 StorageClass",
   },
   config: {
     title: "配置关系",
-    description: "ConfigMap、Secret、ServiceAccount 与使用方",
   },
   other: {
     title: "其他关系",
-    description: "未归类但可导航的关联资源",
   },
 } as const;
 
 type RelationshipGroupKey = keyof typeof RELATIONSHIP_GROUP_META;
 
+const RELATIONSHIP_SEMANTIC_META: Record<
+  RelationshipSemantic,
+  { label: string; color: string }
+> = {
+  owner: { label: "Owner", color: "blue" },
+  parentRef: { label: "父引用", color: "orange" },
+  backendRef: { label: "后端引用", color: "cyan" },
+};
+
+function getRelationshipSemantic(value?: string): RelationshipSemantic | undefined {
+  const normalized = String(value ?? "")
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
+  if (["owner", "ownerreference"].includes(normalized)) {
+    return "owner";
+  }
+  if (["parentref", "parentreference"].includes(normalized)) {
+    return "parentRef";
+  }
+  if (["backendref", "backendreference", "backendservice"].includes(normalized)) {
+    return "backendRef";
+  }
+  return undefined;
+}
+
+function getRelationshipItemSemantic(item: RelationshipItem) {
+  return (
+    item.chain.map((node) => getRelationshipSemantic(node.role)).find(Boolean) ??
+    item.tags
+      ?.map((tag) => getRelationshipSemantic(tag.label))
+      .find(Boolean) ??
+    getRelationshipSemantic(item.title)
+  );
+}
+
 function relationshipNodeKey(node: RelationshipNode) {
-  return `${normalizeKind(node.kind ?? "object")}:${node.namespace ?? "_cluster"}:${node.name ?? "_"}:${node.id ?? "_"}`;
+  return `${node.clusterId ?? "_cluster"}:${normalizeKind(node.kind ?? "object")}:${node.namespace ?? "_cluster"}:${node.name ?? "_"}:${node.id ?? "_"}`;
+}
+
+const GENERIC_RELATIONSHIP_ITEM_TITLES = new Set([
+  "网络路径",
+  "存储路径",
+  "配置引用",
+]);
+
+function isCurrentResourceRelationshipNode(
+  detail: ResourceDetailRendererProps["detail"],
+  node: RelationshipNode,
+) {
+  if (
+    normalizeKind(node.kind ?? "") !==
+    normalizeKind(detail.descriptor.resourceKind || detail.overview.kind)
+  ) {
+    return false;
+  }
+
+  if (node.id && node.id === detail.overview.id) {
+    return true;
+  }
+
+  return (
+    !node.id &&
+    node.name === detail.overview.name &&
+    node.namespace === detail.overview.namespace &&
+    (!node.clusterId || node.clusterId === detail.overview.clusterId)
+  );
+}
+
+function relationshipItemIdentity(
+  group: RelationshipGroupKey,
+  item: RelationshipItem,
+) {
+  return [
+    group,
+    getRelationshipItemSemantic(item) ?? "generic",
+    item.chain.map(relationshipNodeKey).join("->"),
+  ].join("::");
+}
+
+function normalizeRelationshipItems(
+  detail: ResourceDetailRendererProps["detail"],
+  group: RelationshipGroupKey,
+  items: RelationshipItem[],
+) {
+  const seen = new Set<string>();
+
+  return items.reduce<RelationshipItem[]>((normalizedItems, item) => {
+    const chain = item.chain.filter(
+      (node) => !isCurrentResourceRelationshipNode(detail, node),
+    );
+    if (chain.length === 0) {
+      return normalizedItems;
+    }
+
+    const semantic = getRelationshipItemSemantic(item);
+    const semanticTag = semantic ? RELATIONSHIP_SEMANTIC_META[semantic] : undefined;
+    const tags =
+      semanticTag &&
+      !item.tags?.some((tag) => getRelationshipSemantic(tag.label) === semantic)
+        ? [...(item.tags ?? []), semanticTag]
+        : item.tags;
+    const normalizedItem = { ...item, chain, tags };
+    const identity = relationshipItemIdentity(group, normalizedItem);
+    if (seen.has(identity)) {
+      return normalizedItems;
+    }
+
+    seen.add(identity);
+    normalizedItems.push(normalizedItem);
+    return normalizedItems;
+  }, []);
+}
+
+function toRelationshipGroups(
+  detail: ResourceDetailRendererProps["detail"],
+  groups: Map<RelationshipGroupKey, RelationshipItem[]>,
+) {
+  return (Object.keys(RELATIONSHIP_GROUP_META) as RelationshipGroupKey[])
+    .map((key) => ({
+      key,
+      items: normalizeRelationshipItems(detail, key, groups.get(key) ?? []),
+    }))
+    .filter((group) => group.items.length > 0);
 }
 
 function addRelationshipItem(
@@ -2789,60 +2910,59 @@ function addRelationshipItem(
 function buildRelationshipGroups(
   detail: ResourceDetailRendererProps["detail"],
 ): Array<{ key: RelationshipGroupKey; items: RelationshipItem[] }> {
-  if (detail.relationships.length > 0) {
-    const backendGroups: Array<{
-      key: RelationshipGroupKey;
-      items: RelationshipItem[];
-    }> = [];
-    detail.relationships.forEach((group) => {
-      if (!(group.key in RELATIONSHIP_GROUP_META) || group.items.length === 0) {
-        return;
-      }
-      backendGroups.push({
-        key: group.key,
-        items: group.items.map((item) => ({
-          key: item.key,
-          title: item.title,
-          subtitle: item.subtitle,
-          tags: item.tags,
-          chain: item.chain.map((node) => ({
-            kind: node.kind,
-            name: node.name,
-            namespace: node.namespace,
-            id: node.id,
-            clusterId: node.clusterId,
-            apiVersion: node.apiVersion,
-            role: node.role,
-            color: node.color ?? "default",
-          })),
-        })),
-      });
-    });
-    return backendGroups;
-  }
-
   const groups = new Map<RelationshipGroupKey, RelationshipItem[]>();
   const seen = new Set<string>();
 
+  detail.relationships.forEach((group) => {
+    if (!(group.key in RELATIONSHIP_GROUP_META)) {
+      return;
+    }
+
+    group.items.forEach((item) => {
+      addRelationshipItem(groups, seen, group.key, {
+        key: item.key,
+        title: item.title,
+        subtitle: item.subtitle,
+        tags: item.tags,
+        chain: item.chain.map((node) => ({
+          kind: node.kind,
+          name: node.name,
+          namespace: node.namespace,
+          id: node.id,
+          clusterId: node.clusterId,
+          apiVersion: node.apiVersion,
+          role: node.role,
+          color: node.color ?? "default",
+        })),
+      });
+    });
+  });
+
   const addAssociation = (item: ResourceAssociation) => {
+    const semantic = getRelationshipSemantic(item.associationType);
     const group =
-      item.associationType === "owner" || item.associationType === "owned-pod"
+      semantic === "owner" || item.associationType === "owned-pod"
         ? "control"
+        : semantic === "parentRef" || semantic === "backendRef"
+          ? "network"
         : ASSOCIATION_GROUPS.find((candidate) =>
               candidate.types.has(item.associationType),
             )?.key ?? "other";
+    const semanticMeta = semantic ? RELATIONSHIP_SEMANTIC_META[semantic] : undefined;
     addRelationshipItem(groups, seen, group as RelationshipGroupKey, {
       key: `assoc:${item.associationType}:${item.kind}:${item.namespace ?? "_cluster"}:${item.name}:${item.id ?? "_"}`,
       title:
+        semanticMeta?.label ??
         ASSOCIATION_TYPE_META[item.associationType]?.label ??
         item.associationType,
       subtitle: item.namespace ? `名称空间 ${item.namespace}` : "集群级资源",
       tags: [
         {
           label:
+            semanticMeta?.label ??
             ASSOCIATION_TYPE_META[item.associationType]?.label ??
             item.associationType,
-          color: ASSOCIATION_TYPE_META[item.associationType]?.color,
+          color: semanticMeta?.color ?? ASSOCIATION_TYPE_META[item.associationType]?.color,
         },
       ],
       chain: [
@@ -2852,7 +2972,9 @@ function buildRelationshipGroups(
           namespace: item.namespace,
           id: item.id,
           color:
-            ASSOCIATION_TYPE_META[item.associationType]?.color ?? "geekblue",
+            semanticMeta?.color ??
+            ASSOCIATION_TYPE_META[item.associationType]?.color ??
+            "blue",
         },
       ],
     });
@@ -2860,7 +2982,7 @@ function buildRelationshipGroups(
 
   detail.associations.forEach(addAssociation);
 
-  detail.network.networkPipelines.forEach((item, index) => {
+  detail.network.networkPipelines.forEach((item) => {
     const chain: RelationshipNode[] = [
       {
         kind: item.sourceKind,
@@ -2881,7 +3003,7 @@ function buildRelationshipGroups(
         name: item.endpointSourceName,
         namespace: item.serviceNamespace,
         id: item.endpointSourceId,
-        color: item.endpointSourceKind === "EndpointSlice" ? "volcano" : "gold",
+        color: item.endpointSourceKind === "EndpointSlice" ? "red" : "orange",
       },
       {
         kind: item.backendPodName ? "Pod" : "Pod/IP",
@@ -2893,7 +3015,7 @@ function buildRelationshipGroups(
     ].filter((node) => node.kind || node.name);
 
     addRelationshipItem(groups, seen, "network", {
-      key: `network:${item.sourceKind}:${item.sourceNamespace ?? ""}:${item.sourceName}:${item.serviceNamespace ?? ""}:${item.serviceName ?? ""}:${item.endpointSourceName ?? ""}:${item.backendPodName ?? item.ip ?? index}`,
+      key: `network:${item.sourceKind}:${item.sourceNamespace ?? ""}:${item.sourceName}:${item.serviceNamespace ?? ""}:${item.serviceName ?? ""}:${item.endpointSourceName ?? ""}:${item.backendPodName ?? item.ip ?? ""}`,
       title: "网络路径",
       subtitle: [item.host, item.path, item.port ? `port ${item.port}` : null]
         .filter(Boolean)
@@ -2908,9 +3030,9 @@ function buildRelationshipGroups(
     });
   });
 
-  detail.storage.storagePipelines.forEach((item, index) => {
+  detail.storage.storagePipelines.forEach((item) => {
     addRelationshipItem(groups, seen, "storage", {
-      key: `storage:${item.container}:${item.mountPath}:${item.volumeName ?? ""}:${item.pvcNamespace ?? ""}:${item.pvcName ?? ""}:${item.pvName ?? ""}:${item.storageClass ?? ""}:${index}`,
+      key: `storage:${item.container}:${item.mountPath}:${item.volumeName ?? ""}:${item.pvcNamespace ?? ""}:${item.pvcName ?? ""}:${item.pvName ?? ""}:${item.storageClass ?? ""}`,
       title: "存储路径",
       subtitle: [item.mountPath, item.readOnly ? "只读" : null]
         .filter(Boolean)
@@ -2924,7 +3046,7 @@ function buildRelationshipGroups(
         {
           kind: "Container",
           name: item.container,
-          color: "geekblue",
+          color: "blue",
         },
         {
           kind: "Volume",
@@ -2945,15 +3067,15 @@ function buildRelationshipGroups(
         {
           kind: "StorageClass",
           name: item.storageClass,
-          color: "gold",
+          color: "orange",
         },
       ].filter((node) => node.name),
     });
   });
 
-  detail.metadata.configUsages.forEach((item, index) => {
+  detail.metadata.configUsages.forEach((item) => {
     addRelationshipItem(groups, seen, "config", {
-      key: `config:${item.referencedKind}:${item.referencedNamespace ?? ""}:${item.referencedName}:${item.consumerKind}:${item.consumerNamespace ?? ""}:${item.consumerName}:${item.usageType}:${item.container ?? ""}:${item.mountPath ?? ""}:${item.key ?? ""}:${index}`,
+      key: `config:${item.referencedKind}:${item.referencedNamespace ?? ""}:${item.referencedName}:${item.consumerKind}:${item.consumerNamespace ?? ""}:${item.consumerName}:${item.usageType}:${item.container ?? ""}:${item.mountPath ?? ""}:${item.key ?? ""}`,
       title: "配置引用",
       subtitle: [item.container, item.mountPath, item.key ? `key ${item.key}` : null]
         .filter(Boolean)
@@ -2972,7 +3094,7 @@ function buildRelationshipGroups(
           id: item.referencedId,
           color:
             normalizeKind(item.referencedKind) === "secret"
-              ? "magenta"
+              ? "cyan"
               : "blue",
         },
         {
@@ -2980,15 +3102,13 @@ function buildRelationshipGroups(
           name: item.consumerName,
           namespace: item.consumerNamespace,
           id: item.consumerId,
-          color: "geekblue",
+          color: "blue",
         },
       ],
     });
   });
 
-  return (Object.keys(RELATIONSHIP_GROUP_META) as RelationshipGroupKey[])
-    .map((key) => ({ key, items: groups.get(key) ?? [] }))
-    .filter((group) => group.items.length > 0);
+  return toRelationshipGroups(detail, groups);
 }
 
 function RelationshipNavigatorSection({
@@ -3001,7 +3121,7 @@ function RelationshipNavigatorSection({
   return (
     <DetailSection
       title="关系导航"
-      subtitle="网络、存储、配置与控制关系已合并去重；点击资源可切换详情"
+      subtitle="点击资源可切换详情"
       extra={
         total > 0 ? (
           <Typography.Text type="secondary">{total} 条关系</Typography.Text>
@@ -3018,9 +3138,6 @@ function RelationshipNavigatorSection({
               <div key={group.key}>
                 <Space size={8} wrap style={{ marginBottom: 8 }}>
                   <Typography.Text strong>{meta.title}</Typography.Text>
-                  <Typography.Text type="secondary">
-                    {meta.description}
-                  </Typography.Text>
                   <DetailTag>{group.items.length}</DetailTag>
                 </Space>
                 <LimitedList
@@ -3029,7 +3146,9 @@ function RelationshipNavigatorSection({
                     <SimpleListItem>
                       <Space orientation="vertical" size={6} style={{ width: "100%" }}>
                         <Space wrap size={[6, 6]}>
-                          <Typography.Text strong>{item.title}</Typography.Text>
+                          {!GENERIC_RELATIONSHIP_ITEM_TITLES.has(item.title) ? (
+                            <Typography.Text strong>{item.title}</Typography.Text>
+                          ) : null}
                           {(item.tags ?? []).map((tag, index) => (
                             <DetailTag key={`${item.key}-tag-${index}`} color={tag.color}>
                               {tag.label}
@@ -3079,14 +3198,10 @@ function HttpRouteHighlightsSection({ detail }: ResourceDetailRendererProps) {
   const runtimeBackendRefs = detail.runtime.backendRefs ?? [];
   const runtimeHostnames = detail.runtime.hostnames ?? [];
   const parentRefs = detail.associations.filter(
-    (item) => item.associationType === "owner",
+    (item) => getRelationshipSemantic(item.associationType) === "parentRef",
   );
-  const backendRefs = detail.associations.filter((item) =>
-    [
-      "backend-service",
-      "routes-to-service",
-      "traefik-routes-to-service",
-    ].includes(item.associationType),
+  const backendRefs = detail.associations.filter(
+    (item) => getRelationshipSemantic(item.associationType) === "backendRef",
   );
 
   return (
@@ -3115,7 +3230,7 @@ function HttpRouteHighlightsSection({ detail }: ResourceDetailRendererProps) {
                   ? {
                       key: "parents",
                       label: "父引用",
-                      value: <DetailChipList items={runtimeParentRefs} color="gold" />,
+                      value: <DetailChipList items={runtimeParentRefs} color="orange" />,
                     }
                 : null,
               backendRefs.length > 0
@@ -3280,22 +3395,31 @@ function getEventValue(item: ResourceDetailEvent, path: string): unknown {
 function MetadataSection({
   detail,
 }: ResourceDetailRendererProps) {
+  const isPod =
+    normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) ===
+    "pod";
+  const hasLabels = Object.keys(detail.metadata.labels).length > 0;
+  const hasAnnotations = Object.keys(detail.metadata.annotations).length > 0;
+  if (isPod && !hasLabels && !hasAnnotations) {
+    return null;
+  }
+
   const metadataSummary = [
-    detail.metadata.ownerReferences.length > 0
+    !isPod && detail.metadata.ownerReferences.length > 0
       ? {
           key: "ownerReferences",
           label: "Owner References",
           value: `${detail.metadata.ownerReferences.length} 项（见关系导航）`,
         }
       : null,
-    Object.keys(detail.metadata.labels).length > 0
+    hasLabels
       ? {
           key: "labelsCount",
           label: "Labels 数量",
           value: Object.keys(detail.metadata.labels).length,
         }
       : null,
-    Object.keys(detail.metadata.annotations).length > 0
+    hasAnnotations
       ? {
           key: "annotationsCount",
           label: "Annotations 数量",
@@ -3313,7 +3437,7 @@ function MetadataSection({
           {metadataSummary.length > 0 ? (
             <DetailDescriptions items={metadataSummary} />
           ) : null}
-          {Object.keys(detail.metadata.labels).length > 0 ? (
+          {hasLabels ? (
             <>
               <Typography.Text strong>Labels</Typography.Text>
               <DetailDescriptions
@@ -3327,7 +3451,7 @@ function MetadataSection({
               />
             </>
           ) : null}
-          {Object.keys(detail.metadata.annotations).length > 0 ? (
+          {hasAnnotations ? (
             <>
               <Typography.Text strong>Annotations</Typography.Text>
               <DetailDescriptions
@@ -3399,6 +3523,11 @@ export function ResourceDetailContent({
               buildOverviewFieldMap(detail, clusterMap),
             )
           : null}
+        <AutoscalingHighlightsSection
+          detail={detail}
+          clusterMap={clusterMap}
+          onNavigateRequest={onNavigateRequest}
+        />
         <RelationshipNavigatorSection
           detail={detail}
           onNavigateRequest={onNavigateRequest}
@@ -3412,6 +3541,12 @@ export function ResourceDetailContent({
         {detail.descriptor.sections.includes("events") ? (
           <EventsSection detail={detail} />
         ) : null}
+        {renderSpecSections({
+          detail,
+          snapshot,
+          clusterMap,
+          onNavigateRequest,
+        })}
       </Space>
     );
   }
@@ -3442,7 +3577,7 @@ export function ResourceDetailContent({
         {detail.descriptor.sections.includes("events") ? (
           <EventsSection detail={detail} />
         ) : null}
-        {renderSpecStatusSections({
+        {renderSpecSections({
           detail,
           snapshot,
           clusterMap,
@@ -3478,7 +3613,7 @@ export function ResourceDetailContent({
         {detail.descriptor.sections.includes("events") ? (
           <EventsSection detail={detail} />
         ) : null}
-        {renderSpecStatusSections({
+        {renderSpecSections({
           detail,
           snapshot,
           clusterMap,
@@ -3514,7 +3649,7 @@ export function ResourceDetailContent({
         {detail.descriptor.sections.includes("events") ? (
           <EventsSection detail={detail} />
         ) : null}
-        {renderSpecStatusSections({
+        {renderSpecSections({
           detail,
           snapshot,
           clusterMap,
@@ -3546,7 +3681,7 @@ export function ResourceDetailContent({
 
   const sectionContent: Partial<Record<ResourceDetailSection, ReactNode>> = {
     runtime:
-      runtimeDetailFields.length > 0
+      normalizedKind !== "pod" && runtimeDetailFields.length > 0
         ? renderKeyValueSection(
             "运行详情",
             "镜像、副本与节点等详细字段",
@@ -3673,6 +3808,19 @@ export function ResourceDetailContent({
         onNavigateRequest={onNavigateRequest}
       />
       <MiddlewareHighlightsSection
+        detail={detail}
+        onNavigateRequest={onNavigateRequest}
+      />
+
+      {buildSpecSection({
+        detail,
+        snapshot,
+        specSnapshot: detail.rawSpec ?? snapshot?.spec,
+        clusterMap,
+        onNavigateRequest,
+      })}
+
+      <MetadataSection
         detail={detail}
         onNavigateRequest={onNavigateRequest}
       />

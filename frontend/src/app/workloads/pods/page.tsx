@@ -830,7 +830,7 @@ export default function PodsPage() {
             <Typography.Link
               onClick={() => setDetailTarget({ kind: POD_KIND, id: row.id })}
               style={{
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontFamily: "var(--kn-font-mono)",
                 fontSize: 12,
               }}
             >
@@ -1019,15 +1019,59 @@ export default function PodsPage() {
     [isTableLoading],
   );
   const sortState = useMemo(() => ({ sortBy, sortOrder }), [sortBy, sortOrder]);
+  const scopeFilterControl = useMemo(
+    () => (
+      <div className="pod-workbench__scope">
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          namespace={namespace}
+          clusterOptions={clusterFilterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onApply={handleScopeApply}
+        />
+      </div>
+    ),
+    [
+      clusterFilterOptions,
+      clusterId,
+      clustersQuery.isLoading,
+      handleScopeApply,
+      knownNamespaces,
+      namespace,
+      namespaceDisabled,
+      namespacePlaceholder,
+    ],
+  );
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space
+      className="pod-workbench"
+      orientation="vertical"
+      size={16}
+      style={{ width: "100%" }}
+    >
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path={POD_PATH}
+          embedded
+          className="pod-workbench__header"
+          title={
+            <span className="pod-workbench__title-row">
+              <span className="pod-workbench__title">Pod</span>
+              <OpsFilterChip
+                tone="info"
+                className="pod-workbench__kind-chip"
+                style={{ margin: 0 }}
+              >
+                容器组
+              </OpsFilterChip>
+            </span>
+          }
           description="查看和管理集群中运行的 Pod 实例。"
-          style={{ marginBottom: 12 }}
-          titleSuffix={
+          extra={
             <ResourceAddButton
               onClick={() => router.push("/workloads/create?kind=Pod")}
               aria-label="创建Pod"
@@ -1035,18 +1079,12 @@ export default function PodsPage() {
           }
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            namespace={namespace}
-            clusterOptions={clusterFilterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onApply={handleScopeApply}
-          />
-
+        <Space
+          className="pod-workbench__content"
+          orientation="vertical"
+          size={12}
+          style={{ width: "100%" }}
+        >
           {!isInitializing && !accessToken ? (
             <Alert
               className="workload-resource-state-alert"
@@ -1070,26 +1108,29 @@ export default function PodsPage() {
             />
           ) : null}
 
-          <PodTimeProvider>
-            <ResourceTable<PodRow>
-              rowKey="key"
-              tableKey={POD_TABLE_KEY}
-              className="pod-table"
-              bordered
-              columns={columns as ColumnsType<PodRow>}
-              onResourceNavigate={(request) => setDetailTarget(request)}
-              dataSource={displayedRows}
-              preferencesClient={preferencesClient}
-              globalSearch={globalSearch}
-              filters={tableFilters}
-              onFiltersChange={handleFiltersChange}
-              sort={sortState}
-              loading={loadingState}
-              onChange={handleResourceTableChange}
-              pagination={getPaginationConfig(displayedTotal, tableBusy)}
-              emptyDescription="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。"
-            />
-          </PodTimeProvider>
+          <div className="pod-workbench__table-zone">
+            <PodTimeProvider>
+              <ResourceTable<PodRow>
+                rowKey="key"
+                tableKey={POD_TABLE_KEY}
+                className="pod-table"
+                bordered
+                columns={columns as ColumnsType<PodRow>}
+                onResourceNavigate={(request) => setDetailTarget(request)}
+                dataSource={displayedRows}
+                preferencesClient={preferencesClient}
+                globalSearch={globalSearch}
+                filters={tableFilters}
+                onFiltersChange={handleFiltersChange}
+                toolbarExtra={scopeFilterControl}
+                sort={sortState}
+                loading={loadingState}
+                onChange={handleResourceTableChange}
+                pagination={getPaginationConfig(displayedTotal, tableBusy)}
+                emptyDescription="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。"
+              />
+            </PodTimeProvider>
+          </div>
         </Space>
       </OpsSurface>
 

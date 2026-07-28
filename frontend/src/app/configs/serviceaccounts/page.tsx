@@ -15,15 +15,15 @@ import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
+import { OpsFilterChip, OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
-import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
+import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import {
   matchLabelExpressions,
   parseResourceSearchInput,
@@ -188,7 +188,7 @@ export default function ServiceAccountsPage() {
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
   const lastDiscoveryRefreshAtRef = useRef<Record<string, number>>({});
-  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
+  const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [keyword, setKeyword] = useState(initialKeyword);
@@ -416,12 +416,6 @@ export default function ServiceAccountsPage() {
     [tableData],
   );
 
-  const handleSearch = () => {
-    const parsed = parseResourceSearchInput(keywordInput);
-    resetPage();
-    setMergedFilters(parsed.labelExpressions);
-    setKeyword(parsed.keyword);
-  };
   const handleGlobalSearchChange = (value: string) => {
     const parsed = parseResourceSearchInput(value);
     setKeywordInput(value);
@@ -648,14 +642,40 @@ export default function ServiceAccountsPage() {
       ),
     },
   ];
+  const scopeFilterControl = (
+    <div className="workload-workbench__scope">
+      <ResourceScopeFilterButton
+        clusterId={clusterId}
+        namespace={namespace}
+        clusterOptions={clusterOptions}
+        clusterLoading={clustersQuery.isLoading}
+        knownNamespaces={knownNamespaces}
+        namespaceDisabled={namespaceDisabled}
+        namespacePlaceholder={namespacePlaceholder}
+        onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+          onScopeChange(nextClusterId, nextNamespace);
+          resetPage();
+        }}
+      />
+    </div>
+  );
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space className="workload-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/configs/serviceaccounts"
-          style={{ marginBottom: 12 }}
-          titleSuffix={
+          embedded
+          className="workload-workbench__header"
+          title={
+            <span className="workload-workbench__title-row">
+              <span className="workload-workbench__title">ServiceAccount</span>
+              <OpsFilterChip tone="info" className="workload-workbench__kind-chip" style={{ margin: 0 }}>
+                工作负载身份
+              </OpsFilterChip>
+            </span>
+          }
+          extra={
             <ResourceAddButton
               title="创建ServiceAccount"
               onClick={() => {
@@ -677,30 +697,7 @@ export default function ServiceAccountsPage() {
           }
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <NetworkResourcePageFilters
-            clusterId={clusterId}
-            namespace={namespace}
-            keywordInput={keywordInput}
-            clusterOptions={clusterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onClusterChange={(value) => {
-              onClusterChange(value);
-              resetPage();
-            }}
-            onNamespaceChange={(value) => {
-              onNamespaceChange(value);
-              resetPage();
-            }}
-            onKeywordInputChange={setKeywordInput}
-            onSearch={handleSearch}
-            keywordPlaceholder="输入关键字，或 label 过滤（如 env=prod team=platform）"
-            marginBottom={0}
-          />
-
+        <Space className="workload-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
           {!isInitializing && !accessToken ? (
             <Alert className="config-resource-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
           ) : null}
@@ -715,49 +712,52 @@ export default function ServiceAccountsPage() {
             />
           ) : null}
 
-          <ResourceTable<ServiceAccountRecord>
-            bordered
-            rowKey="id"
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            tableKey="configs.serviceaccounts"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "输入关键字，或 label 过滤（如 env=prod team=platform）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            dataSource={tableData}
-            layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
-            loading={listQuery.isLoading}
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
-            }
-            onRow={(record) => ({
-              onClick: (event: ReactMouseEvent<HTMLElement>) => {
-                if (isServiceAccountRowInteractiveTarget(event.target)) return;
-                if (record.id) {
-                  setDetailTarget({
-                    kind: "ServiceAccount",
-                    id: record.id,
-                    kindLabel: "ServiceAccount",
-                    apiVersion: record.apiVersion,
-                    namespace: record.namespace,
-                    name: record.name,
-                    label: record.name,
-                    snapshot: { labels: record.labels },
-                  });
-                }
-              },
-            })}
-            pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
-          />
+          <div className="workload-workbench__table-zone">
+            <ResourceTable<ServiceAccountRecord>
+              bordered
+              rowKey="id"
+              columns={columns}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              tableKey="configs.serviceaccounts"
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleGlobalSearchChange,
+                placeholder: "输入关键字，或 label 过滤（如 env=prod team=platform）",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              toolbarExtra={scopeFilterControl}
+              sort={{ sortBy, sortOrder }}
+              dataSource={tableData}
+              layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
+              loading={listQuery.isLoading}
+              onChange={(nextPagination, filters, sorter, extra) =>
+                handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
+              }
+              onRow={(record) => ({
+                onClick: (event: ReactMouseEvent<HTMLElement>) => {
+                  if (isServiceAccountRowInteractiveTarget(event.target)) return;
+                  if (record.id) {
+                    setDetailTarget({
+                      kind: "ServiceAccount",
+                      id: record.id,
+                      kindLabel: "ServiceAccount",
+                      apiVersion: record.apiVersion,
+                      namespace: record.namespace,
+                      name: record.name,
+                      label: record.name,
+                      snapshot: { labels: record.labels },
+                    });
+                  }
+                },
+              })}
+              pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
+            />
+          </div>
         </Space>
       </OpsSurface>
 
@@ -795,7 +795,7 @@ export default function ServiceAccountsPage() {
           onChange={(event) => setYamlValue(event.target.value)}
           autoSize={{ minRows: 18, maxRows: 28 }}
           spellCheck={false}
-          style={{ fontFamily: "monospace" }}
+          style={{ fontFamily: "var(--kn-font-mono)" }}
         />
       </OpsModalShell>
 

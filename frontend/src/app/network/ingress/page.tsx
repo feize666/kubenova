@@ -22,7 +22,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
-import { OpsModalShell, OpsSurface } from "@/components/ops";
+import { OpsFilterChip, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
@@ -500,40 +500,67 @@ export default function IngressPage() {
     },
   ];
 
+  const scopeFilterControl = (
+    <div className="workload-workbench__scope">
+      <NetworkResourcePageFilters
+        clusterId={clusterId}
+        namespace={namespace}
+        keywordInput={keywordInput}
+        clusterOptions={clusterFilterOptions}
+        clusterLoading={clustersQuery.isLoading}
+        knownNamespaces={knownNamespaces}
+        namespaceDisabled={namespaceDisabled}
+        namespacePlaceholder={namespacePlaceholder}
+        onClusterChange={(value) => {
+          onClusterChange(value);
+          resetPage();
+        }}
+        onNamespaceChange={(value) => {
+          onNamespaceChange(value);
+          resetPage();
+        }}
+        onKeywordInputChange={setKeywordInput}
+        onSearch={handleSearch}
+        keywordPlaceholder="按名称/标签搜索（示例：ingress-a app=web env=prod）"
+        marginBottom={0}
+      />
+    </div>
+  );
+
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space
+      className="workload-workbench"
+      orientation="vertical"
+      size={16}
+      style={{ width: "100%" }}
+    >
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/network/ingress"
+          embedded
+          className="workload-workbench__header"
+          title={
+            <span className="workload-workbench__title-row">
+              <span className="workload-workbench__title">Ingress</span>
+              <OpsFilterChip
+                tone="info"
+                className="workload-workbench__kind-chip"
+                style={{ margin: 0 }}
+              >
+                入口路由
+              </OpsFilterChip>
+            </span>
+          }
           description="管理集群 Ingress 入口规则与域名路由。"
-          style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建Ingress" onClick={handleOpenCreate} />}
+          extra={<ResourceAddButton title="创建Ingress" onClick={handleOpenCreate} />}
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <NetworkResourcePageFilters
-            clusterId={clusterId}
-            namespace={namespace}
-            keywordInput={keywordInput}
-            clusterOptions={clusterFilterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onClusterChange={(value) => {
-              onClusterChange(value);
-              resetPage();
-            }}
-            onNamespaceChange={(value) => {
-              onNamespaceChange(value);
-              resetPage();
-            }}
-            onKeywordInputChange={setKeywordInput}
-            onSearch={handleSearch}
-            keywordPlaceholder="按名称/标签搜索（示例：ingress-a app=web env=prod）"
-            marginBottom={0}
-          />
-
+        <Space
+          className="workload-workbench__content"
+          orientation="vertical"
+          size={12}
+          style={{ width: "100%" }}
+        >
           {!isInitializing && !accessToken ? (
             <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
           ) : null}
@@ -548,31 +575,34 @@ export default function IngressPage() {
             />
           ) : null}
 
-          <ResourceTable<IngressResource>
-            rowKey="id"
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            tableKey="network.ingress"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleFilterSearch,
-              placeholder: "按名称/标签搜索（示例：ingress-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            dataSource={tableData}
-            bordered
-            loading={isLoading && !data}
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
-            }
-            pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          />
+          <div className="workload-workbench__table-zone">
+            <ResourceTable<IngressResource>
+              rowKey="id"
+              columns={columns}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              tableKey="network.ingress"
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleFilterSearch,
+                placeholder: "按名称/标签搜索（示例：ingress-a app=web env=prod）",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              toolbarExtra={scopeFilterControl}
+              sort={{ sortBy, sortOrder }}
+              dataSource={tableData}
+              bordered
+              loading={isLoading && !data}
+              onChange={(nextPagination, filters, sorter, extra) =>
+                handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+              }
+              pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+            />
+          </div>
         </Space>
       </OpsSurface>
 

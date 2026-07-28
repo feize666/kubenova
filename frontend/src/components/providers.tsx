@@ -16,7 +16,7 @@ const RealtimeSyncBridge = dynamic(
 
 function RealtimeSyncBridgeSlot() {
   const pathname = usePathname();
-  if (pathname === "/login") {
+  if (pathname === "/login" || pathname === "/login-new") {
     return null;
   }
   return <RealtimeSyncBridge />;

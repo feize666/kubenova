@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
 import { Prisma } from '@prisma/client';
@@ -323,12 +324,19 @@ export class ClusterHealthService {
       );
     }
 
-    const snapshot = await this.getLatestSnapshot(clusterId);
+    let snapshot = await this.getLatestSnapshot(clusterId);
     if (!snapshot || snapshot.isStale) {
-      void this.probeCluster(clusterId, {
+      snapshot = await this.probeCluster(clusterId, {
         source: 'auto',
         timeoutMs: 5_000,
       });
+    }
+
+    if (!snapshot.ok) {
+      const reason = snapshot.reason ?? 'Kubernetes API Server 不可达';
+      throw new ServiceUnavailableException(
+        `集群当前离线，无法读取真实资源数据：${reason}`,
+      );
     }
   }
 
@@ -518,6 +526,30 @@ export class ClusterHealthService {
       const probeResult = await this.probeConnectedCluster(cluster, timeoutMs);
       status = probeResult.ok ? 'running' : 'offline';
       payload = probeResult;
+      {
+        const detectedApiServer =
+          typeof probeResult.detailJson?.apiServer === 'string'
+            ? probeResult.detailJson.apiServer
+            : undefined;
+        const detectedVersion =
+          probeResult.ok && typeof probeResult.detailJson?.version === 'string'
+            ? probeResult.detailJson.version
+            : detectedApiServer && detectedApiServer !== cluster.apiServer
+              ? 'unknown'
+              : undefined;
+        try {
+          await this.clustersService.updateDetectedConnectionInfo(cluster.id, {
+            apiServer: detectedApiServer,
+            kubernetesVersion: detectedVersion,
+          });
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error ? error.message : 'unknown error';
+          this.logger.warn(
+            `detected cluster info update failed: clusterId=${cluster.id} reason=${message}`,
+          );
+        }
+      }
       const latest = await this.prisma.clusterHealthSnapshot.findUnique({
         where: { clusterId },
         select: { failureCount: true },
@@ -615,7 +647,9 @@ export class ClusterHealthService {
     }
 
     const startedAt = Date.now();
+    let apiServer = cluster.apiServer;
     try {
+      apiServer = this.k8sClientService.inspectKubeconfig(kubeconfig).apiServer;
       const result = await this.withTimeout(
         this.fetchClusterVersionAndNodeCount(kubeconfig),
         timeoutMs,
@@ -626,6 +660,7 @@ export class ClusterHealthService {
         latencyMs,
         reason: null,
         detailJson: {
+          apiServer,
           version: result.version,
           nodeCount: result.nodeCount,
         },
@@ -634,16 +669,45 @@ export class ClusterHealthService {
       const latencyMs = Math.min(Date.now() - startedAt, timeoutMs);
       const message = error instanceof Error ? error.message : 'probe failed';
       const isTimeout = message === 'PROBE_TIMEOUT';
+      const reason = this.describeConnectionFailure(
+        apiServer,
+        message,
+        isTimeout,
+      );
       this.logger.warn(
         `cluster probe failed: clusterId=${cluster.id} reason=${message}`,
       );
       return {
         ok: false,
         latencyMs,
-        reason: isTimeout ? 'PROBE_TIMEOUT' : 'API_UNREACHABLE',
-        detailJson: { message },
+        reason,
+        detailJson: { apiServer, message },
       };
     }
+  }
+
+  private describeConnectionFailure(
+    apiServer: string | null,
+    message: string,
+    isTimeout: boolean,
+  ): string {
+    const target = apiServer || '未知 API Server';
+    let isPrivateAddress = false;
+    try {
+      const hostname = new URL(target).hostname;
+      isPrivateAddress =
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname.startsWith('10.') ||
+        hostname.startsWith('192.168.') ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+    } catch {
+      isPrivateAddress = false;
+    }
+    if (isPrivateAddress) {
+      return `API Server 私网地址不可达（${target}）：${message}`;
+    }
+    return `${isTimeout ? 'API Server 连接超时' : 'API Server 不可达'}（${target}）：${message}`;
   }
 
   private async fetchClusterVersionAndNodeCount(

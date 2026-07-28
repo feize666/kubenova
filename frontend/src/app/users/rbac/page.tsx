@@ -26,7 +26,8 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsFormSection, OpsIconActionButton, OpsMetricTile, OpsModalShell, OpsPageHeader, OpsStatusTag, OpsSurface, type OpsFilterChipTone } from "@/components/ops";
+import { OpsFilterChip, OpsFormSection, OpsIconActionButton, OpsMetricTile, OpsModalShell, OpsStatusTag, OpsSurface, type OpsFilterChipTone } from "@/components/ops";
+import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import {
   POD_ACTION_MENU_CLASS,
@@ -36,10 +37,6 @@ import {
   renderPodLikeResourceActionStyles,
 } from "@/components/resource-action-bar";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
-import {
-  ResourceFilterToolbar,
-  ResourceFilterToolbarItem,
-} from "@/components/resource-filter-toolbar";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -160,7 +157,7 @@ function RoleCards() {
               actions={
                 <Space size={8} wrap>
                   <span className="rbac-role-card__icon">{role.icon}</span>
-                  <OpsFilterChip tone={roleChipTone(role.name)} style={{ fontFamily: "monospace", fontSize: 11 }}>
+                  <OpsFilterChip tone={roleChipTone(role.name)} style={{ fontFamily: "var(--kn-font-mono)", fontSize: 11 }}>
                     {role.name}
                   </OpsFilterChip>
                 </Space>
@@ -521,13 +518,13 @@ function stateTag(state: RbacState): React.ReactNode {
 function kindTag(kind: string): React.ReactNode {
   if (kind === "ClusterRoleBinding") {
     return (
-      <OpsFilterChip tone="neutral" style={{ fontFamily: "monospace" }}>
+      <OpsFilterChip tone="neutral" style={{ fontFamily: "var(--kn-font-mono)" }}>
         {kind}
       </OpsFilterChip>
     );
   }
   return (
-    <OpsFilterChip tone="info" style={{ fontFamily: "monospace" }}>
+    <OpsFilterChip tone="info" style={{ fontFamily: "var(--kn-font-mono)" }}>
       {kind}
     </OpsFilterChip>
   );
@@ -710,7 +707,7 @@ export default function RbacPage() {
             {preset ? <span style={{ color: preset.color }}>{preset.icon}</span> : null}
             <Typography.Link
               onClick={() => setDetailRecord(row)}
-              style={{ fontFamily: "monospace", fontWeight: 600 }}
+              style={{ fontFamily: "var(--kn-font-mono)", fontWeight: 600 }}
               ellipsis
             >
               {value}
@@ -749,7 +746,7 @@ export default function RbacPage() {
       ...getSortableColumnProps("namespace", query.isLoading && !query.data),
       render: (value: string) =>
         value ? (
-          <OpsFilterChip tone="neutral" style={{ fontFamily: "monospace" }}>{value}</OpsFilterChip>
+          <OpsFilterChip tone="neutral" style={{ fontFamily: "var(--kn-font-mono)" }}>{value}</OpsFilterChip>
         ) : (
           <Typography.Text type="secondary" italic>
             集群级
@@ -766,7 +763,7 @@ export default function RbacPage() {
       render: (value: string, row) => (
         <Space size={4} style={{ minWidth: 0 }}>
           <UserOutlined style={{ color: "var(--kn-text-muted)" }} />
-          <Typography.Text copyable={{ text: value }} style={{ fontFamily: "monospace" }} ellipsis>
+          <Typography.Text copyable={{ text: value }} style={{ fontFamily: "var(--kn-font-mono)" }} ellipsis>
             {row.subjectKind}:{value}
             {row.subjectKind === "ServiceAccount" && row.subjectNamespace ? `@${row.subjectNamespace}` : ""}
           </Typography.Text>
@@ -843,58 +840,60 @@ export default function RbacPage() {
       },
     },
   ];
+  const scopeFilterControl = (
+    <div className="resource-workbench__scope">
+      <ResourceScopeFilterButton
+        clusterId={clusterId}
+        namespace={namespace}
+        clusterOptions={clusterOptions}
+        clusterLoading={clustersQuery.isLoading}
+        knownNamespaces={knownNamespaces}
+        namespaceDisabled={namespaceDisabled}
+        namespacePlaceholder={namespacePlaceholder}
+        onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+          onScopeChange(nextClusterId, nextNamespace);
+          setPage(1);
+        }}
+      />
+    </div>
+  );
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsPageHeader
-        className="resource-page-header"
-        title="访问控制（RBAC）"
-        subtitle="管理平台角色绑定关系，控制用户对 Kubernetes 资源的访问权限。"
-      />
+    <Space className="resource-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourcePageHeader
+          path="/users/rbac"
+          embedded
+          className="resource-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">RBAC</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                访问控制
+              </OpsFilterChip>
+            </span>
+          }
+          description="管理平台角色绑定关系，控制用户对 Kubernetes 资源的访问权限。"
+          extra={<ResourceAddButton compact={false} label="新建绑定" onClick={() => setCreateOpen(true)} aria-label="新建绑定" />}
+        />
 
-      <Row gutter={[12, 12]}>
-        <Col xs={24} sm={12} lg={6}>
-          <OpsMetricTile label="绑定总数" tone="info" value={query.isLoading ? "-" : stats.total} />
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <OpsMetricTile label="已启用" tone="success" value={query.isLoading ? "-" : stats.active} />
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <OpsMetricTile label="集群级" tone="neutral" value={query.isLoading ? "-" : stats.clusterLevel} />
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <OpsMetricTile label="名称空间级" tone="info" value={query.isLoading ? "-" : stats.nsLevel} />
-        </Col>
-      </Row>
+        <Space className="resource-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
+          <Row gutter={[12, 12]}>
+            <Col xs={24} sm={12} lg={6}>
+              <OpsMetricTile label="绑定总数" meta="当前资源清单中的绑定" tone="info" value={query.isLoading ? "-" : stats.total} />
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <OpsMetricTile label="已启用" meta="可生效访问控制" tone="success" value={query.isLoading ? "-" : stats.active} />
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <OpsMetricTile label="集群级" meta="ClusterRoleBinding" tone="neutral" value={query.isLoading ? "-" : stats.clusterLevel} />
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <OpsMetricTile label="名称空间级" meta="RoleBinding" tone="info" value={query.isLoading ? "-" : stats.nsLevel} />
+            </Col>
+          </Row>
 
-      {/* 角色说明卡片 */}
-      <RoleCards />
-
-      {/* 绑定列表 */}
-      <OpsSurface
-        variant="panel"
-        padding="sm"
-        title="角色绑定列表"
-        subtitle={query.data ? <OpsFilterChip tone="info">共 {query.data.total} 条</OpsFilterChip> : null}
-      >
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceFilterToolbar>
-            <ResourceFilterToolbarItem width="auto">
-              <ResourceScopeFilterButton
-                clusterId={clusterId}
-                namespace={namespace}
-                clusterOptions={clusterOptions}
-                clusterLoading={clustersQuery.isLoading}
-                knownNamespaces={knownNamespaces}
-                namespaceDisabled={namespaceDisabled}
-                namespacePlaceholder={namespacePlaceholder}
-                onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-                  onScopeChange(nextClusterId, nextNamespace);
-                  setPage(1);
-                }}
-              />
-            </ResourceFilterToolbarItem>
-          </ResourceFilterToolbar>
+          <RoleCards />
 
           {/* 错误提示 */}
           {!isInitializing && !accessToken ? (
@@ -931,68 +930,70 @@ export default function RbacPage() {
             />
           ) : null}
 
-          <ResourceTable<RbacTableRecord>
-            rowKey="key"
-            tableKey="business.rbac"
-            columns={columns}
-            dataSource={rows}
-            bordered
-            layoutOptions={{ nameValues: rows.map((item) => item.name), actionWidth: TABLE_COL_WIDTH.actionCompact }}
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: (value) => {
-                setKeywordInput(value);
-                setKeyword(value.trim());
-                setPage(1);
-              },
-              placeholder: "搜索策略名 / 用户名 / 名称空间",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              setKindFilter(typeof nextFilters.kind === "string" ? nextFilters.kind : "");
-              setPage(1);
-            }}
-            toolbarExtra={
-              <Space size={8} wrap>
-                <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void query.refetch()} loading={query.isFetching}>
-                  刷新
-                </OpsIconActionButton>
-                <ResourceAddButton compact={false} label="新建绑定" onClick={() => setCreateOpen(true)} aria-label="新建绑定" />
-              </Space>
-            }
-            loading={{ spinning: query.isLoading, description: "RBAC 数据加载中..." }}
-            onChange={(pagination, filters, sorter, extra) => {
-              handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
-              if (pagination.current && pagination.current !== page) {
-                setPage(pagination.current);
-              }
-              if (pagination.pageSize && pagination.pageSize !== pageSize) {
-                setPageSize(pagination.pageSize);
-                setPage(1);
-              }
-            }}
-            pagination={buildTablePagination({
-              current: page,
-              pageSize,
-              total: query.data?.total ?? 0,
-              onChange: (nextPage, nextPageSize) => {
-                if (nextPageSize !== pageSize) {
-                  setPageSize(nextPageSize);
+          <div className="resource-workbench__table-zone">
+            <ResourceTable<RbacTableRecord>
+              rowKey="key"
+              tableKey="business.rbac"
+              columns={columns}
+              dataSource={rows}
+              bordered
+              layoutOptions={{ nameValues: rows.map((item) => item.name), actionWidth: TABLE_COL_WIDTH.actionCompact }}
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: keywordInput,
+                onChange: (value) => {
+                  setKeywordInput(value);
+                  setKeyword(value.trim());
                   setPage(1);
-                  return;
+                },
+                placeholder: "搜索策略名 / 用户名 / 名称空间",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                setKindFilter(typeof nextFilters.kind === "string" ? nextFilters.kind : "");
+                setPage(1);
+              }}
+              toolbarExtra={
+                <Space size={8} wrap>
+                  {scopeFilterControl}
+                  <OpsIconActionButton icon={<ReloadOutlined />} onClick={() => void query.refetch()} loading={query.isFetching}>
+                    刷新
+                  </OpsIconActionButton>
+                </Space>
+              }
+              loading={{ spinning: query.isLoading, description: "RBAC 数据加载中..." }}
+              onChange={(pagination, filters, sorter, extra) => {
+                handleTableChange(pagination, filters, sorter, extra, query.isLoading && !query.data);
+                if (pagination.current && pagination.current !== page) {
+                  setPage(pagination.current);
                 }
-                setPage(nextPage);
-              },
-              showTotal: (total) => `共 ${total} 条`,
-            })}
-            emptyDescription={
-              keyword || namespace || clusterId || kindFilter
-                ? "暂无符合条件的 RBAC 绑定"
-                : "暂无 RBAC 绑定，点击「新建绑定」创建"
-            }
-          />
+                if (pagination.pageSize && pagination.pageSize !== pageSize) {
+                  setPageSize(pagination.pageSize);
+                  setPage(1);
+                }
+              }}
+              pagination={buildTablePagination({
+                current: page,
+                pageSize,
+                total: query.data?.total ?? 0,
+                onChange: (nextPage, nextPageSize) => {
+                  if (nextPageSize !== pageSize) {
+                    setPageSize(nextPageSize);
+                    setPage(1);
+                    return;
+                  }
+                  setPage(nextPage);
+                },
+                showTotal: (total) => `共 ${total} 条`,
+              })}
+              emptyDescription={
+                keyword || namespace || clusterId || kindFilter
+                  ? "暂无符合条件的 RBAC 绑定"
+                  : "暂无 RBAC 绑定，点击「新建绑定」创建"
+              }
+            />
+          </div>
         </Space>
       </OpsSurface>
 

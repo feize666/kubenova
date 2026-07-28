@@ -22,8 +22,20 @@ export const RESOURCE_DETAIL_SECTIONS: ResourceDetailSection[] = [
 export interface ResourceDetailDescriptor {
   resourceKind: string;
   sections: ResourceDetailSection[];
-  fieldsBySection: Record<ResourceDetailSection, string[]>;
+  fieldsBySection: ResourceDetailFieldsBySection;
+  capabilities: ResourceDetailCapabilities;
   version: string;
+}
+
+export type ResourceDetailFieldsBySection = Record<
+  ResourceDetailSection,
+  string[]
+>;
+
+export interface ResourceDetailCapabilities {
+  rawSpec: boolean;
+  rawStatus: boolean;
+  relationships: boolean;
 }
 
 export interface ResourceAssociation {

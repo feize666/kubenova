@@ -149,3 +149,34 @@
 - [x] Add per-route long task, JS heap, and route quiet class diagnostics.
 - [x] Run `node --check frontend/scripts/performance-switching.mjs`.
 - [x] Run `npm run e2e:performance:switching:smoke` when `frontend/node_modules/playwright` is available; passed on 2026-06-07 after replacing deprecated AntD `Space.direction` usage with `orientation`.
+
+## 2026-07-27 Resource Topology V2
+
+### Plan And Baseline
+
+- [x] Confirm single-cluster scope and four core resource domains.
+- [x] Freeze capacity and latency targets.
+- [x] Define five expert slices with at most three concurrent worktrees.
+- [x] Apply the Impeccable product-register design gates to frontend delivery.
+- [x] Create a temporary dirty-workspace snapshot without touching the main index (`41a533d`).
+
+### Batch 1
+
+- [x] E1: implement the V2 backend contract and typed core-domain resolvers.
+- [x] E2: implement the unified frontend V2 model and graph engine.
+- [x] E3: implement fixtures, capacity guards, and verification hooks.
+- [ ] Main: review scope, run focused gates, and integrate Batch 1.
+
+### Batch 2
+
+- [ ] E4: implement revision-aware cache and stale snapshot semantics.
+- [ ] E5: integrate the unified topology page and remove legacy runtime fallbacks.
+- [ ] Main: review scope, run focused gates, and integrate Batch 2.
+
+### Final Gates
+
+- [ ] Backend focused tests and build pass.
+- [ ] Frontend topology tests, lint, typecheck, and build pass.
+- [ ] 1k/5k/10k capacity fixtures meet declared budgets.
+- [ ] Browser smoke covers grouping, focus, details, stale, partial, and over-limit states.
+- [ ] Temporary artifacts, branches, and worktrees are removed.

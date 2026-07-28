@@ -1,0 +1,322 @@
+/*
+ * Solid-surface override for topology, overview, and AIOps.
+ * Import after globals.css so these route-scoped rules remain the final layer.
+ */
+
+.resource-map-shell {
+  --map-page-bg: var(--ops-bg);
+  --map-panel-bg: var(--ops-surface);
+  --map-canvas-bg: var(--ops-surface-raised);
+  --map-card-bg: var(--ops-surface-raised);
+  --map-card-bg-soft: var(--ops-surface-muted);
+  --map-shadow: none;
+  background: var(--map-page-bg);
+  background-image: none;
+}
+
+.resource-map-header.ops-page-header,
+.resource-map-header-shell > .ops-surface,
+.resource-map-header-shell > .ops-surface > .ops-surface__body,
+.resource-map-toolbar,
+.resource-map-canvas,
+.resource-map-rail,
+.resource-map-rail.ops-inspector-shell,
+.resource-map-canvas-state .ops-state,
+.resource-map-rail > .ant-empty {
+  background: var(--map-panel-bg);
+  background-image: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.resource-map-header.ops-page-header::before,
+.resource-map-header.ops-page-header::after,
+.resource-map-header-shell > .ops-surface::before,
+.resource-map-header-shell > .ops-surface::after,
+.resource-map-canvas::after,
+.resource-map-node::before,
+.resource-map-stack-card::after,
+.resource-map-health.is-error::after,
+.resource-map-health.is-warning::after {
+  content: none;
+  background: none;
+}
+
+.resource-map-canvas::before {
+  background-image:
+    linear-gradient(var(--map-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--map-grid) 1px, transparent 1px);
+  opacity: 1;
+  mask-image: none;
+}
+
+.resource-map-header__stats span,
+.resource-map-toolbar select,
+.resource-map-toolbar button,
+.resource-map-toolbar .ant-input-affix-wrapper,
+.resource-map-breadcrumbs,
+.resource-map-breadcrumbs button,
+.resource-map-motion-state,
+.resource-map-zoom-percent,
+.resource-map-rail__head button,
+.resource-map-canvas .react-flow__controls-button {
+  background: var(--map-card-bg-soft);
+  background-image: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.resource-map-toolbar .ant-input,
+.resource-map-canvas .react-flow {
+  background: transparent;
+}
+
+.resource-map-toolbar button:hover,
+.resource-map-list__item:hover {
+  background: var(--map-card-bg);
+}
+
+.resource-map-toolbar button.is-active {
+  background: color-mix(in srgb, var(--source-color, var(--kn-primary)) 14%, var(--map-card-bg));
+}
+
+.resource-map-node,
+.resource-map-stack-card,
+.resource-map-density__hero {
+  background: var(--map-card-bg);
+  background-image: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.resource-map-node:hover,
+.resource-map-node.is-selected,
+.resource-map-node.is-error,
+.resource-map-node.is-warning,
+.resource-map-stack-card:hover,
+.resource-map-stack-card.is-error,
+.resource-map-stack-card.is-warning,
+.resource-map-list__item.is-error,
+.resource-map-list__item.is-warning {
+  box-shadow: none;
+}
+
+.resource-map-node--group,
+.resource-map-node__group-head,
+.resource-map-node__collapse,
+.resource-map-stack-card__badge,
+.resource-map-health,
+.resource-map-facts div,
+.resource-map-section,
+.resource-map-health-grid span,
+.resource-map-list__item,
+.resource-map-density-panel {
+  background: var(--map-card-bg-soft);
+  background-image: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.resource-map-node--group,
+.resource-map-node__group-head,
+.resource-map-node__badge,
+.resource-map-node__collapse,
+.resource-map-stack-card,
+.resource-map-canvas-state .ops-state {
+  background-image: none !important;
+}
+
+.resource-map-node--group {
+  background-color: var(--map-card-bg-soft) !important;
+}
+
+.resource-map-node__group-head {
+  background-color: var(--map-card-bg) !important;
+}
+
+.resource-map-node__icon,
+.resource-map-stack-card__icon,
+.resource-map-node__status,
+.resource-map-node__badge,
+.resource-map-density-card__icon {
+  background: color-mix(in srgb, var(--node-state-color, var(--node-accent, var(--kn-primary))) 12%, var(--map-card-bg));
+  box-shadow: none;
+}
+
+.resource-map-density-card {
+  background: color-mix(in srgb, var(--density-color) 7%, var(--map-card-bg));
+  background-image: none;
+  box-shadow: none;
+}
+
+.resource-map-density-row i {
+  background: color-mix(in srgb, var(--map-border) 74%, transparent);
+}
+
+.resource-map-edge .react-flow__edge-path,
+.resource-map-edge.is-abnormal .react-flow__edge-path,
+.resource-map-edge.is-related .react-flow__edge-path {
+  filter: none;
+}
+
+.resource-map-jump-action.is-ready {
+  background: var(--topology-jump-button-bg) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.resource-map-jump-action.is-ready:hover,
+.resource-map-jump-action.is-ready:focus-visible {
+  background: var(--topology-jump-button-bg-hover) !important;
+  background-image: none !important;
+  box-shadow: var(--ops-focus-ring) !important;
+}
+
+.ops-overview-shell,
+.ops-overview-header.ops-page-header,
+.ops-overview-card,
+.ops-overview-scope-strip,
+.ops-overview-summary-metric {
+  background: var(--ops-surface);
+  background-image: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.ops-overview-header.ops-page-header::before,
+.ops-overview-header.ops-page-header::after {
+  content: none;
+  background: none;
+}
+
+.ops-overview-summary-row {
+  gap: 8px;
+}
+
+.ops-overview-summary-metric {
+  border-radius: 6px;
+  border-color: var(--overview-panel-border);
+}
+
+.ops-overview-impact-map {
+  background-color: var(--ops-surface-raised);
+  background-image:
+    linear-gradient(90deg, var(--ops-overview-grid-line) 1px, transparent 1px),
+    linear-gradient(0deg, var(--ops-overview-grid-line) 1px, transparent 1px);
+}
+
+.ops-overview-impact-node,
+.ops-overview-impact-node--ok,
+.ops-overview-impact-node--warn,
+.ops-overview-impact-node--danger {
+  box-shadow: none;
+}
+
+.ops-overview-impact-node::before {
+  content: none;
+}
+
+.ops-aiops-cockpit,
+.ops-aiops-panel.ops-surface,
+.ops-aiops-evidence-card.ops-surface,
+.ops-observability-cockpit,
+.ops-observability-panel.ops-surface,
+.ops-observability-panel--sources .ant-col > .ant-space,
+.ops-metric-tile,
+.ops-aiops-panel .ant-table,
+.ops-aiops-panel .ant-table-container,
+.ops-aiops-panel .ant-table-thead > tr > th,
+.ops-aiops-panel .ant-table-tbody > tr > td,
+.ops-aiops-panel .ant-empty,
+.ops-aiops-panel .ant-spin-container,
+.ops-aiops-panel .ant-skeleton-content .ant-skeleton-title,
+.ops-aiops-panel .ant-skeleton-content .ant-skeleton-paragraph > li {
+  background: var(--ops-surface);
+  background-image: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.ops-aiops-panel.ops-surface .ops-surface__header {
+  background: var(--ops-surface-raised);
+  background-image: none;
+}
+
+.ops-observability-panel.ops-surface .ops-surface__header,
+.ops-observability-panel--sources .ant-col > .ant-space,
+.ops-metric-tile {
+  background: var(--ops-surface-raised) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.ops-aiops-evidence-card.ops-surface {
+  background: var(--ops-surface-raised);
+}
+
+.ops-aiops-panel .ant-table-thead > tr > th {
+  border-bottom-color: var(--ops-border-subtle);
+}
+
+.ops-aiops-panel .ant-table-tbody > tr > td {
+  border-bottom-color: var(--ops-border-subtle);
+}
+
+.ops-aiops-panel .ant-table-tbody > tr:hover > td,
+.ops-aiops-panel .ant-table-tbody > tr.ant-table-row:hover > td {
+  background: var(--ops-surface-muted) !important;
+}
+
+.ops-aiops-panel .ant-empty,
+.resource-map-rail > .ant-empty,
+.resource-map-canvas-state .ops-state {
+  border: 1px solid var(--ops-border-subtle);
+  border-radius: 6px;
+}
+
+.ops-aiops-panel .ant-empty-image,
+.resource-map-rail > .ant-empty .ant-empty-image {
+  opacity: 1;
+}
+
+.ops-aiops-panel .ant-progress-inner,
+.ops-aiops-panel .ant-progress-bg,
+.ops-aiops-panel .ant-progress-success-bg,
+.resource-map-density-row i,
+.resource-map-density-row i::before {
+  box-shadow: none;
+}
+
+/* Legacy panels that use glass variables must resolve to a solid final layer. */
+.ops-surface--glass,
+.ops-workbench-panel,
+.ops-surface--workbench,
+.ops-frame-shell,
+.ops-popover-panel,
+.ant-popover .ant-popover-inner,
+.ant-dropdown .ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-modal .ant-modal-content,
+.ant-drawer .ant-drawer-content {
+  background-color: var(--kn-solid-surface) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-map-node,
+  .resource-map-stack-card,
+  .resource-map-node::before,
+  .resource-map-stack-card::after {
+    transition: none;
+    animation: none;
+  }
+}

@@ -6,6 +6,8 @@ export type ClusterState = 'active' | 'disabled' | 'deleted';
 export interface ClusterRecord {
   id: string;
   name: string;
+  /** kubeconfig 当前 context 指向的真实 API Server */
+  apiServer: string;
   environment: string;
   status: string;
   cpuUsage: number;
@@ -197,7 +199,7 @@ export class ClustersRepository {
   async update(record: ClusterRecord): Promise<ClusterRecord> {
     const updateData: Prisma.ClusterRegistryUpdateInput = {
       name: record.name,
-      apiServer: `https://${record.name}`,
+      apiServer: record.apiServer,
       status: record.state,
       metadata: this.toMetadata(record),
       // 软删除支持：state 为 deleted 时设置 deletedAt，否则清除
@@ -221,6 +223,7 @@ export class ClustersRepository {
     return {
       id: row.id,
       name: row.name,
+      apiServer: row.apiServer,
       // 历史数据未写入 environment 时，默认归类到“本地”，避免前端筛选/可选集群丢失。
       environment: metadata.environment ?? '本地',
       status:
@@ -246,7 +249,7 @@ export class ClustersRepository {
   private toCreateInput(record: ClusterRecord) {
     const data: Prisma.ClusterRegistryCreateInput = {
       name: record.name,
-      apiServer: `https://${record.name}`,
+      apiServer: record.apiServer,
       status: record.state,
       metadata: this.toMetadata(record) as Prisma.InputJsonObject,
       createdAt: new Date(record.createdAt),

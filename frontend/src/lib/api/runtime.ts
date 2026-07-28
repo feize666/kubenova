@@ -48,13 +48,31 @@ export function resolveRuntimeContainer(container?: string, containerNames?: str
   return "main";
 }
 
+export function resolveRuntimeContainerParam(
+  container?: string,
+  containerNames?: string[],
+): string | undefined {
+  const normalized = typeof container === "string" ? container.trim() : "";
+  if (normalized) {
+    return normalized;
+  }
+  if (Array.isArray(containerNames)) {
+    const first = containerNames.find((item) => typeof item === "string" && item.trim().length > 0);
+    return first?.trim();
+  }
+  return undefined;
+}
+
 export function buildRuntimeTargetParams(target: RuntimeTargetBase): URLSearchParams {
   const params = new URLSearchParams({
     clusterId: target.clusterId,
     namespace: target.namespace,
     pod: target.pod,
-    container: resolveRuntimeContainer(target.container, target.containerNames),
   });
+  const container = resolveRuntimeContainerParam(target.container, target.containerNames);
+  if (container) {
+    params.set("container", container);
+  }
   return params;
 }
 
@@ -81,8 +99,13 @@ export async function createRuntimeSession(
 ): Promise<CreateRuntimeSessionResponse> {
   const body: CreateRuntimeSessionRequest = {
     ...payload,
-    container: resolveRuntimeContainer(payload.container, payload.containerNames),
   };
+  const container = resolveRuntimeContainerParam(payload.container, payload.containerNames);
+  if (container) {
+    body.container = container;
+  } else {
+    delete body.container;
+  }
   const result = await apiRequest<CreateRuntimeSessionResponse, CreateRuntimeSessionRequest>("/api/runtime/sessions", {
     method: "POST",
     body,

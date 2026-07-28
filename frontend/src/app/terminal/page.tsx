@@ -135,11 +135,8 @@ function readCssVar(name: string, fallback: string): string {
 }
 
 function readOpsTerminalTheme() {
-  const isDark =
-    typeof document !== "undefined" &&
-    document.documentElement.dataset.theme === "dark";
   const background = readCssVar("--ops-terminal-bg", "#0c131d");
-  const baseTheme = {
+  return {
     background,
     foreground: readCssVar("--ops-terminal-fg", "#e8eef7"),
     cursor: readCssVar("--ops-status-info-text", "#38bdf8"),
@@ -148,47 +145,22 @@ function readOpsTerminalTheme() {
       "--ops-terminal-selection",
       "rgba(56, 189, 248, 0.28)",
     ),
-  };
-  if (isDark) {
-    return {
-      ...baseTheme,
-      black: "#020617",
-      red: "#ef4444",
-      green: "#22c55e",
-      yellow: "#f59e0b",
-      blue: "#3b82f6",
-      magenta: "#a855f7",
-      cyan: "#06b6d4",
-      white: "#e2e8f0",
-      brightBlack: "#64748b",
-      brightRed: "#f87171",
-      brightGreen: "#4ade80",
-      brightYellow: "#facc15",
-      brightBlue: "#60a5fa",
-      brightMagenta: "#c084fc",
-      brightCyan: "#67e8f9",
-      brightWhite: "#f8fafc",
-    };
-  }
-
-  return {
-    ...baseTheme,
-    black: "#0f172a",
-    red: "#dc2626",
-    green: "#15803d",
-    yellow: "#b45309",
-    blue: "#1d4ed8",
-    magenta: "#7e22ce",
-    cyan: "#0369a1",
-    white: "#334155",
+    black: "#020617",
+    red: readCssVar("--ops-status-red", "#dc2626"),
+    green: readCssVar("--ops-status-green", "#15803d"),
+    yellow: readCssVar("--ops-status-orange", "#c26a00"),
+    blue: readCssVar("--ops-status-blue", "#2563eb"),
+    magenta: readCssVar("--ops-status-cyan", "#0891b2"),
+    cyan: readCssVar("--ops-status-cyan", "#0891b2"),
+    white: "#e2e8f0",
     brightBlack: "#64748b",
-    brightRed: "#ef4444",
-    brightGreen: "#16a34a",
-    brightYellow: "#d97706",
-    brightBlue: "#2563eb",
-    brightMagenta: "#9333ea",
-    brightCyan: "#0284c7",
-    brightWhite: "#0f172a",
+    brightRed: readCssVar("--ops-text-status-danger", "#dc2626"),
+    brightGreen: readCssVar("--ops-text-status-success", "#15803d"),
+    brightYellow: readCssVar("--ops-text-status-warning", "#c26a00"),
+    brightBlue: readCssVar("--ops-text-status-info", "#2563eb"),
+    brightMagenta: readCssVar("--ops-text-accent-cyan", "#0891b2"),
+    brightCyan: readCssVar("--ops-text-accent-cyan", "#0891b2"),
+    brightWhite: "#f8fafc",
   };
 }
 
@@ -392,16 +364,10 @@ export default function TerminalPage() {
         ["clusterId", targetBase.clusterId],
         ["namespace", targetBase.namespace],
         ["pod", targetBase.pod],
-        ["container", selectedContainer],
       ]
         .filter(([, value]) => !value)
         .map(([key]) => key),
-    [
-      selectedContainer,
-      targetBase.clusterId,
-      targetBase.namespace,
-      targetBase.pod,
-    ],
+    [targetBase.clusterId, targetBase.namespace, targetBase.pod],
   );
 
   const targetKey = useMemo(
@@ -423,6 +389,8 @@ export default function TerminalPage() {
   const availableContainers =
     sessionInfo?.target?.availableContainers ??
     (selectedContainer ? [selectedContainer] : []);
+  const effectiveContainer =
+    selectedContainer || sessionInfo?.target?.container?.trim() || "";
   const podPhase = sessionInfo?.target?.podPhase;
   const sourceLabel = fromPage || "手动打开";
 
@@ -555,7 +523,7 @@ export default function TerminalPage() {
         clusterId: targetBase.clusterId,
         namespace: targetBase.namespace,
         pod: targetBase.pod,
-        container: selectedContainer,
+        container: selectedContainer || undefined,
       },
       accessToken as string,
     );
@@ -1040,7 +1008,7 @@ export default function TerminalPage() {
   }, []);
 
   const missingText = missingParams.length
-    ? `缺少连接参数：${missingParams.join("、")}。请从资源页面点击“进入终端”，或补全 ?clusterId=&namespace=&pod=&container=`
+    ? `缺少连接参数：${missingParams.join("、")}。请从资源页面点击“进入终端”，或补全 ?clusterId=&namespace=&pod=`
     : "";
   const isExpiredVisual =
     sessionInfo?.sessionState === "expired" ||
@@ -1088,7 +1056,7 @@ export default function TerminalPage() {
           <Space wrap size={8} className="terminal-workbench-toolbar">
             <span className="terminal-workbench-toolbar__select">
               <Select
-                value={selectedContainer || undefined}
+                value={effectiveContainer || undefined}
                 className="terminal-workbench-container-select"
                 placeholder="选择容器"
                 options={availableContainers.map((container) => ({
@@ -1187,7 +1155,7 @@ export default function TerminalPage() {
               Pod {targetBase.pod || "-"}
             </OpsFilterChip>
             <OpsFilterChip tone="neutral">
-              Container {selectedContainer || "-"}
+              Container {effectiveContainer || "-"}
             </OpsFilterChip>
             <Tooltip
               title={
@@ -1283,7 +1251,7 @@ export default function TerminalPage() {
             </div>
             <div className="terminal-workbench-telemetry__item">
               <span>Target</span>
-              <strong>{selectedContainer || "-"}</strong>
+              <strong>{effectiveContainer || "-"}</strong>
             </div>
           </div>
 
@@ -1294,35 +1262,38 @@ export default function TerminalPage() {
       </OpsFrameShell>
       <style jsx global>{`
         .terminal-workbench-shell.ops-frame-shell {
-          --ops-terminal-bg: #f8fafc;
-          --ops-terminal-fg: #182230;
-          --ops-terminal-selection: rgba(37, 99, 235, 0.16);
+          --ops-terminal-bg: #05080d;
+          --ops-terminal-fg: #dce7f3;
+          --ops-terminal-selection: rgba(56, 189, 248, 0.28);
           --terminal-bg: var(--ops-terminal-bg);
-          --terminal-border-glow: rgba(37, 99, 235, 0.08);
+          --terminal-border-glow: rgba(56, 189, 248, 0.16);
           --terminal-workbench-shell-bg: #f5f8fc;
           --terminal-workbench-toolbar-bg: #ffffff;
           --terminal-workbench-toolbar-border: #d8e0ea;
+          --terminal-workbench-shell-title: #101827;
+          --terminal-workbench-shell-subtitle: #64748b;
+          --terminal-workbench-shell-chip-bg: #f1f5f9;
           --terminal-workbench-select-bg: #ffffff;
           --terminal-workbench-select-text: #172033;
           --terminal-workbench-select-muted: #5b6678;
           --terminal-workbench-select-border: #cfd8e3;
-          --terminal-workbench-stage-bg: #ffffff;
-          --terminal-workbench-telemetry-bg: #f8fafc;
-          --terminal-workbench-telemetry-border: #d9e2ee;
-          --terminal-workbench-telemetry-muted: #64748b;
-          --terminal-workbench-telemetry-text: #182230;
-          --terminal-workbench-stage-border: #d5deea;
-          --terminal-workbench-stage-active-border: #a7c0f7;
-          --terminal-workbench-stage-danger-border: #f0b4b4;
-          --terminal-workbench-stage-warning-border: #efd19a;
-          --terminal-workbench-titlebar-bg: #ffffff;
-          --terminal-workbench-titlebar-border: #d9e2ee;
-          --terminal-workbench-title-color: #182230;
-          --terminal-workbench-dot-ring: rgba(15, 23, 42, 0.08);
-          --terminal-workbench-host-bg: #f8fafc;
-          --terminal-workbench-host-inner-line: rgba(15, 23, 42, 0.08);
-          --terminal-workbench-scrollbar-track: #e6edf5;
-          --terminal-workbench-scrollbar-thumb: #8ab0ff;
+          --terminal-workbench-stage-bg: #05080d;
+          --terminal-workbench-telemetry-bg: #0b111b;
+          --terminal-workbench-telemetry-border: #1f2a38;
+          --terminal-workbench-telemetry-muted: #7c8da4;
+          --terminal-workbench-telemetry-text: #dce7f3;
+          --terminal-workbench-stage-border: #1f2a38;
+          --terminal-workbench-stage-active-border: #277fbd;
+          --terminal-workbench-stage-danger-border: #7a3740;
+          --terminal-workbench-stage-warning-border: #7a5a26;
+          --terminal-workbench-titlebar-bg: #080d14;
+          --terminal-workbench-titlebar-border: #1f2a38;
+          --terminal-workbench-title-color: #dce7f3;
+          --terminal-workbench-dot-ring: rgba(255, 255, 255, 0.06);
+          --terminal-workbench-host-bg: #05080d;
+          --terminal-workbench-host-inner-line: rgba(255, 255, 255, 0.04);
+          --terminal-workbench-scrollbar-track: #0b111b;
+          --terminal-workbench-scrollbar-thumb: #385f9a;
           min-height: calc(100vh - 112px);
           border-radius: 8px;
           background: var(--terminal-workbench-shell-bg);
@@ -1331,27 +1302,30 @@ export default function TerminalPage() {
         }
 
         [data-theme="light"] {
-          --ops-terminal-bg: #f8fafc;
-          --ops-terminal-fg: #182230;
-          --ops-terminal-selection: rgba(37, 99, 235, 0.16);
+          --ops-terminal-bg: #05080d;
+          --ops-terminal-fg: #dce7f3;
+          --ops-terminal-selection: rgba(56, 189, 248, 0.28);
           --terminal-bg: var(--ops-terminal-bg);
-          --terminal-border-glow: rgba(37, 99, 235, 0.08);
+          --terminal-border-glow: rgba(56, 189, 248, 0.16);
         }
 
         [data-theme="dark"] .terminal-workbench-shell.ops-frame-shell {
-          --ops-terminal-bg: #0c131d;
-          --ops-terminal-fg: #e8eef7;
+          --ops-terminal-bg: #05080d;
+          --ops-terminal-fg: #dce7f3;
           --ops-terminal-selection: rgba(56, 189, 248, 0.28);
           --terminal-bg: var(--ops-terminal-bg);
           --terminal-border-glow: rgba(56, 189, 248, 0.16);
           --terminal-workbench-shell-bg: #0a1018;
           --terminal-workbench-toolbar-bg: #0f1722;
           --terminal-workbench-toolbar-border: #253041;
+          --terminal-workbench-shell-title: #e8eef7;
+          --terminal-workbench-shell-subtitle: #93a0b2;
+          --terminal-workbench-shell-chip-bg: #0f1722;
           --terminal-workbench-select-bg: #0f1722;
           --terminal-workbench-select-text: #e8eef7;
           --terminal-workbench-select-muted: #8d9aab;
           --terminal-workbench-select-border: #314052;
-          --terminal-workbench-stage-bg: #0c131d;
+          --terminal-workbench-stage-bg: #05080d;
           --terminal-workbench-telemetry-bg: #0f1722;
           --terminal-workbench-telemetry-border: #253041;
           --terminal-workbench-telemetry-muted: #93a0b2;
@@ -1360,11 +1334,11 @@ export default function TerminalPage() {
           --terminal-workbench-stage-active-border: #365780;
           --terminal-workbench-stage-danger-border: #7a3740;
           --terminal-workbench-stage-warning-border: #7a5a26;
-          --terminal-workbench-titlebar-bg: #0f1722;
-          --terminal-workbench-titlebar-border: #253041;
+          --terminal-workbench-titlebar-bg: #080d14;
+          --terminal-workbench-titlebar-border: #1f2a38;
           --terminal-workbench-title-color: var(--ops-terminal-fg);
           --terminal-workbench-dot-ring: rgba(255, 255, 255, 0.06);
-          --terminal-workbench-host-bg: #0c131d;
+          --terminal-workbench-host-bg: #05080d;
           --terminal-workbench-host-inner-line: rgba(255, 255, 255, 0.02);
           --terminal-workbench-scrollbar-track: #1b2430;
           --terminal-workbench-scrollbar-thumb: #4f7fd6;
@@ -1374,29 +1348,35 @@ export default function TerminalPage() {
           align-items: center;
           gap: 14px;
           padding: 12px 14px;
-          border-bottom-color: var(--terminal-workbench-titlebar-border);
+          border-bottom-color: var(--terminal-workbench-toolbar-border);
           background: var(--terminal-workbench-toolbar-bg);
         }
 
         .terminal-workbench-shell .ops-frame-shell__title {
-          color: var(--terminal-workbench-title-color);
+          color: var(--terminal-workbench-shell-title) !important;
           font-size: 16px;
           letter-spacing: 0;
         }
 
         .terminal-workbench-shell .ops-frame-shell__subtitle {
-          color: var(--terminal-workbench-telemetry-muted);
+          color: var(--terminal-workbench-shell-subtitle);
+        }
+
+        .terminal-workbench-shell .ops-frame-shell__chips {
+          padding: 8px 14px;
+          border-bottom-color: var(--terminal-workbench-toolbar-border);
+          background: var(--terminal-workbench-shell-chip-bg);
         }
 
         .terminal-workbench-body {
           display: grid;
           min-height: 0;
-          padding: 12px;
+          padding: 10px 12px 12px;
         }
 
         .terminal-workbench-toolbar.ant-space {
           align-items: center;
-          row-gap: 6px;
+          row-gap: 5px;
         }
 
         .terminal-workbench-toolbar__select,
@@ -1408,10 +1388,9 @@ export default function TerminalPage() {
         }
 
         .terminal-workbench-toolbar__group {
-          padding: 4px;
-          border: 1px solid var(--terminal-workbench-toolbar-border);
-          border-radius: 8px;
-          background: var(--terminal-workbench-toolbar-bg);
+          padding: 0 0 0 8px;
+          border-left: 1px solid var(--terminal-workbench-toolbar-border) !important;
+          background: transparent !important;
           box-shadow: none;
         }
 
@@ -1459,7 +1438,9 @@ export default function TerminalPage() {
           border: 1px solid var(--terminal-workbench-stage-border);
           border-radius: 8px;
           background: var(--terminal-workbench-stage-bg);
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.02),
+            0 1px 2px rgba(15, 23, 42, 0.08);
         }
 
         .terminal-workbench-stage::before,
@@ -1501,10 +1482,10 @@ export default function TerminalPage() {
           align-items: center;
           justify-content: space-between;
           gap: 12px;
-          min-height: 38px;
-          padding: 7px 12px;
+          min-height: 36px;
+          padding: 6px 12px;
           border-bottom: 1px solid var(--terminal-workbench-titlebar-border);
-          background: var(--terminal-workbench-titlebar-bg);
+          background: var(--terminal-workbench-titlebar-bg) !important;
         }
 
         .terminal-workbench-title-group,
@@ -1585,7 +1566,7 @@ export default function TerminalPage() {
           display: grid;
           gap: 2px;
           min-width: 0;
-          padding: 8px 12px;
+          padding: 7px 12px;
           background: var(--terminal-workbench-telemetry-bg);
           color: var(--terminal-workbench-telemetry-text);
         }
@@ -1624,14 +1605,14 @@ export default function TerminalPage() {
         }
 
         .terminal-workbench-terminal-area {
-          height: 66vh;
-          max-height: 66vh;
+          height: 68vh;
+          max-height: 68vh;
           min-height: 0;
           overflow: hidden;
         }
 
         .terminal-workbench-terminal-area .terminal-xterm-host {
-          background: var(--terminal-workbench-host-bg);
+          background: #05080d !important;
           box-shadow: inset 0 0 0 1px var(--terminal-workbench-host-inner-line);
         }
 
@@ -1693,6 +1674,8 @@ export default function TerminalPage() {
           }
 
           .terminal-workbench-toolbar__group {
+            padding-left: 0;
+            border-left: 0 !important;
             flex-wrap: wrap;
             justify-content: flex-start;
           }

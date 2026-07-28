@@ -62,10 +62,17 @@ export type ResourceDetailSection =
   | "events"
   | "metadata";
 
+export interface ResourceDetailCapabilities {
+  rawSpec: boolean;
+  rawStatus: boolean;
+  relationships: boolean;
+}
+
 export interface ResourceDetailDescriptor {
   resourceKind: string;
   sections: ResourceDetailSection[];
   fieldsBySection: Record<ResourceDetailSection, string[]>;
+  capabilities: ResourceDetailCapabilities;
   version: string;
 }
 
@@ -335,6 +342,11 @@ export interface ResourceDetailRuntime {
     peers?: Array<{ namespaceSelector?: string; podSelector?: string; ipBlock?: string }>;
     ports?: Array<{ protocol?: string; port?: string }>;
   }>;
+  limits?: Array<Record<string, unknown>>;
+  hard?: Record<string, string>;
+  used?: Record<string, string>;
+  scopes?: string[];
+  scopeSelector?: Record<string, unknown>;
 }
 
 export interface ResourceDetailContainerSummary {
@@ -583,6 +595,44 @@ function normalizeRelationshipGroups(
   }));
 }
 
+const RESOURCE_DETAIL_SECTIONS: ResourceDetailSection[] = [
+  "overview",
+  "runtime",
+  "associations",
+  "network",
+  "storage",
+  "events",
+  "metadata",
+];
+
+function isResourceDetailSection(value: unknown): value is ResourceDetailSection {
+  return typeof value === "string" && RESOURCE_DETAIL_SECTIONS.includes(value as ResourceDetailSection);
+}
+
+function normalizeDetailFieldsBySection(value: unknown): Record<ResourceDetailSection, string[]> {
+  const source = isObject(value) ? value : {};
+  return Object.fromEntries(
+    RESOURCE_DETAIL_SECTIONS.map((section) => [
+      section,
+      Array.isArray(source[section])
+        ? source[section].filter((field): field is string => typeof field === "string")
+        : [],
+    ]),
+  ) as Record<ResourceDetailSection, string[]>;
+}
+
+function normalizeDetailCapabilities(
+  value: unknown,
+  fallback: ResourceDetailCapabilities,
+): ResourceDetailCapabilities {
+  const source = isObject(value) ? value : {};
+  return {
+    rawSpec: toOptionalBoolean(source.rawSpec) ?? fallback.rawSpec,
+    rawStatus: toOptionalBoolean(source.rawStatus) ?? fallback.rawStatus,
+    relationships: toOptionalBoolean(source.relationships) ?? fallback.relationships,
+  };
+}
+
 function normalizeResourceKind(kind: string): string {
   const value = kind.trim().toLowerCase().replace(/[\s_-]+/g, "");
   switch (value) {
@@ -621,7 +671,31 @@ function normalizeResourceKind(kind: string): string {
       return "horizontalpodautoscaler";
     case "verticalpodautoscaler":
     case "verticalpodautoscalers":
+    case "vpa":
+    case "vpas":
       return "verticalpodautoscaler";
+    case "hpa":
+    case "hpas":
+      return "horizontalpodautoscaler";
+    case "helm":
+    case "helmapplication":
+    case "helmapplications":
+    case "helmrelease":
+    case "helmreleases":
+      return "helmrelease";
+    case "helmrepository":
+    case "helmrepositories":
+    case "helmrepo":
+    case "helmrepos":
+      return "helmrepository";
+    case "limitrange":
+    case "limitranges":
+      return "limitrange";
+    case "resourcequota":
+    case "resourcequotas":
+    case "quota":
+    case "quotas":
+      return "resourcequota";
     case "dynamic":
     case "dynamicresource":
     case "customresource":
@@ -723,6 +797,22 @@ export async function getResourceDetail(
   const metadataRaw = isObject(payloadData.metadata) ? payloadData.metadata : {};
   const eventsRaw = isObject(payloadData.events) ? payloadData.events : {};
   const detailRaw = isObject(payloadData.detail) ? payloadData.detail : {};
+  const rawSpec = isObject(payloadData.rawSpec)
+    ? payloadData.rawSpec
+    : isObject(detailRaw.rawSpec)
+      ? detailRaw.rawSpec
+      : undefined;
+  const rawStatus = isObject(payloadData.rawStatus)
+    ? payloadData.rawStatus
+    : isObject(detailRaw.rawStatus)
+      ? detailRaw.rawStatus
+      : undefined;
+  const rawRelationships = payloadData.relationships ?? detailRaw.relationships;
+  const capabilities = normalizeDetailCapabilities(descriptorRaw.capabilities, {
+    rawSpec: Boolean(rawSpec),
+    rawStatus: Boolean(rawStatus),
+    relationships: Array.isArray(rawRelationships),
+  });
 
   const networkPipelineRaw =
     networkRaw.networkPipelines ??
@@ -747,19 +837,10 @@ export async function getResourceDetail(
     descriptor: {
       resourceKind: toStringValue(descriptorRaw.resourceKind),
       sections: Array.isArray(descriptorRaw.sections)
-        ? descriptorRaw.sections.filter((item): item is ResourceDetailSection => typeof item === "string")
+        ? descriptorRaw.sections.filter(isResourceDetailSection)
         : [],
-      fieldsBySection: isObject(descriptorRaw.fieldsBySection)
-        ? (descriptorRaw.fieldsBySection as Record<ResourceDetailSection, string[]>)
-        : {
-            overview: [],
-            runtime: [],
-            associations: [],
-            network: [],
-            storage: [],
-            events: [],
-            metadata: [],
-          },
+      fieldsBySection: normalizeDetailFieldsBySection(descriptorRaw.fieldsBySection),
+      capabilities,
       version: toStringValue(descriptorRaw.version),
     },
     overview: {
@@ -927,9 +1008,42 @@ export async function getResourceDetail(
               : [],
           }))
         : undefined,
+      limits: Array.isArray(runtimeRaw.limits)
+        ? asObjectArray(runtimeRaw.limits)
+        : Array.isArray(rawSpec?.limits)
+          ? asObjectArray(rawSpec.limits)
+          : undefined,
+      hard: isObject(runtimeRaw.hard)
+        ? Object.fromEntries(
+            Object.entries(runtimeRaw.hard).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+          )
+        : isObject(rawSpec?.hard)
+          ? Object.fromEntries(
+              Object.entries(rawSpec.hard).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+            )
+          : undefined,
+      used: isObject(runtimeRaw.used)
+        ? Object.fromEntries(
+            Object.entries(runtimeRaw.used).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+          )
+        : isObject(rawStatus?.used)
+          ? Object.fromEntries(
+              Object.entries(rawStatus.used).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+            )
+          : undefined,
+      scopes: Array.isArray(runtimeRaw.scopes)
+        ? runtimeRaw.scopes.filter((item): item is string => typeof item === "string")
+        : Array.isArray(rawSpec?.scopes)
+          ? rawSpec.scopes.filter((item): item is string => typeof item === "string")
+          : undefined,
+      scopeSelector: isObject(runtimeRaw.scopeSelector)
+        ? runtimeRaw.scopeSelector
+        : isObject(rawSpec?.scopeSelector)
+          ? rawSpec.scopeSelector
+          : undefined,
     },
-    rawSpec: isObject(payloadData.rawSpec) ? payloadData.rawSpec : undefined,
-    rawStatus: isObject(payloadData.rawStatus) ? payloadData.rawStatus : undefined,
+    rawSpec: capabilities.rawSpec ? rawSpec : undefined,
+    rawStatus: capabilities.rawStatus ? rawStatus : undefined,
     associations: Array.isArray(payload.associations)
       ? payload.associations.filter((item): item is ResourceAssociation => isObject(item)).map((item) => ({
           id: typeof item.id === "string" ? item.id : undefined,
@@ -1247,7 +1361,7 @@ export async function getResourceDetail(
         };
       }),
     },
-    relationships: normalizeRelationshipGroups(payloadData.relationships),
+    relationships: capabilities.relationships ? normalizeRelationshipGroups(rawRelationships) : [],
     generatedAt: toStringValue(payload.generatedAt, new Date().toISOString()),
   };
 }
@@ -1327,6 +1441,27 @@ export interface DynamicResourceIdentity {
   resource: string;
   namespace?: string;
   name: string;
+}
+
+export function buildDynamicResourceDetailRequest(
+  identity: DynamicResourceIdentity,
+  resourceKind: string,
+): ResourceDetailRequest {
+  const group = identity.group?.trim() ?? "";
+  const version = identity.version.trim();
+  const resource = identity.resource.trim();
+  const namespace = identity.namespace?.trim() ?? "";
+  const name = identity.name.trim();
+  return {
+    // Dynamic details use a distinct endpoint; kindLabel retains the concrete resource kind for the UI.
+    kind: "dynamic",
+    kindLabel: resourceKind.trim() || "DynamicResource",
+    id: ["dynamic", identity.clusterId.trim(), group, version, resource, namespace, name].join(":"),
+    apiVersion: group ? `${group}/${version}` : version,
+    namespace: namespace || undefined,
+    name,
+    label: name,
+  };
 }
 
 export interface DynamicResourceDetailResponse {

@@ -384,15 +384,24 @@ export default function ClusterNodesPage() {
     resetPage();
     setKeyword(value.trim());
   };
-
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space className="resource-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/clusters/nodes"
+          embedded
+          className="resource-workbench__header"
           style={{ marginBottom: 12 }}
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">Node</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                工作节点
+              </OpsFilterChip>
+            </span>
+          }
         />
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+        <Space className="resource-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
           <ResourceFilterToolbar>
             <ResourceFilterToolbarItem width="auto">
               <ResourceScopeFilterButton
@@ -460,50 +469,52 @@ export default function ClusterNodesPage() {
               description="工作节点列表需要一个可读集群作为数据源。"
             />
           ) : (
-            <ResourceTable<ClusterNodeListItemModel>
-              rowKey="id"
-              tableKey="business.cluster-nodes"
-              columns={columns as ColumnsType<ClusterNodeListItemModel>}
-              onResourceNavigate={(request) => setDetailTarget(request)}
-              dataSource={tableData}
-              preferencesClient={createTablePreferencesClient(
-                accessToken || undefined,
-              )}
-              globalSearch={{
-                value: keyword,
-                onChange: handleGlobalSearchChange,
-                placeholder: "搜索名称 / 角色 / IP / 版本",
-              }}
-              filters={tableFilters}
-              onFiltersChange={(nextFilters) => {
-                setTableFilters(nextFilters);
-                resetPage();
-              }}
-              loading={{
-                spinning: clustersQuery.isLoading || nodesQuery.isLoading,
-                description: selectedClusterName
-                  ? `${selectedClusterName} 工作节点加载中...`
-                  : "工作节点加载中...",
-              }}
-              onChange={(nextPagination, filters, sorter, extra) =>
-                handleTableChange(
-                  nextPagination,
-                  filters,
-                  sorter,
-                  extra,
+            <div className="resource-workbench__table-zone">
+              <ResourceTable<ClusterNodeListItemModel>
+                rowKey="id"
+                tableKey="business.cluster-nodes"
+                columns={columns as ColumnsType<ClusterNodeListItemModel>}
+                onResourceNavigate={(request) => setDetailTarget(request)}
+                dataSource={tableData}
+                preferencesClient={createTablePreferencesClient(
+                  accessToken || undefined,
+                )}
+                globalSearch={{
+                  value: keyword,
+                  onChange: handleGlobalSearchChange,
+                  placeholder: "搜索名称 / 角色 / IP / 版本",
+                }}
+                filters={tableFilters}
+                onFiltersChange={(nextFilters) => {
+                  setTableFilters(nextFilters);
+                  resetPage();
+                }}
+                loading={{
+                  spinning: clustersQuery.isLoading || nodesQuery.isLoading,
+                  description: selectedClusterName
+                    ? `${selectedClusterName} 工作节点加载中...`
+                    : "工作节点加载中...",
+                }}
+                onChange={(nextPagination, filters, sorter, extra) =>
+                  handleTableChange(
+                    nextPagination,
+                    filters,
+                    sorter,
+                    extra,
+                    nodesQuery.isLoading,
+                  )
+                }
+                pagination={getPaginationConfig(
+                  nodesQuery.data?.total ?? tableData.length,
                   nodesQuery.isLoading,
-                )
-              }
-              pagination={getPaginationConfig(
-                nodesQuery.data?.total ?? tableData.length,
-                nodesQuery.isLoading,
-              )}
-              layoutOptions={{
-                nameValues: tableData.map((item) => item.name),
-                actionWidth: 0,
-              }}
-              emptyDescription="暂无符合条件的工作节点"
-            />
+                )}
+                layoutOptions={{
+                  nameValues: tableData.map((item) => item.name),
+                  actionWidth: 0,
+                }}
+                emptyDescription="暂无符合条件的工作节点"
+              />
+            </div>
           )}
         </Space>
       </OpsSurface>

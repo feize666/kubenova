@@ -25,7 +25,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useMemo } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsPageHeader, OpsScopeSelector, OpsStatusTag, type OpsScopeSelectorOption } from "@/components/ops";
+import { OpsFilterChip, OpsScopeSelector, OpsStatusTag, OpsSurface, type OpsScopeSelectorOption } from "@/components/ops";
+import { ResourcePageHeader } from "@/components/resource-page-header";
 import { MetricUnitFormatter } from "@/components/visual-system";
 import { getClusters } from "@/lib/api/clusters";
 import { getDashboardStats, type DashboardStats } from "@/lib/api/dashboard";
@@ -480,28 +481,36 @@ export default function HomePage() {
       label: "工作负载",
       icon: <DeploymentUnitOutlined />,
     },
-    {
-      href: formatScopedHref("/workloads/helm", clusterId),
-      label: "Helm 应用",
-      icon: <ThunderboltOutlined />,
-    },
   ];
 
   return (
-    <div className={["ops-overview-shell", statsQuery.isFetching ? "ops-scoped-loading" : undefined].filter(Boolean).join(" ")}>
-      <OpsPageHeader
-        className="ops-overview-header"
-        title="总览"
-        subtitle={`${scopeLabel} 的风险态势、资源容量、服务影响与运维入口`}
-        actions={(
-          <Space size={8} wrap className="ops-overview-header__chips">
-          <OpsStatusTag tone={riskSummary.riskLevel}>{riskSummary.riskLevel === "critical" ? "高风险" : riskSummary.riskLevel === "warning" ? "需关注" : "稳定"}</OpsStatusTag>
-          <OpsFilterChip tone="info" icon={<ClusterOutlined />}>集群 {stats?.clusters.total ?? 0}</OpsFilterChip>
-          <OpsFilterChip tone="warning">活跃告警 {stats?.alerts.total ?? 0}</OpsFilterChip>
-          {clusterId ? <OpsFilterChip tone="neutral">单集群</OpsFilterChip> : <OpsFilterChip tone="neutral">全部集群</OpsFilterChip>}
-          </Space>
-        )}
-      />
+    <div className={["ops-overview-shell", "dashboard-workbench", statsQuery.isFetching ? "ops-scoped-loading" : undefined].filter(Boolean).join(" ")}>
+      <div className="resource-workbench dashboard-workbench__header-zone">
+        <OpsSurface variant="panel" padding="sm">
+          <ResourcePageHeader
+            path="/"
+            embedded
+            className="resource-workbench__header dashboard-workbench__page-header"
+            title={
+              <span className="resource-workbench__title-row">
+                <span className="resource-workbench__title">Overview</span>
+                <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                  总览
+                </OpsFilterChip>
+              </span>
+            }
+            description={`${scopeLabel} 的风险态势、资源容量、服务影响与运维入口`}
+            actions={(
+              <Space size={8} wrap className="ops-overview-header__chips">
+                <OpsStatusTag tone={riskSummary.riskLevel}>{riskSummary.riskLevel === "critical" ? "高风险" : riskSummary.riskLevel === "warning" ? "需关注" : "稳定"}</OpsStatusTag>
+                <OpsFilterChip tone="info" icon={<ClusterOutlined />}>集群 {stats?.clusters.total ?? 0}</OpsFilterChip>
+                <OpsFilterChip tone="warning">活跃告警 {stats?.alerts.total ?? 0}</OpsFilterChip>
+                {clusterId ? <OpsFilterChip tone="neutral">单集群</OpsFilterChip> : <OpsFilterChip tone="neutral">全部集群</OpsFilterChip>}
+              </Space>
+            )}
+          />
+        </OpsSurface>
+      </div>
 
       {scopedFallback ? (
         <Alert
@@ -644,7 +653,7 @@ export default function HomePage() {
 
       <section className="ops-overview-grid" aria-label="运行态势">
         <div className="ops-overview-span-4">
-          <OverviewCard title="CPU Usage" scope={resourceUsageSummary.dataSource} action={<LineChartOutlined />}>
+          <OverviewCard title="CPU 使用率" scope={resourceUsageSummary.dataSource} action={<LineChartOutlined />}>
             <div className="ops-overview-chart-card">
               <div className="ops-overview-chart-value">
                 <strong>{liveSnapshot?.available ? formatLiveCpu(liveSnapshot.cpuUsage) : formatPercent(resourceUsageSummary.cpuUsagePercent)}</strong>
@@ -666,7 +675,7 @@ export default function HomePage() {
           </OverviewCard>
         </div>
         <div className="ops-overview-span-4">
-          <OverviewCard title="Memory Usage" scope={resourceUsageSummary.dataSource} action={<LineChartOutlined />}>
+          <OverviewCard title="内存使用率" scope={resourceUsageSummary.dataSource} action={<LineChartOutlined />}>
             <div className="ops-overview-chart-card">
               <div className="ops-overview-chart-value">
                 <strong>{liveSnapshot?.available ? formatLiveMemory(liveSnapshot.memoryUsage) : formatPercent(resourceUsageSummary.memoryUsagePercent)}</strong>
@@ -688,7 +697,7 @@ export default function HomePage() {
           </OverviewCard>
         </div>
         <div className="ops-overview-span-4">
-          <OverviewCard title="Service Impact（服务影响拓扑）" scope="6 小时" action={<NodeIndexOutlined />}>
+          <OverviewCard title="服务影响拓扑" scope="6 小时" action={<NodeIndexOutlined />}>
             <div className="ops-overview-impact-layout">
               <ImpactMap impact={stats?.serviceImpact} />
               <div className="ops-overview-impact-services-list">
@@ -752,7 +761,7 @@ export default function HomePage() {
           </OverviewCard>
         </div>
         <div className="ops-overview-span-3">
-          <OverviewCard title="高频运维入口" action={<AppstoreOutlined />}>
+          <OverviewCard title="常用运维入口" action={<AppstoreOutlined />}>
             <div className="ops-overview-shortcuts">
               {actions.map((item) => (
                 <Link key={item.href} href={item.href} prefetch={false} className="ops-overview-shortcut">

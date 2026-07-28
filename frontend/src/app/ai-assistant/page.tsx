@@ -65,6 +65,7 @@ import {
   OpsStatusTag,
   OpsSurface,
 } from "@/components/ops";
+import { ResourcePageHeader } from "@/components/resource-page-header";
 import {
   createSession,
   executeAction,
@@ -254,7 +255,7 @@ function MarkdownContent({ content }: { content: string }) {
                 borderRadius: 3,
                 padding: "1px 5px",
                 fontSize: "0.88em",
-                fontFamily: "monospace",
+                fontFamily: "var(--kn-font-mono)",
                 wordBreak: "break-word",
                 overflowWrap: "anywhere",
               }}
@@ -1735,71 +1736,66 @@ export default function AiAssistantPage() {
 
   return (
     <div
-      className="ops-workbench-shell ops-workbench-shell--ai"
+      className="resource-workbench ops-workbench-shell ops-workbench-shell--ai"
       style={{
-        display: "flex",
-        flexDirection: "column",
+        display: "grid",
+        gridTemplateRows: "auto minmax(0, 1fr)",
         gap: 12,
         width: "100%",
         minWidth: 0,
-        height: "calc(100vh - 110px)",
         minHeight: 0,
-        overflow: "hidden",
+        overflow: "visible",
       }}
     >
       <OpsSurface
         className="ai-assistant-hero-surface"
-        variant="workbench"
+        variant="panel"
         padding="sm"
         style={{ flex: "0 0 auto", minWidth: 0, overflow: "hidden" }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 12,
-          }}
-        >
-          <div>
-            <Typography.Title level={3} style={{ margin: 0 }}>
-              KubeNova Assistant Workbench
-            </Typography.Title>
-            <Typography.Paragraph
-              type="secondary"
-              style={{ margin: "4px 0 0" }}
-            >
-              通过告警接入、智能诊断、ChatOps 会话和可执行建议形成闭环运维。
-            </Typography.Paragraph>
-          </div>
-          <Space>
-            {!showAlertPanelInline ? (
+        <ResourcePageHeader
+          path="/ai-assistant"
+          embedded
+          className="resource-workbench__header ai-assistant-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">AI Assistant</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                ChatOps
+              </OpsFilterChip>
+            </span>
+          }
+          description="通过告警接入、智能诊断、ChatOps 会话和可执行建议形成闭环运维。"
+          extra={
+            <Space wrap>
+              {!showAlertPanelInline ? (
+                <OpsIconActionButton
+                  icon={<ApiOutlined />}
+                  onClick={() => setAlertDrawerOpen(true)}
+                  disabled={isInitializing || !accessToken}
+                >
+                  告警接入
+                </OpsIconActionButton>
+              ) : null}
               <OpsIconActionButton
-                icon={<ApiOutlined />}
-                onClick={() => setAlertDrawerOpen(true)}
+                icon={<ReloadOutlined />}
+                loading={pingLoading}
+                onClick={() => void refetchPing()}
                 disabled={isInitializing || !accessToken}
               >
-                告警接入
+                检测中转站
               </OpsIconActionButton>
-            ) : null}
-            <OpsIconActionButton
-              icon={<ReloadOutlined />}
-              loading={pingLoading}
-              onClick={() => void refetchPing()}
-              disabled={isInitializing || !accessToken}
-            >
-              检测中转站
-            </OpsIconActionButton>
-            <OpsIconActionButton
-              opsTone="primary"
-              icon={<SettingOutlined />}
-              onClick={() => setSettingsOpen(true)}
-              disabled={isInitializing || !accessToken}
-            >
-              模型设置
-            </OpsIconActionButton>
-          </Space>
-        </div>
+              <OpsIconActionButton
+                opsTone="primary"
+                icon={<SettingOutlined />}
+                onClick={() => setSettingsOpen(true)}
+                disabled={isInitializing || !accessToken}
+              >
+                模型设置
+              </OpsIconActionButton>
+            </Space>
+          }
+        />
 
         <Row gutter={[12, 12]} style={{ marginTop: 8 }}>
           <Col xs={24} sm={12} lg={6}>
@@ -1807,6 +1803,7 @@ export default function AiAssistantPage() {
               className="ai-assistant-metric-card"
               icon={<WarningOutlined />}
               label="活跃告警"
+              meta={`严重 ${criticalCount} · 高风险 ${highCount}`}
               tone="info"
               value={suggestions?.items.length ?? 0}
             />
@@ -1815,6 +1812,7 @@ export default function AiAssistantPage() {
             <OpsMetricTile
               className="ai-assistant-metric-card"
               label="严重告警"
+              meta={criticalCount > 0 ? "需优先诊断" : "当前无严重告警"}
               tone="danger"
               value={criticalCount}
             />
@@ -1823,6 +1821,7 @@ export default function AiAssistantPage() {
             <OpsMetricTile
               className="ai-assistant-metric-card"
               label="高风险告警"
+              meta={highCount > 0 ? "建议纳入处置队列" : "当前无高风险告警"}
               tone="warning"
               value={highCount}
             />

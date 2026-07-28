@@ -35,9 +35,9 @@ interface ActivityItem {
 }
 
 const LEVEL_COLOR: Record<ActivityItem["level"], string> = {
-  critical: "#f85149",
-  warning: "#d29922",
-  info: "#58a6ff",
+  critical: "#dc2626",
+  warning: "#c26a00",
+  info: "#2563eb",
 };
 
 const LEVEL_LABEL: Record<ActivityItem["level"], string> = {
@@ -49,14 +49,14 @@ const LEVEL_LABEL: Record<ActivityItem["level"], string> = {
 // ---------- 主题 tokens ----------
 function useThemeTokens(isDark: boolean) {
   return {
-    bg: isDark ? "rgba(22,27,34,0.9)" : "#ffffff",
-    border: isDark ? "#30363d" : "#d0d7de",
-    titleColor: isDark ? "#8b949e" : "#57606a",
-    valueColor: isDark ? "#e6edf3" : "#1f2328",
-    metaColor: isDark ? "#484f58" : "#8c959f",
-    gridColor: isDark ? "#21262d" : "#eaeef2",
+    bg: isDark ? "rgba(23,34,48,0.94)" : "#ffffff",
+    border: isDark ? "#2f3f52" : "#d8e0ea",
+    titleColor: isDark ? "#b5c0cc" : "#52606f",
+    valueColor: isDark ? "#eef3f8" : "#17202b",
+    metaColor: isDark ? "#8190a0" : "#7c8794",
+    gridColor: isDark ? "#243244" : "#e7edf4",
     hoverBg: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
-    innerBorder: isDark ? "#21262d" : "#eaeef2",
+    innerBorder: isDark ? "#243244" : "#e7edf4",
   };
 }
 
@@ -150,7 +150,7 @@ function PanelHeader({
           color: t.titleColor,
           letterSpacing: "0.08em",
           textTransform: "uppercase",
-          fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+          fontFamily: "var(--kn-font-mono)",
         }}
       >
         {title}
@@ -178,9 +178,9 @@ function ClusterHealthGrid({
   const faulted = Math.max(0, total - healthy - warning);
 
   const items = [
-    { label: "健康", value: healthy, color: "#3fb950" },
-    { label: "告警", value: warning, color: "#d29922" },
-    { label: "故障", value: faulted, color: "#f85149" },
+    { label: "健康", value: healthy, color: "#15803d" },
+    { label: "告警", value: warning, color: "#c26a00" },
+    { label: "故障", value: faulted, color: "#dc2626" },
   ];
 
   const syncTime = new Date().toLocaleTimeString("zh-CN", {
@@ -218,7 +218,7 @@ function ClusterHealthGrid({
                 style={{
                   fontSize: 11,
                   color: t.titleColor,
-                  fontFamily: "'SF Mono', 'Fira Code', monospace",
+                  fontFamily: "var(--kn-font-mono)",
                   letterSpacing: "0.04em",
                 }}
               >
@@ -251,10 +251,10 @@ function ClusterHealthGrid({
           alignItems: "center",
         }}
       >
-        <span style={{ fontSize: 11, color: t.metaColor, fontFamily: "'SF Mono', 'Fira Code', monospace" }}>
+        <span style={{ fontSize: 11, color: t.metaColor, fontFamily: "var(--kn-font-mono)" }}>
           总数 / {total}
         </span>
-        <span style={{ fontSize: 11, color: t.metaColor, fontFamily: "'SF Mono', 'Fira Code', monospace", fontVariantNumeric: "tabular-nums" }}>
+        <span style={{ fontSize: 11, color: t.metaColor, fontFamily: "var(--kn-font-mono)", fontVariantNumeric: "tabular-nums" }}>
           同步于 {syncTime}
         </span>
       </div>
@@ -303,11 +303,11 @@ function AlertBarChart({
         titleColor: isDark ? "#e6edf3" : "#1f2328",
         bodyColor: isDark ? "#8b949e" : "#57606a",
         titleFont: {
-          family: "'SF Mono', 'Fira Code', monospace",
+          family: "var(--kn-font-mono)",
           size: 11,
         },
         bodyFont: {
-          family: "'SF Mono', 'Fira Code', monospace",
+          family: "var(--kn-font-mono)",
           size: 11,
         },
         padding: 8,
@@ -320,7 +320,7 @@ function AlertBarChart({
         grid: { color: t.gridColor },
         ticks: {
           color: t.titleColor,
-          font: { size: 10, family: "'SF Mono', 'Fira Code', monospace" },
+          font: { size: 10, family: "var(--kn-font-mono)" },
           stepSize: 1,
         },
         border: { display: false, dash: [3, 3] },
@@ -329,7 +329,7 @@ function AlertBarChart({
         grid: { display: false },
         ticks: {
           color: t.titleColor,
-          font: { size: 11, family: "'SF Mono', 'Fira Code', monospace" },
+          font: { size: 11, family: "var(--kn-font-mono)" },
         },
         border: { display: false },
       },
@@ -350,16 +350,16 @@ function AlertBarChart({
         }}
       >
         {[
-          { label: "严重", value: critical, color: "#f85149" },
-          { label: "警告", value: warning, color: "#d29922" },
-          { label: "提示", value: info, color: "#58a6ff" },
+    { label: "严重", value: critical, color: "#dc2626" },
+    { label: "警告", value: warning, color: "#c26a00" },
+    { label: "提示", value: info, color: "#2563eb" },
         ].map((item) => (
           <div key={item.label} style={{ flex: 1 }}>
             <div
               style={{
                 fontSize: 10,
                 color: t.titleColor,
-                fontFamily: "'SF Mono', 'Fira Code', monospace",
+                fontFamily: "var(--kn-font-mono)",
                 letterSpacing: "0.06em",
                 marginBottom: 3,
               }}
@@ -433,7 +433,7 @@ function ActivityList({ isDark, items }: { isDark: boolean; items: ActivityItem[
                 fontSize: 10,
                 fontWeight: 600,
                 color,
-                fontFamily: "'SF Mono', 'Fira Code', monospace",
+                fontFamily: "var(--kn-font-mono)",
                 letterSpacing: "0.04em",
                 minWidth: 32,
                 flexShrink: 0,
@@ -464,7 +464,7 @@ function ActivityList({ isDark, items }: { isDark: boolean; items: ActivityItem[
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
-                  fontFamily: "'SF Mono', 'Fira Code', monospace",
+                  fontFamily: "var(--kn-font-mono)",
                 }}
               >
                 {item.source}
@@ -476,7 +476,7 @@ function ActivityList({ isDark, items }: { isDark: boolean; items: ActivityItem[
                 fontSize: 11,
                 color: t.metaColor,
                 flexShrink: 0,
-                fontFamily: "'SF Mono', 'Fira Code', monospace",
+                fontFamily: "var(--kn-font-mono)",
                 fontVariantNumeric: "tabular-nums",
               }}
             >
@@ -500,14 +500,14 @@ function HealthScorePanel({
   const t = useThemeTokens(isDark);
 
   const scoreColor =
-    score >= 80 ? "#3fb950" : score >= 60 ? "#d29922" : "#f85149";
+    score >= 80 ? "#15803d" : score >= 60 ? "#c26a00" : "#dc2626";
   const scoreLabel =
     score >= 80 ? "健康" : score >= 60 ? "降级" : "严重";
 
   const zones = [
-    { label: "严重", range: "0 – 59", color: "#f85149", active: score < 60 },
-    { label: "警告", range: "60 – 79", color: "#d29922", active: score >= 60 && score < 80 },
-    { label: "健康", range: "80 – 100", color: "#3fb950", active: score >= 80 },
+    { label: "严重", range: "0 – 59", color: "#dc2626", active: score < 60 },
+    { label: "警告", range: "60 – 79", color: "#c26a00", active: score >= 60 && score < 80 },
+    { label: "健康", range: "80 – 100", color: "#15803d", active: score >= 80 },
   ];
 
   return (
@@ -520,7 +520,7 @@ function HealthScorePanel({
           color: scoreColor,
           fontVariantNumeric: "tabular-nums",
           lineHeight: 1,
-          letterSpacing: "-2px",
+          letterSpacing: 0,
         }}
       >
         {score}
@@ -531,7 +531,7 @@ function HealthScorePanel({
           fontSize: 11,
           fontWeight: 600,
           color: scoreColor,
-          fontFamily: "'SF Mono', 'Fira Code', monospace",
+          fontFamily: "var(--kn-font-mono)",
           letterSpacing: "0.1em",
           marginTop: 4,
           marginBottom: 20,
@@ -581,7 +581,7 @@ function HealthScorePanel({
                 fontSize: 10,
                 fontWeight: 700,
                 color: z.color,
-                fontFamily: "'SF Mono', 'Fira Code', monospace",
+                fontFamily: "var(--kn-font-mono)",
                 letterSpacing: "0.06em",
               }}
             >
@@ -591,7 +591,7 @@ function HealthScorePanel({
               style={{
                 fontSize: 10,
                 color: t.metaColor,
-                fontFamily: "'SF Mono', 'Fira Code', monospace",
+                fontFamily: "var(--kn-font-mono)",
                 marginTop: 2,
               }}
             >
@@ -671,11 +671,11 @@ export function DashboardChartsV2({ stats }: { stats?: DashboardStats }) {
                       padding: "1px 6px",
                       borderRadius: 3,
                       background: isDark ? "rgba(56,189,248,0.1)" : "rgba(14,165,233,0.08)",
-                      color: isDark ? "#38bdf8" : "#0284c7",
+                      color: isDark ? "#5bd6e4" : "#0891b2",
                       fontSize: 10,
                       fontWeight: 700,
                       border: `1px solid ${isDark ? "rgba(56,189,248,0.25)" : "rgba(14,165,233,0.2)"}`,
-                      fontFamily: "'SF Mono', 'Fira Code', monospace",
+                      fontFamily: "var(--kn-font-mono)",
                       letterSpacing: "0.04em",
                     }}
                   >
@@ -694,13 +694,13 @@ export function DashboardChartsV2({ stats }: { stats?: DashboardStats }) {
                       <MetricRingVisual
                         value={MetricUnitFormatter({ kind: "cpu", value: liveSnapshot.cpuUsage })}
                           percent={typeof liveSnapshot.cpuUsage === "number" ? Math.min(100, liveSnapshot.cpuUsage * 1000) : 0}
-                          color="#3fb950"
+                          color="#15803d"
                           size={88}
                           showGlow
                       />
                       </div>
                       <div style={{ marginTop: 10 }}>
-                        <TrendBars values={liveCpuSeries.length > 0 ? liveCpuSeries : [liveSnapshot.cpuUsage ?? 0]} color="#3fb950" isDark={isDark} />
+                        <TrendBars values={liveCpuSeries.length > 0 ? liveCpuSeries : [liveSnapshot.cpuUsage ?? 0]} color="#15803d" isDark={isDark} />
                       </div>
                     </div>
                   </Col>
@@ -711,13 +711,13 @@ export function DashboardChartsV2({ stats }: { stats?: DashboardStats }) {
                       <MetricRingVisual
                         value={MetricUnitFormatter({ kind: "memory", value: liveSnapshot.memoryUsage })}
                           percent={typeof liveSnapshot.memoryUsage === "number" ? (liveSnapshot.memoryUsage / (1024 ** 3)) * 100 : 0}
-                          color="#58a6ff"
+                          color="#2563eb"
                           size={88}
                           showGlow
                       />
                       </div>
                       <div style={{ marginTop: 10 }}>
-                        <TrendBars values={liveMemorySeries.length > 0 ? liveMemorySeries : [liveSnapshot.memoryUsage ?? 0]} color="#58a6ff" isDark={isDark} />
+                        <TrendBars values={liveMemorySeries.length > 0 ? liveMemorySeries : [liveSnapshot.memoryUsage ?? 0]} color="#2563eb" isDark={isDark} />
                       </div>
                     </div>
                   </Col>
@@ -743,11 +743,11 @@ export function DashboardChartsV2({ stats }: { stats?: DashboardStats }) {
                     padding: "1px 6px",
                     borderRadius: 3,
                     background: isDark ? "rgba(88,166,255,0.1)" : "rgba(9,105,218,0.08)",
-                    color: isDark ? "#58a6ff" : "#0969da",
+                    color: isDark ? "#78a4ff" : "#2563eb",
                     fontSize: 10,
                     fontWeight: 700,
                     border: `1px solid ${isDark ? "rgba(88,166,255,0.25)" : "rgba(9,105,218,0.2)"}`,
-                    fontFamily: "'SF Mono', 'Fira Code', monospace",
+                    fontFamily: "var(--kn-font-mono)",
                     letterSpacing: "0.04em",
                   }}
                 >
@@ -786,7 +786,7 @@ export function DashboardChartsV2({ stats }: { stats?: DashboardStats }) {
               {activityItems.length > 0 ? (
                 <ActivityList isDark={isDark} items={activityItems} />
               ) : (
-                <div style={{ padding: 16, color: isDark ? "#8b949e" : "#57606a", fontSize: 12 }}>
+                <div style={{ padding: 16, color: isDark ? "#8190a0" : "#7c8794", fontSize: 12 }}>
                   暂无真实事件数据（请先执行集群同步或等待告警写入）。
                 </div>
               )}

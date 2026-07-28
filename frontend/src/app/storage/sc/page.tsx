@@ -33,7 +33,7 @@ import {
   type ResourceMenuItem,
 } from "@/components/resource-action-bar";
 import { ResourceAddButton } from "@/components/resource-add-button";
-import { OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
+import { OpsFilterChip, OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
@@ -533,13 +533,51 @@ export default function StorageClassPage() {
     path: "/storage/sc",
   });
 
+  const scopeFilterControl = (
+    <div className="workload-workbench__scope">
+      <ResourceClusterNamespaceFilters
+        clusterId={clusterId}
+        keywordInput={keywordInput}
+        clusterOptions={clusterFilterOptions}
+        clusterLoading={clustersQuery.isLoading}
+        namespaceVisible={false}
+        marginBottom={0}
+        onClusterChange={(value) => {
+          onClusterChange(value);
+          resetPage();
+        }}
+        onKeywordInputChange={setKeywordInput}
+        onSearch={handleSearch}
+        keywordPlaceholder="按名称/标签搜索（示例：sc-fast tier=prod）"
+      />
+    </div>
+  );
+
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space
+      className="workload-workbench"
+      orientation="vertical"
+      size={16}
+      style={{ width: "100%" }}
+    >
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/storage/sc"
-          style={{ marginBottom: 12 }}
-          titleSuffix={<ResourceAddButton title="创建StorageClass" onClick={() => {
+          embedded
+          className="workload-workbench__header"
+          title={
+            <span className="workload-workbench__title-row">
+              <span className="workload-workbench__title">StorageClass</span>
+              <OpsFilterChip
+                tone="info"
+                className="workload-workbench__kind-chip"
+                style={{ margin: 0 }}
+              >
+                存储类
+              </OpsFilterChip>
+            </span>
+          }
+          extra={<ResourceAddButton title="创建StorageClass" onClick={() => {
             const nextClusterId = clusterId || clusterOptions[0]?.value || "";
             form.resetFields();
             form.setFieldsValue({
@@ -555,23 +593,12 @@ export default function StorageClassPage() {
           }} />}
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceClusterNamespaceFilters
-            clusterId={clusterId}
-            keywordInput={keywordInput}
-            clusterOptions={clusterFilterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            namespaceVisible={false}
-            marginBottom={0}
-            onClusterChange={(value) => {
-              onClusterChange(value);
-              resetPage();
-            }}
-            onKeywordInputChange={setKeywordInput}
-            onSearch={handleSearch}
-            keywordPlaceholder="按名称/标签搜索（示例：sc-fast tier=prod）"
-          />
-
+        <Space
+          className="workload-workbench__content"
+          orientation="vertical"
+          size={12}
+          style={{ width: "100%" }}
+        >
           {!isInitializing && !accessToken ? (
             <Alert className="storage-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看 StorageClass 信息。" />
           ) : null}
@@ -585,32 +612,35 @@ export default function StorageClassPage() {
             />
           ) : null}
 
-          <ResourceTable<StorageResource>
-            rowKey="id"
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            tableKey="storage.sc"
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称/标签搜索（示例：sc-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            dataSource={tableData}
-            bordered
-            layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
-            loading={isLoading && !data}
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
-            }
-            pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
-          />
+          <div className="workload-workbench__table-zone">
+            <ResourceTable<StorageResource>
+              rowKey="id"
+              columns={columns}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              tableKey="storage.sc"
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleGlobalSearchChange,
+                placeholder: "按名称/标签搜索（示例：sc-a app=web env=prod）",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              toolbarExtra={scopeFilterControl}
+              sort={{ sortBy, sortOrder }}
+              dataSource={tableData}
+              bordered
+              layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
+              loading={isLoading && !data}
+              onChange={(nextPagination, filters, sorter, extra) =>
+                handleTableChange(nextPagination, filters, sorter, extra, isLoading && !data)
+              }
+              pagination={getPaginationConfig(data?.total ?? 0, isLoading && !data)}
+            />
+          </div>
         </Space>
       </OpsSurface>
 

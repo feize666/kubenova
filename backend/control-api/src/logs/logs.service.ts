@@ -66,7 +66,7 @@ export interface LogsStreamBootstrapRequest {
   clusterId: string;
   namespace: string;
   pod: string;
-  container: string;
+  container?: string;
   level?: LogLevel;
   keyword?: string;
   tailLines?: number;
@@ -255,7 +255,6 @@ export class LogsService {
     this.assertRequired(input.clusterId, 'clusterId');
     this.assertRequired(input.namespace, 'namespace');
     this.assertRequired(input.pod, 'pod');
-    this.assertRequired(input.container, 'container');
     if (
       input.level !== undefined &&
       !['INFO', 'WARN', 'ERROR'].includes(input.level)

@@ -20,6 +20,7 @@ import { matchLabelExpressions, parseResourceSearchInput } from "@/components/re
 import { getClusters } from "@/lib/api/clusters";
 import {
   applyResourceYaml,
+  buildDynamicResourceDetailRequest,
   createDynamicResource,
   deleteDynamicResource,
   getDynamicResourceDetail,
@@ -41,6 +42,7 @@ type DynamicConfigResourcePageProps = {
   path: string;
   tableKey: string;
   titleKind: string;
+  titleBadge?: string;
   group?: string;
   version: string;
   resource: string;
@@ -335,6 +337,7 @@ export function DynamicConfigResourcePage({
   path,
   tableKey,
   titleKind,
+  titleBadge,
   group = "",
   version,
   resource,
@@ -361,6 +364,7 @@ export function DynamicConfigResourcePage({
   const [createYamlClusterId, setCreateYamlClusterId] = useState("");
   const [createYamlNamespace, setCreateYamlNamespace] = useState("");
   const [form] = Form.useForm<CreateConfigPolicyFormValues>();
+  const resolvedTitleBadge = titleBadge ?? titleKind;
   const watchedLimitType = Form.useWatch("limitType", form) ?? "Container";
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<DynamicResourceItem>({
@@ -558,24 +562,7 @@ export function DynamicConfigResourcePage({
   }
 
   function buildDetailTarget(row: DynamicResourceItem): ResourceDetailRequest {
-    const identity = buildIdentity(row);
-    return {
-      kind: "dynamic",
-      kindLabel: kind,
-      id: [
-        "dynamic",
-        identity.clusterId,
-        identity.group ?? "",
-        identity.version ?? "",
-        identity.resource ?? "",
-        identity.namespace ?? "",
-        identity.name ?? "",
-      ].join(":"),
-      apiVersion: group ? `${group}/${version}` : version,
-      namespace: row.namespace,
-      name: row.name,
-      label: row.name,
-    };
+    return buildDynamicResourceDetailRequest(buildIdentity(row), kind);
   }
 
   const openCreate = () => {
@@ -786,14 +773,40 @@ export function DynamicConfigResourcePage({
       ),
     },
   ];
+  const scopeFilterControl = (
+    <div className="workload-workbench__scope">
+      <ResourceScopeFilterButton
+        clusterId={clusterId}
+        namespace={namespace}
+        clusterOptions={clusterOptions}
+        clusterLoading={clustersQuery.isLoading}
+        knownNamespaces={knownNamespaces}
+        namespaceDisabled={namespaceDisabled}
+        namespacePlaceholder={namespacePlaceholder}
+        onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+          onScopeChange(nextClusterId, nextNamespace);
+          resetPage();
+        }}
+      />
+    </div>
+  );
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space className="workload-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface className="dynamic-config-list-surface" variant="panel" padding="sm">
         <ResourcePageHeader
           path={path}
-          style={{ marginBottom: 12 }}
-          titleSuffix={
+          embedded
+          className="workload-workbench__header"
+          title={
+            <span className="workload-workbench__title-row">
+              <span className="workload-workbench__title">{kind}</span>
+              <OpsFilterChip tone="info" className="workload-workbench__kind-chip" style={{ margin: 0 }}>
+                {resolvedTitleBadge}
+              </OpsFilterChip>
+            </span>
+          }
+          extra={
             <ResourceAddButton
               title={`创建${kind}`}
               onClick={openCreate}
@@ -802,21 +815,7 @@ export function DynamicConfigResourcePage({
           }
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            namespace={namespace}
-            clusterOptions={clusterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-              onScopeChange(nextClusterId, nextNamespace);
-              resetPage();
-            }}
-          />
-
+        <Space className="workload-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
           {!isInitializing && !accessToken ? (
             <Alert className="dynamic-config-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
           ) : null}
@@ -837,33 +836,36 @@ export function DynamicConfigResourcePage({
             />
           ) : null}
 
-          <ResourceTable<DynamicResourceItem>
-            bordered
-            rowKey="id"
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            tableKey={tableKey}
-            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "输入关键字，或 label 过滤（如 env=prod team=platform）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            dataSource={tableData}
-            layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
-            loading={listQuery.isLoading}
-            onChange={(nextPagination, filters, sorter, extra) =>
-              handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
-            }
-            pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
-            emptyDescription={emptyDescription}
-          />
+          <div className="workload-workbench__table-zone">
+            <ResourceTable<DynamicResourceItem>
+              bordered
+              rowKey="id"
+              columns={columns}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              tableKey={tableKey}
+              preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleGlobalSearchChange,
+                placeholder: "输入关键字，或 label 过滤（如 env=prod team=platform）",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              toolbarExtra={scopeFilterControl}
+              sort={{ sortBy, sortOrder }}
+              dataSource={tableData}
+              layoutOptions={{ nameValues: tableData.map((item) => item.name), nameWidthOptions: { max: 320 } }}
+              loading={listQuery.isLoading}
+              onChange={(nextPagination, filters, sorter, extra) =>
+                handleTableChange(nextPagination, filters, sorter, extra, listQuery.isLoading && !listQuery.data)
+              }
+              pagination={getPaginationConfig(listQuery.data?.total ?? 0, listQuery.isLoading && !listQuery.data)}
+              emptyDescription={emptyDescription}
+            />
+          </div>
         </Space>
       </OpsSurface>
 

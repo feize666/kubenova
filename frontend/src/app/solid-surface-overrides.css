@@ -1,0 +1,188 @@
+/*
+ * Final surface policy. This stylesheet is imported after every legacy visual
+ * layer so shared workbench primitives stay opaque across the application.
+ */
+:root,
+[data-theme="dark"] {
+  --kn-solid-shell: #101720;
+  --kn-solid-sidebar: #121b26;
+  --kn-solid-topbar: #17212d;
+  --kn-solid-surface: #161f2a;
+  --kn-solid-surface-raised: #1c2735;
+  --kn-solid-control: #1a2633;
+  --kn-solid-overlay: #202d3b;
+  --kn-solid-border: #2a394a;
+  --kn-glass-bg: var(--kn-solid-surface);
+  --kn-glass-bg-strong: var(--kn-solid-surface-raised);
+  --kn-glass-bg-soft: var(--kn-solid-surface);
+  --kn-glass-highlight: transparent;
+  --kn-glass-border: var(--kn-solid-border);
+  --kn-glass-border-strong: #3f6388;
+  --kn-topbar-bg: var(--kn-solid-topbar);
+  --kn-topbar-action-bg: var(--kn-solid-control);
+  --kn-topbar-action-bg-hover: #233449;
+  --kn-topbar-action-border: var(--kn-solid-border);
+  --kn-topbar-action-border-hover: #3b6c9d;
+  --page-toolbar-bg: var(--kn-solid-surface);
+  --page-toolbar-bg-strong: var(--kn-solid-surface-raised);
+  --page-toolbar-highlight: transparent;
+  --page-toolbar-sweep: transparent;
+  --page-toolbar-shadow: none;
+  --ops-control-bg: var(--kn-solid-control);
+  --ops-control-bg-hover: #233449;
+  --ops-control-bg-active: #2a3d54;
+  --ops-control-highlight: none;
+  --ops-control-shadow: none;
+  --ops-control-shadow-hover: none;
+  --ops-control-shadow-active: none;
+  --ops-floating-bg: var(--kn-solid-overlay);
+  --ops-floating-shadow: 0 12px 26px rgb(0 0 0 / 28%);
+  --ops-metric-bg: var(--kn-solid-surface-raised);
+}
+
+[data-theme="light"] {
+  --kn-solid-shell: #f4f6f8;
+  --kn-solid-sidebar: #ffffff;
+  --kn-solid-topbar: #ffffff;
+  --kn-solid-surface: #ffffff;
+  --kn-solid-surface-raised: #f8fafc;
+  --kn-solid-control: #ffffff;
+  --kn-solid-overlay: #ffffff;
+  --kn-solid-border: #d9e1ea;
+  --kn-glass-bg: var(--kn-solid-surface);
+  --kn-glass-bg-strong: var(--kn-solid-surface-raised);
+  --kn-glass-bg-soft: var(--kn-solid-surface);
+  --kn-glass-highlight: transparent;
+  --kn-glass-border: var(--kn-solid-border);
+  --kn-glass-border-strong: #8aafd6;
+  --kn-topbar-bg: var(--kn-solid-topbar);
+  --kn-topbar-action-bg: var(--kn-solid-control);
+  --kn-topbar-action-bg-hover: #edf4fa;
+  --kn-topbar-action-border: var(--kn-solid-border);
+  --kn-topbar-action-border-hover: #7da9d6;
+  --page-toolbar-bg: var(--kn-solid-surface);
+  --page-toolbar-bg-strong: var(--kn-solid-surface-raised);
+  --page-toolbar-highlight: transparent;
+  --page-toolbar-sweep: transparent;
+  --page-toolbar-shadow: none;
+  --ops-control-bg: var(--kn-solid-control);
+  --ops-control-bg-hover: #edf4fa;
+  --ops-control-bg-active: #e2eef9;
+  --ops-control-highlight: none;
+  --ops-control-shadow: none;
+  --ops-control-shadow-hover: none;
+  --ops-control-shadow-active: none;
+  --ops-floating-bg: var(--kn-solid-overlay);
+  --ops-floating-shadow: 0 10px 24px rgb(15 23 42 / 12%);
+  --ops-metric-bg: var(--kn-solid-surface-raised);
+}
+
+/* No page or portalled component may restore a backdrop blur. */
+.kubenova-shell *,
+.ant-dropdown *,
+.ant-popover *,
+.ant-modal-root *,
+.ant-drawer *,
+.ant-select-dropdown * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.kubenova-shell.ant-layout {
+  background: var(--kn-solid-shell) !important;
+}
+
+.kubenova-shell::before,
+.app-header::before,
+.ops-page-header--surface::after,
+.resource-table-toolbar::after,
+.ops-surface--panel:has(.resource-page-header)::before {
+  display: none !important;
+}
+
+.kn-glass-surface,
+.ops-surface--glass,
+.ops-workbench-panel,
+.ops-surface--workbench,
+.ops-surface--panel:has(.resource-page-header),
+.ops-page-header--surface,
+.resource-page-header.ops-page-header--surface,
+.resource-table-toolbar,
+.resource-cluster-namespace-filters .resource-filter-toolbar,
+.resource-filter-toolbar,
+.ops-popover-panel,
+.ant-popover .ant-popover-inner,
+.ant-dropdown .ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-modal .ant-modal-content,
+.ops-modal-shell .ant-modal-content,
+.ops-confirm-modal .ant-modal-content,
+.ant-drawer .ant-drawer-content,
+.ops-drawer-shell .ant-drawer-content,
+.ops-frame-shell {
+  background: var(--kn-solid-surface) !important;
+  border-color: var(--kn-solid-border) !important;
+  box-shadow: none !important;
+}
+
+:root .app-sidebar.app-sidebar.ant-layout-sider {
+  background: var(--kn-solid-sidebar) !important;
+  border-right-color: var(--kn-solid-border) !important;
+  box-shadow: none !important;
+}
+
+:root .app-header.app-header,
+:root .app-header.app-header.kn-glass-surface {
+  background: var(--kn-solid-topbar) !important;
+  border-bottom-color: var(--kn-solid-border) !important;
+  box-shadow: none !important;
+}
+
+.logo-wrap.kn-halo-focus,
+.shell-status-band,
+.app-header .ant-input-affix-wrapper,
+.shell-theme-toggle.ops-icon-action-button.ant-btn,
+.shell-topbar-action.ops-icon-action-button.ant-btn,
+.shell-mobile-nav-trigger.ops-icon-action-button.ant-btn,
+.shell-mobile-search-trigger.ops-icon-action-button.ant-btn,
+.ops-frame-shell__header,
+.ops-frame-shell__toolbar,
+.ops-frame-shell__chips {
+  background: var(--kn-solid-control) !important;
+  border-color: var(--kn-solid-border) !important;
+  box-shadow: none !important;
+}
+
+.ops-surface--panel:has(.resource-page-header) .resource-page-header.ops-page-header--surface,
+.ops-surface--panel:has(.resource-page-header) .resource-filter-toolbar {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.app-sidebar-menu.ant-menu .ant-menu-item:hover,
+.app-sidebar-menu.ant-menu .ant-menu-submenu-title:hover,
+.app-sidebar-menu.ant-menu .ant-menu-item-selected {
+  background: var(--kn-solid-control) !important;
+  box-shadow: none !important;
+}
+
+.ops-icon-action-button.ant-btn,
+.ops-filter-trigger-button.ant-btn,
+.resource-scope-filter-button.ant-btn,
+.ops-icon-action-button.ant-btn.resource-table-icon-action,
+.resource-table-icon-action.ant-btn {
+  background: var(--ops-control-bg) !important;
+  box-shadow: none !important;
+}
+
+.ops-icon-action-button.ant-btn:hover,
+.ops-icon-action-button.ant-btn:focus-visible,
+.ops-icon-action-button.ant-btn.is-active,
+.ops-filter-trigger-button.ant-btn:hover,
+.ops-filter-trigger-button.ant-btn:focus-visible,
+.ops-filter-trigger-button.ant-btn.is-active,
+.resource-scope-filter-button.ant-btn:hover,
+.resource-scope-filter-button.ant-btn:focus-visible {
+  background: var(--ops-control-bg-hover) !important;
+  box-shadow: none !important;
+}

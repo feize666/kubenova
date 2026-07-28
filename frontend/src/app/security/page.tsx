@@ -26,7 +26,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsFilterChip, OpsMetricTile, OpsPageHeader, OpsStatusTag, OpsSurface, type OpsFilterChipTone, type OpsStatusTone } from "@/components/ops";
+import { OpsFilterChip, OpsMetricTile, OpsStatusTag, OpsSurface, type OpsFilterChipTone, type OpsStatusTone } from "@/components/ops";
+import { ResourcePageHeader } from "@/components/resource-page-header";
 import {
   ResourceActionDropdown,
   type ResourceActionItem,
@@ -523,66 +524,68 @@ function SecurityEventsTab() {
           </ResourceFilterToolbarItem>
         </ResourceFilterToolbar>
 
-        <ResourceTable<SecurityEvent>
-          rowKey="id"
-          tableKey="business.security.events"
-          columns={columns as ColumnsType<SecurityEvent>}
-          onResourceNavigate={(request) => setResourceDetailTarget(request)}
-          dataSource={tableRows}
-          bordered
-          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-          globalSearch={{
-            value: keyword,
-            onChange: (value) => {
-              setKeyword(value);
-              setPage(1);
-            },
-            placeholder: "搜索标题 / 类型 / 资源 / 集群",
-          }}
-          filters={tableFilters}
-          onFiltersChange={(nextFilters) => {
-            setTableFilters(nextFilters);
-            setSeverityFilter(typeof nextFilters.severity === "string" ? nextFilters.severity : undefined);
-            setStatusFilter(typeof nextFilters.status === "string" ? nextFilters.status : undefined);
-            setPage(1);
-          }}
-          toolbarExtra={
-            <Button
-              icon={<ReloadOutlined />}
-              loading={refreshingEvents}
-              onClick={() => void handleRefreshEvents()}
-            >
-              刷新
-            </Button>
-          }
-          loading={isLoading}
-          size="small"
-          scroll={{ x: 1000 }}
-          onChange={(pagination, filters, sorter, extra) => {
-            handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
-            if (extra.action === "sort") {
-              setPage(1);
-            }
-          }}
-          pagination={buildTablePagination({
-            current: page,
-            pageSize,
-            total: sortedItems.length,
-            onChange: (nextPage, nextPageSize) => {
-              if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
+        <div className="resource-workbench__table-zone">
+          <ResourceTable<SecurityEvent>
+            rowKey="id"
+            tableKey="business.security.events"
+            columns={columns as ColumnsType<SecurityEvent>}
+            onResourceNavigate={(request) => setResourceDetailTarget(request)}
+            dataSource={tableRows}
+            bordered
+            preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+            globalSearch={{
+              value: keyword,
+              onChange: (value) => {
+                setKeyword(value);
                 setPage(1);
-                return;
+              },
+              placeholder: "搜索标题 / 类型 / 资源 / 集群",
+            }}
+            filters={tableFilters}
+            onFiltersChange={(nextFilters) => {
+              setTableFilters(nextFilters);
+              setSeverityFilter(typeof nextFilters.severity === "string" ? nextFilters.severity : undefined);
+              setStatusFilter(typeof nextFilters.status === "string" ? nextFilters.status : undefined);
+              setPage(1);
+            }}
+            toolbarExtra={
+              <Button
+                icon={<ReloadOutlined />}
+                loading={refreshingEvents}
+                onClick={() => void handleRefreshEvents()}
+              >
+                刷新
+              </Button>
+            }
+            loading={isLoading}
+            size="small"
+            scroll={{ x: 1000 }}
+            onChange={(pagination, filters, sorter, extra) => {
+              handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
+              if (extra.action === "sort") {
+                setPage(1);
               }
-              setPage(nextPage);
-            },
-          })}
-          rowClassName={(record) =>
-            record.severity === "critical" && record.status === "open"
-              ? "ant-table-row-danger"
-              : ""
-          }
-        />
+            }}
+            pagination={buildTablePagination({
+              current: page,
+              pageSize,
+              total: sortedItems.length,
+              onChange: (nextPage, nextPageSize) => {
+                if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
+                  setPageSize(nextPageSize);
+                  setPage(1);
+                  return;
+                }
+                setPage(nextPage);
+              },
+            })}
+            rowClassName={(record) =>
+              record.severity === "critical" && record.status === "open"
+                ? "ant-table-row-danger"
+                : ""
+            }
+          />
+        </div>
       </Space>
       <BusinessDetailDrawer
         open={Boolean(detailRecord)}
@@ -828,59 +831,61 @@ function AuditLogsTab() {
 
   return (
     <>
-      <ResourceTable<AuditLogRecord>
-        rowKey="id"
-        tableKey="business.security.auditLogs"
-        columns={columns as ColumnsType<AuditLogRecord>}
-        dataSource={pagedItems}
-        preferencesClient={createTablePreferencesClient(accessToken || undefined)}
-        globalSearch={{
-          value: keyword,
-          onChange: (value) => {
-            setKeyword(value);
-            setPage(1);
-          },
-          placeholder: "搜索用户 / 资源类型 / 资源名",
-        }}
-        filters={tableFilters}
-        onFiltersChange={(nextFilters) => {
-          setTableFilters(nextFilters);
-          setActionFilter(typeof nextFilters.action === "string" ? nextFilters.action : undefined);
-          setResultFilter(typeof nextFilters.result === "string" ? nextFilters.result : undefined);
-          setPage(1);
-        }}
-        toolbarExtra={
-          <Button
-            icon={<ReloadOutlined />}
-            loading={refreshingAuditLogs}
-            onClick={() => void handleRefreshAuditLogs()}
-          >
-            刷新
-          </Button>
-        }
-        loading={isLoading}
-        size="small"
-        scroll={{ x: 900 }}
-        onChange={(pagination, filters, sorter, extra) => {
-          handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
-          if (extra.action === "sort") {
-            setPage(1);
-          }
-        }}
-        pagination={buildTablePagination({
-          current: page,
-          pageSize,
-          total: sortedItems.length,
-          onChange: (nextPage, nextPageSize) => {
-            if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
-              setPageSize(nextPageSize);
+      <div className="resource-workbench__table-zone">
+        <ResourceTable<AuditLogRecord>
+          rowKey="id"
+          tableKey="business.security.auditLogs"
+          columns={columns as ColumnsType<AuditLogRecord>}
+          dataSource={pagedItems}
+          preferencesClient={createTablePreferencesClient(accessToken || undefined)}
+          globalSearch={{
+            value: keyword,
+            onChange: (value) => {
+              setKeyword(value);
               setPage(1);
-              return;
+            },
+            placeholder: "搜索用户 / 资源类型 / 资源名",
+          }}
+          filters={tableFilters}
+          onFiltersChange={(nextFilters) => {
+            setTableFilters(nextFilters);
+            setActionFilter(typeof nextFilters.action === "string" ? nextFilters.action : undefined);
+            setResultFilter(typeof nextFilters.result === "string" ? nextFilters.result : undefined);
+            setPage(1);
+          }}
+          toolbarExtra={
+            <Button
+              icon={<ReloadOutlined />}
+              loading={refreshingAuditLogs}
+              onClick={() => void handleRefreshAuditLogs()}
+            >
+              刷新
+            </Button>
+          }
+          loading={isLoading}
+          size="small"
+          scroll={{ x: 900 }}
+          onChange={(pagination, filters, sorter, extra) => {
+            handleTableChange(pagination, filters, sorter, extra, isLoading && !data);
+            if (extra.action === "sort") {
+              setPage(1);
             }
-            setPage(nextPage);
-          },
-        })}
-      />
+          }}
+          pagination={buildTablePagination({
+            current: page,
+            pageSize,
+            total: sortedItems.length,
+            onChange: (nextPage, nextPageSize) => {
+              if (typeof nextPageSize === "number" && nextPageSize !== pageSize) {
+                setPageSize(nextPageSize);
+                setPage(1);
+                return;
+              }
+              setPage(nextPage);
+            },
+          })}
+        />
+      </div>
       <BusinessDetailDrawer
         open={Boolean(detailRecord)}
         title={detailRecord ? `审计日志 · ${detailRecord.actor}` : "审计日志"}
@@ -1010,12 +1015,23 @@ export default function SecurityPage() {
   ];
 
   return (
-    <div>
-      <OpsPageHeader
-        className="resource-page-header"
-        title="安全审计"
-        subtitle="聚合漏洞扫描、安全事件与操作审计日志，全面掌握集群安全态势。"
-      />
+    <Space className="resource-workbench security-workbench" direction="vertical" size={16} style={{ width: "100%" }}>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourcePageHeader
+          path="/security"
+          embedded
+          className="resource-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">Security Audit</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                安全审计
+              </OpsFilterChip>
+            </span>
+          }
+          description="聚合漏洞扫描、安全事件与操作审计日志，全面掌握集群安全态势。"
+        />
+      </OpsSurface>
 
       {/* 统计卡片 */}
       <Skeleton loading={statsLoading} active paragraph={{ rows: 1 }}>
@@ -1033,6 +1049,7 @@ export default function SecurityPage() {
             <OpsMetricTile
               icon={<ExclamationCircleOutlined />}
               label="待处理事件"
+              meta={stats ? `今日审计 ${stats.todayAuditLogs ?? 0} 条` : undefined}
               tone={(stats?.openEvents ?? 0) > 0 ? "warning" : "success"}
               value={stats?.openEvents ?? 0}
             />
@@ -1041,6 +1058,7 @@ export default function SecurityPage() {
             <OpsMetricTile
               icon={<SafetyCertificateOutlined />}
               label="合规评分"
+              meta={`评分区间 ${complianceTone === "success" ? "健康" : complianceTone === "warning" ? "关注" : "风险"}`}
               suffix="%"
               tone={complianceTone}
               value={stats?.complianceScore ?? 0}
@@ -1050,6 +1068,7 @@ export default function SecurityPage() {
             <OpsMetricTile
               icon={<FileTextOutlined />}
               label="今日审计日志"
+              meta={stats ? `高危漏洞 ${stats.criticalVulnerabilities ?? 0} 条` : undefined}
               tone="info"
               value={stats?.todayAuditLogs ?? 0}
             />
@@ -1059,6 +1078,6 @@ export default function SecurityPage() {
 
       {/* 安全事件 + 审计日志 Tabs */}
       <Tabs defaultActiveKey="events" items={tabItems} />
-    </div>
+    </Space>
   );
 }

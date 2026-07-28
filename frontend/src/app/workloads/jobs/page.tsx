@@ -6,7 +6,7 @@ import {
   EyeOutlined,
   FileTextOutlined,
 } from "@ant-design/icons";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Alert,
   App,
@@ -47,6 +47,7 @@ import {
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
+import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
 import { OpsFormSection, OpsModalShell } from "@/components/ops";
 import { OpsSurface } from "@/components/ops/ops-surface";
 import {
@@ -296,6 +297,19 @@ export default function JobsPage() {
     setMergedFilters(parsed.labelExpressions);
     setKeyword(parsed.keyword);
   };
+  const handleScopeApply = useCallback(
+    ({
+      clusterId: nextClusterId,
+      namespace: nextNamespace,
+    }: {
+      clusterId: string;
+      namespace: string;
+    }) => {
+      onScopeChange(nextClusterId, nextNamespace);
+      resetPage();
+    },
+    [onScopeChange, resetPage],
+  );
   useSyncResourceFilterUrlState({ clusterId, namespace, keyword });
 
   const openAddModal = () => {
@@ -585,36 +599,66 @@ export default function JobsPage() {
       ),
     },
   ];
+  const scopeFilterControl = useMemo(
+    () => (
+      <div className="workload-workbench__scope">
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          namespace={namespace}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onApply={handleScopeApply}
+        />
+      </div>
+    ),
+    [
+      clusterId,
+      clusterOptions,
+      clustersQuery.isLoading,
+      handleScopeApply,
+      knownNamespaces,
+      namespace,
+      namespaceDisabled,
+      namespacePlaceholder,
+    ],
+  );
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space
+      className="workload-workbench"
+      orientation="vertical"
+      size={16}
+      style={{ width: "100%" }}
+    >
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
           path="/workloads/jobs"
-          style={{ marginBottom: 12 }}
-          titleSuffix={
-            <ResourceAddButton onClick={openAddModal} aria-label="创建Job" />
+          embedded
+          className="workload-workbench__header"
+          title={
+            <span className="workload-workbench__title-row">
+              <span className="workload-workbench__title">Job</span>
+              <OpsFilterChip
+                tone="info"
+                className="workload-workbench__kind-chip"
+                style={{ margin: 0 }}
+              >
+                一次性任务
+              </OpsFilterChip>
+            </span>
           }
+          extra={<ResourceAddButton onClick={openAddModal} aria-label="创建Job" />}
         />
 
-        <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            namespace={namespace}
-            clusterOptions={clusterOptions}
-            clusterLoading={clustersQuery.isLoading}
-            knownNamespaces={knownNamespaces}
-            namespaceDisabled={namespaceDisabled}
-            namespacePlaceholder={namespacePlaceholder}
-            onApply={({
-              clusterId: nextClusterId,
-              namespace: nextNamespace,
-            }) => {
-              onScopeChange(nextClusterId, nextNamespace);
-              resetPage();
-            }}
-          />
-
+        <Space
+          className="workload-workbench__content"
+          orientation="vertical"
+          size={12}
+          style={{ width: "100%" }}
+        >
           {!isInitializing && !accessToken ? (
             <Alert
               className="workload-resource-state-alert"
@@ -634,42 +678,45 @@ export default function JobsPage() {
             />
           ) : null}
 
-          <ResourceTable<WorkloadListItem>
-            bordered
-            rowKey="id"
-            tableKey="workloads.jobs"
-            preferencesClient={createTablePreferencesClient(
-              accessToken || undefined,
-            )}
-            globalSearch={{
-              value: keywordInput,
-              onChange: handleGlobalSearchChange,
-              placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
-            }}
-            filters={tableFilters}
-            onFiltersChange={(nextFilters) => {
-              setTableFilters(nextFilters);
-              resetPage();
-            }}
-            sort={{ sortBy, sortOrder }}
-            columns={columns}
-            onResourceNavigate={(request) => setDetailTarget(request)}
-            dataSource={filteredTableData}
-            loading={isLoading && !data}
-            onChange={(paginationInfo, filters, sorter, extra) =>
-              handleTableChange(
-                paginationInfo,
-                filters,
-                sorter,
-                extra,
+          <div className="workload-workbench__table-zone">
+            <ResourceTable<WorkloadListItem>
+              bordered
+              rowKey="id"
+              tableKey="workloads.jobs"
+              preferencesClient={createTablePreferencesClient(
+                accessToken || undefined,
+              )}
+              globalSearch={{
+                value: keywordInput,
+                onChange: handleGlobalSearchChange,
+                placeholder: "按名称/标签搜索（示例：app-a app=web env=prod）",
+              }}
+              filters={tableFilters}
+              onFiltersChange={(nextFilters) => {
+                setTableFilters(nextFilters);
+                resetPage();
+              }}
+              toolbarExtra={scopeFilterControl}
+              sort={{ sortBy, sortOrder }}
+              columns={columns}
+              onResourceNavigate={(request) => setDetailTarget(request)}
+              dataSource={filteredTableData}
+              loading={isLoading && !data}
+              onChange={(paginationInfo, filters, sorter, extra) =>
+                handleTableChange(
+                  paginationInfo,
+                  filters,
+                  sorter,
+                  extra,
+                  isLoading && !data,
+                )
+              }
+              pagination={getPaginationConfig(
+                data?.total ?? 0,
                 isLoading && !data,
-              )
-            }
-            pagination={getPaginationConfig(
-              data?.total ?? 0,
-              isLoading && !data,
-            )}
-          />
+              )}
+            />
+          </div>
         </Space>
       </OpsSurface>
 

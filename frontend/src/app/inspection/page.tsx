@@ -20,7 +20,8 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
-import { OpsCommandPreview, OpsFilterChip, OpsIconActionButton, OpsMetricTile, OpsModalShell, OpsPageHeader, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { OpsCommandPreview, OpsFilterChip, OpsIconActionButton, OpsMetricTile, OpsModalShell, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import {
   ResourceFilterToolbar,
@@ -505,6 +506,9 @@ export default function InspectionPage() {
       gap: capabilityQuery.data?.summary?.gap ?? stats.gap,
     };
   }, [capabilityQuery.data]);
+  const inspectionSummary = reportQuery.data?.summary;
+  const inspectionCoverageRate =
+    capabilityStats.total > 0 ? Math.round((capabilityStats.implemented / capabilityStats.total) * 100) : 0;
 
   const capabilityItems = useMemo(() => {
     const raw = capabilityQuery.data?.items ?? [];
@@ -636,12 +640,23 @@ export default function InspectionPage() {
   }, [issueMaxPage]);
 
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-      <OpsPageHeader
-        className="resource-page-header"
-        title="集群资源巡检"
-        subtitle="参考主流 Kubernetes 平台，统一巡检集群、名称空间、工作负载、网络、存储、配置与活跃告警。"
-      />
+    <Space className="resource-workbench inspection-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
+      <OpsSurface variant="panel" padding="sm">
+        <ResourcePageHeader
+          path="/inspection"
+          embedded
+          className="resource-workbench__header"
+          title={
+            <span className="resource-workbench__title-row">
+              <span className="resource-workbench__title">Inspection</span>
+              <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
+                资源巡检
+              </OpsFilterChip>
+            </span>
+          }
+          description="统一巡检集群、名称空间、工作负载、网络、存储、配置与活跃告警。"
+        />
+      </OpsSurface>
 
       <ResourceFilterToolbar
         actions={
@@ -715,16 +730,37 @@ export default function InspectionPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} md={6}>
-          <OpsMetricTile label="巡检评分" suffix="/ 100" tone="success" value={reportQuery.data?.summary.score ?? 0} />
+          <OpsMetricTile
+            label="巡检评分"
+            meta={`覆盖 ${inspectionSummary?.totalResources ?? 0} 个资源 · ${timeQuery.from && timeQuery.to ? "自定义窗口" : timeQuery.range}`}
+            suffix="/ 100"
+            tone="success"
+            value={inspectionSummary?.score ?? 0}
+          />
         </Col>
         <Col xs={24} md={6}>
-          <OpsMetricTile label="资源总数" tone="neutral" value={reportQuery.data?.summary.totalResources ?? 0} />
+          <OpsMetricTile
+            label="资源总数"
+            meta={inspectionSummary ? `严重 ${inspectionSummary.critical ?? 0} · 警告 ${inspectionSummary.warning ?? 0}` : "巡检报告未就绪"}
+            tone="neutral"
+            value={inspectionSummary?.totalResources ?? 0}
+          />
         </Col>
         <Col xs={24} md={6}>
-          <OpsMetricTile label="严重问题" tone="danger" value={reportQuery.data?.summary.critical ?? 0} />
+          <OpsMetricTile
+            label="严重问题"
+            meta={inspectionSummary?.critical ? "需优先修复" : "当前无严重项"}
+            tone="danger"
+            value={inspectionSummary?.critical ?? 0}
+          />
         </Col>
         <Col xs={24} md={6}>
-          <OpsMetricTile label="警告问题" tone="warning" value={reportQuery.data?.summary.warning ?? 0} />
+          <OpsMetricTile
+            label="警告问题"
+            meta={inspectionSummary?.warning ? `能力项覆盖率 ${inspectionCoverageRate}%` : "当前无警告项"}
+            tone="warning"
+            value={inspectionSummary?.warning ?? 0}
+          />
         </Col>
       </Row>
 
@@ -766,34 +802,36 @@ export default function InspectionPage() {
       >
         <Row gutter={[16, 16]} style={{ marginBottom: 8 }}>
           <Col xs={24} md={6}>
-            <OpsMetricTile label="能力项总数" tone="neutral" value={capabilityStats.total} />
+            <OpsMetricTile label="能力项总数" meta="对标 Rancher / KubeSphere" tone="neutral" value={capabilityStats.total} />
           </Col>
           <Col xs={24} md={6}>
-            <OpsMetricTile label="已实现" tone="success" value={capabilityStats.implemented} />
+            <OpsMetricTile label="已实现" meta={capabilityStats.total ? `覆盖率 ${inspectionCoverageRate}%` : "暂无能力基线"} tone="success" value={capabilityStats.implemented} />
           </Col>
           <Col xs={24} md={6}>
-            <OpsMetricTile label="规划中" tone="info" value={capabilityStats.planned} />
+            <OpsMetricTile label="规划中" meta="进入实施排期" tone="info" value={capabilityStats.planned} />
           </Col>
           <Col xs={24} md={6}>
-            <OpsMetricTile label="待补齐" tone="warning" value={capabilityStats.gap} />
+            <OpsMetricTile label="待补齐" meta="优先补齐高频能力" tone="warning" value={capabilityStats.gap} />
           </Col>
         </Row>
 
-        <ResourceTable<CapabilityBaselineMatrixItem>
-          rowKey={(record) => `${record.category}-${record.capabilityName}`}
-          tableKey="business.inspection.capabilityBaseline"
-          columns={capabilityColumns as ColumnsType<CapabilityBaselineMatrixItem>}
-          dataSource={capabilityPagedItems}
-          preferencesClient={tablePreferencesClient}
-          filters={capabilityFilters}
-          onFiltersChange={(nextFilters) => {
-            setCapabilityFilters(nextFilters);
-            setCapabilityPage(1);
-          }}
-          loading={capabilityQuery.isLoading}
-          pagination={capabilityPagination}
-          scroll={{ x: 1300 }}
-        />
+        <div className="resource-workbench__table-zone">
+          <ResourceTable<CapabilityBaselineMatrixItem>
+            rowKey={(record) => `${record.category}-${record.capabilityName}`}
+            tableKey="business.inspection.capabilityBaseline"
+            columns={capabilityColumns as ColumnsType<CapabilityBaselineMatrixItem>}
+            dataSource={capabilityPagedItems}
+            preferencesClient={tablePreferencesClient}
+            filters={capabilityFilters}
+            onFiltersChange={(nextFilters) => {
+              setCapabilityFilters(nextFilters);
+              setCapabilityPage(1);
+            }}
+            loading={capabilityQuery.isLoading}
+            pagination={capabilityPagination}
+            scroll={{ x: 1300 }}
+          />
+        </div>
       </OpsSurface>
 
       {reportQuery.isError ? (
@@ -806,41 +844,43 @@ export default function InspectionPage() {
         />
       ) : null}
 
-      <OpsSurface variant="panel" padding="sm">
-        <ResourceTable<InspectionIssue>
-          rowKey="id"
-          tableKey="business.inspection.issues"
-          columns={columns as ColumnsType<InspectionIssue>}
-          onResourceNavigate={(request) => setResourceDetailTarget(request)}
-          dataSource={issuePagedItems}
-          preferencesClient={tablePreferencesClient}
-          globalSearch={{
-            value: keywordInput,
-            onChange: (value) => {
-              setKeywordInput(value);
-              setKeyword(value.trim());
+      <OpsSurface variant="panel" padding="sm" title="巡检问题">
+        <div className="resource-workbench__table-zone">
+          <ResourceTable<InspectionIssue>
+            rowKey="id"
+            tableKey="business.inspection.issues"
+            columns={columns as ColumnsType<InspectionIssue>}
+            onResourceNavigate={(request) => setResourceDetailTarget(request)}
+            dataSource={issuePagedItems}
+            preferencesClient={tablePreferencesClient}
+            globalSearch={{
+              value: keywordInput,
+              onChange: (value) => {
+                setKeywordInput(value);
+                setKeyword(value.trim());
+                setIssuePage(1);
+              },
+              placeholder: "搜索问题 / 资源 / 证据 / 修复建议",
+            }}
+            filters={issueFilters}
+            onFiltersChange={(nextFilters) => {
+              setIssueFilters(nextFilters);
               setIssuePage(1);
-            },
-            placeholder: "搜索问题 / 资源 / 证据 / 修复建议",
-          }}
-          filters={issueFilters}
-          onFiltersChange={(nextFilters) => {
-            setIssueFilters(nextFilters);
-            setIssuePage(1);
-          }}
-          loading={reportQuery.isLoading}
-          pagination={issuePagination}
-          className="inspection-issues-table"
-          layoutOptions={{
-            actionWidth: 156,
-            autoFit: {
-              rows: issuePagedItems,
-              min: 96,
-              max: 420,
-              sampleSize: 12,
-            },
-          }}
-        />
+            }}
+            loading={reportQuery.isLoading}
+            pagination={issuePagination}
+            className="inspection-issues-table"
+            layoutOptions={{
+              actionWidth: 156,
+              autoFit: {
+                rows: issuePagedItems,
+                min: 96,
+                max: 420,
+                sampleSize: 12,
+              },
+            }}
+          />
+        </div>
       </OpsSurface>
 
       <OpsModalShell

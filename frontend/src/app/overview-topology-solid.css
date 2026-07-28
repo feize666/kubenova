@@ -1,0 +1,69 @@
+/* Page-scoped final overrides for the overview and resource topology workbenches. */
+.ops-overview-shell .ops-overview-card,
+.ops-overview-shell .ops-overview-scope-strip,
+.dashboard-workbench__header-zone > .ops-surface {
+  background: var(--overview-panel-bg) !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.dashboard-workbench__header-zone > .ops-surface > .ops-surface__body {
+  padding: 0;
+}
+
+.dashboard-workbench__page-header {
+  min-height: 0 !important;
+  padding: 12px 14px !important;
+}
+
+.dashboard-workbench__header-zone > .ops-surface::before,
+.dashboard-workbench__header-zone > .ops-surface::after,
+.resource-map-header-shell > .ops-surface::before,
+.resource-map-header-shell > .ops-surface::after {
+  display: none !important;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar,
+.resource-map-shell.resource-map-shell--workbench .resource-map-rail,
+.resource-map-shell.resource-map-shell--workbench .resource-map-canvas,
+.resource-map-shell.resource-map-shell--workbench .resource-map-canvas-state .ops-state,
+.resource-map-shell.resource-map-shell--workbench .resource-map-node,
+.resource-map-shell.resource-map-shell--workbench .resource-map-node--group,
+.resource-map-shell.resource-map-shell--workbench .resource-map-stack-card,
+.resource-map-shell.resource-map-shell--workbench .resource-map-rail .ops-inspector-shell__header,
+.resource-map-shell.resource-map-shell--workbench .resource-map-rail .ops-inspector-shell__fact,
+.resource-map-shell.resource-map-shell--workbench .resource-map-health,
+.resource-map-shell.resource-map-shell--workbench .resource-map-section,
+.resource-map-shell.resource-map-shell--workbench .resource-map-list__item,
+.resource-map-shell.resource-map-shell--workbench .resource-map-density__hero,
+.resource-map-shell.resource-map-shell--workbench .resource-map-density-card,
+.resource-map-shell.resource-map-shell--workbench .resource-map-density-panel {
+  background: var(--map-card-bg) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-canvas {
+  background: var(--map-canvas-bg) !important;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-canvas::after,
+.resource-map-shell.resource-map-shell--workbench .resource-map-node::before,
+.resource-map-shell.resource-map-shell--workbench .resource-map-stack-card::after,
+.resource-map-shell.resource-map-shell--workbench .resource-map-health.is-error::after,
+.resource-map-shell.resource-map-shell--workbench .resource-map-health.is-warning::after {
+  display: none !important;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-node::after {
+  box-shadow: none !important;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-edge .react-flow__edge-path,
+.resource-map-shell.resource-map-shell--workbench .resource-map-edge.is-abnormal .react-flow__edge-path,
+.resource-map-shell.resource-map-shell--workbench .resource-map-edge.is-related .react-flow__edge-path {
+  filter: none !important;
+}

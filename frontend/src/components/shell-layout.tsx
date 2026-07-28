@@ -505,8 +505,8 @@ const AppSider = memo(function AppSider({
 
   return (
     <Sider
-      width={232}
-      className="app-sidebar kn-glass-surface"
+      width={280}
+      className="app-sidebar"
       data-shell-region="sidebar"
       theme={mode as "dark" | "light"}
       style={{ borderRight: "1px solid var(--kn-border)" }}
@@ -551,7 +551,7 @@ const AppSider = memo(function AppSider({
             className="logo-wordmark"
             style={{
               fontWeight: 800,
-              fontSize: 16,
+              fontSize: 17,
               color: "var(--kn-primary)",
               letterSpacing: "0.08em",
               lineHeight: 1.2,
@@ -559,7 +559,7 @@ const AppSider = memo(function AppSider({
           >
             KubeNova
           </div>
-          <div className="logo-caption" style={{ fontSize: 11, color: "var(--kn-text-muted)", letterSpacing: "0.16em" }}>
+          <div className="logo-caption" style={{ fontSize: 11, color: "var(--kn-text-muted)", letterSpacing: "0.12em" }}>
             CLOUD NATIVE OPS
           </div>
         </div>
@@ -601,6 +601,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
   const { mode, toggleTheme } = useThemeMode();
   const { accessToken, isAuthenticated, isInitializing, username, role, logout } = useAuth();
   const isLoginPage = pathname === "/login";
+  const isTopologyRoute = pathname === "/network/topology";
   const currentTitle = getTitleFromPath(pathname);
   const capabilitiesQuery = useQuery({
     queryKey: queryKeys.capabilities.list(accessToken),
@@ -806,7 +807,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
         <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} />
         <Layout>
         <Header
-          className="app-header kn-glass-surface"
+          className="app-header"
           data-shell-region="topbar"
         >
           <Dropdown
@@ -858,14 +859,18 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
             ]}
           />
           <div className="shell-status-band" aria-label="当前工作区状态">
-            <span className="shell-status-chip shell-status-chip--scope">
-              <span>集群</span>
-              <strong>{shellScope.cluster}</strong>
-            </span>
-            <span className="shell-status-chip shell-status-chip--scope">
-              <span>命名空间</span>
-              <strong>{shellScope.namespace}</strong>
-            </span>
+            {!isTopologyRoute ? (
+              <>
+                <span className="shell-status-chip shell-status-chip--scope">
+                  <span>集群</span>
+                  <strong>{shellScope.cluster}</strong>
+                </span>
+                <span className="shell-status-chip shell-status-chip--scope">
+                  <span>命名空间</span>
+                  <strong>{shellScope.namespace}</strong>
+                </span>
+              </>
+            ) : null}
             <span className="shell-status-chip shell-status-chip--success">
               <i aria-hidden="true" />
               <span>能力</span>
@@ -880,10 +885,12 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               <strong>{role || "user"}</strong>
             </span>
           </div>
-          <div className="shell-mobile-scope" aria-label="当前移动端工作区范围">
-            <span>{shellScope.cluster}</span>
-            <strong>{shellScope.namespace}</strong>
-          </div>
+          {!isTopologyRoute ? (
+            <div className="shell-mobile-scope" aria-label="当前移动端工作区范围">
+              <span>{shellScope.cluster}</span>
+              <strong>{shellScope.namespace}</strong>
+            </div>
+          ) : null}
           <Space size={12} className="shell-topbar-actions">
             <Input
               id="shell-global-search"
