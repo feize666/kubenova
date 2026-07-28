@@ -138,7 +138,7 @@ function Canvas({
   const [layout, setLayout] = useState<Layout>({ nodes: [], edges: [] });
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [aspectRatio, setAspectRatio] = useState(1.65);
-  const [viewMode, setViewMode] = useState<"actual" | "fit" | "custom">("actual");
+  const [viewMode, setViewMode] = useState<"actual" | "fit" | "custom">("fit");
   const [layoutError, setLayoutError] = useState(false);
   const [layoutRetry, setLayoutRetry] = useState(0);
   const capacityProjection = useMemo(
@@ -187,13 +187,18 @@ function Canvas({
 
   const showActualSize = useCallback((duration = 180) => {
     setViewMode("actual");
-    void flow.setViewport({ x: 24, y: focusedGroup ? 116 : 24, zoom: 1 }, { duration });
+    void flow.setViewport({ x: 20, y: focusedGroup ? 72 : 64, zoom: 1 }, { duration });
   }, [flow, focusedGroup]);
 
-  const fitGraph = useCallback((duration = 220) => {
+  const fitGraph = useCallback((duration = 180) => {
     setViewMode("fit");
-    void flow.fitView({ padding: 0.16, duration, minZoom: 0.2, maxZoom: 1 });
-  }, [flow]);
+    void flow.fitView({
+      padding: aspectRatio < 0.9 ? 0.24 : 0.16,
+      duration,
+      minZoom: 0.2,
+      maxZoom: 1,
+    });
+  }, [aspectRatio, flow]);
 
   useEffect(() => {
     if (!layout.nodes.length || appliedLayoutRevision.current === layoutRevision) return;
@@ -255,6 +260,7 @@ function Canvas({
   const handleNodeClick = (node: Node<TopologyRendererNodeData>) => {
     const graphNode = node.data.graphNode;
     if (graphNode.nodes?.length) {
+      setViewMode("fit");
       onFocus(graphNode.id);
       onSelectResource(null);
       return;
@@ -340,7 +346,9 @@ function Canvas({
                   <button
                     type="button"
                     onClick={() => {
-                      onFocus(item.id === "root" ? null : item.id);
+                      const nextFocus = item.id === "root" ? null : item.id;
+                      setViewMode("fit");
+                      onFocus(nextFocus);
                       onSelectResource(null);
                     }}
                   >

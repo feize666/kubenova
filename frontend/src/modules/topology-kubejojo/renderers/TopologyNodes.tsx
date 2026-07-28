@@ -203,6 +203,21 @@ export function kindCode(kind?: string) {
   return KIND_CODE[value] ?? (fallback || "RS");
 }
 
+function kindDomain(kind?: string) {
+  if ([
+    "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Pod", "Job", "CronJob",
+    "HorizontalPodAutoscaler", "VerticalPodAutoscaler",
+  ].includes(kind ?? "")) return "workload";
+  if ([
+    "Service", "Ingress", "IngressRoute", "Endpoints", "EndpointSlice", "NetworkPolicy",
+    "GatewayClass", "Gateway", "HTTPRoute",
+  ].includes(kind ?? "")) return "network";
+  if (["PersistentVolume", "PersistentVolumeClaim", "StorageClass"].includes(kind ?? "")) return "storage";
+  if (["ConfigMap", "Secret", "ServiceAccount"].includes(kind ?? "")) return "configuration";
+  if (["Cluster", "Namespace"].includes(kind ?? "")) return "scope";
+  return "other";
+}
+
 function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>>) {
   const graphNode = data.graphNode;
   const children = getChildren(graphNode);
@@ -229,6 +244,7 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
         ? "未关联资源"
         : "资源集合";
   const groupClass = graphNode.groupKind ? `is-group-${graphNode.groupKind}` : undefined;
+  const kindClass = `is-kind-${kindDomain(nodeKind)}`;
 
   return (
     <div
@@ -239,6 +255,7 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
         selected ? "is-selected" : undefined,
         isCollapsedGroup ? "is-collapsed" : undefined,
         isCollapsedGroup ? groupClass : undefined,
+        kindClass,
       ].filter(Boolean).join(" ")}
       role="button"
       tabIndex={0}
@@ -311,6 +328,7 @@ function GroupNode({ data }: NodeProps<Node<TopologyRendererNodeData>>) {
   const isIsolated = graphNode.groupKind === "isolated";
   const groupType = isComponent ? "关联组件" : isIsolated ? "未关联资源" : subtitle;
   const relationshipCount = representedRelationshipCount(graphNode);
+  const groupClass = graphNode.groupKind ? `is-${graphNode.groupKind}` : undefined;
 
   return (
     <div
@@ -318,7 +336,7 @@ function GroupNode({ data }: NodeProps<Node<TopologyRendererNodeData>>) {
         "topology-kubejojo__group",
         `is-${status}`,
         `is-${viewState}`,
-        isComponent ? "is-component" : undefined,
+        groupClass,
       ].filter(Boolean).join(" ")}
       role="group"
       aria-label={`${groupType} ${title}，${resourceCount} 个资源，${relationshipCount} 条关系，状态${STATUS_META[status].label}`}

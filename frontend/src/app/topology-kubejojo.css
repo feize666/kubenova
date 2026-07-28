@@ -16,6 +16,18 @@
   --tk-focus: #0b6db6;
   --tk-grid: #cbd6e1;
   --tk-edge: #69839b;
+  --tk-component-border: #91a7bb;
+  --tk-component-surface: #f7f9fb;
+  --tk-kind-workload: #0b6db6;
+  --tk-kind-workload-surface: #edf6fd;
+  --tk-kind-network: #087f8c;
+  --tk-kind-network-surface: #eaf7f7;
+  --tk-kind-storage: #177a5b;
+  --tk-kind-storage-surface: #ebf7f1;
+  --tk-kind-configuration: #9b5f00;
+  --tk-kind-configuration-surface: #fff6dc;
+  --tk-kind-scope: #526477;
+  --tk-kind-scope-surface: #edf2f6;
   --tk-success: #177a43;
   --tk-success-surface: #eaf7ef;
   --tk-success-border: #88c5a0;
@@ -65,6 +77,18 @@
   --tk-focus: #8bd0ff;
   --tk-grid: #33485a;
   --tk-edge: #7590a8;
+  --tk-component-border: #526b80;
+  --tk-component-surface: #15212b;
+  --tk-kind-workload: #62bdf9;
+  --tk-kind-workload-surface: #17384d;
+  --tk-kind-network: #62d1d8;
+  --tk-kind-network-surface: #173a3c;
+  --tk-kind-storage: #54c79b;
+  --tk-kind-storage-surface: #17372d;
+  --tk-kind-configuration: #f3bd52;
+  --tk-kind-configuration-surface: #3c3018;
+  --tk-kind-scope: #b5c3d0;
+  --tk-kind-scope-surface: #293744;
   --tk-success: #54c77d;
   --tk-success-surface: #173728;
   --tk-success-border: #397759;
@@ -99,7 +123,7 @@
 .topology-kubejojo__canvas .react-flow__pane { cursor: grab; }
 .topology-kubejojo__canvas .react-flow__pane:active { cursor: grabbing; }
 .topology-kubejojo__canvas .react-flow__attribution { display: none; }
-.topology-kubejojo__canvas .react-flow__background { opacity: 0.58; }
+.topology-kubejojo__canvas .react-flow__background { opacity: 0.36; }
 .topology-kubejojo__canvas .react-flow__nodes { pointer-events: auto; }
 .topology-kubejojo__canvas .react-flow__edges { pointer-events: none; }
 .topology-kubejojo__canvas .react-flow__edges { z-index: 5; }
@@ -108,8 +132,9 @@
 .topology-kubejojo__canvas .react-flow__node:has(.topology-kubejojo__node:focus-visible),
 .topology-kubejojo__canvas .react-flow__node:has(.topology-kubejojo__group:focus-visible),
 .topology-kubejojo__canvas .react-flow__node:has(.topology-kubejojo__group-label:hover) { z-index: 20; }
-.topology-kubejojo__canvas .react-flow__edge-path { stroke: var(--tk-edge); stroke-width: 1.5px; opacity: 0.9; }
-.topology-kubejojo__edge-path { stroke-linecap: round; stroke-linejoin: round; transition: stroke 180ms ease, stroke-width 180ms ease, opacity 180ms ease; }
+.topology-kubejojo__canvas .react-flow__edge-path { stroke: var(--tk-edge); }
+.topology-kubejojo__edge-path { stroke-linecap: round; stroke-linejoin: round; transition: stroke 160ms ease, opacity 160ms ease; }
+.topology-kubejojo__edge-path.is-overlay { stroke-linecap: butt; }
 .topology-kubejojo__edge-label {
   position: absolute;
   border-radius: 4px;
@@ -188,7 +213,7 @@
 .topology-kubejojo__focus button:hover { border-color: var(--tk-primary); color: var(--tk-primary); }
 
 .topology-kubejojo__focus {
-  top: 62px;
+  top: 12px;
   left: 14px;
   display: flex;
   max-width: min(560px, calc(100% - 28px));
@@ -216,6 +241,7 @@
   font-size: 11px;
   line-height: 20px;
   padding: 0 8px;
+  font-variant-numeric: tabular-nums;
 }
 
 .topology-kubejojo__zoom {
@@ -260,7 +286,7 @@
   width: 220px;
   height: 88px;
   gap: 10px;
-  border: 1px solid var(--tk-status-border, var(--tk-border-strong));
+  border: 1px solid var(--tk-border-strong);
   border-radius: 6px;
   background: var(--tk-surface);
   padding: 10px 11px;
@@ -319,8 +345,8 @@
   place-items: center;
   border: 1px solid var(--tk-border);
   border-radius: 3px;
-  background: var(--tk-surface-subtle);
-  color: var(--tk-primary);
+  background: var(--tk-kind-surface, var(--tk-surface-subtle));
+  color: var(--tk-kind-color, var(--tk-primary));
   font-size: 9px;
   font-weight: 750;
   line-height: 1;
@@ -354,6 +380,7 @@
   font-size: 10px;
   line-height: 18px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .topology-kubejojo__summary-metrics > span {
   display: inline-flex;
@@ -391,13 +418,18 @@
   flex: 0 0 40px;
   align-self: center;
   place-items: center;
-  border: 1px solid var(--tk-status-border, var(--tk-border));
+  border: 1px solid color-mix(in srgb, var(--tk-kind-color, var(--tk-primary)) 42%, var(--tk-border));
   border-radius: 4px;
-  background: var(--tk-status-surface, var(--tk-primary-weak));
-  color: var(--tk-status-color, var(--tk-primary));
+  background: var(--tk-kind-surface, var(--tk-primary-weak));
+  color: var(--tk-kind-color, var(--tk-primary));
   font-size: 11px;
   font-weight: 700;
 }
+.topology-kubejojo__node.is-kind-workload { --tk-kind-color: var(--tk-kind-workload); --tk-kind-surface: var(--tk-kind-workload-surface); }
+.topology-kubejojo__node.is-kind-network { --tk-kind-color: var(--tk-kind-network); --tk-kind-surface: var(--tk-kind-network-surface); }
+.topology-kubejojo__node.is-kind-storage { --tk-kind-color: var(--tk-kind-storage); --tk-kind-surface: var(--tk-kind-storage-surface); }
+.topology-kubejojo__node.is-kind-configuration { --tk-kind-color: var(--tk-kind-configuration); --tk-kind-surface: var(--tk-kind-configuration-surface); }
+.topology-kubejojo__node.is-kind-scope { --tk-kind-color: var(--tk-kind-scope); --tk-kind-surface: var(--tk-kind-scope-surface); }
 .topology-kubejojo__node-copy {
   display: flex;
   min-width: 0;
@@ -513,36 +545,43 @@
   height: 100%;
   min-width: 268px;
   min-height: 184px;
-  border: 1px solid var(--tk-status-border, var(--tk-border));
+  border: 1px solid var(--tk-border-strong);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--tk-status-surface, var(--tk-primary-weak)) 34%, var(--tk-surface));
+  background: color-mix(in srgb, var(--tk-surface-subtle) 72%, transparent);
   transition: opacity 160ms ease, border-color 160ms ease;
   writing-mode: horizontal-tb;
 }
-.topology-kubejojo__group.is-component { border-style: dashed; background: transparent; }
+.topology-kubejojo__group.is-scope { border-color: var(--tk-border-strong); background: transparent; }
+.topology-kubejojo__group.is-component {
+  border-color: var(--tk-component-border);
+  background: var(--tk-component-surface);
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--tk-primary) 48%, transparent);
+}
+.topology-kubejojo__group.is-isolated { border-style: dashed; background: transparent; }
 .topology-kubejojo__group.is-muted { opacity: 0.32; }
 .topology-kubejojo__group.is-context { opacity: 0.76; }
 .topology-kubejojo__group.is-focused,
 .topology-kubejojo__group.is-selected { border: 2px solid var(--tk-focus); }
 .topology-kubejojo__group-label {
   position: absolute;
-  top: 13px;
-  left: 14px;
+  top: 0;
+  left: 0;
   z-index: 2;
   display: grid;
-  width: min(520px, calc(100% - 28px));
-  max-width: calc(100% - 28px);
-  min-height: 50px;
+  width: 100%;
+  max-width: 100%;
+  min-height: 52px;
   grid-template-columns: 16px minmax(82px, 1fr) minmax(88px, auto);
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--tk-border);
-  border-radius: 5px;
-  background: var(--tk-surface);
+  border: 0;
+  border-bottom: 1px solid var(--tk-border);
+  border-radius: 5px 5px 0 0;
+  background: color-mix(in srgb, var(--tk-surface) 88%, var(--tk-component-surface));
   color: var(--tk-muted);
   font-size: 12px;
   line-height: normal;
-  padding: 7px 9px;
+  padding: 7px 10px;
 }
 .topology-kubejojo__group-copy,
 .topology-kubejojo__group-metrics { display: flex; min-width: 0; flex-direction: column; }
@@ -551,7 +590,7 @@
 .topology-kubejojo__group-metrics { align-items: flex-end; }
 .topology-kubejojo__group-metrics strong { color: var(--tk-text); font-size: 11px; line-height: 17px; white-space: nowrap; }
 .topology-kubejojo__group-metrics span { max-width: 180px; overflow: hidden; color: var(--tk-muted); font-size: 10px; line-height: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.topology-kubejojo__group > .topology-kubejojo__node-glance { top: 70px; left: 14px; }
+.topology-kubejojo__group > .topology-kubejojo__node-glance { top: 58px; left: 10px; }
 
 .topology-kubejojo__handle { width: 8px !important; height: 8px !important; border: 0 !important; background: transparent !important; opacity: 0 !important; }
 
@@ -683,7 +722,7 @@
   .resource-map-shell--workbench .resource-map-workbench,
   .resource-map-shell--workbench .resource-map-canvas-state { min-height: 520px; }
   .topology-kubejojo { min-height: 520px; border-radius: 0; }
-  .topology-kubejojo__focus { top: 66px; right: 10px; left: 10px; }
+  .topology-kubejojo__focus { top: 64px; right: 10px; left: 10px; }
   .topology-kubejojo__zoom { top: 10px; right: 10px; }
   .topology-kubejojo__zoom button,
   .topology-kubejojo__zoom button:last-child { width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
