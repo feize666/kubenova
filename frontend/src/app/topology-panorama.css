@@ -130,6 +130,53 @@
 .resource-map-toolbar .ant-input { color: var(--panorama-text); }
 .resource-map-toolbar .ant-input::placeholder { color: var(--panorama-muted); }
 
+/* Topology control deck: compact, high-signal cards that preserve the existing light palette. */
+.resource-map-source-chips { gap: 6px; }
+.resource-map-source-chips > button {
+  min-width: 112px;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  text-align: left;
+  border-left: 3px solid var(--source-color, var(--panorama-primary));
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+.resource-map-source-chips > button:hover { transform: translateY(-1px); }
+.resource-map-source-chip__copy { display: grid; gap: 1px; line-height: 1.1; }
+.resource-map-source-chip__copy small { color: var(--panorama-muted); font-size: 10px; }
+.resource-map-source-chip__count {
+  margin-left: auto;
+  min-width: 24px;
+  padding: 2px 5px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--source-color) 12%, var(--panorama-surface));
+  color: var(--source-color);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.topology-link-mode.is-active { border-color: var(--panorama-primary) !important; color: var(--panorama-primary-strong) !important; }
+.resource-map-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--panorama-border);
+  border-radius: 5px;
+  background: var(--panorama-surface);
+  color: var(--panorama-muted);
+  font-size: 11px;
+}
+.resource-map-legend__title { color: var(--panorama-text); font-weight: 700; margin-right: 3px; }
+.resource-map-legend i { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 50%; background: var(--legend-color, var(--panorama-primary)); vertical-align: -1px; }
+.resource-map-legend i.is-line { width: 16px; height: 2px; border-radius: 0; background: var(--panorama-primary); }
+.resource-map-legend i.is-dashed { width: 16px; height: 0; border-top: 2px dashed var(--panorama-muted); border-radius: 0; background: transparent; }
+
+.topology-detail-relations button { transition: border-color 120ms ease, background 120ms ease, transform 120ms ease; }
+.topology-detail-relations button:hover { transform: translateX(2px); border-color: var(--panorama-primary); background: color-mix(in srgb, var(--panorama-primary) 7%, var(--panorama-surface)); }
+
 .resource-map-canvas {
   min-height: min(720px, calc(100vh - 222px));
   border: 1px solid var(--panorama-border);

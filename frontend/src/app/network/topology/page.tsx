@@ -14,6 +14,7 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { Alert, Button, Descriptions, Drawer, Input, Segmented, Select, Space, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
@@ -341,6 +342,7 @@ function freshnessMessage(data: Awaited<ReturnType<typeof getTopologyGraphV2>>):
 
 export default function NetworkTopologyPage() {
   const { accessToken: token } = useAuth();
+  const router = useRouter();
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [selectedNamespace, setSelectedNamespace] = useState(ALL_NAMESPACE);
   const [selectedSources, setSelectedSources] = useState<Set<TopologyGraphSource>>(
@@ -357,6 +359,7 @@ export default function NetworkTopologyPage() {
   const [detail, setDetail] = useState<DetailRequest | null>(null);
   const [yaml, setYaml] = useState<YamlTarget | null>(null);
   const [fitVersion, setFitVersion] = useState("initial");
+  const [linkMode, setLinkMode] = useState(false);
 
   const clusterQuery = useQuery({
     queryKey: ["topology-v2", "clusters", token],
@@ -553,6 +556,36 @@ export default function NetworkTopologyPage() {
     }
   }, [resetFocus, selectedCluster]);
 
+  const navigateToResource = useCallback((resource: TopologyGraphResource) => {
+    const kind = normalizeKind(resource.kind);
+    const routes: Record<string, string> = {
+      Pod: "/workloads/pods",
+      Deployment: "/workloads/deployments",
+      StatefulSet: "/workloads/statefulsets",
+      DaemonSet: "/workloads/daemonsets",
+      ReplicaSet: "/workloads/replicasets",
+      Job: "/workloads/jobs",
+      CronJob: "/workloads/cronjobs",
+      Service: "/network/services",
+      Ingress: "/network/ingress",
+      IngressRoute: "/network/ingress",
+      Endpoints: "/network/endpoints",
+      EndpointSlice: "/network/endpointslices",
+      NetworkPolicy: "/network/networkpolicy",
+      PersistentVolume: "/storage/pv",
+      PersistentVolumeClaim: "/storage/pvc",
+      StorageClass: "/storage/sc",
+      ConfigMap: "/configs/configmaps",
+      Secret: "/configs/secrets",
+      ServiceAccount: "/configs/serviceaccounts",
+    };
+    const params = new URLSearchParams({ clusterId: resource.clusterId, keyword: resource.name });
+    if (resource.namespace) params.set("namespace", resource.namespace);
+    router.push(`${routes[kind] ?? "/network/topology"}?${params.toString()}`);
+    setTopologySelection(null);
+    setDetail(null);
+  }, [router]);
+
   return (
     <section className="resource-map-shell resource-map-shell--workbench">
       <ResourcePageHeader
@@ -608,12 +641,13 @@ export default function NetworkTopologyPage() {
                 style={{
                   "--source-color-light": SOURCE_META[source].lightColor,
                   "--source-color-dark": SOURCE_META[source].darkColor,
+                  "--source-color": SOURCE_META[source].lightColor,
                 } as CSSProperties}
                 onClick={() => toggleSource(source)}
               >
                 {SOURCE_META[source].icon}
-                <span>{SOURCE_META[source].label}</span>
-                <strong>{sourceCounts[source]}</strong>
+                <span className="resource-map-source-chip__copy"><span>{SOURCE_META[source].label}</span><small>资源域</small></span>
+                <strong className="resource-map-source-chip__count">{sourceCounts[source]}</strong>
               </button>
             ))}
           </div>
@@ -632,6 +666,19 @@ export default function NetworkTopologyPage() {
         </div>
 
         <div className="resource-map-toolbar__actions">
+          <Button
+            className={linkMode ? "is-active topology-link-mode" : "topology-link-mode"}
+            icon={<BranchesOutlined />}
+            aria-pressed={linkMode}
+            onClick={() => {
+              setLinkMode((value) => !value);
+              setExpandAll(true);
+              setNeighborhoodResourceId(null);
+              setFitVersion(String(Date.now()));
+            }}
+          >
+            {linkMode ? "链路中" : "完整链路"}
+          </Button>
           <Button
             type={errorsOnly ? "primary" : "default"}
             icon={<WarningOutlined />}
@@ -714,6 +761,13 @@ export default function NetworkTopologyPage() {
           description={`当前快照关联 ${graphQuery.data.coverage.warningRecords} 条活动告警。`}
         />
       ) : null}
+
+      <div className="resource-map-legend" aria-label="拓扑图例">
+        <span className="resource-map-legend__title">拓扑图例</span>
+        {SOURCE_KEYS.map((source) => <span key={source}><i style={{ "--legend-color": SOURCE_META[source].lightColor } as CSSProperties} />{SOURCE_META[source].label}</span>)}
+        <span><i className="is-line" />关系</span>
+        <span><i className="is-dashed" />推断关系</span>
+      </div>
 
       <div className="resource-map-workbench">
         <div className="resource-map-canvas">
@@ -824,8 +878,7 @@ export default function NetworkTopologyPage() {
                     key={relation.id}
                     type="button"
                     onClick={() => {
-                      if (neighborhoodResourceId) setNeighborhoodResourceId(peerId);
-                      setTopologySelection({ canvasId: peerId, resourceId: peerId, aggregation: null });
+                      if (peer) navigateToResource(peer);
                     }}
                   >
                     <span>{relation.label}</span>
