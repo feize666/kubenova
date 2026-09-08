@@ -184,17 +184,22 @@ export class TopologyRelationResolver {
               add(service, row, 'publishes', 'network', 'PUBLISHES', [
                 'metadata.labels.kubernetes.io/service-name',
               ]);
-        for (const target of endpointTargets(row))
-          for (const workload of findByKindAndName(
-            byKindName,
-            row,
-            target.kind,
-            target.name,
-          ))
+        for (const target of endpointTargets(row)) {
+          const workloads =
+            target.kind && target.name
+              ? findByKindAndName(byKindName, row, target.kind, target.name)
+              : target.ip
+                ? (byKind.get('Pod') ?? []).filter(
+                    (pod) =>
+                      sameNamespace(row, pod) && podIpMatches(pod, target.ip!),
+                  )
+                : [];
+          for (const workload of workloads)
             if (sameNamespace(row, workload))
               add(row, workload, 'resolves', 'network', 'RESOLVES', [
                 target.path,
               ]);
+        }
       }
 
       if (source === 'network' && row.kind === 'Endpoints') {
@@ -209,17 +214,22 @@ export class TopologyRelationResolver {
             add(service, row, 'publishes', 'network', 'PUBLISHES', [
               'metadata.name',
             ]);
-        for (const target of endpointTargets(row))
-          for (const workload of findByKindAndName(
-            byKindName,
-            row,
-            target.kind,
-            target.name,
-          ))
+        for (const target of endpointTargets(row)) {
+          const workloads =
+            target.kind && target.name
+              ? findByKindAndName(byKindName, row, target.kind, target.name)
+              : target.ip
+                ? (byKind.get('Pod') ?? []).filter(
+                    (pod) =>
+                      sameNamespace(row, pod) && podIpMatches(pod, target.ip!),
+                  )
+                : [];
+          for (const workload of workloads)
             if (sameNamespace(row, workload))
               add(row, workload, 'resolves', 'network', 'RESOLVES', [
                 target.path,
               ]);
+        }
       }
 
       if (source === 'network' && row.kind === 'NetworkPolicy') {
@@ -462,25 +472,57 @@ function workloadReferences(row: PersistedResource): ResourceReference[] {
 
 function endpointTargets(
   row: PersistedResource,
-): Array<{ kind: string; name: string; path: string }> {
+): Array<{ kind?: string; name?: string; ip?: string; path: string }> {
   const spec = asRecord(row.spec);
-  const refs: Array<{ kind: string; name: string; path: string }> = [];
+  const refs: Array<{
+    kind?: string;
+    name?: string;
+    ip?: string;
+    path: string;
+  }> = [];
   const add = (value: Prisma.JsonValue | null | undefined, path: string) => {
     const target = asRecord(value);
     const kind = asString(target?.kind);
     const name = asString(target?.name);
+    const ip = asString(target?.ip);
     if (kind && name) refs.push({ kind, name, path });
+    else if (ip) refs.push({ ip, path });
   };
-  for (const endpoint of asArray(spec?.endpoints))
-    add(asRecord(endpoint)?.targetRef, 'spec.endpoints[].targetRef');
+  for (const endpoint of asArray(spec?.endpoints)) {
+    const item = asRecord(endpoint);
+    if (item?.targetRef) add(item.targetRef, 'spec.endpoints[].targetRef');
+    else {
+      for (const address of asArray(item?.addresses)) {
+        const ip = asString(address);
+        if (ip) refs.push({ ip, path: 'spec.endpoints[].addresses[]' });
+      }
+      add(item, 'spec.endpoints[].addresses[]');
+    }
+  }
   for (const subset of asArray(spec?.subsets)) {
     for (const address of [
       ...asArray(asRecord(subset)?.addresses),
       ...asArray(asRecord(subset)?.notReadyAddresses),
-    ])
-      add(asRecord(address)?.targetRef, 'spec.subsets[].addresses[].targetRef');
+    ]) {
+      const item = asRecord(address);
+      add(
+        item?.targetRef ?? item,
+        item?.targetRef
+          ? 'spec.subsets[].addresses[].targetRef'
+          : 'spec.subsets[].addresses[].ip',
+      );
+    }
   }
   return refs;
+}
+
+/** Match EndpointSlice/Endpoints address-only entries to persisted Pods. */
+function podIpMatches(pod: PersistedResource, ip: string): boolean {
+  const status = asRecord(pod.statusJson);
+  if (asString(status?.podIP) === ip) return true;
+  return asArray(status?.podIPs).some(
+    (item) => asString(asRecord(item)?.ip) === ip,
+  );
 }
 
 function serviceBackends(
