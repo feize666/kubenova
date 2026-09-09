@@ -610,24 +610,30 @@ export default function NetworkTopologyPage() {
 
       <div className="resource-map-toolbar" aria-label="拓扑控制栏">
         <div className="resource-map-toolbar__scope">
-          <Select
-            aria-label="选择集群"
-            value={selectedCluster?.id}
-            placeholder="选择集群"
-            disabled={clusters.length === 0}
-            options={clusters.map((cluster) => ({ value: cluster.id, label: cluster.name }))}
-            onChange={selectCluster}
-          />
-          <Select
-            aria-label="选择名称空间"
-            value={selectedNamespace}
-            disabled={!selectedCluster}
-            options={[
-              { value: ALL_NAMESPACE, label: "全部名称空间" },
-              ...namespaceOptions.map((namespace) => ({ value: namespace, label: namespace })),
-            ]}
-            onChange={selectNamespace}
-          />
+          <div className="resource-map-context-field">
+            <span className="resource-map-context-field__label">集群</span>
+            <Select
+              aria-label="选择集群"
+              value={selectedCluster?.id}
+              placeholder="选择集群"
+              disabled={clusters.length === 0}
+              options={clusters.map((cluster) => ({ value: cluster.id, label: cluster.name }))}
+              onChange={selectCluster}
+            />
+          </div>
+          <div className="resource-map-context-field">
+            <span className="resource-map-context-field__label">范围</span>
+            <Select
+              aria-label="选择名称空间"
+              value={selectedNamespace}
+              disabled={!selectedCluster}
+              options={[
+                { value: ALL_NAMESPACE, label: "全部名称空间" },
+                ...namespaceOptions.map((namespace) => ({ value: namespace, label: namespace })),
+              ]}
+              onChange={selectNamespace}
+            />
+          </div>
         </div>
 
         <div className="resource-map-toolbar__filters">
@@ -645,9 +651,12 @@ export default function NetworkTopologyPage() {
                 } as CSSProperties}
                 onClick={() => toggleSource(source)}
               >
-                {SOURCE_META[source].icon}
-                <span className="resource-map-source-chip__copy"><span>{SOURCE_META[source].label}</span><small>资源域</small></span>
-                <strong className="resource-map-source-chip__count">{sourceCounts[source]}</strong>
+                <span className="resource-map-source-chip__icon">{SOURCE_META[source].icon}</span>
+                <span className="resource-map-source-chip__copy"><span>{SOURCE_META[source].label}</span><small>{selectedSources.has(source) ? "已显示" : "已隐藏"}</small></span>
+                <span className="resource-map-source-chip__metrics">
+                  <strong className="resource-map-source-chip__count">{sourceCounts[source]}</strong>
+                  <small>{(graphQuery.data?.resources ?? []).filter((resource) => resource.source === source && resourceStatus(resource) !== "healthy").length} 异常</small>
+                </span>
               </button>
             ))}
           </div>
@@ -666,6 +675,7 @@ export default function NetworkTopologyPage() {
         </div>
 
         <div className="resource-map-toolbar__actions">
+          <span className="resource-map-toolbar__hint">视图模式</span>
           <Button
             className={linkMode ? "is-active topology-link-mode" : "topology-link-mode"}
             icon={<BranchesOutlined />}
@@ -694,7 +704,7 @@ export default function NetworkTopologyPage() {
             allowClear
             aria-label="搜索拓扑资源"
             prefix={<SearchOutlined />}
-            placeholder="搜索资源"
+            placeholder="搜索名称、类型或名称空间"
             value={queryInput}
             onChange={(event) => setQueryInput(event.target.value)}
           />
@@ -767,6 +777,7 @@ export default function NetworkTopologyPage() {
         {SOURCE_KEYS.map((source) => <span key={source}><i style={{ "--legend-color": SOURCE_META[source].lightColor } as CSSProperties} />{SOURCE_META[source].label}</span>)}
         <span><i className="is-line" />关系</span>
         <span><i className="is-dashed" />推断关系</span>
+        <span className="resource-map-legend__status"><i className="is-status" />实时快照</span>
       </div>
 
       <div className="resource-map-workbench">

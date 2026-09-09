@@ -407,3 +407,38 @@
   .resource-map-shell *::before,
   .resource-map-shell *::after { transition: none !important; animation: none !important; }
 }
+
+/* Control deck: one visual language for context, resource domains and actions. */
+.resource-map-shell--workbench {
+  background-color: var(--panorama-canvas);
+  background-image: linear-gradient(135deg, color-mix(in srgb, var(--panorama-primary) 3%, transparent), transparent 38%);
+}
+.resource-map-toolbar__scope,
+.resource-map-toolbar__filters,
+.resource-map-toolbar__actions { align-items: center; }
+.resource-map-context-field { display: inline-flex; align-items: center; gap: 7px; padding: 3px 7px 3px 9px; border: 1px solid var(--panorama-border); border-radius: 5px; background: var(--panorama-surface-raised); }
+.resource-map-context-field__label { color: var(--panorama-muted); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.resource-map-context-field .ant-select { min-width: 138px; }
+.resource-map-context-field .ant-select-selector { border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 0 26px 0 0 !important; }
+.resource-map-source-chips > button { min-height: 48px; border: 1px solid var(--panorama-border); border-left: 3px solid var(--source-color, var(--panorama-primary)); border-radius: 6px; background: linear-gradient(115deg, color-mix(in srgb, var(--source-color) 7%, var(--panorama-surface)), var(--panorama-surface)); }
+.resource-map-source-chips > button.is-active { border-color: color-mix(in srgb, var(--source-color) 56%, var(--panorama-border)); box-shadow: inset 0 -2px 0 var(--source-color), 0 4px 12px color-mix(in srgb, var(--source-color) 10%, transparent); }
+.resource-map-source-chip__icon { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 5px; background: color-mix(in srgb, var(--source-color) 13%, var(--panorama-surface)); color: var(--source-color); }
+.resource-map-source-chip__copy span { color: var(--panorama-text); font-size: 12px; font-weight: 700; }
+.resource-map-source-chip__metrics { display: grid; justify-items: end; gap: 1px; margin-left: auto; }
+.resource-map-source-chip__metrics small { color: var(--panorama-muted); font-size: 9px; white-space: nowrap; }
+.resource-map-source-chip__count { background: transparent; padding: 0; font-size: 16px; }
+.resource-map-toolbar__hint { color: var(--panorama-muted); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.resource-map-toolbar__actions .ant-btn { min-height: 32px; border-radius: 5px; font-weight: 600; }
+.resource-map-toolbar__actions .ant-input-affix-wrapper { min-height: 32px; border-radius: 5px; }
+.resource-map-toolbar__actions .ops-icon-action-button.ant-btn { width: 32px; height: 32px; border-radius: 5px; }
+.resource-map-legend { padding: 8px 12px; border-radius: 6px; background: color-mix(in srgb, var(--panorama-surface) 92%, var(--panorama-primary)); }
+.resource-map-legend__status { margin-left: auto; color: var(--panorama-success); font-weight: 600; }
+.resource-map-legend i.is-status { width: 7px; height: 7px; background: var(--panorama-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--panorama-success) 15%, transparent); }
+
+@media (max-width: 720px) {
+  .resource-map-context-field { flex: 1; min-width: 0; }
+  .resource-map-context-field .ant-select { min-width: 0; flex: 1; }
+  .resource-map-source-chips > button { min-width: 0; flex: 1 1 calc(50% - 6px); }
+  .resource-map-toolbar__hint { width: 100%; }
+  .resource-map-legend__status { margin-left: 0; }
+}
