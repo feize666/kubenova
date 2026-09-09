@@ -15,11 +15,24 @@
   --panorama-danger: #c43131;
   min-height: calc(100vh - 116px);
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /* The legend is a sibling of the workbench; give it its own intrinsic row
+   * so it cannot absorb the canvas' flexible height. */
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 10px;
   overflow: hidden;
   color: var(--panorama-text);
   background: var(--panorama-canvas);
+}
+
+.resource-map-shell.resource-map-shell--workbench > .resource-map-legend {
+  min-height: 28px;
+  height: auto;
+  align-self: start;
+}
+
+.resource-map-shell.resource-map-shell--workbench > .resource-map-workbench {
+  min-height: 0;
+  height: 100%;
 }
 
 [data-theme="dark"] .resource-map-shell {
