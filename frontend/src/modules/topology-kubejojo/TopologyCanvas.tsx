@@ -15,6 +15,7 @@ import {
   ReactFlowProvider,
   useReactFlow,
   type Edge,
+  type EdgeMarker,
   type Node,
 } from "@xyflow/react";
 
@@ -38,6 +39,7 @@ import {
   topologyKubejojoNodeTypes,
   type TopologyRendererEdgeData,
   type TopologyRendererNodeData,
+  type TopologyNodeStatus,
 } from "./renderers";
 
 type Props = {
@@ -64,6 +66,32 @@ type Layout = {
   nodes: Node<TopologyRendererNodeData>[];
   edges: Edge<TopologyRendererEdgeData>[];
 };
+
+const EDGE_MARKER_COLOR: Record<TopologyNodeStatus, string> = {
+  healthy: "var(--tk-success)",
+  warning: "var(--tk-warning)",
+  critical: "var(--tk-danger)",
+  unknown: "var(--tk-edge)",
+};
+
+function relationHealth(
+  relation: KubejojoRelation | undefined,
+  resourceStatusById: Map<string, TopologyNodeStatus>,
+): TopologyNodeStatus {
+  if (!relation) return "unknown";
+  const statuses = [resourceStatusById.get(relation.source), resourceStatusById.get(relation.target)];
+  if (statuses.includes("critical")) return "critical";
+  if (statuses.includes("warning")) return "warning";
+  if (statuses.every((status) => status === "healthy")) return "healthy";
+  return "unknown";
+}
+
+function aggregateEdgeHealth(statuses: TopologyNodeStatus[]): TopologyNodeStatus {
+  if (statuses.includes("critical")) return "critical";
+  if (statuses.includes("warning")) return "warning";
+  if (statuses.length > 0 && statuses.every((status) => status === "healthy")) return "healthy";
+  return "unknown";
+}
 
 function countVisibleNodes(node: KubejojoGraphNode): number {
   if (node.collapsed) return node.id === "root" ? 0 : 1;
@@ -274,11 +302,23 @@ function Canvas({
 
   const edges = useMemo(() => {
     const relationById = new Map(projected.relations.map((relation) => [relation.id, relation]));
+    const resourceStatusById = new Map(projected.resources.map((resource) => [resource.id, resource.status ?? "unknown"]));
     return layout.edges.map((edge) => ({
       ...edge,
+      markerEnd: typeof edge.markerEnd === "object"
+        ? {
+          ...(edge.markerEnd as EdgeMarker),
+          color: EDGE_MARKER_COLOR[aggregateEdgeHealth(
+            (edge.data?.relationIds ?? []).map((id) => relationHealth(relationById.get(id), resourceStatusById)),
+          )],
+        }
+        : edge.markerEnd,
       data: {
         ...edge.data,
         route: "elk" as const,
+        status: aggregateEdgeHealth(
+          (edge.data?.relationIds ?? []).map((id) => relationHealth(relationById.get(id), resourceStatusById)),
+        ),
         viewState: edgeViewState(edge.data?.relationIds, relationById, selectedNodeId, adjacent),
       },
     })) as Edge<TopologyRendererEdgeData>[];
