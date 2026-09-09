@@ -9,7 +9,7 @@ import { applyTopologyCapacity, projectTopologyNeighborhood, TOPOLOGY_CAPACITY_L
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
 import { getKubejojoRelationSemantics, makeKubejojoRelationId, makeKubejojoStableId } from "./relations.ts";
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
-import { collapseKubejojoGraph, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, groupKubejojoGraph, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
+import { collapseKubejojoGraph, getKubejojoAccessPathOrder, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, groupKubejojoGraph, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
 
 const progressiveDisclosureResources: KubejojoResource[] = [
   { id: "deployment", kind: "Deployment", name: "checkout", namespace: "demo", instanceName: "checkout" },
@@ -112,6 +112,19 @@ test("typed relation semantics cover the four initial topology domains", () => {
   );
   assert.equal(getKubejojoRelationSemantics(undefined, "policy").type, "GOVERNS");
   assert.equal(getKubejojoRelationSemantics(undefined, "config", "secretKeyRef").type, "USES_SECRET");
+});
+
+test("canonical access path has stable visual ordering", () => {
+  const order = (kind: string) => getKubejojoAccessPathOrder({
+    id: kind,
+    resource: { id: kind, kind, name: kind },
+  });
+  assert.ok(order("Ingress") < order("Service"));
+  assert.ok(order("Service") < order("EndpointSlice"));
+  assert.ok(order("EndpointSlice") < order("Pod"));
+  assert.ok(order("Pod") < order("PersistentVolumeClaim"));
+  assert.ok(order("PersistentVolumeClaim") < order("PersistentVolume"));
+  assert.equal(order("EndpointSlice") < order("Endpoints"), true);
 });
 
 test("progressive disclosure folds scope, then component, then reveals resources", () => {

@@ -74,6 +74,29 @@ const WEIGHTS: Record<string, number> = {
   ConfigMap: 760,
   Secret: 760,
 };
+/**
+ * Stable visual order for the canonical request path.  ELK still computes
+ * the actual coordinates, however preserving this order in the model keeps
+ * siblings deterministic and prevents the endpoint compatibility branch from
+ * jumping ahead of EndpointSlice between renders.
+ */
+const ACCESS_PATH_ORDER: Record<string, number> = {
+  Ingress: 10,
+  IngressRoute: 10,
+  Gateway: 10,
+  Service: 20,
+  EndpointSlice: 30,
+  Endpoints: 31,
+  Pod: 40,
+  PersistentVolumeClaim: 50,
+  PersistentVolume: 60,
+  ConfigMap: 50,
+  Secret: 50,
+  ReplicaSet: 50,
+  Deployment: 60,
+  StatefulSet: 60,
+  DaemonSet: 60,
+};
 const DEFAULT_ASPECT_RATIO = 1.6;
 
 export const KUBEJOJO_LAYOUT_METRICS = Object.freeze({
@@ -107,6 +130,15 @@ const weight = (node: KubejojoGraphNode) => {
 };
 const each = (node: KubejojoGraphNode, fn: (item: KubejojoGraphNode) => void) => { fn(node); node.nodes?.forEach((item) => each(item, fn)); };
 const compareNodes = (left: KubejojoGraphNode, right: KubejojoGraphNode) => weight(right) - weight(left) || left.id.localeCompare(right.id, "en");
+
+export function getKubejojoAccessPathOrder(node: KubejojoGraphNode): number {
+  return ACCESS_PATH_ORDER[node.resource?.kind ?? ""] ?? 45;
+}
+
+const compareLayoutNodes = (left: KubejojoGraphNode, right: KubejojoGraphNode) =>
+  getKubejojoAccessPathOrder(left) - getKubejojoAccessPathOrder(right)
+  || left.resource?.name?.localeCompare(right.resource?.name ?? "", "en")
+  || left.id.localeCompare(right.id, "en");
 
 function normalizeAspectRatio(aspectRatio: number) {
   return Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : DEFAULT_ASPECT_RATIO;
@@ -388,7 +420,9 @@ type ElkNodeData = ElkNode & {
 };
 
 function toElk(node: KubejojoGraphNode, aspect: number): ElkNodeData {
-  const children = node.collapsed ? undefined : node.nodes?.map((child) => toElk(child, aspect));
+  const children = node.collapsed
+    ? undefined
+    : node.nodes?.slice().sort(compareLayoutNodes).map((child) => toElk(child, aspect));
   const containedIds = new Set(leaves(node).map((child) => child.id));
   // A collapsed node is represented as one visible card. Its child nodes do
   // not exist in this ELK pass, so their internal edges stay inside the
@@ -414,6 +448,10 @@ function toElk(node: KubejojoGraphNode, aspect: number): ElkNodeData {
       "elk.layered.cycleBreaking.strategy": "DEPTH_FIRST",
       "elk.layered.layering.strategy": "NETWORK_SIMPLEX",
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      // Respect the deterministic child order above when several valid
+      // layouts exist (notably Service -> EndpointSlice/Endpoints branches).
+      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      "elk.layered.considerModelOrder.components": "true",
       "elk.nodeSize.minimum": `(${KUBEJOJO_LAYOUT_METRICS.nodeWidth}.0,${KUBEJOJO_LAYOUT_METRICS.nodeHeight}.0)`,
       "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
       "elk.spacing.nodeNode": String(KUBEJOJO_LAYOUT_METRICS.layeredNodeSpacing),
