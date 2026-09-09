@@ -122,7 +122,12 @@ function normalizePath(path: string): string {
     try {
       const parsed = new URL(configuredBase);
       const hostname = parsed.hostname.toLowerCase();
-      if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+      if (
+        hostname === "localhost" ||
+        hostname === "127.0.0.1" ||
+        hostname === "::1" ||
+        hostname === "control-api"
+      ) {
         return path;
       }
     } catch {

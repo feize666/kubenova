@@ -200,7 +200,16 @@ function resolveAuthApiBases(): string[] {
   const sameOrigin = typeof window !== "undefined" ? window.location.origin.replace(/\/+$/, "") : "";
 
   if (configuredBase && /^https?:\/\//i.test(configuredBase)) {
-    set.add(configuredBase);
+    try {
+      const hostname = new URL(configuredBase).hostname.toLowerCase();
+      if (typeof window !== "undefined" && hostname === "control-api") {
+        set.add(sameOrigin);
+      } else {
+        set.add(configuredBase);
+      }
+    } catch {
+      set.add(sameOrigin);
+    }
   } else if (sameOrigin) {
     set.add(sameOrigin);
   } else {
