@@ -83,11 +83,13 @@ export class AuthService {
     const refreshToken = this.tokenService.createRefreshToken();
     const refreshTokenHash = this.tokenService.hashToken(refreshToken);
     const expiresAt = this.tokenService.resolveAccessTokenExpiry();
+    const refreshExpiresAt = this.tokenService.resolveRefreshTokenExpiry();
 
     const session = await this.authRepository.createSession({
       userId: userRecord.id,
       refreshTokenHash,
       expiresAt,
+      refreshExpiresAt,
     });
 
     return {
@@ -109,17 +111,21 @@ export class AuthService {
       return null;
     }
 
-    await this.authRepository.revokeSessionById(currentSession.id);
-
     const nextRefreshToken = this.tokenService.createRefreshToken();
     const nextRefreshTokenHash = this.tokenService.hashToken(nextRefreshToken);
     const expiresAt = this.tokenService.resolveAccessTokenExpiry();
 
-    const nextSession = await this.authRepository.createSession({
+    const nextSession = await this.authRepository.rotateSession({
+      sessionId: currentSession.id,
       userId: currentSession.userId,
-      refreshTokenHash: nextRefreshTokenHash,
+      currentRefreshTokenHash: refreshTokenHash,
+      nextRefreshTokenHash,
       expiresAt,
+      refreshExpiresAt: currentSession.refreshExpiresAt,
     });
+    if (!nextSession) {
+      return null;
+    }
 
     return {
       token: this.tokenService.createAccessToken(nextSession.id),

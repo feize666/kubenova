@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AUTH_EXPIRED_EVENT, CONTROL_API_BASE, resetAuthExpiryState } from "@/lib/api/client";
 
 type LoginPayload = {
@@ -32,6 +32,18 @@ type AuthSnapshot = {
   username: string;
   role: string;
   expiresAt?: string;
+};
+
+type RefreshResponse = {
+  accessToken: string;
+  refreshToken: string;
+  user: AuthUser;
+  expiresAt?: string;
+};
+
+type RefreshAttempt = {
+  snapshot: AuthSnapshot | null;
+  unauthorized: boolean;
 };
 
 function normalizeRole(role: string | undefined | null): string {
@@ -314,6 +326,56 @@ function isUnauthorizedAuthError(error: unknown): error is AuthApiError {
   return error instanceof AuthApiError && error.status === 401;
 }
 
+function snapshotFromRefresh(data: RefreshResponse): AuthSnapshot {
+  return {
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
+    username: data.user.username,
+    role: normalizeRole(data.user.role),
+    expiresAt: data.expiresAt,
+  };
+}
+
+async function waitForRotatedSnapshot(
+  currentRefreshToken: string,
+): Promise<AuthSnapshot | null> {
+  // A second tab can receive 401 while the winning tab is still persisting
+  // the rotated token. Give the winner a short grace window before logging out.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const snapshot = readAuthSnapshot();
+    if (
+      snapshot?.accessToken &&
+      snapshot.refreshToken &&
+      snapshot.refreshToken !== currentRefreshToken
+    ) {
+      return snapshot;
+    }
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
+  }
+  return null;
+}
+
+type RefreshLockNavigator = Navigator & {
+  locks?: {
+    request<T>(
+      name: string,
+      options: { mode: "exclusive" },
+      callback: () => Promise<T>,
+    ): Promise<T>;
+  };
+};
+
+function withRefreshLock<T>(callback: () => Promise<T>): Promise<T> {
+  if (typeof navigator !== "undefined" && (navigator as RefreshLockNavigator).locks) {
+    return (navigator as RefreshLockNavigator).locks!.request<T>(
+      "kubenova-auth-refresh",
+      { mode: "exclusive" },
+      callback,
+    );
+  }
+  return callback();
+}
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function useAuth() {
@@ -334,7 +396,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
   const bootstrappedRef = useRef(false);
   const authGenerationRef = useRef(0);
-  const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const refreshInFlightRef = useRef<Promise<RefreshAttempt> | null>(null);
+  const storageSyncTimerRef = useRef<number | null>(null);
 
   const markAuthGeneration = () => {
     authGenerationRef.current += 1;
@@ -354,6 +417,73 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const refreshSession = useCallback(
+    async (
+      currentRefreshToken: string,
+      expectedGeneration = authGenerationRef.current,
+    ): Promise<RefreshAttempt> => {
+      if (!currentRefreshToken) {
+        return { snapshot: null, unauthorized: true };
+      }
+      if (refreshInFlightRef.current) {
+        return refreshInFlightRef.current;
+      }
+
+      const executeRefresh = async (): Promise<RefreshAttempt> => {
+        try {
+          const refreshed = await requestAuthJson<RefreshResponse>("refresh", {
+            method: "POST",
+            body: JSON.stringify({ refreshToken: currentRefreshToken }),
+          });
+          if (expectedGeneration !== authGenerationRef.current) {
+            return { snapshot: null, unauthorized: false };
+          }
+          const nextSnapshot = snapshotFromRefresh(refreshed.data);
+          const remember = Boolean(window.localStorage.getItem(LOCAL_ACCESS_KEY));
+          markAuthGeneration();
+          authExpiredHandled = false;
+          resetAuthExpiryState();
+          persistAuth(nextSnapshot, remember);
+          setAccessToken(nextSnapshot.accessToken);
+          setRefreshToken(nextSnapshot.refreshToken);
+          setUsername(nextSnapshot.username);
+          setRole(nextSnapshot.role);
+          setExpiresAt(nextSnapshot.expiresAt ?? "");
+          setLastRequestId(refreshed.requestId);
+          return { snapshot: nextSnapshot, unauthorized: false };
+        } catch (error) {
+          if (error instanceof AuthApiError) {
+            setLastRequestId(error.requestId);
+          }
+          if (isUnauthorizedAuthError(error)) {
+            const rotatedSnapshot = await waitForRotatedSnapshot(currentRefreshToken);
+            if (rotatedSnapshot && expectedGeneration === authGenerationRef.current) {
+              markAuthGeneration();
+              authExpiredHandled = false;
+              resetAuthExpiryState();
+              setAccessToken(rotatedSnapshot.accessToken);
+              setRefreshToken(rotatedSnapshot.refreshToken);
+              setUsername(rotatedSnapshot.username);
+              setRole(rotatedSnapshot.role);
+              setExpiresAt(rotatedSnapshot.expiresAt ?? "");
+              return { snapshot: rotatedSnapshot, unauthorized: false };
+            }
+          }
+          return {
+            snapshot: null,
+            unauthorized: isUnauthorizedAuthError(error),
+          };
+        } finally {
+          refreshInFlightRef.current = null;
+        }
+      };
+      const task = withRefreshLock(executeRefresh);
+      refreshInFlightRef.current = task;
+      return task;
+    },
+    [],
+  );
+
   useEffect(() => {
     if (bootstrappedRef.current) {
       return;
@@ -372,11 +502,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUsername(snapshot.username);
       setRole(snapshot.role);
       setExpiresAt(snapshot.expiresAt ?? "");
-      setIsInitializing(false);
+
+      let activeSnapshot = snapshot;
+      if (snapshot.refreshToken && isExpiringSoon(snapshot.expiresAt)) {
+        const refreshedSnapshot = await refreshSession(snapshot.refreshToken, requestGeneration);
+        if (!refreshedSnapshot.snapshot) {
+          if (refreshedSnapshot.unauthorized) {
+            applyClearAuthState(requestGeneration);
+          }
+          setIsInitializing(false);
+          return;
+        }
+        activeSnapshot = refreshedSnapshot.snapshot;
+      }
 
       try {
         const me = await requestAuthJson<{ user: AuthUser; expiresAt?: string }>("me", {
-          headers: { Authorization: `Bearer ${snapshot.accessToken}` },
+          headers: { Authorization: `Bearer ${activeSnapshot.accessToken}` },
         });
         if (requestGeneration !== authGenerationRef.current) {
           return;
@@ -391,77 +533,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error instanceof AuthApiError) {
           setLastRequestId(error.requestId);
         }
+        if (isUnauthorizedAuthError(error) && activeSnapshot.refreshToken) {
+          const refreshedSnapshot = await refreshSession(
+            activeSnapshot.refreshToken,
+            authGenerationRef.current,
+          );
+          if (refreshedSnapshot.snapshot) {
+            setIsInitializing(false);
+            return;
+          }
+          if (refreshedSnapshot.unauthorized) {
+            applyClearAuthState(authGenerationRef.current);
+          }
+        }
         if (isUnauthorizedAuthError(error)) {
-          applyClearAuthState(requestGeneration);
+          applyClearAuthState(authGenerationRef.current);
         }
       } finally {
-        if (requestGeneration === authGenerationRef.current) {
-          setIsInitializing(false);
-        }
+        setIsInitializing(false);
       }
     };
 
     void run();
-  }, []);
+  }, [refreshSession]);
 
   useEffect(() => {
-    if (!refreshToken || !expiresAt) {
+    if (isInitializing || !refreshToken || !expiresAt) {
       return;
     }
     let cancelled = false;
 
     const runRefresh = async () => {
-      if (refreshInFlightRef.current) {
-        await refreshInFlightRef.current;
-        return;
-      }
       const requestGeneration = authGenerationRef.current;
-      let currentTask: Promise<void> | null = null;
-      currentTask = (async () => {
-        try {
-        const refreshed = await requestAuthJson<{
-          accessToken: string;
-          refreshToken: string;
-          user: AuthUser;
-          expiresAt?: string;
-        }>("refresh", {
-          method: "POST",
-          body: JSON.stringify({ refreshToken }),
-        });
-        if (cancelled || requestGeneration !== authGenerationRef.current) {
-          return;
-        }
-        const remember = Boolean(window.localStorage.getItem(LOCAL_ACCESS_KEY));
-        const nextSnapshot: AuthSnapshot = {
-          accessToken: refreshed.data.accessToken,
-          refreshToken: refreshed.data.refreshToken,
-          username: refreshed.data.user.username,
-          role: normalizeRole(refreshed.data.user.role),
-          expiresAt: refreshed.data.expiresAt,
-        };
-        markAuthGeneration();
-        persistAuth(nextSnapshot, remember);
-        setAccessToken(nextSnapshot.accessToken);
-        setRefreshToken(nextSnapshot.refreshToken);
-        setUsername(nextSnapshot.username);
-        setRole(nextSnapshot.role);
-        setExpiresAt(nextSnapshot.expiresAt ?? "");
-        setLastRequestId(refreshed.requestId);
-        } catch (error) {
-          if (error instanceof AuthApiError) {
-            setLastRequestId(error.requestId);
-          }
-          if (!cancelled && isUnauthorizedAuthError(error)) {
-            applyClearAuthState(requestGeneration);
-          }
-        } finally {
-          if (refreshInFlightRef.current === currentTask) {
-            refreshInFlightRef.current = null;
-          }
-        }
-      })();
-      refreshInFlightRef.current = currentTask;
-      await currentTask;
+      const result = await refreshSession(refreshToken, requestGeneration);
+      if (!cancelled && result.unauthorized) {
+        applyClearAuthState(requestGeneration);
+      }
     };
 
     if (isExpiringSoon(expiresAt)) {
@@ -479,7 +586,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [expiresAt, refreshToken]);
+  }, [expiresAt, isInitializing, refreshSession, refreshToken]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage) {
+        return;
+      }
+      if (
+        ![
+          LOCAL_ACCESS_KEY,
+          LOCAL_REFRESH_KEY,
+          LOCAL_USER_KEY,
+          LOCAL_ROLE_KEY,
+          LOCAL_EXPIRES_KEY,
+        ].includes(event.key ?? "")
+      ) {
+        return;
+      }
+      if (storageSyncTimerRef.current !== null) {
+        window.clearTimeout(storageSyncTimerRef.current);
+      }
+      storageSyncTimerRef.current = window.setTimeout(() => {
+        storageSyncTimerRef.current = null;
+        const snapshot = readAuthSnapshot();
+        markAuthGeneration();
+        authExpiredHandled = false;
+        resetAuthExpiryState();
+        setAccessToken(snapshot?.accessToken ?? "");
+        setRefreshToken(snapshot?.refreshToken ?? "");
+        setUsername(snapshot?.username ?? "");
+        setRole(snapshot?.role ?? "");
+        setExpiresAt(snapshot?.expiresAt ?? "");
+      }, 25);
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      if (storageSyncTimerRef.current !== null) {
+        window.clearTimeout(storageSyncTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -492,12 +645,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       authExpiredHandled = true;
-      clearAuthState({
-        setAccessToken,
-        setRefreshToken,
-        setUsername,
-        setRole,
-        setExpiresAt,
+      void refreshSession(refreshToken).then((result) => {
+        if (result.snapshot) {
+          authExpiredHandled = false;
+          return;
+        }
+        if (result.unauthorized) {
+          applyClearAuthState();
+        } else {
+          authExpiredHandled = false;
+        }
       });
     };
 
@@ -505,7 +662,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired as EventListener);
     };
-  }, []);
+  }, [refreshSession, refreshToken]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
