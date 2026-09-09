@@ -16,6 +16,7 @@ import {
 
 export * from "./capacity";
 export * from "./relations";
+export * from "./viewport";
 
 export type KubejojoResource = TopologyRendererGraphNode["resource"] & {
   id: string;

@@ -22,6 +22,7 @@ import {
   applyTopologyCapacity,
   collapseKubejojoGraph,
   findKubejojoNode,
+  getCenteredTopologyViewport,
   getKubejojoSelectionPath,
   groupKubejojoGraph,
   layoutKubejojoGraph,
@@ -188,8 +189,16 @@ function Canvas({
 
   const showActualSize = useCallback((duration = 180) => {
     setViewMode("actual");
-    void flow.setViewport({ x: 20, y: focusedGroup ? 72 : 64, zoom: 1 }, { duration });
-  }, [flow, focusedGroup]);
+    const canvas = canvasRef.current;
+    const visibleNodes = flow.getNodes();
+    if (!canvas || !visibleNodes.length) return;
+    const viewport = getCenteredTopologyViewport(
+      getNodesBounds(visibleNodes),
+      { width: canvas.clientWidth, height: canvas.clientHeight },
+      { zoom: 1, minZoom: 1, maxZoom: 1 },
+    );
+    if (viewport) void flow.setViewport(viewport, { duration });
+  }, [flow]);
 
   const fitGraph = useCallback(async (duration = 180) => {
     setViewMode("fit");
@@ -205,22 +214,16 @@ function Canvas({
       return;
     }
 
-    // fitView centers short graphs vertically, leaving a large dead band
-    // above the first resource row on tall screens. Keep the graph near the
-    // top inset while preserving a bounded zoom for large inventories.
     const bounds = getNodesBounds(visibleNodes);
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     const inset = aspectRatio < 0.9 ? 48 : 28;
-    if (width <= 0 || height <= 0 || bounds.width <= 0 || bounds.height <= 0) return;
-    const zoom = Math.max(
-      0.2,
-      Math.min(1, (width - inset * 2) / bounds.width, (height - inset * 2) / bounds.height),
+    const viewport = getCenteredTopologyViewport(
+      bounds,
+      { width, height },
+      { minZoom: 0.2, maxZoom: 1, padding: inset },
     );
-    await flow.setViewport(
-      { x: inset - bounds.x * zoom, y: inset - bounds.y * zoom, zoom },
-      { duration },
-    );
+    if (viewport) await flow.setViewport(viewport, { duration });
   }, [aspectRatio, flow]);
 
   useEffect(() => {
