@@ -10,6 +10,7 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
+  getNodesBounds,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -190,14 +191,36 @@ function Canvas({
     void flow.setViewport({ x: 20, y: focusedGroup ? 72 : 64, zoom: 1 }, { duration });
   }, [flow, focusedGroup]);
 
-  const fitGraph = useCallback((duration = 180) => {
+  const fitGraph = useCallback(async (duration = 180) => {
     setViewMode("fit");
-    void flow.fitView({
-      padding: aspectRatio < 0.9 ? 0.24 : 0.16,
-      duration,
-      minZoom: 0.2,
-      maxZoom: 1,
-    });
+    const canvas = canvasRef.current;
+    const visibleNodes = flow.getNodes();
+    if (!canvas || !visibleNodes.length) {
+      await flow.fitView({
+        padding: aspectRatio < 0.9 ? 0.16 : 0.08,
+        duration,
+        minZoom: 0.2,
+        maxZoom: 1,
+      });
+      return;
+    }
+
+    // fitView centers short graphs vertically, leaving a large dead band
+    // above the first resource row on tall screens. Keep the graph near the
+    // top inset while preserving a bounded zoom for large inventories.
+    const bounds = getNodesBounds(visibleNodes);
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    const inset = aspectRatio < 0.9 ? 48 : 28;
+    if (width <= 0 || height <= 0 || bounds.width <= 0 || bounds.height <= 0) return;
+    const zoom = Math.max(
+      0.2,
+      Math.min(1, (width - inset * 2) / bounds.width, (height - inset * 2) / bounds.height),
+    );
+    await flow.setViewport(
+      { x: inset - bounds.x * zoom, y: inset - bounds.y * zoom, zoom },
+      { duration },
+    );
   }, [aspectRatio, flow]);
 
   useEffect(() => {
