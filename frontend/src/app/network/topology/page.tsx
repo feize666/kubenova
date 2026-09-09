@@ -133,6 +133,28 @@ function normalizeKind(kind: string): string {
   return kind;
 }
 
+const RESOURCE_MANAGEMENT_ROUTES: Record<string, string> = {
+  Pod: "/workloads/pods",
+  Deployment: "/workloads/deployments",
+  StatefulSet: "/workloads/statefulsets",
+  DaemonSet: "/workloads/daemonsets",
+  ReplicaSet: "/workloads/replicasets",
+  Job: "/workloads/jobs",
+  CronJob: "/workloads/cronjobs",
+  Service: "/network/services",
+  Ingress: "/network/ingress",
+  IngressRoute: "/network/ingress",
+  Endpoints: "/network/endpoints",
+  EndpointSlice: "/network/endpointslices",
+  NetworkPolicy: "/network/networkpolicy",
+  PersistentVolume: "/storage/pv",
+  PersistentVolumeClaim: "/storage/pvc",
+  StorageClass: "/storage/sc",
+  ConfigMap: "/configs/configmaps",
+  Secret: "/configs/secrets",
+  ServiceAccount: "/configs/serviceaccounts",
+};
+
 function resourceStatus(resource: TopologyGraphResource): "healthy" | "warning" | "critical" | "unknown" {
   const status = resource.status.trim().toLowerCase();
   if (["error", "failed", "failure", "unhealthy", "critical"].includes(status)) return "critical";
@@ -558,33 +580,34 @@ export default function NetworkTopologyPage() {
 
   const navigateToResource = useCallback((resource: TopologyGraphResource) => {
     const kind = normalizeKind(resource.kind);
-    const routes: Record<string, string> = {
-      Pod: "/workloads/pods",
-      Deployment: "/workloads/deployments",
-      StatefulSet: "/workloads/statefulsets",
-      DaemonSet: "/workloads/daemonsets",
-      ReplicaSet: "/workloads/replicasets",
-      Job: "/workloads/jobs",
-      CronJob: "/workloads/cronjobs",
-      Service: "/network/services",
-      Ingress: "/network/ingress",
-      IngressRoute: "/network/ingress",
-      Endpoints: "/network/endpoints",
-      EndpointSlice: "/network/endpointslices",
-      NetworkPolicy: "/network/networkpolicy",
-      PersistentVolume: "/storage/pv",
-      PersistentVolumeClaim: "/storage/pvc",
-      StorageClass: "/storage/sc",
-      ConfigMap: "/configs/configmaps",
-      Secret: "/configs/secrets",
-      ServiceAccount: "/configs/serviceaccounts",
-    };
+    const routes = RESOURCE_MANAGEMENT_ROUTES;
     const params = new URLSearchParams({ clusterId: resource.clusterId, keyword: resource.name });
     if (resource.namespace) params.set("namespace", resource.namespace);
     router.push(`${routes[kind] ?? "/network/topology"}?${params.toString()}`);
     setTopologySelection(null);
     setDetail(null);
   }, [router]);
+
+  const navigateDetailRequest = useCallback((request: DetailRequest) => {
+    const kind = normalizeKind(request.kind);
+    const route = RESOURCE_MANAGEMENT_ROUTES[kind];
+    if (!route || !request.name) {
+      setDetail(request);
+      return;
+    }
+    const idParts = request.id.split("/");
+    const clusterId = idParts[0] && !request.id.startsWith("dynamic:")
+      ? idParts[0]
+      : selectedCluster?.id;
+    const params = new URLSearchParams({
+      ...(clusterId ? { clusterId } : {}),
+      keyword: request.name,
+    });
+    if (request.namespace) params.set("namespace", request.namespace);
+    router.push(`${route}?${params.toString()}`);
+    setDetail(null);
+    setTopologySelection(null);
+  }, [router, selectedCluster?.id]);
 
   return (
     <section className="resource-map-shell resource-map-shell--workbench">
@@ -929,7 +952,7 @@ export default function NetworkTopologyPage() {
         onClose={() => setDetail(null)}
         token={token}
         request={detail}
-        onNavigateRequest={setDetail}
+        onNavigateRequest={navigateDetailRequest}
       />
       <ResourceYamlDrawer
         open={Boolean(yaml)}

@@ -35,6 +35,22 @@
   height: 100%;
 }
 
+/* Resource names are readable as normal content until interaction signals
+ * that they are actionable. */
+.resource-detail-drawer-wrapper .resource-detail-overview a.ant-typography,
+.resource-detail-drawer-wrapper .resource-detail-overview a.ant-typography:visited {
+  color: var(--panorama-text);
+  text-decoration: none;
+}
+
+.resource-detail-drawer-wrapper .resource-detail-overview a.ant-typography:hover,
+.resource-detail-drawer-wrapper .resource-detail-overview a.ant-typography:focus-visible,
+.resource-detail-drawer-wrapper .resource-detail-overview a.ant-typography:active {
+  color: var(--panorama-primary-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 [data-theme="dark"] .resource-map-shell {
   --panorama-canvas: #101820;
   --panorama-surface: #16222d;
