@@ -21,6 +21,9 @@ import type {
 import {
   indexWarnings,
   TopologyResourceProjector,
+  asArray,
+  asRecord,
+  asString,
 } from './topology-resource.projector';
 import { TopologyRelationResolver } from './topology-relation.resolver';
 import {
@@ -93,10 +96,11 @@ export class TopologyGraphService {
       query.namespace,
       enabledSources,
     );
-    const resources = this.projector.projectLegacy(rows, indexWarnings(alerts));
+    const topologyRows = collapseDeploymentReplicaSets(rows);
+    const resources = this.projector.projectLegacy(topologyRows, indexWarnings(alerts));
     return this.assembler.assembleLegacy({
       resources,
-      relations: this.relationResolver.resolveLegacy(rows, resources),
+      relations: this.relationResolver.resolveLegacy(topologyRows, resources),
       warningRecords: alerts.length,
     });
   }
@@ -144,12 +148,13 @@ export class TopologyGraphService {
       legacySources,
       true,
     );
-    const resources = this.projector.projectV2(rows, indexWarnings(alerts));
-    const relations = this.relationResolver.resolveV2(rows, resources);
+    const topologyRows = collapseDeploymentReplicaSets(rows);
+    const resources = this.projector.projectV2(topologyRows, indexWarnings(alerts));
+    const relations = this.relationResolver.resolveV2(topologyRows, resources);
     const graph = this.assembler.assembleV2({
       clusterId,
       enabledSources,
-      rows,
+      rows: topologyRows,
       resources,
       relations,
       warningRecords: alerts.length,
@@ -478,6 +483,76 @@ function networkSource(kind: string): LegacyTopologySource {
   ].includes(kind)
     ? 'gateway'
     : 'network';
+}
+
+/** Keep the current ReplicaSet only; Kubernetes retains old rollout revisions. */
+function collapseDeploymentReplicaSets(rows: TopologyRow[]): TopologyRow[] {
+  const deployments = new Set(
+    rows
+      .filter(({ source, row }) => source === 'workloads' && row.kind === 'Deployment')
+      .map(({ row }) => `${row.clusterId}\u0000${row.namespace ?? ''}\u0000${row.name}`),
+  );
+  const candidates = new Map<string, TopologyRow[]>();
+  for (const item of rows) {
+    if (item.source !== 'workloads' || item.row.kind !== 'ReplicaSet') continue;
+    const status = asRecord(item.row.statusJson);
+    const refs = [
+      ...asArray(status?.ownerReferences),
+      ...asArray(asRecord(status?.metadata)?.ownerReferences),
+    ];
+    for (const value of refs) {
+      const ref = asRecord(value);
+      if (asString(ref?.kind) !== 'Deployment') continue;
+      const name = asString(ref?.name);
+      const key = name
+        ? `${item.row.clusterId}\u0000${item.row.namespace ?? ''}\u0000${name}`
+        : null;
+      if (key && deployments.has(key)) {
+        const list = candidates.get(key) ?? [];
+        list.push(item);
+        candidates.set(key, list);
+      }
+    }
+  }
+  const retained = new Set<string>();
+  for (const list of candidates.values()) {
+    list.sort((left, right) => {
+      const lr = replicaSetRevision(left.row);
+      const rr = replicaSetRevision(right.row);
+      if (lr !== rr) return rr - lr;
+      const l = left.row.readyReplicas ?? 0;
+      const r = right.row.readyReplicas ?? 0;
+      if (l !== r) return r - l;
+      const lReplicas = left.row.replicas ?? 0;
+      const rReplicas = right.row.replicas ?? 0;
+      if (lReplicas !== rReplicas) return rReplicas - lReplicas;
+      const lt = Date.parse(String(left.row.updatedAt ?? '')) || 0;
+      const rt = Date.parse(String(right.row.updatedAt ?? '')) || 0;
+      if (lt !== rt) return rt - lt;
+      return right.row.name.localeCompare(left.row.name);
+    });
+    if (list[0]) retained.add(list[0].row.id);
+  }
+  return rows.filter(
+    ({ source, row }) =>
+      source !== 'workloads' || row.kind !== 'ReplicaSet' || !hasDeploymentOwner(row) || retained.has(row.id),
+  );
+}
+
+function replicaSetRevision(row: PersistedResource): number {
+  const status = asRecord(row.statusJson);
+  const metadata = asRecord(status?.metadata);
+  const annotations = asRecord(metadata?.annotations) ?? asRecord(status?.annotations);
+  const revision = Number(asString(annotations?.['deployment.kubernetes.io/revision']));
+  return Number.isFinite(revision) ? revision : 0;
+}
+
+function hasDeploymentOwner(row: PersistedResource): boolean {
+  const status = asRecord(row.statusJson);
+  return [
+    ...asArray(status?.ownerReferences),
+    ...asArray(asRecord(status?.metadata)?.ownerReferences),
+  ].some((value) => asString(asRecord(value)?.kind) === 'Deployment');
 }
 
 function aggregateRevision(

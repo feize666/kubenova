@@ -710,6 +710,21 @@ describe('TopologyGraphService', () => {
     });
   });
 
+  it('keeps only the newest ReplicaSet for each Deployment', async () => {
+    const { service, prisma } = build();
+    mockTables(prisma, {
+      workloads: [
+        { id: 'deploy', clusterId: 'c-1', namespace: 'app', kind: 'Deployment', name: 'api', state: 'active', labels: {}, spec: {}, statusJson: {} },
+        { id: 'rs-old', clusterId: 'c-1', namespace: 'app', kind: 'ReplicaSet', name: 'api-old', state: 'active', labels: {}, replicas: 0, readyReplicas: 0, spec: {}, statusJson: { ownerReferences: [{ kind: 'Deployment', name: 'api' }], metadata: { annotations: { 'deployment.kubernetes.io/revision': '1' } } } },
+        { id: 'rs-new', clusterId: 'c-1', namespace: 'app', kind: 'ReplicaSet', name: 'api-new', state: 'active', labels: {}, replicas: 2, readyReplicas: 2, spec: {}, statusJson: { ownerReferences: [{ kind: 'Deployment', name: 'api' }], metadata: { annotations: { 'deployment.kubernetes.io/revision': '2' } } } },
+      ],
+    });
+    const result = await service.getGraphV2({ clusterId: 'c-1', sources: ['workloads'] });
+    const replicaSets = result.resources.filter((resource) => resource.kind === 'ReplicaSet');
+    expect(replicaSets).toHaveLength(1);
+    expect(replicaSets[0]?.name).toBe('api-new');
+  });
+
   it('requires clusterId for V2 and marks omitted domains unavailable', async () => {
     const { service, prisma } = build();
     await expect(service.getGraphV2()).rejects.toThrow(
