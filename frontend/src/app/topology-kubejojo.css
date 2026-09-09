@@ -777,3 +777,119 @@
   .topology-kubejojo *, .topology-kubejojo *::before, .topology-kubejojo *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
   .topology-kubejojo__node-glance { transform: none; }
 }
+
+/* Visual system v2 -------------------------------------------------------
+ * A restrained command-surface treatment: the existing light palette stays
+ * intact, while depth, grouping and relationship priority are made explicit.
+ */
+.topology-kubejojo {
+  border-radius: 12px;
+  border-color: color-mix(in srgb, var(--tk-primary) 14%, var(--tk-border));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 10px 30px rgba(27,45,65,.06);
+}
+.topology-kubejojo__canvas {
+  background-image:
+    linear-gradient(rgba(11,109,182,.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(11,109,182,.045) 1px, transparent 1px),
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--tk-primary) 12%, transparent), transparent 38%),
+    linear-gradient(145deg, var(--tk-surface), var(--tk-canvas));
+  background-size: 28px 28px, 28px 28px, auto, auto;
+}
+.topology-kubejojo__canvas::after {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(27,45,65,.055));
+}
+.topology-kubejojo__node-card {
+  width: 224px;
+  height: 92px;
+  border-radius: 12px;
+  border-color: color-mix(in srgb, var(--tk-kind-color, var(--tk-primary)) 28%, var(--tk-border));
+  background: linear-gradient(150deg, var(--tk-surface) 0%, color-mix(in srgb, var(--tk-kind-surface, var(--tk-primary-weak)) 72%, var(--tk-surface)) 100%);
+  box-shadow: 0 5px 14px rgba(27,45,65,.08), inset 0 1px 0 rgba(255,255,255,.78);
+}
+.topology-kubejojo__node-card::before {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  border-radius: 99px;
+  background: var(--tk-kind-color, var(--tk-primary));
+  opacity: .72;
+  content: "";
+}
+.topology-kubejojo__node-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--tk-kind-color, var(--tk-primary)) 18%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--tk-kind-color, var(--tk-primary)) 18%, transparent);
+  font-size: 10px;
+  letter-spacing: .02em;
+}
+.topology-kubejojo__node-title { letter-spacing: -.01em; }
+.topology-kubejojo__node:hover .topology-kubejojo__node-card {
+  border-color: var(--tk-kind-color, var(--tk-primary));
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--tk-kind-color, var(--tk-primary)) 16%, transparent), inset 0 1px 0 rgba(255,255,255,.9);
+}
+.topology-kubejojo__node.is-selected .topology-kubejojo__node-card,
+.topology-kubejojo__node.is-focused .topology-kubejojo__node-card {
+  border-color: var(--tk-focus);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--tk-focus) 15%, transparent), 0 12px 26px color-mix(in srgb, var(--tk-focus) 22%, transparent);
+}
+.topology-kubejojo__node-card--summary {
+  border-left-width: 4px;
+  background: linear-gradient(145deg, var(--tk-surface), color-mix(in srgb, var(--tk-kind-surface, var(--tk-primary-weak)) 84%, var(--tk-surface)));
+}
+.topology-kubejojo__summary-code { border-radius: 5px; }
+.topology-kubejojo__summary-enter {
+  border: 1px solid color-mix(in srgb, var(--tk-primary) 30%, var(--tk-border));
+  border-radius: 999px;
+  background: var(--tk-primary-weak);
+  padding: 0 6px;
+}
+.topology-kubejojo__group {
+  border-radius: 14px;
+  border-color: color-mix(in srgb, var(--tk-primary) 18%, var(--tk-border-strong));
+  background: color-mix(in srgb, var(--tk-surface) 74%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85), 0 10px 24px rgba(27,45,65,.055);
+}
+.topology-kubejojo__group-label {
+  min-height: 58px;
+  border-radius: 13px 13px 0 0;
+  border-bottom-color: color-mix(in srgb, var(--tk-primary) 16%, var(--tk-border));
+  background: linear-gradient(105deg, color-mix(in srgb, var(--tk-surface) 96%, var(--tk-primary-weak)), color-mix(in srgb, var(--tk-primary-weak) 44%, var(--tk-surface)));
+}
+.topology-kubejojo__group-status { box-shadow: 0 0 0 3px color-mix(in srgb, var(--tk-status-color, var(--tk-muted)) 10%, transparent); }
+.topology-kubejojo__edge-path { filter: drop-shadow(0 1px 1px rgba(27,45,65,.08)); }
+.topology-kubejojo__edge-path.is-domain-workload { stroke: var(--tk-kind-workload); }
+.topology-kubejojo__edge-path.is-domain-network { stroke: var(--tk-kind-network); }
+.topology-kubejojo__edge-path.is-domain-storage { stroke: var(--tk-kind-storage); }
+.topology-kubejojo__edge-path.is-domain-configuration { stroke: var(--tk-kind-configuration); }
+.topology-kubejojo__edge-path.is-focused { stroke-width: 2.6px; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--tk-primary) 35%, transparent)); }
+.topology-kubejojo__edge-path.is-overlay { opacity: .48; }
+.topology-kubejojo__edge-label {
+  border: 1px solid color-mix(in srgb, var(--tk-primary) 24%, var(--tk-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tk-surface) 92%, var(--tk-primary-weak));
+  box-shadow: 0 3px 10px rgba(27,45,65,.12);
+  line-height: 22px;
+  padding: 0 8px;
+}
+.topology-kubejojo__zoom,
+.topology-kubejojo__focus {
+  border-radius: 10px;
+  border-color: color-mix(in srgb, var(--tk-primary) 18%, var(--tk-border));
+  box-shadow: 0 8px 22px rgba(27,45,65,.10), inset 0 1px 0 rgba(255,255,255,.86);
+}
+.topology-kubejojo__zoom button,
+.topology-kubejojo__focus button { border-radius: 7px; }
+.topology-kubejojo__focus-count { border-radius: 999px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .topology-kubejojo__edge-path.is-focused.is-main { animation: topology-edge-pulse-v2 2.2s ease-in-out infinite; }
+}
+@keyframes topology-edge-pulse-v2 { 0%,100% { stroke-dashoffset: 0; opacity: .78; } 50% { stroke-dashoffset: -10; opacity: 1; } }
