@@ -9,6 +9,7 @@ import {
   ReloadOutlined,
   SearchOutlined,
   SafetyOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { App, Avatar, Badge, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Popover, Skeleton, Space } from "antd";
@@ -36,7 +37,7 @@ const ENABLE_ROUTE_PREFETCH = process.env.NODE_ENV === "production";
 const UPDATE_NOTICE_VERSION_KEY = "kubenova.system-update.notice-version";
 
 type PlatformNavigationItem = {
-  key: "platform-overview" | "platform-clusters" | "platform-access" | "platform-applications";
+  key: "platform-overview" | "platform-clusters" | "platform-access" | "platform-applications" | "platform-settings";
   label: string;
   path: string;
   icon: React.ReactNode;
@@ -49,6 +50,7 @@ const PLATFORM_NAVIGATION: readonly PlatformNavigationItem[] = [
   { key: "platform-access", label: "授权管理", path: "/users", icon: <SafetyOutlined />, requiredRole: "admin" },
   // 应用中心将随着集群工作台路由迁移；过渡期先落到已有的应用发布入口。
   { key: "platform-applications", label: "应用中心", path: "/workloads/deployments", icon: <AppstoreOutlined /> },
+  { key: "platform-settings", label: "系统设置", path: "/system/update", icon: <SettingOutlined />, requiredRole: "admin" },
 ];
 
 const PREFETCHABLE_NAV_PATHS = new Set(PLATFORM_NAVIGATION.map((item) => item.path));
@@ -176,11 +178,13 @@ const AppSider = memo(function AppSider({
   mode,
   userRole,
   disabledPaths,
+  updateAvailable,
 }: {
   pathname: string;
   mode: string;
   userRole: string;
   disabledPaths?: Set<string> | null;
+  updateAvailable: boolean;
 }) {
   const visibleNavigation = useMemo(
     () => getVisiblePlatformNavigation(userRole, disabledPaths),
@@ -216,7 +220,11 @@ const AppSider = memo(function AppSider({
       visibleNavigation.map((item) => ({
           key: item.path,
           className: `app-sidebar-menu__section app-sidebar-menu__section--${item.key}`,
-          icon: item.icon,
+          icon: item.key === "platform-settings" ? (
+            <Badge dot={updateAvailable} offset={[-2, 2]}>
+              <span className="app-sidebar-menu__settings-icon">{item.icon}</span>
+            </Badge>
+          ) : item.icon,
           label: (
             <Link
               className="app-sidebar-menu__link app-sidebar-menu__link--section"
@@ -229,7 +237,7 @@ const AppSider = memo(function AppSider({
             </Link>
           ),
         })),
-    [prefetchPath, visibleNavigation],
+    [prefetchPath, updateAvailable, visibleNavigation],
   );
 
   return (
@@ -544,7 +552,13 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
       </a>
       <Layout className="kubenova-shell" style={{ minHeight: "100dvh" }}>
         {/* AppSider 用 memo 隔离，pathname 变化时只有 selectedKeys/openKeys 更新，父级其余 state 不会触发它重渲染 */}
-        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} />
+        <AppSider
+          pathname={pathname}
+          mode={mode}
+          userRole={role}
+          disabledPaths={disabledPaths}
+          updateAvailable={updateAvailable}
+        />
         <Layout>
         <Header
           className="app-header"

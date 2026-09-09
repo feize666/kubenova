@@ -14987,7 +14987,8 @@ body.topology-overview-active {
 [data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-overview,
 [data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-clusters,
 [data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-access,
-[data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-applications {
+[data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-applications,
+[data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-settings {
   color: #172033;
   font-size: 15px;
   font-weight: 700;
@@ -14996,8 +14997,15 @@ body.topology-overview-active {
 [data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-overview > .ant-menu-item-icon,
 [data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-clusters > .ant-menu-item-icon,
 [data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-access > .ant-menu-item-icon,
-[data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-applications > .ant-menu-item-icon {
+[data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-applications > .ant-menu-item-icon,
+[data-theme="light"] .app-sidebar-menu.ant-menu .app-sidebar-menu__section--platform-settings > .ant-menu-item-icon {
   color: #2468e8 !important;
+}
+
+[data-theme="light"] .app-sidebar-menu__settings-icon {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
 }
 
 [data-theme="light"] .app-sidebar-menu.ant-menu .ant-menu-item.app-sidebar-menu__section:hover {

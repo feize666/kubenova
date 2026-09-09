@@ -42,15 +42,18 @@ describe('TopologySummaryService', () => {
     expect(prisma.namespaceRecord.findMany).not.toHaveBeenCalled();
   });
 
-  it('asserts explicit cluster and returns empty shape', async () => {
+  it('reads persisted summary for an explicit cluster without requiring live health', async () => {
     const { service, prisma, clusterHealthService } = build();
     mockEmptyTables(prisma);
+    (
+      clusterHealthService.assertClusterOnlineForRead as jest.Mock
+    ).mockRejectedValue(new Error('cluster probe is temporarily unavailable'));
 
     const result = await service.listNamespaceSummaries({ clusterId: ' c-1 ' });
 
     expect(
       clusterHealthService.assertClusterOnlineForRead,
-    ).toHaveBeenCalledWith('c-1');
+    ).not.toHaveBeenCalled();
     expect(result.items).toEqual([]);
     expect(prisma.workloadRecord.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
