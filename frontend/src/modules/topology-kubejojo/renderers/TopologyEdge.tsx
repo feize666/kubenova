@@ -3,7 +3,13 @@
 import { BaseEdge, EdgeLabelRenderer, type Edge, type EdgeProps } from "@xyflow/react";
 import { memo } from "react";
 
-import type { TopologyElkPoint, TopologyElkSection, TopologyRendererEdgeData, TopologyViewState } from "./contracts";
+import type {
+  TopologyElkPoint,
+  TopologyElkSection,
+  TopologyNodeStatus,
+  TopologyRendererEdgeData,
+  TopologyViewState,
+} from "./contracts";
 
 const MAIN_RELATION_TYPES = new Set([
   "OWNS",
@@ -31,11 +37,40 @@ function sectionPoints(section: TopologyElkSection, offset: TopologyElkPoint): T
   }));
 }
 
-function buildElkPath(sections: TopologyElkSection[], offset: TopologyElkPoint): string {
+function pointToward(from: TopologyElkPoint, to: TopologyElkPoint, distanceFromOrigin: number): TopologyElkPoint {
+  const length = distance(from, to);
+  if (!length) return from;
+  const ratio = Math.min(1, distanceFromOrigin / length);
+  return {
+    x: from.x + ((to.x - from.x) * ratio),
+    y: from.y + ((to.y - from.y) * ratio),
+  };
+}
+
+export function buildRoundedElkPath(
+  sections: TopologyElkSection[],
+  offset: TopologyElkPoint,
+  radius = 10,
+): string {
   return sections.map((section) => {
-    const [start, ...rest] = sectionPoints(section, offset);
-    return `M ${start.x},${start.y} ${rest.map((item) => `L ${item.x},${item.y}`).join(" ")}`;
-  }).join(" ");
+    const points = sectionPoints(section, offset);
+    if (!points.length) return "";
+    if (points.length === 1) return `M ${points[0].x},${points[0].y}`;
+
+    const commands = [`M ${points[0].x},${points[0].y}`];
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const previous = points[index - 1];
+      const corner = points[index];
+      const next = points[index + 1];
+      const cornerRadius = Math.min(radius, distance(previous, corner) / 2, distance(corner, next) / 2);
+      const entry = pointToward(corner, previous, cornerRadius);
+      const exit = pointToward(corner, next, cornerRadius);
+      commands.push(`L ${entry.x},${entry.y}`, `Q ${corner.x},${corner.y} ${exit.x},${exit.y}`);
+    }
+    const end = points[points.length - 1];
+    commands.push(`L ${end.x},${end.y}`);
+    return commands.join(" ");
+  }).filter(Boolean).join(" ");
 }
 
 function distance(left: TopologyElkPoint, right: TopologyElkPoint): number {
@@ -73,12 +108,21 @@ function edgeStyle(
   dashed: boolean | undefined,
   confidence: number | undefined,
   layer: TopologyEdgeLayer,
+  status: TopologyNodeStatus | undefined,
 ) {
   const neutralStroke = "var(--tk-edge)";
-  const typedStroke = stroke ?? neutralStroke;
+  const statusStroke: Record<TopologyNodeStatus, string> = {
+    healthy: "var(--tk-success)",
+    warning: "var(--tk-warning)",
+    critical: "var(--tk-danger)",
+    unknown: neutralStroke,
+  };
+  const typedStroke = status ? statusStroke[status] : stroke ?? neutralStroke;
   const confidenceOpacity = typeof confidence === "number" ? Math.max(0.35, Math.min(1, confidence)) : 1;
   const base = {
-    strokeDasharray: layer === "overlay" ? (dashed ? "4 5" : "2 5") : dashed ? "6 4" : undefined,
+    strokeDasharray: viewState === "focused"
+      ? (layer === "main" ? "9 6" : "4 5")
+      : layer === "overlay" ? (dashed ? "4 5" : "2 5") : dashed ? "6 4" : undefined,
   };
   switch (viewState) {
     case "focused":
@@ -122,10 +166,11 @@ function EdgeRenderer({
   if (!sections.length) return null;
 
   const offset = edgeData?.parentOffset ?? { x: 0, y: 0 };
-  const path = buildElkPath(sections, offset);
+  const path = buildRoundedElkPath(sections, offset);
   const layer = topologyEdgeLayer(edgeData?.relationType, edgeData?.dashed);
   const viewState = edgeData?.viewState ?? "default";
-  const style = edgeStyle(viewState, edgeData?.stroke, edgeData?.dashed, edgeData?.confidence, layer);
+  const status = edgeData?.status ?? "unknown";
+  const style = edgeStyle(viewState, edgeData?.stroke, edgeData?.dashed, edgeData?.confidence, layer, status);
   const labelPosition = pathMidpoint(sections, offset);
   const showLabel = Boolean(edgeData?.label && edgeData.viewState === "focused");
   return (
@@ -134,13 +179,13 @@ function EdgeRenderer({
         id={id}
         path={path}
         markerEnd={markerEnd}
-        className={`topology-kubejojo__edge-path is-${layer} is-${viewState} is-domain-${edgeData?.relationDomain ?? "scope"}`}
+        className={`topology-kubejojo__edge-path is-${layer} is-${viewState} is-status-${status} is-domain-${edgeData?.relationDomain ?? "scope"}`}
         style={style}
       />
       {showLabel ? (
         <EdgeLabelRenderer>
           <span
-            className={`topology-kubejojo__edge-label is-${layer} nodrag nopan`}
+            className={`topology-kubejojo__edge-label is-${layer} is-status-${status} nodrag nopan`}
             style={{
               transform: `translate(-50%, -50%) translate(${labelPosition.x}px, ${labelPosition.y}px)`,
             }}

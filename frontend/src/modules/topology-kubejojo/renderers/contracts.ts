@@ -70,6 +70,7 @@ export interface TopologyRendererEdgeData extends Record<string, unknown> {
   stroke?: string;
   dashed?: boolean;
   confidence?: number;
+  status?: TopologyNodeStatus;
   ports?: string[];
   evidence?: string[];
   route?: "elk" | "bridge";
