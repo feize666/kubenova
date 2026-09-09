@@ -1,6 +1,6 @@
 "use client";
 
-import { CloudDownloadOutlined, ReloadOutlined, RollbackOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { ArrowUpOutlined, CloudDownloadOutlined, LinkOutlined, ReloadOutlined, RollbackOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Col, Divider, Input, Row, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -36,7 +36,7 @@ export default function SystemUpdatePage() {
   const { message } = App.useApp();
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
-  const [targetVersion, setTargetVersion] = useState("v0.0.1");
+  const [targetVersion, setTargetVersion] = useState("");
   const [rollbackVersion, setRollbackVersion] = useState("");
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailRecord, setDetailRecord] = useState<SystemUpdateHistoryItem | null>(null);
@@ -56,11 +56,11 @@ export default function SystemUpdatePage() {
   });
 
   const installMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (version?: string) =>
       installSystemUpdate(
         {
           confirm: true,
-          targetVersion: targetVersion.trim(),
+          targetVersion: (version ?? targetVersion).trim(),
         },
         accessToken ?? undefined,
       ),
@@ -70,6 +70,26 @@ export default function SystemUpdatePage() {
     },
     onError: (error) => {
       message.error(error instanceof Error ? error.message : "发布失败");
+    },
+  });
+
+  const upgradeMutation = useMutation({
+    mutationFn: async (version: string) => {
+      await installSystemUpdate(
+        { confirm: true, targetVersion: version.trim() },
+        accessToken ?? undefined,
+      );
+      return restartSystemUpdate(
+        { confirm: true, message: `一键升级并激活 ${version.trim()}` },
+        accessToken ?? undefined,
+      );
+    },
+    onSuccess: async () => {
+      message.success("升级并激活完成");
+      await queryClient.invalidateQueries({ queryKey: ["system-update"] });
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : "升级失败");
     },
   });
 
@@ -244,6 +264,39 @@ export default function SystemUpdatePage() {
         description="安装阶段只落盘新版本；重启阶段激活运行版本并异步触发发布后审计。回滚保持指针切换，目标秒级恢复。"
       />
 
+      {status?.updateAvailable ? (
+        <Alert
+          className="system-update-available-alert"
+          type="info"
+          showIcon
+          icon={<ArrowUpOutlined />}
+          title={`发现新版本 ${status.latestVersion}`}
+          description={(
+            <Space wrap>
+              <span>
+                当前运行 {status.runningVersion}，可安装新版本并在确认后激活。
+              </span>
+              {status.latestReleaseUrl ? (
+                <Typography.Link href={status.latestReleaseUrl} target="_blank" rel="noreferrer">
+                  查看发布说明 <LinkOutlined />
+                </Typography.Link>
+              ) : null}
+            </Space>
+          )}
+          action={(
+            <OpsIconActionButton
+              icon={<CloudDownloadOutlined />}
+              opsTone="primary"
+              opsVariant="primary"
+              loading={upgradeMutation.isPending}
+              onClick={() => upgradeMutation.mutate(status.latestVersion)}
+            >
+              升级到 {status.latestVersion}
+            </OpsIconActionButton>
+          )}
+        />
+      ) : null}
+
       <Row gutter={[16, 16]}>
         <Col xs={24} md={12}>
           <OpsSurface variant="panel" padding="sm" title="版本状态">
@@ -347,7 +400,7 @@ export default function SystemUpdatePage() {
                 loading={installMutation.isPending}
                 opsTone="primary"
                 opsVariant="primary"
-                onClick={() => installMutation.mutate()}
+                onClick={() => installMutation.mutate(undefined)}
               >
                 安装更新（不立即激活）
               </OpsIconActionButton>

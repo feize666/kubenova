@@ -19,6 +19,8 @@ const AUDIT_REPORT_PATH = join(
   '.run/resource-reality-audit.json',
 );
 const UPDATE_STATE_PATH = join(process.cwd(), '.run/system-update-state.json');
+const UPDATE_REPOSITORY = process.env.KUBENOVA_UPDATE_REPOSITORY ?? 'feize666/kubenova';
+const UPDATE_CHECK_INTERVAL_MS = 5 * 60_000;
 
 interface RecordOperationInput {
   operationType: SystemUpdateHistoryItem['operationType'];
@@ -87,16 +89,30 @@ export class SystemUpdateService implements OnModuleInit {
 
   private auditPromise: Promise<void> | null = null;
   private persistQueue: Promise<void> = Promise.resolve();
+  private latestReleaseUrl: string | null = null;
+  private latestReleasePublishedAt: string | null = null;
+  private lastUpdateCheckAt: string | null = null;
+  private updateCheckPromise: Promise<void> | null = null;
 
   async onModuleInit(): Promise<void> {
     await this.loadPersistedState();
+    void this.refreshLatestVersion();
+    const timer = setInterval(() => void this.refreshLatestVersion(), UPDATE_CHECK_INTERVAL_MS);
+    timer.unref();
   }
 
   getStatus(): SystemUpdateStatusPayload {
+    if (!this.updateCheckPromise && (!this.lastUpdateCheckAt || Date.now() - Date.parse(this.lastUpdateCheckAt) > UPDATE_CHECK_INTERVAL_MS)) {
+      void this.refreshLatestVersion();
+    }
     return {
       runningVersion: this.state.runningVersion,
       installedVersion: this.state.installedVersion,
       latestVersion: this.state.latestVersion,
+      updateAvailable: isNewerVersion(this.state.latestVersion, this.state.runningVersion),
+      latestReleaseUrl: this.latestReleaseUrl,
+      latestReleasePublishedAt: this.latestReleasePublishedAt,
+      lastUpdateCheckAt: this.lastUpdateCheckAt,
       backupVersion: this.state.backupVersion,
       installStatus: this.state.installStatus,
       installable: this.isInstallable(),
@@ -427,6 +443,61 @@ export class SystemUpdateService implements OnModuleInit {
     }
   }
 
+  private async refreshLatestVersion(): Promise<void> {
+    if (this.updateCheckPromise) return this.updateCheckPromise;
+    this.updateCheckPromise = (async () => {
+      try {
+        const headers = {
+          accept: 'application/vnd.github+json',
+          'user-agent': 'kubenova-update-checker',
+        };
+        const releaseResponse = await fetch(
+          `https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`,
+          { headers, signal: AbortSignal.timeout(5000) },
+        );
+        let tag: string | null = null;
+        let url: string | null = null;
+        let publishedAt: string | null = null;
+        if (releaseResponse.ok) {
+          const release = (await releaseResponse.json()) as {
+            tag_name?: unknown;
+            html_url?: unknown;
+            published_at?: unknown;
+          };
+          tag = typeof release.tag_name === 'string' ? release.tag_name : null;
+          url = typeof release.html_url === 'string' ? release.html_url : null;
+          publishedAt = typeof release.published_at === 'string' ? release.published_at : null;
+        }
+        if (!tag) {
+          const tagsResponse = await fetch(
+            `https://api.github.com/repos/${UPDATE_REPOSITORY}/tags?per_page=20`,
+            { headers, signal: AbortSignal.timeout(5000) },
+          );
+          if (tagsResponse.ok) {
+            const tags = (await tagsResponse.json()) as Array<{ name?: unknown }>;
+            tag = tags
+              .map((item) => (typeof item.name === 'string' ? item.name : null))
+              .find(Boolean) ?? null;
+            url = tag
+              ? `https://github.com/${UPDATE_REPOSITORY}/releases/tag/${encodeURIComponent(tag)}`
+              : null;
+          }
+        }
+        if (tag) {
+          this.state.latestVersion = this.normalizeVersion(tag);
+          this.latestReleaseUrl = url;
+          this.latestReleasePublishedAt = publishedAt;
+        }
+        this.lastUpdateCheckAt = new Date().toISOString();
+      } catch {
+        this.lastUpdateCheckAt = new Date().toISOString();
+      } finally {
+        this.updateCheckPromise = null;
+      }
+    })();
+    return this.updateCheckPromise;
+  }
+
   private async runPostReleaseAudit(
     releaseVersion: string,
     operator: string,
@@ -493,4 +564,16 @@ export class SystemUpdateService implements OnModuleInit {
 
     await this.auditPromise;
   }
+}
+
+function isNewerVersion(candidate: string, current: string): boolean {
+  const parse = (value: string) =>
+    value.trim().replace(/^v/i, '').split(/[.-]/).slice(0, 3)
+      .map((part) => Number.parseInt(part, 10) || 0);
+  const left = parse(candidate);
+  const right = parse(current);
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] > right[index];
+  }
+  return false;
 }

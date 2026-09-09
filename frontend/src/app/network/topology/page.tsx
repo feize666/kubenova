@@ -33,6 +33,7 @@ import {
 } from "@/lib/api/topology-graph";
 import { getTopologyNamespaceSummaries } from "@/lib/api/topology-summary";
 import { emitResourceScopeChange } from "@/lib/resource-scope-events";
+import { buildResourceRefDetailRequest } from "@/lib/resource-navigation";
 import {
   KubejojoTopologyCanvas,
   type KubejojoTopologySelection,
@@ -273,9 +274,18 @@ function detailRequest(resource: TopologyGraphResource): DetailRequest {
       label: resource.name,
     };
   }
+  const stableRequest = buildResourceRefDetailRequest({
+    resourceKind: kind,
+    resourceName: resource.name,
+    clusterId: resource.clusterId,
+    namespace: resource.namespace,
+  });
   return {
     kind,
-    id: resource.recordId,
+    // Record ids are database implementation details. The detail API also
+    // accepts a stable cluster/namespace/name identity, which keeps topology
+    // navigation working across syncs and after records are recreated.
+    id: stableRequest?.id ?? resource.recordId,
     kindLabel: KIND_LABEL[kind] ?? kind,
     apiVersion: resource.identity.apiVersion ?? undefined,
     namespace: resource.namespace ?? undefined,

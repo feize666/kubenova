@@ -41,6 +41,10 @@ export interface SystemUpdateStatusPayload {
   runningVersion: string;
   installedVersion?: string | null;
   latestVersion: string;
+  updateAvailable?: boolean;
+  latestReleaseUrl?: string | null;
+  latestReleasePublishedAt?: string | null;
+  lastUpdateCheckAt?: string | null;
   backupVersion?: string | null;
   installStatus:
     | 'idle'

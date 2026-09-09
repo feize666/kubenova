@@ -453,6 +453,25 @@ function resolveAssociationNavigationByIdentity(
           label: namespace ? `${namespace}/${name}` : name,
         }
       : {};
+  // Prefer the stable Kubernetes identity over an opaque persisted record id.
+  // Associations may contain ids from a previous inventory sync.
+  const stableTarget = kind && name
+    ? buildResourceRefDetailRequest({
+        resourceKind: kind,
+        resourceName: name,
+        namespace,
+        clusterId: clusterId || detail.overview.clusterId,
+      })
+    : null;
+  if (stableTarget) {
+    return {
+      target: {
+        ...requestMeta,
+        ...stableTarget,
+        apiVersion,
+      },
+    };
+  }
   const direct = toNavigateRequest(kind, id, requestMeta);
   if (direct) {
     return { target: direct };
