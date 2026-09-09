@@ -4,6 +4,7 @@ import { randomBytes, createHash } from 'crypto';
 import type { AppConfig } from '../platform/config/env.schema';
 
 const DEFAULT_ACCESS_EXPIRES_IN = '30m';
+const DEFAULT_REFRESH_EXPIRES_IN = '7d';
 
 function parseDurationToMs(input: string): number {
   const value = input.trim();
@@ -56,6 +57,16 @@ export class TokenService {
         'jwtExpiresIn',
         DEFAULT_ACCESS_EXPIRES_IN,
       ) ?? DEFAULT_ACCESS_EXPIRES_IN;
+    const expiresMs = parseDurationToMs(expiresIn);
+    return new Date(Date.now() + expiresMs);
+  }
+
+  resolveRefreshTokenExpiry(): Date {
+    const expiresIn =
+      this.configService.get<string>(
+        'refreshTokenExpiresIn',
+        DEFAULT_REFRESH_EXPIRES_IN,
+      ) ?? DEFAULT_REFRESH_EXPIRES_IN;
     const expiresMs = parseDurationToMs(expiresIn);
     return new Date(Date.now() + expiresMs);
   }

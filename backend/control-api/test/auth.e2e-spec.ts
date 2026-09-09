@@ -21,7 +21,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import request from 'supertest';
-import { AuthModule } from '../src/auth/auth.module';
+import { AuthController } from '../src/auth/auth.controller';
+import { AuthRepository } from '../src/auth/auth.repository';
+import { AuthService } from '../src/auth/auth.service';
+import { TokenService } from '../src/auth/token.service';
+import { AuthGuard } from '../src/common/auth.guard';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { ResponseEnvelopeInterceptor } from '../src/common/interceptors/response-envelope.interceptor';
 import { PrismaService } from '../src/platform/database/prisma.service';
@@ -32,6 +36,7 @@ import { PrismaService } from '../src/platform/database/prisma.service';
 
 const FIXED_NOW = new Date('2026-04-14T00:00:00.000Z');
 const FIXED_EXPIRES = new Date('2026-04-14T00:30:00.000Z');
+const FIXED_REFRESH_EXPIRES = new Date('2026-04-21T00:00:00.000Z');
 const SESSION_ID = 'session-abc-123';
 const REFRESH_TOKEN_HASH = 'sha256-hashed-refresh-token';
 
@@ -42,7 +47,7 @@ const MOCK_USER = {
   role: 'platform-admin',
   isActive: true,
   passwordHash:
-    'sha256:8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', // sha256('admin')
+    'auth-e2e-fixed-salt:3e10cd6cdc2be0cd083548c8f8b7ab12f9822ad849ae5f940819b69e1518e019347c0260052d8c7f3b5771881b6bf8e90b4f96617a69c2e8ccca7f4b5d319374',
   createdAt: FIXED_NOW,
   updatedAt: FIXED_NOW,
 };
@@ -52,6 +57,7 @@ const MOCK_SESSION = {
   userId: MOCK_USER.id,
   refreshTokenHash: REFRESH_TOKEN_HASH,
   expiresAt: FIXED_EXPIRES,
+  refreshExpiresAt: FIXED_REFRESH_EXPIRES,
   revokedAt: null,
   createdAt: FIXED_NOW,
   user: MOCK_USER,
@@ -62,7 +68,7 @@ const MOCK_SESSION = {
 // ──────────────────────────────────────────────
 
 function buildPrismaMock() {
-  return {
+  const prismaMock = {
     user: {
       findFirst: jest.fn(),
     },
@@ -71,24 +77,33 @@ function buildPrismaMock() {
       findFirst: jest.fn(),
       updateMany: jest.fn(),
     },
+    $transaction: jest.fn(),
     $disconnect: jest.fn().mockResolvedValue(undefined),
     onModuleDestroy: jest.fn().mockResolvedValue(undefined),
   };
+  prismaMock.$transaction.mockImplementation(
+    async (callback: (client: typeof prismaMock) => Promise<unknown>) =>
+      callback(prismaMock),
+  );
+  return prismaMock;
 }
 
 // ──────────────────────────────────────────────
-// 应用构建辅助（仅加载 AuthModule，不依赖数据库）
+// 应用构建辅助（注册真实认证组件，数据库使用内存 mock）
 // ──────────────────────────────────────────────
 
 async function buildApp(
   prismaMock: ReturnType<typeof buildPrismaMock>,
 ): Promise<INestApplication> {
   const moduleFixture: TestingModule = await Test.createTestingModule({
-    imports: [
-      ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
-      AuthModule,
-    ],
+    imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true })],
+    controllers: [AuthController],
     providers: [
+      AuthService,
+      AuthRepository,
+      TokenService,
+      AuthGuard,
+      { provide: PrismaService, useValue: prismaMock },
       {
         provide: APP_INTERCEPTOR,
         useClass: ResponseEnvelopeInterceptor,
@@ -98,10 +113,7 @@ async function buildApp(
         useClass: HttpExceptionFilter,
       },
     ],
-  })
-    .overrideProvider(PrismaService)
-    .useValue(prismaMock)
-    .compile();
+  }).compile();
 
   const app = moduleFixture.createNestApplication();
   app.useGlobalPipes(
@@ -174,9 +186,8 @@ describe('Auth (e2e)', () => {
         .expect(401);
 
       expect(res.body).toMatchObject({
-        error: expect.objectContaining({
-          code: 'AUTH_LOGIN_FAILED',
-        }),
+        code: 'AUTH_LOGIN_FAILED',
+        status: 401,
       });
       expect(prisma.session.create).not.toHaveBeenCalled();
     });
@@ -251,9 +262,8 @@ describe('Auth (e2e)', () => {
         .expect(401);
 
       expect(res.body).toMatchObject({
-        error: expect.objectContaining({
-          code: 'AUTH_REFRESH_FAILED',
-        }),
+        code: 'AUTH_REFRESH_FAILED',
+        status: 401,
       });
     });
 
@@ -295,9 +305,8 @@ describe('Auth (e2e)', () => {
         .expect(401);
 
       expect(res.body).toMatchObject({
-        error: expect.objectContaining({
-          code: 'AUTH_TOKEN_MISSING',
-        }),
+        code: 'AUTH_TOKEN_MISSING',
+        status: 401,
       });
     });
 
@@ -310,9 +319,8 @@ describe('Auth (e2e)', () => {
         .expect(401);
 
       expect(res.body).toMatchObject({
-        error: expect.objectContaining({
-          code: 'AUTH_TOKEN_INVALID',
-        }),
+        code: 'AUTH_TOKEN_INVALID',
+        status: 401,
       });
     });
   });
@@ -346,9 +354,8 @@ describe('Auth (e2e)', () => {
         .expect(401);
 
       expect(res.body).toMatchObject({
-        error: expect.objectContaining({
-          code: 'AUTH_TOKEN_MISSING',
-        }),
+        code: 'AUTH_TOKEN_MISSING',
+        status: 401,
       });
     });
 

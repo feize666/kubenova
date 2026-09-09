@@ -20,12 +20,14 @@ export class AuthRepository {
     userId: string;
     refreshTokenHash: string;
     expiresAt: Date;
+    refreshExpiresAt: Date;
   }): Promise<Session> {
     return this.prisma.session.create({
       data: {
         userId: input.userId,
         refreshTokenHash: input.refreshTokenHash,
         expiresAt: input.expiresAt,
+        refreshExpiresAt: input.refreshExpiresAt,
       },
     });
   }
@@ -51,7 +53,7 @@ export class AuthRepository {
       where: {
         refreshTokenHash,
         revokedAt: null,
-        expiresAt: { gt: new Date() },
+        refreshExpiresAt: { gt: new Date() },
         user: { isActive: true },
       },
       include: { user: true },
@@ -67,6 +69,55 @@ export class AuthRepository {
       data: {
         revokedAt: new Date(),
       },
+    });
+  }
+
+  async revokeSessionByRefreshTokenHash(
+    sessionId: string,
+    refreshTokenHash: string,
+  ): Promise<boolean> {
+    const result = await this.prisma.session.updateMany({
+      where: {
+        id: sessionId,
+        refreshTokenHash,
+        revokedAt: null,
+        refreshExpiresAt: { gt: new Date() },
+      },
+      data: { revokedAt: new Date() },
+    });
+    return result.count === 1;
+  }
+
+  async rotateSession(input: {
+    sessionId: string;
+    userId: string;
+    currentRefreshTokenHash: string;
+    nextRefreshTokenHash: string;
+    expiresAt: Date;
+    refreshExpiresAt: Date;
+  }): Promise<Session | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const revoked = await tx.session.updateMany({
+        where: {
+          id: input.sessionId,
+          refreshTokenHash: input.currentRefreshTokenHash,
+          revokedAt: null,
+          refreshExpiresAt: { gt: new Date() },
+        },
+        data: { revokedAt: new Date() },
+      });
+      if (revoked.count !== 1) {
+        return null;
+      }
+
+      return tx.session.create({
+        data: {
+          userId: input.userId,
+          refreshTokenHash: input.nextRefreshTokenHash,
+          expiresAt: input.expiresAt,
+          refreshExpiresAt: input.refreshExpiresAt,
+        },
+      });
     });
   }
 }

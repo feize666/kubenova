@@ -11,6 +11,7 @@ export const CONTROL_API_BASE = process.env.NEXT_PUBLIC_CONTROL_API_BASE ?? "";
 export const AUTH_EXPIRED_EVENT = "aiops:auth-expired";
 export const AUTH_EXPIRED_MESSAGE = "访问令牌无效或已过期，请重新登录";
 const AUTH_EXPIRED_CODES = new Set([
+  "AUTH_TOKEN_INVALID",
   "AUTH_EXPIRED",
   "TOKEN_EXPIRED",
   "ACCESS_TOKEN_EXPIRED",
