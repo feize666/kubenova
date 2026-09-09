@@ -795,14 +795,6 @@ export default function NetworkTopologyPage() {
         />
       ) : null}
 
-      <div className="resource-map-legend" aria-label="拓扑图例">
-        <span className="resource-map-legend__title">拓扑图例</span>
-        {SOURCE_KEYS.map((source) => <span key={source}><i style={{ "--legend-color": SOURCE_META[source].lightColor } as CSSProperties} />{SOURCE_META[source].label}</span>)}
-        <span><i className="is-line" />关系</span>
-        <span><i className="is-dashed" />推断关系</span>
-        <span className="resource-map-legend__status"><i className="is-status" />实时快照</span>
-      </div>
-
       <div className="resource-map-workbench">
         <div className="resource-map-canvas">
           {loading ? (
