@@ -442,3 +442,169 @@
   .resource-map-toolbar__hint { width: 100%; }
   .resource-map-legend__status { margin-left: 0; }
 }
+
+/* Compact control deck: keep context, filters and actions readable without
+ * sacrificing canvas height. These selectors intentionally outrank the
+ * legacy workbench overrides loaded after this file. */
+.resource-map-shell.resource-map-shell--workbench .resource-map-header.ops-page-header {
+  min-height: 48px;
+  padding: 7px 12px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-header .ops-page-header__title {
+  font-size: 16px;
+  line-height: 20px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar {
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 34px 38px;
+  gap: 6px 10px;
+  padding: 6px 8px;
+  align-items: center;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__scope {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-context-field {
+  height: 30px;
+  min-width: 0;
+  gap: 5px;
+  padding: 2px 6px 2px 8px;
+  border-radius: 4px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-context-field__label {
+  font-size: 9px;
+  letter-spacing: .02em;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-context-field .ant-select {
+  min-width: 116px;
+  height: 26px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  gap: 5px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions .ant-btn,
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions .ops-icon-action-button.ant-btn {
+  min-height: 30px;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions .ops-icon-action-button.ant-btn {
+  width: 30px;
+  padding: 0;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions .ant-input-affix-wrapper {
+  width: clamp(170px, 20vw, 250px);
+  min-height: 30px;
+  height: 30px;
+  border-radius: 4px;
+  padding-block: 2px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__hint {
+  display: none;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__filters {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chips {
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chips > button {
+  min-width: 118px;
+  min-height: 36px;
+  height: 36px;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 4px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chip__icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chip__copy span { font-size: 11px; }
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chip__copy small,
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chip__metrics small { font-size: 8px; }
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chip__count { font-size: 14px; }
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__filters > .ant-segmented {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__filters > .ant-segmented .ant-segmented-item {
+  min-height: 24px;
+  line-height: 24px;
+  font-size: 11px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-legend {
+  min-height: 28px;
+  height: 28px;
+  gap: 8px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-legend__title { font-size: 10px; }
+.resource-map-shell.resource-map-shell--workbench .resource-map-legend > span { font-size: 10px; }
+.resource-map-shell.resource-map-shell--workbench .resource-map-legend__status { margin-left: auto; }
+
+@media (max-width: 900px) {
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__scope,
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions,
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__filters {
+    grid-column: 1;
+  }
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__scope { grid-row: 1; }
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions { grid-row: 2; justify-content: flex-start; }
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__filters { grid-row: 3; }
+}
+
+@media (max-width: 560px) {
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions .ant-input-affix-wrapper { flex: 1 1 100%; width: auto; }
+  .resource-map-shell.resource-map-shell--workbench .resource-map-source-chips { overflow-x: auto; }
+  .resource-map-shell.resource-map-shell--workbench .resource-map-legend { overflow-x: auto; }
+}
