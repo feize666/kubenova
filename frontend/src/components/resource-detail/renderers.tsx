@@ -18,6 +18,8 @@ import {
   DetailSection,
   DetailChipList,
 } from "./section-primitives";
+import { ResourceLink } from "./resource-link";
+import { buildResourceRefDetailRequest } from "@/lib/resource-navigation";
 import {
   buildHeadlampDetailSections,
   buildSpecSection,
@@ -510,6 +512,15 @@ function resolveAssociationNavigationByIdentity(
   if (fallbackTarget) {
     return { target: fallbackTarget };
   }
+  const genericTarget = buildResourceRefDetailRequest({
+    resourceKind: kind,
+    resourceName: name,
+    namespace,
+    clusterId: clusterId || detail.overview.clusterId,
+  });
+  if (genericTarget) {
+    return { target: genericTarget };
+  }
   return {
     target: null,
     reason: namespace
@@ -840,7 +851,7 @@ function EndpointHighlightsSection({ detail }: ResourceDetailRendererProps) {
   );
 }
 
-function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
+function IngressHighlightsSection({ detail, clusterMap, onNavigateRequest }: ResourceDetailRendererProps) {
   const kind = normalizeKind(
     detail.descriptor.resourceKind || detail.overview.kind,
   );
@@ -999,7 +1010,15 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
                           </Typography.Text>
                         )}
                         <DetailTag color="blue">Backend</DetailTag>
-                        <Typography.Text strong>{item.name}</Typography.Text>
+                        <ResourceLink
+                          kind="Service"
+                          name={item.name}
+                          namespace={item.namespace ?? detail.overview.namespace}
+                          clusterId={detail.overview.clusterId}
+                          clusterMap={clusterMap}
+                          onNavigateRequest={onNavigateRequest}
+                          strong
+                        />
                         {item.namespace ? (
                           <Typography.Text type="secondary">
                             {item.namespace}
@@ -1070,7 +1089,7 @@ function IngressHighlightsSection({ detail }: ResourceDetailRendererProps) {
   );
 }
 
-function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps) {
+function OverviewHeroSection({ detail, clusterMap, onNavigateRequest }: ResourceDetailRendererProps) {
   const allowedRuntimeFields = new Set(getAllowedRuntimeFields(detail));
   const isPod =
     normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) ===
@@ -1122,7 +1141,16 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
 
         <Space orientation="vertical" size={4} style={{ width: "100%" }}>
           <Typography.Title level={4} style={{ margin: 0 }}>
-            {detail.overview.name}
+            <ResourceLink
+              kind={detail.overview.kind}
+              name={detail.overview.name}
+              id={detail.overview.id}
+              namespace={detail.overview.namespace}
+              clusterId={detail.overview.clusterId}
+              clusterMap={clusterMap}
+              onNavigateRequest={onNavigateRequest}
+              strong
+            />
           </Typography.Title>
           <Typography.Text type="secondary">
             集群 {getClusterDisplayName(clusterMap ?? {}, detail.overview.clusterId)}
@@ -1200,7 +1228,7 @@ function OverviewHeroSection({ detail, clusterMap }: ResourceDetailRendererProps
   );
 }
 
-function StatusSnapshotSection({ detail }: ResourceDetailRendererProps) {
+function StatusSnapshotSection({ detail, clusterMap, onNavigateRequest }: ResourceDetailRendererProps) {
   const isPod =
     normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) ===
     "pod";
@@ -1260,7 +1288,16 @@ function StatusSnapshotSection({ detail }: ResourceDetailRendererProps) {
       ? { key: "podIP", label: "Pod IP", value: detail.runtime.podIP }
       : null,
     allowedRuntimeFields.has("nodeName") && detail.runtime.nodeName
-      ? { key: "nodeName", label: "节点", value: detail.runtime.nodeName }
+      ? { key: "nodeName", label: "节点", value: (
+          <ResourceLink
+            kind="Node"
+            name={detail.runtime.nodeName}
+            clusterId={detail.overview.clusterId}
+            clusterMap={clusterMap}
+            onNavigateRequest={onNavigateRequest}
+            strong
+          />
+        ) }
       : null,
   ].filter(Boolean) as Array<{
     key: string;
@@ -1277,6 +1314,8 @@ function StatusSnapshotSection({ detail }: ResourceDetailRendererProps) {
 
 function PodHighlightsSection({
   detail,
+  clusterMap,
+  onNavigateRequest,
 }: ResourceDetailRendererProps) {
   if (
     normalizeKind(detail.descriptor.resourceKind || detail.overview.kind) !==
@@ -1290,7 +1329,17 @@ function PodHighlightsSection({
       ? {
           key: "serviceAccountName",
           label: "ServiceAccount",
-          value: detail.runtime.serviceAccountName,
+          value: (
+            <ResourceLink
+              kind="ServiceAccount"
+              name={detail.runtime.serviceAccountName}
+              namespace={detail.overview.namespace}
+              clusterId={detail.overview.clusterId}
+              clusterMap={clusterMap}
+              onNavigateRequest={onNavigateRequest}
+              strong
+            />
+          ),
         }
       : null,
     detail.runtime.restartPolicy
@@ -3751,9 +3800,10 @@ export function ResourceDetailContent({
 
       <PodHighlightsSection
         detail={detail}
+        clusterMap={clusterMap}
         onNavigateRequest={onNavigateRequest}
       />
-      <NodeHighlightsSection detail={detail} />
+      <NodeHighlightsSection detail={detail} clusterMap={clusterMap} onNavigateRequest={onNavigateRequest} />
       <WorkloadHighlightsSection
         detail={detail}
         onNavigateRequest={onNavigateRequest}
@@ -3783,6 +3833,7 @@ export function ResourceDetailContent({
       />
       <IngressHighlightsSection
         detail={detail}
+        clusterMap={clusterMap}
         onNavigateRequest={onNavigateRequest}
       />
       <NetworkPolicyHighlightsSection detail={detail} />
