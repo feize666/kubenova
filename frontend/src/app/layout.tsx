@@ -18,6 +18,13 @@ import "@xyflow/react/dist/style.css";
 export const metadata: Metadata = {
   title: "KubeNova",
   description: "云原生智能运维控制台",
+  icons: {
+    icon: [
+      { url: "/kubenova-icon.svg", type: "image/svg+xml" },
+    ],
+    shortcut: ["/kubenova-icon.svg"],
+    apple: [{ url: "/kubenova-icon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
