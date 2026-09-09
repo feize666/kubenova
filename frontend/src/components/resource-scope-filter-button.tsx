@@ -7,6 +7,7 @@ import { ClusterSelect, type ClusterOption } from "@/components/cluster-select";
 import { NamespaceSelect } from "@/components/namespace-select";
 import { OpsFilterTriggerButton, OpsPopoverPanel } from "@/components/ops";
 import { useClusterDisplayMap } from "@/hooks/use-cluster-display-map";
+import { useRouteClusterScope } from "@/hooks/use-cluster-namespace-filter";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { emitResourceScopeChange } from "@/lib/resource-scope-events";
 
@@ -39,52 +40,66 @@ export function ResourceScopeFilterButton({
   label = "资源范围",
   onApply,
 }: ResourceScopeFilterButtonProps) {
+  const routeScope = useRouteClusterScope();
+  const effectiveClusterId = routeScope.isFixed ? routeScope.clusterId : clusterId;
   const [open, setOpen] = useState(false);
-  const [draftClusterId, setDraftClusterId] = useState(clusterId);
+  const [draftClusterId, setDraftClusterId] = useState(effectiveClusterId);
   const [draftNamespace, setDraftNamespace] = useState(namespace);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
-      setDraftClusterId(clusterId);
+      setDraftClusterId(effectiveClusterId);
       setDraftNamespace(namespace);
     }
     setOpen(nextOpen);
   };
 
-  const clusterNameById = useClusterDisplayMap(clusterOptions, clusterId);
+  const clusterNameById = useClusterDisplayMap(clusterOptions, effectiveClusterId);
+  const effectiveClusterName = effectiveClusterId
+    ? getClusterDisplayName(Object.fromEntries(clusterNameById), effectiveClusterId)
+    : "";
 
-  const hasConcreteDraftCluster = draftClusterId.trim().length > 0;
-  const parentKeepsDraftDisabled = Boolean(namespaceDisabled && draftClusterId === clusterId);
+  const namespaceClusterId = routeScope.isFixed ? effectiveClusterId : draftClusterId;
+  const hasConcreteDraftCluster = namespaceClusterId.trim().length > 0;
+  const parentKeepsDraftDisabled = Boolean(namespaceDisabled && namespaceClusterId === clusterId);
   const resolvedNamespaceDisabled = !hasConcreteDraftCluster || parentKeepsDraftDisabled;
   const resolvedNamespacePlaceholder =
     namespacePlaceholder ?? (hasConcreteDraftCluster ? "全部名称空间" : "请先选择具体集群");
-  const activeCount = Number(Boolean(clusterId)) + Number(Boolean(namespace));
+  const activeCount = Number(Boolean(effectiveClusterId)) + Number(Boolean(namespace));
 
   const summary = useMemo(() => {
-    if (!clusterId && !namespace) return "全部资源";
-    const clusterLabel = clusterId
-      ? getClusterDisplayName(Object.fromEntries(clusterNameById), clusterId)
+    if (!effectiveClusterId && !namespace) return "全部资源";
+    const clusterLabel = effectiveClusterId
+      ? effectiveClusterName
       : "全部集群";
     if (namespaceVisible && namespace) return `${clusterLabel} / ${namespace}`;
     return clusterLabel;
-  }, [clusterId, clusterNameById, namespace, namespaceVisible]);
+  }, [effectiveClusterId, effectiveClusterName, namespace, namespaceVisible]);
 
   const applyDraft = () => {
+    const nextClusterId = routeScope.isFixed ? effectiveClusterId : draftClusterId;
     const nextNamespace = namespaceVisible ? draftNamespace : "";
     emitResourceScopeChange({
-      clusterId: draftClusterId,
-      clusterName: draftClusterId ? getClusterDisplayName(Object.fromEntries(clusterNameById), draftClusterId) : "",
+      clusterId: nextClusterId,
+      clusterName: nextClusterId
+        ? getClusterDisplayName(Object.fromEntries(clusterNameById), nextClusterId)
+        : "",
       namespace: nextNamespace,
     });
-    onApply({ clusterId: draftClusterId, namespace: nextNamespace });
+    onApply({ clusterId: nextClusterId, namespace: nextNamespace });
     setOpen(false);
   };
 
   const resetAndApply = () => {
-    setDraftClusterId("");
+    const nextClusterId = routeScope.isFixed ? effectiveClusterId : "";
+    setDraftClusterId(nextClusterId);
     setDraftNamespace("");
-    emitResourceScopeChange({ clusterId: "", namespace: "" });
-    onApply({ clusterId: "", namespace: "" });
+    emitResourceScopeChange({
+      clusterId: nextClusterId,
+      clusterName: routeScope.isFixed ? effectiveClusterName : "",
+      namespace: "",
+    });
+    onApply({ clusterId: nextClusterId, namespace: "" });
     setOpen(false);
   };
 
@@ -97,20 +112,27 @@ export function ResourceScopeFilterButton({
       className="resource-scope-filter-panel"
     >
       <Space orientation="vertical" size={10} style={{ width: "100%" }}>
-        <div>
-          <Typography.Text className="resource-scope-filter-label">集群</Typography.Text>
-          <ClusterSelect
-            value={draftClusterId}
-            onChange={(value) => {
-              setDraftClusterId(value);
-              setDraftNamespace("");
-            }}
-            options={clusterOptions}
-            loading={clusterLoading}
-            unavailable={clusterUnavailable}
-            showAllOption
-          />
-        </div>
+        {routeScope.isFixed ? (
+          <div>
+            <Typography.Text className="resource-scope-filter-label">当前集群</Typography.Text>
+            <Typography.Text strong>{effectiveClusterName}</Typography.Text>
+          </div>
+        ) : (
+          <div>
+            <Typography.Text className="resource-scope-filter-label">集群</Typography.Text>
+            <ClusterSelect
+              value={draftClusterId}
+              onChange={(value) => {
+                setDraftClusterId(value);
+                setDraftNamespace("");
+              }}
+              options={clusterOptions}
+              loading={clusterLoading}
+              unavailable={clusterUnavailable}
+              showAllOption
+            />
+          </div>
+        )}
         {namespaceVisible ? (
           <div>
             <Typography.Text className="resource-scope-filter-label">名称空间</Typography.Text>
@@ -118,7 +140,7 @@ export function ResourceScopeFilterButton({
               value={draftNamespace}
               onChange={setDraftNamespace}
               knownNamespaces={knownNamespaces}
-              clusterId={draftClusterId}
+              clusterId={namespaceClusterId}
               loading={namespaceLoading}
               disabled={resolvedNamespaceDisabled}
               placeholder={resolvedNamespacePlaceholder}

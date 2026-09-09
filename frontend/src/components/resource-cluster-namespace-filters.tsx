@@ -5,6 +5,7 @@ import { Space } from "antd";
 import type { ReactNode } from "react";
 import { OpsIconActionButton, type OpsActiveFilter } from "@/components/ops";
 import { useClusterDisplayMap } from "@/hooks/use-cluster-display-map";
+import { useRouteClusterScope } from "@/hooks/use-cluster-namespace-filter";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { emitResourceScopeChange } from "@/lib/resource-scope-events";
 import {
@@ -61,30 +62,34 @@ export function ResourceClusterNamespaceFilters({
   marginBottom = 8,
   showKeywordSearch = false,
 }: ResourceClusterNamespaceFiltersProps) {
-  const hasConcreteCluster = clusterId.trim().length > 0;
+  const routeScope = useRouteClusterScope();
+  const effectiveClusterId = routeScope.isFixed ? routeScope.clusterId : clusterId;
+  const hasConcreteCluster = effectiveClusterId.trim().length > 0;
   const resolvedNamespaceDisabled = namespaceDisabled ?? !hasConcreteCluster;
   const resolvedNamespacePlaceholder =
     namespacePlaceholder ?? (hasConcreteCluster ? "全部名称空间" : "请先选择具体集群");
-  const clusterNameById = useClusterDisplayMap(clusterOptions, clusterId);
-  const clusterLabel = clusterId
-    ? getClusterDisplayName(Object.fromEntries(clusterNameById), clusterId)
+  const clusterNameById = useClusterDisplayMap(clusterOptions, effectiveClusterId);
+  const clusterLabel = effectiveClusterId
+    ? getClusterDisplayName(Object.fromEntries(clusterNameById), effectiveClusterId)
     : "";
   const activeFilters: OpsActiveFilter[] = [
-    clusterId
+    effectiveClusterId
       ? {
           key: "cluster",
           label: "集群",
           value: clusterLabel,
           tone: "info",
-          onClear: () => {
-            emitResourceScopeChange({ clusterId: "", namespace: "" });
-            if (onScopeChange) {
-              onScopeChange("", "");
-            } else {
-              onClusterChange("");
-              onNamespaceChange?.("");
-            }
-          },
+          onClear: routeScope.isFixed
+            ? undefined
+            : () => {
+                emitResourceScopeChange({ clusterId: "", namespace: "" });
+                if (onScopeChange) {
+                  onScopeChange("", "");
+                } else {
+                  onClusterChange("");
+                  onNamespaceChange?.("");
+                }
+              },
         }
       : null,
     namespaceVisible && namespace
@@ -94,9 +99,9 @@ export function ResourceClusterNamespaceFilters({
           value: namespace,
           tone: "neutral",
           onClear: () => {
-            emitResourceScopeChange({ clusterId, clusterName: clusterLabel, namespace: "" });
+            emitResourceScopeChange({ clusterId: effectiveClusterId, clusterName: clusterLabel, namespace: "" });
             if (onScopeChange) {
-              onScopeChange(clusterId, "");
+              onScopeChange(effectiveClusterId, "");
             } else {
               onNamespaceChange?.("");
             }
@@ -131,7 +136,7 @@ export function ResourceClusterNamespaceFilters({
       >
         <ResourceFilterToolbarItem width="auto">
           <ResourceScopeFilterButton
-            clusterId={clusterId}
+            clusterId={effectiveClusterId}
             namespace={namespace}
             clusterOptions={clusterOptions}
             clusterLoading={clusterLoading}
@@ -142,18 +147,21 @@ export function ResourceClusterNamespaceFilters({
             namespacePlaceholder={resolvedNamespacePlaceholder}
             namespaceVisible={namespaceVisible}
             onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-              const nextClusterLabel = nextClusterId
-                ? getClusterDisplayName(Object.fromEntries(clusterNameById), nextClusterId)
+              const resolvedClusterId = routeScope.isFixed ? effectiveClusterId : nextClusterId;
+              const nextClusterLabel = resolvedClusterId
+                ? getClusterDisplayName(Object.fromEntries(clusterNameById), resolvedClusterId)
                 : "";
               emitResourceScopeChange({
-                clusterId: nextClusterId,
+                clusterId: resolvedClusterId,
                 clusterName: nextClusterLabel,
                 namespace: nextNamespace,
               });
               if (onScopeChange) {
-                onScopeChange(nextClusterId, nextNamespace);
+                onScopeChange(resolvedClusterId, nextNamespace);
               } else {
-                onClusterChange(nextClusterId);
+                if (!routeScope.isFixed) {
+                  onClusterChange(resolvedClusterId);
+                }
                 onNamespaceChange?.(nextNamespace);
               }
             }}
