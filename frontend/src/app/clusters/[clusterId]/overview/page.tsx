@@ -2,6 +2,7 @@
 
 import {
   ApiOutlined,
+  ApartmentOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
   DeploymentUnitOutlined,
@@ -10,6 +11,7 @@ import {
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Col, Progress, Row, Space, Typography } from "antd";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ClusterContextProvider, useClusterContext } from "@/components/cluster-context";
 import { OpsFilterChip, OpsLoadingState, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
@@ -17,6 +19,7 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import { useAuth } from "@/components/auth-context";
 import { getDashboardStats } from "@/lib/api/dashboard";
 import { QUERY_CACHE_TIMINGS } from "@/lib/query";
+import { buildClusterResourceHref } from "@/lib/cluster-workspace";
 
 const panelStyle = {
   background: "#ffffff",
@@ -28,6 +31,14 @@ const softBlueStyle = {
   background: "#f3f8ff",
   border: "1px solid #d5e7fb",
 };
+
+const workspaceEntries = [
+  { key: "workloads", title: "工作负载", description: "Pod、Deployment 与任务运行状态", path: "workloads/pods", icon: <DeploymentUnitOutlined /> },
+  { key: "network", title: "网络管理", description: "Service、Ingress 与端点链路", path: "network/services", icon: <ApiOutlined /> },
+  { key: "storage", title: "存储管理", description: "PVC、PV 与存储类", path: "storage/pvc", icon: <DatabaseOutlined /> },
+  { key: "configs", title: "配置管理", description: "ConfigMap、Secret 与服务账号", path: "configs/configmaps", icon: <SafetyCertificateOutlined /> },
+  { key: "topology", title: "资源拓扑", description: "工作负载、网络、存储依赖关系", path: "network/topology", icon: <ApartmentOutlined /> },
+] as const;
 
 function displayValue(value: string | number | null | undefined) {
   return value === null || value === undefined || value === "" ? "-" : value;
@@ -135,6 +146,25 @@ function ClusterInfoContent() {
         <Col xs={24} sm={12} xl={6}><OpsMetricTile tone="success" icon={<DeploymentUnitOutlined />} label="工作负载" value={displayValue(workloadTotal)} meta={workloadTotal === undefined ? "暂无统计数据" : `健康 ${workloadHealthy ?? 0} · 异常 ${workloadUnhealthy ?? 0}`} /></Col>
         <Col xs={24} sm={12} xl={6}><OpsMetricTile tone="info" icon={<DatabaseOutlined />} label="拓扑资源" value={displayValue(topology?.pods)} meta={topology ? `服务 ${topology.services} · 入口 ${topology.ingresses}` : "暂无拓扑统计"} /></Col>
       </Row>
+
+      <OpsSurface variant="panel" padding="md" style={panelStyle} title="资源工作台">
+        <Row gutter={[12, 12]}>
+          {workspaceEntries.map((entry) => (
+            <Col xs={24} sm={12} xl={8} key={entry.key}>
+              <Link
+                href={buildClusterResourceHref(clusterId, entry.path)}
+                className="cluster-workspace-entry"
+              >
+                <span className="cluster-workspace-entry__icon" aria-hidden>{entry.icon}</span>
+                <span>
+                  <strong>{entry.title}</strong>
+                  <small>{entry.description}</small>
+                </span>
+              </Link>
+            </Col>
+          ))}
+        </Row>
+      </OpsSurface>
 
       <OpsSurface variant="panel" padding="md" style={panelStyle} title="资源使用率">
         {resourceUsage ? (

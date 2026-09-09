@@ -15175,3 +15175,138 @@ body.topology-overview-active {
 [data-theme="light"] .ant-tabs-top > .ant-tabs-nav::before {
   border-color: #d7e5ff !important;
 }
+
+/* Blue-white platform policy: every functional route uses the same operational surface. */
+[data-theme="light"] {
+  --kn-bg: #f4f8ff;
+  --kn-sider: #ffffff;
+  --kn-surface: #ffffff;
+  --kn-surface-raised: #f7fbff;
+  --kn-surface-overlay: #ffffff;
+  --kn-surface-subtle: #edf5ff;
+  --kn-border: #d7e5ff;
+  --kn-border-strong: #a9c8ff;
+  --kn-border-hover: #75a7fb;
+  --kn-text: #172033;
+  --kn-text-secondary: #52627b;
+  --kn-text-muted: #74829a;
+  --kn-primary: #2468e8;
+  --kn-primary-hover: #1455ce;
+  --kn-primary-subtle: #e8f1ff;
+  --ops-bg: #f4f8ff;
+  --ops-surface: #ffffff;
+  --ops-surface-raised: #f7fbff;
+  --ops-surface-overlay: #ffffff;
+  --ops-surface-muted: #edf5ff;
+  --ops-border-subtle: #d7e5ff;
+  --ops-border-strong: #a9c8ff;
+  --ops-border-hover: #75a7fb;
+  --ops-hover-bg: #f0f6ff;
+  --ops-active-bg: #e8f1ff;
+  --map-page-bg: #f4f8ff;
+  --map-panel-bg: #ffffff;
+  --map-canvas-bg: #f7fbff;
+  --map-card-bg: #ffffff;
+  --map-card-bg-soft: #edf5ff;
+  --map-border: #cfe0fb;
+  --ops-console-frame-bg: #f7fbff;
+  --ops-console-header-bg: #ffffff;
+  --ops-console-chip-bg: #edf5ff;
+  --ops-console-border: #cfe0fb;
+  --ops-console-divider: #dce9fb;
+}
+
+[data-theme="light"] .ops-frame-shell,
+[data-theme="light"] .logs-workbench-shell.ops-frame-shell,
+[data-theme="light"] .terminal-workbench-shell.ops-frame-shell,
+[data-theme="light"] .logs-workbench-shell .ops-frame-shell__body,
+[data-theme="light"] .terminal-workbench-shell .ops-frame-shell__body,
+[data-theme="light"] .logs-toolbar-card.ops-surface,
+[data-theme="light"] .logs-terminal-card.ops-surface,
+[data-theme="light"] .headlamp-log-group,
+[data-theme="light"] .headlamp-log-group-actions,
+[data-theme="light"] .terminal-workbench-toolbar__group {
+  border-color: #cfe0fb !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+}
+
+[data-theme="light"] .ops-frame-shell__header,
+[data-theme="light"] .ops-frame-shell__toolbar,
+[data-theme="light"] .ops-frame-shell__chips,
+[data-theme="light"] .terminal-workbench-stage,
+[data-theme="light"] .logs-terminal-frame,
+[data-theme="light"] .terminal-xterm-host,
+[data-theme="light"] .logs-terminal-host {
+  border-color: #cfe0fb !important;
+  background: #f7fbff !important;
+}
+
+[data-theme="light"] .logs-terminal-titlebar,
+[data-theme="light"] .terminal-workbench-titlebar {
+  border-bottom-color: #bfd6ff !important;
+  background: #eaf3ff !important;
+  color: #172033 !important;
+}
+
+[data-theme="light"] .logs-empty-hint {
+  border-color: #cfe0fb !important;
+  background: #f7fbff !important;
+  box-shadow: none !important;
+}
+
+[data-theme="light"] .logs-empty-hint .ant-typography,
+[data-theme="light"] .logs-empty-hint .ant-typography-secondary,
+[data-theme="light"] .logs-terminal-title,
+[data-theme="light"] .terminal-workbench-title.ant-typography {
+  color: #172033 !important;
+}
+
+.cluster-workspace-entry {
+  display: flex;
+  min-height: 88px;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #cfe3fb;
+  border-radius: 8px;
+  background: #f7fbff;
+  color: #102a43;
+  padding: 14px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.cluster-workspace-entry:hover {
+  border-color: #1677ff;
+  box-shadow: 0 8px 18px rgba(22, 119, 255, 0.12);
+  color: #0958d9;
+  transform: translateY(-1px);
+}
+
+.cluster-workspace-entry__icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: #e6f4ff;
+  color: #1677ff;
+  font-size: 18px;
+}
+
+.cluster-workspace-entry strong,
+.cluster-workspace-entry small {
+  display: block;
+}
+
+.cluster-workspace-entry strong {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.cluster-workspace-entry small {
+  margin-top: 3px;
+  color: #5d7590;
+  font-size: 12px;
+  line-height: 18px;
+}

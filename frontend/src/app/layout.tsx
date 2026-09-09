@@ -13,6 +13,7 @@ import "./solid-surface-overrides.css";
 import "./topology-solid-surfaces.css";
 import "./topology-panorama.css";
 import "./topology-kubejojo.css";
+import "./blue-white-final.css";
 import "@xyflow/react/dist/style.css";
 
 export const metadata: Metadata = {
@@ -34,7 +35,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Script
           id="kubenova-theme-init"
           strategy="beforeInteractive"
-        >{`try{var m=localStorage.getItem('kubenova-theme-mode');document.documentElement.setAttribute('data-theme',m==='dark'||m==='light'?m:'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}`}</Script>
+        >{`try{localStorage.setItem('kubenova-theme-mode','light');document.documentElement.setAttribute('data-theme','light');}catch(e){document.documentElement.setAttribute('data-theme','light');}`}</Script>
         <AntdRegistry>
           <Providers>
             <AppShell>{children}</AppShell>

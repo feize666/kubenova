@@ -75,25 +75,25 @@ function TopologyResourceNodeBase({ id, data, selected }: NodeProps<TopologyFlow
         gap: 10,
         alignItems: "center",
         padding: "10px 12px",
-        border: `1px solid ${selected || focused ? color : "var(--map-border, #334155)"}`,
+        border: `1px solid ${selected || focused ? color : "var(--map-border, #cfe0fb)"}`,
         borderRadius: 4,
-        background: isGroup ? "var(--map-card-bg-soft, #172033)" : "var(--map-card-bg, #101820)",
-        color: "var(--ops-text, #e5edf7)",
+        background: isGroup ? "var(--map-card-bg-soft, #edf5ff)" : "var(--map-card-bg, #ffffff)",
+        color: "var(--ops-text, #172033)",
         boxShadow: selected || focused ? `0 0 0 1px ${color}` : "none",
         cursor: "pointer",
         font: "inherit",
         textAlign: "left",
       }}
     >
-      <Handle type="target" position={Position.Left} style={{ background: color, border: "1px solid var(--map-canvas-bg, #0b1120)" }} />
+      <Handle type="target" position={Position.Left} style={{ background: color, border: "1px solid var(--map-canvas-bg, #f7fbff)" }} />
       <span style={{ display: "grid", gap: 3, minWidth: 0 }}>
         <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>{topology.label}</strong>
-        <small style={{ color: "var(--ops-text-muted, #9fb0c5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11 }}>
+        <small style={{ color: "var(--ops-text-muted, #52627b)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11 }}>
           {topology.subtitle ?? topology.resource?.kind ?? "Resource"}
         </small>
       </span>
       {isGroup ? <span style={{ color, fontSize: 12, fontWeight: 700 }}>{topology.hiddenChildCount ?? 0}</span> : <span style={{ width: 8, height: 8, borderRadius: "50%", background: color }} />}
-      <Handle type="source" position={Position.Right} style={{ background: color, border: "1px solid var(--map-canvas-bg, #0b1120)" }} />
+      <Handle type="source" position={Position.Right} style={{ background: color, border: "1px solid var(--map-canvas-bg, #f7fbff)" }} />
     </button>
   );
 }
@@ -112,9 +112,9 @@ function TopologyRelationEdgeBase({ id, sourceX, sourceY, targetX, targetY, sour
               position: "absolute",
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               padding: "1px 5px",
-              border: "1px solid var(--map-border, #334155)",
+              border: "1px solid var(--map-border, #cfe0fb)",
               borderRadius: 3,
-              background: "var(--map-card-bg, #101820)",
+              background: "var(--map-card-bg, #ffffff)",
               color,
               fontSize: 10,
               fontWeight: 700,

@@ -8,6 +8,7 @@ import {
   DisconnectOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
+  LoginOutlined,
   MoreOutlined,
   PauseCircleOutlined,
   PlayCircleOutlined,
@@ -31,6 +32,7 @@ import {
 } from "antd";
 import type { MenuProps, TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useRouter } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterDetailDrawer } from "@/components/cluster-detail-drawer";
@@ -76,6 +78,7 @@ import {
 import type { Cluster } from "@/lib/api/types";
 import { QUERY_CACHE_TIMINGS, queryKeys } from "@/lib/query";
 import { useAntdTableSortPagination } from "@/lib/table";
+import { buildClusterWorkspaceHref } from "@/lib/cluster-workspace";
 
 export type ClusterTableRecord = Cluster & { key: string };
 type ClusterTableChangeHandler = NonNullable<TableProps<ClusterTableRecord>["onChange"]>;
@@ -263,6 +266,7 @@ function resolveProbeFailureReason(reason?: string | null) {
 }
 
 export default function ClustersPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
   const [keywordInput, setKeywordInput] = useState("");
@@ -621,6 +625,9 @@ export default function ClustersPage() {
   const handleCloseDetail = useCallback(() => setDetailOpen(false), []);
   const handleCloseHealthDetail = useCallback(() => setHealthDetailCluster(null), []);
   const handleDetailRefreshRequest = useCallback(() => void refetchList(), [refetchList]);
+  const openClusterWorkspace = useCallback((clusterId: string) => {
+    router.push(buildClusterWorkspaceHref(clusterId));
+  }, [router]);
 
   const columns: Array<HeadlampResourceTableColumn<ClusterTableRecord>> = useMemo(() => [
     {
@@ -636,10 +643,7 @@ export default function ClustersPage() {
         <Space orientation="vertical" size={2}>
           <Typography.Link
             strong
-            onClick={() => {
-              setSelectedCluster(row);
-              setDetailOpen(true);
-            }}
+            onClick={() => openClusterWorkspace(row.id)}
           >
             {name}
           </Typography.Link>
@@ -798,6 +802,13 @@ export default function ClustersPage() {
         const items: MenuProps["items"] = [
           !isDeleted
             ? {
+                key: "openWorkspace",
+                icon: <LoginOutlined />,
+                label: "进入集群",
+              }
+            : null,
+          !isDeleted
+            ? {
                 key: isDisabled ? "enable" : "disable",
                 icon: isDisabled ? <PlayCircleOutlined /> : <PauseCircleOutlined />,
                 danger: !isDisabled,
@@ -837,6 +848,10 @@ export default function ClustersPage() {
             items={items}
             ariaLabel="操作"
             onClick={({ key }) => {
+              if (key === "openWorkspace") {
+                openClusterWorkspace(row.id);
+                return;
+              }
               if (key === "healthDetail") {
                 setHealthDetailCluster(row);
                 return;
@@ -898,6 +913,7 @@ export default function ClustersPage() {
     manualProbeMutation,
     nameWidth,
     openEditModal,
+    openClusterWorkspace,
     togglingId,
   ]);
 
@@ -1115,13 +1131,12 @@ export default function ClustersPage() {
             <Form.Item
               label="供应商"
               name="provider"
-              rules={[{ required: true, message: "请输入供应商" }]}
             >
-              <Input placeholder="例如：AWS / 阿里云 / 自建" />
+              <Input placeholder="可选：留空后根据 API Server 自动识别" />
             </Form.Item>
             <Form.Item label="状态" name="status">
               <Select
-                placeholder="请选择状态（可选）"
+                placeholder="可选：留空后由健康探测自动更新"
                 allowClear
                 options={[
                   { label: "正常", value: "正常" },

@@ -29,6 +29,26 @@ const nextConfig: NextConfig = {
     const runtimeGatewayBase = normalizeHttpBase(configuredGatewayBase, "http://127.0.0.1:4100");
     return [
       {
+        source: "/clusters/:clusterId/workloads/:path*",
+        destination: "/workloads/:path*?clusterId=:clusterId",
+      },
+      {
+        source: "/clusters/:clusterId/network/:path*",
+        destination: "/network/:path*?clusterId=:clusterId",
+      },
+      {
+        source: "/clusters/:clusterId/storage/:path*",
+        destination: "/storage/:path*?clusterId=:clusterId",
+      },
+      {
+        source: "/clusters/:clusterId/configs/:path*",
+        destination: "/configs/:path*?clusterId=:clusterId",
+      },
+      {
+        source: "/clusters/:clusterId/namespaces",
+        destination: "/namespaces?clusterId=:clusterId",
+      },
+      {
         source: "/ws/:path*",
         destination: `${runtimeGatewayBase}/ws/:path*`,
       },

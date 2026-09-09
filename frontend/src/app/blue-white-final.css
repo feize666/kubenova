@@ -1,0 +1,84 @@
+/* Final blue-white layer for portalled Ant Design controls and shared utility views. */
+:root {
+  --kn-solid-shell: #f4f8ff;
+  --kn-solid-sidebar: #ffffff;
+  --kn-solid-topbar: #ffffff;
+  --kn-solid-surface: #ffffff;
+  --kn-solid-surface-raised: #f7fbff;
+  --kn-solid-control: #ffffff;
+  --kn-solid-overlay: #ffffff;
+  --kn-solid-border: #d7e5ff;
+  --kn-glass-bg: #ffffff;
+  --kn-glass-bg-strong: #f7fbff;
+  --kn-glass-bg-soft: #ffffff;
+  --kn-glass-border: #d7e5ff;
+  --kn-glass-border-strong: #a9c8ff;
+  --kn-topbar-bg: #ffffff;
+  --kn-topbar-action-bg: #ffffff;
+  --kn-topbar-action-bg-hover: #f0f6ff;
+  --kn-topbar-action-border: #d7e5ff;
+  --kn-topbar-action-border-hover: #75a7fb;
+  --ops-control-bg: #ffffff;
+  --ops-control-bg-hover: #f0f6ff;
+  --ops-control-bg-active: #e8f1ff;
+  --ops-floating-bg: #ffffff;
+  --ops-metric-bg: #f7fbff;
+}
+
+[data-theme="light"] :is(
+  .ant-notification-notice,
+  .ant-message-notice-content,
+  .ant-tooltip-inner,
+  .ant-tour-content,
+  .ant-cascader-menus,
+  .ant-tree-select-dropdown,
+  .ant-auto-complete-dropdown,
+  .ant-mentions-dropdown,
+  .ant-color-picker-panel
+) {
+  border: 1px solid #d7e5ff !important;
+  background: #ffffff !important;
+  color: #172033 !important;
+  box-shadow: 0 8px 24px rgba(36, 104, 232, 0.08) !important;
+}
+
+[data-theme="light"] :is(.ant-popover-arrow:before, .ant-tooltip-arrow:before) {
+  border-color: #d7e5ff !important;
+  background: #ffffff !important;
+}
+
+[data-theme="light"] :is(
+  .ant-dropdown-menu-item:hover,
+  .ant-cascader-menu-item:hover,
+  .ant-tree-select-dropdown .ant-select-item-option-active,
+  .ant-picker-cell-in-view.ant-picker-cell-selected .ant-picker-cell-inner
+) {
+  background: #f0f6ff !important;
+  color: #1455ce !important;
+}
+
+[data-theme="light"] :is(.ant-segmented-item-selected, .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn) {
+  color: #1455ce !important;
+}
+
+[data-theme="light"] .ops-frame-shell:not(.terminal-workbench-shell):not(.logs-workbench-shell) {
+  border-color: #d7e5ff !important;
+  background: #ffffff !important;
+  box-shadow: 0 8px 24px rgba(36, 104, 232, 0.06) !important;
+}
+
+[data-theme="light"] .ops-drawer-shell:not(.ops-drawer-shell--editor) .ant-drawer-body {
+  background: #f6faff !important;
+}
+
+[data-theme="light"] .ai-assistant-chat-context-header {
+  border-bottom: 1px solid #d7e5ff;
+  background: #ffffff !important;
+  backdrop-filter: none !important;
+}
+
+/* Code and command content remains deliberately high-contrast inside blue-white work surfaces. */
+[data-theme="light"] .ai-assistant-chat-surface pre {
+  background: #08111f !important;
+  color: #e5edf8 !important;
+}

@@ -5,7 +5,7 @@ import { ConfigProvider, theme as antdTheme } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo } from "react";
 
 dayjs.locale("zh-cn");
 
@@ -17,18 +17,6 @@ type ThemeContextValue = {
 };
 
 const ThemeModeContext = createContext<ThemeContextValue | null>(null);
-
-function readBrowserThemeMode(): ThemeMode {
-  const attr = document.documentElement.getAttribute("data-theme");
-  if (attr === "dark" || attr === "light") {
-    return attr;
-  }
-  const saved = window.localStorage.getItem("kubenova-theme-mode");
-  if (saved === "dark" || saved === "light") {
-    return saved;
-  }
-  return "light";
-}
 
 export function useThemeMode() {
   const ctx = useContext(ThemeModeContext);
@@ -703,35 +691,21 @@ const lightTheme: ThemeConfig = {
 };
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setMode] = useState<ThemeMode>("light");
-  const [isRestored, setIsRestored] = useState(false);
+  const mode: ThemeMode = "light";
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setMode(readBrowserThemeMode());
-      setIsRestored(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
+    document.documentElement.setAttribute("data-theme", "light");
+    window.localStorage.setItem("kubenova-theme-mode", "light");
   }, []);
 
-  useEffect(() => {
-    if (!isRestored) {
-      return;
-    }
-    document.documentElement.setAttribute("data-theme", mode);
-    window.localStorage.setItem("kubenova-theme-mode", mode);
-  }, [isRestored, mode]);
-
   const value = useMemo(
-    () => ({ mode, toggleTheme: () => setMode((m) => (m === "dark" ? "light" : "dark")) }),
+    () => ({ mode, toggleTheme: () => undefined }),
     [mode],
   );
 
-  const themeConfig = mode === "dark" ? darkTheme : lightTheme;
-
   return (
     <ThemeModeContext.Provider value={value}>
-      <ConfigProvider locale={zhCN} theme={themeConfig}>
+      <ConfigProvider locale={zhCN} theme={lightTheme}>
         {children}
       </ConfigProvider>
     </ThemeModeContext.Provider>

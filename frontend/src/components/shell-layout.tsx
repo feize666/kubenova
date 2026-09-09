@@ -5,12 +5,10 @@ import {
   BellOutlined,
   HomeOutlined,
   MenuOutlined,
-  MoonFilled,
   NodeIndexOutlined,
   ReloadOutlined,
   SearchOutlined,
   SafetyOutlined,
-  SunFilled,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { App, Avatar, Badge, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Popover, Skeleton, Space } from "antd";
@@ -321,7 +319,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { mode, toggleTheme } = useThemeMode();
+  const { mode } = useThemeMode();
   const { accessToken, isAuthenticated, isInitializing, username, role, logout } = useAuth();
   const { notification } = App.useApp();
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -701,22 +699,6 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
             </Popover>
             <OpsIconActionButton className="shell-topbar-action" icon={<ReloadOutlined />} onClick={() => window.location.reload()}>
               刷新
-            </OpsIconActionButton>
-            <OpsIconActionButton
-              className={`shell-theme-toggle shell-theme-toggle--${mode}`}
-              onClick={toggleTheme}
-              aria-pressed={mode === "dark"}
-              aria-label={`切换到${mode === "dark" ? "浅色" : "深色"}主题`}
-              data-mode={mode}
-            >
-              <span className={`shell-theme-segment ${mode === "light" ? "is-active" : ""}`}>
-                <SunFilled />
-                浅色
-              </span>
-              <span className={`shell-theme-segment ${mode === "dark" ? "is-active" : ""}`}>
-                <MoonFilled />
-                深色
-              </span>
             </OpsIconActionButton>
             <Dropdown
               menu={{
