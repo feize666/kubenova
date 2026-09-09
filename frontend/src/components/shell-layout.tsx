@@ -22,7 +22,7 @@ import {
   ToolOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Avatar, Breadcrumb, Dropdown, Input, Layout, Menu, Popover, Skeleton, Space } from "antd";
+import { App, Avatar, Badge, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Popover, Skeleton, Space } from "antd";
 import type { MenuProps } from "antd";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -33,6 +33,7 @@ import { useThemeMode } from "@/components/theme-context";
 import { getClusters } from "@/lib/api/clusters";
 import { listCapabilities } from "@/lib/api/capabilities";
 import { getClusterDisplayName, rememberClusterDisplayNames } from "@/lib/cluster-display-name";
+import { getSystemUpdateStatus, type SystemUpdateStatusPayload } from "@/lib/api/system-update";
 import { buildLoginRoute, buildInternalReturnTo } from "@/lib/login-return";
 import { RESOURCE_SCOPE_CHANGE_EVENT, type ResourceScopeChangeDetail } from "@/lib/resource-scope-events";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
@@ -61,6 +62,7 @@ const MAX_IDLE_PREFETCH_PATHS = 5;
 const MAX_OPEN_SIDEBAR_SECTIONS = 1;
 const ROUTE_TRANSITION_QUIET_MS = 650;
 const ENABLE_ROUTE_PREFETCH = process.env.NODE_ENV === "production";
+const UPDATE_NOTICE_VERSION_KEY = "kubenova.system-update.notice-version";
 
 type SidebarOpenSectionKey = string | null;
 
@@ -268,11 +270,13 @@ const AppSider = memo(function AppSider({
   mode,
   userRole,
   disabledPaths,
+  updateAvailable = false,
 }: {
   pathname: string;
   mode: string;
   userRole: string;
   disabledPaths?: Set<string> | null;
+  updateAvailable?: boolean;
 }) {
   const visibleSections = useMemo(
     () =>
@@ -381,7 +385,11 @@ const AppSider = memo(function AppSider({
               onMouseEnter={() => prefetchPaths(section.items.map((item) => item.path).slice(0, MAX_IDLE_PREFETCH_PATHS), 250)}
               onFocus={() => prefetchPaths(section.items.map((item) => item.path).slice(0, MAX_IDLE_PREFETCH_PATHS), 250)}
             >
-              {section.label}
+              {section.key === "section-system-management" ? (
+                <Badge dot={updateAvailable} offset={[7, -2]}>
+                  {section.label}
+                </Badge>
+              ) : section.label}
             </span>
           ),
           children: section.items.map((item) => ({
@@ -404,7 +412,7 @@ const AppSider = memo(function AppSider({
           })),
         };
       }),
-    [prefetchPath, prefetchPaths, visibleSections],
+    [prefetchPath, prefetchPaths, updateAvailable, visibleSections],
   );
 
   useEffect(() => {
@@ -600,6 +608,8 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { mode, toggleTheme } = useThemeMode();
   const { accessToken, isAuthenticated, isInitializing, username, role, logout } = useAuth();
+  const { notification } = App.useApp();
+  const [notificationOpen, setNotificationOpen] = useState(false);
   const isLoginPage = pathname === "/login";
   const isTopologyRoute = pathname === "/network/topology";
   const currentTitle = getTitleFromPath(pathname);
@@ -627,6 +637,40 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     refetchOnReconnect: true,
     refetchOnWindowFocus: false,
   });
+  const updateStatusQuery = useQuery<SystemUpdateStatusPayload>({
+    queryKey: ["system-update", "shell-status", accessToken],
+    queryFn: () => getSystemUpdateStatus(accessToken ?? undefined),
+    enabled: !isLoginPage && !isInitializing && isAuthenticated && Boolean(accessToken) && ["admin", "platform-admin"].includes(role.toLowerCase()),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+  });
+  const updateStatus = updateStatusQuery.data;
+  const updateAvailable = Boolean(updateStatus?.updateAvailable);
+
+  useEffect(() => {
+    const version = updateStatus?.latestVersion?.trim();
+    if (!updateAvailable || !version || typeof window === "undefined") return;
+    const previousNoticeVersion = window.localStorage.getItem(UPDATE_NOTICE_VERSION_KEY);
+    if (previousNoticeVersion === version) return;
+    window.localStorage.setItem(UPDATE_NOTICE_VERSION_KEY, version);
+    notification.info({
+      key: `system-update-${version}`,
+      message: `发现新版本 ${version}`,
+      description: "KubeNova 已检测到可用更新，进入更新管理即可查看并一键升级。",
+      placement: "topRight",
+      duration: 8,
+      btn: (
+        <Button type="link" size="small" onClick={() => {
+          notification.destroy(`system-update-${version}`);
+          router.push("/system/update");
+        }}>
+          查看更新
+        </Button>
+      ),
+    });
+  }, [notification, notificationOpen, router, updateAvailable, updateStatus?.latestVersion]);
   const userItems: MenuProps["items"] = [
     { key: "profile", label: "个人中心" },
     { key: "logout", label: "退出登录" },
@@ -804,7 +848,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
       </a>
       <Layout className="kubenova-shell" style={{ minHeight: "100dvh" }}>
         {/* AppSider 用 memo 隔离，pathname 变化时只有 selectedKeys/openKeys 更新，父级其余 state 不会触发它重渲染 */}
-        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} />
+        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} updateAvailable={updateAvailable} />
         <Layout>
         <Header
           className="app-header"
@@ -922,7 +966,41 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
                 icon={<SearchOutlined />}
               />
             </Popover>
-            <OpsIconActionButton className="shell-topbar-action" icon={<BellOutlined />}>通知中心</OpsIconActionButton>
+            <Popover
+              open={notificationOpen}
+              onOpenChange={setNotificationOpen}
+              trigger="click"
+              placement="bottomRight"
+              overlayClassName="shell-notification-popover"
+              content={(
+                <div className="shell-notification-center" role="status" aria-live="polite">
+                  <div className="shell-notification-center__header">
+                    <strong>通知中心</strong>
+                    {updateAvailable ? <Badge count={1} size="small" /> : null}
+                  </div>
+                  {updateAvailable && updateStatus ? (
+                    <div className="shell-notification-center__item">
+                      <div className="shell-notification-center__item-title">
+                        <Badge status="processing" />
+                        <strong>系统更新可用</strong>
+                      </div>
+                      <span>最新版本 {updateStatus.latestVersion}，当前运行 {updateStatus.runningVersion}</span>
+                      <Link href="/system/update" onClick={() => setNotificationOpen(false)}>
+                        查看并升级
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="shell-notification-center__empty">暂无新通知</div>
+                  )}
+                </div>
+              )}
+            >
+              <Badge dot={updateAvailable} offset={[-3, 3]}>
+                <OpsIconActionButton className="shell-topbar-action" icon={<BellOutlined />} aria-label="打开通知中心">
+                  通知中心
+                </OpsIconActionButton>
+              </Badge>
+            </Popover>
             <OpsIconActionButton className="shell-topbar-action" icon={<ReloadOutlined />} onClick={() => window.location.reload()}>
               刷新
             </OpsIconActionButton>

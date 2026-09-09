@@ -11512,6 +11512,58 @@ body.topology-overview-active {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
 }
+
+.shell-notification-popover .ant-popover-inner {
+  padding: 0;
+  overflow: hidden;
+}
+
+.shell-notification-center {
+  width: min(360px, calc(100vw - 32px));
+  color: var(--kn-text);
+}
+
+.shell-notification-center__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--kn-border);
+  font-size: 14px;
+}
+
+.shell-notification-center__item {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px 16px;
+  background: color-mix(in srgb, var(--kn-primary) 7%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.shell-notification-center__item-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+}
+
+.shell-notification-center__item > span {
+  color: var(--kn-text-muted);
+}
+
+.shell-notification-center__item > a {
+  width: fit-content;
+  color: var(--kn-primary);
+  font-weight: 600;
+}
+
+.shell-notification-center__empty {
+  padding: 22px 16px;
+  color: var(--kn-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
 .resource-map-canvas {
   position: relative;
   overflow: hidden;
