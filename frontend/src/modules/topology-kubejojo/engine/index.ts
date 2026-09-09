@@ -140,6 +140,14 @@ const compareLayoutNodes = (left: KubejojoGraphNode, right: KubejojoGraphNode) =
   || left.resource?.name?.localeCompare(right.resource?.name ?? "", "en")
   || left.id.localeCompare(right.id, "en");
 
+function visualEdgeEndpoints(edge: KubejojoRelation): { source: string; target: string } {
+  // The canvas follows the operator's request path: runtime workload first,
+  // then its controller. Keep the API relation's ownership semantics intact.
+  return edge.type === "OWNS" || edge.role === "owner"
+    ? { source: edge.target, target: edge.source }
+    : { source: edge.source, target: edge.target };
+}
+
 function normalizeAspectRatio(aspectRatio: number) {
   return Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : DEFAULT_ASPECT_RATIO;
 }
@@ -429,14 +437,17 @@ function toElk(node: KubejojoGraphNode, aspect: number): ElkNodeData {
   // component until the operator focuses that component.
   const edges: Array<ElkExtendedEdge & { data?: KubejojoRelation }> = (node.collapsed ? [] : node.edges ?? [])
     .filter((edge) => containedIds.has(edge.source) && containedIds.has(edge.target))
-    .map((edge) => ({
+    .map((edge) => {
+      const endpoints = visualEdgeEndpoints(edge);
+      return {
       id: edge.id,
       type: "topologyEdge",
-      sources: [edge.source],
-      targets: [edge.target],
+      sources: [endpoints.source],
+      targets: [endpoints.target],
       labels: [{ text: edge.label || getKubejojoRelationSemantics(edge.type, edge.role).label, width: 76, height: 18 }],
       data: edge,
-    }));
+      };
+    });
   const isGroup = Boolean(node.nodes?.length && !node.collapsed);
   const policy = getKubejojoLayoutPolicy(edges.length > 0, aspect);
   const groupOptions: Record<string, string> = edges.length
