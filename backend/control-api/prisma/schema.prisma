@@ -21,6 +21,7 @@ model User {
   aiConversationSessions AiConversationSession[]
   auditLogs    AuditLog[]
   preferences  UserPreference[]
+  clusterRoleBindings ClusterRoleBinding[]
 }
 
 model UserPreference {
@@ -71,6 +72,7 @@ model ClusterRegistry {
   resourceCapabilities ApiResourceCapability[]
   clusterProfile   ClusterProfile?
   healthSnapshot   ClusterHealthSnapshot?
+  clusterRoleBindings ClusterRoleBinding[]
 
   // 仅对未删除集群强制名称唯一（deletedAt 为 null 时才参与唯一约束）
   @@index([name, deletedAt])
@@ -95,6 +97,25 @@ model ClusterHealthSnapshot {
 
   @@index([status])
   @@index([checkedAt])
+}
+
+// 平台用户与受管集群的访问授权。平台管理员不需要显式绑定；
+// 非管理员必须存在一条 active 绑定才能进入对应集群工作台。
+model ClusterRoleBinding {
+  id        String   @id @default(cuid())
+  userId    String
+  clusterId String
+  role      String   @default("viewer") // cluster-admin|operator|viewer
+  state     String   @default("active") // active|disabled
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cluster   ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clusterId])
+  @@index([clusterId, state])
+  @@index([userId, state])
 }
 
 model RuntimeSession {

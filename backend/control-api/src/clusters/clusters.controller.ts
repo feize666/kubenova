@@ -17,6 +17,11 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../common/auth.guard';
+import { ClusterAccessGuard } from '../common/cluster-access.guard';
+import {
+  ClusterAccessService,
+  type ClusterAccessContext,
+} from '../common/cluster-access.service';
 import {
   appendAudit,
   assertWritePermission,
@@ -35,6 +40,7 @@ import { ClusterEventSyncService } from './cluster-event-sync.service';
 import { ClusterSyncService } from './cluster-sync.service';
 
 interface AuthenticatedUser {
+  id?: string;
   username?: string;
   role?: PlatformRole;
 }
@@ -44,6 +50,7 @@ interface AuthenticatedRequest extends Request {
   user?: {
     user?: AuthenticatedUser;
   };
+  clusterAccess?: ClusterAccessContext;
 }
 
 interface MutationReasonPayload {
@@ -64,7 +71,7 @@ interface Envelope<
 }
 
 @Controller(['api/clusters', 'api/v1/clusters'])
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ClusterAccessGuard)
 export class ClustersController {
   private readonly logger = new Logger(ClustersController.name);
 
@@ -73,6 +80,7 @@ export class ClustersController {
     private readonly clusterSyncService: ClusterSyncService,
     private readonly clusterHealthService: ClusterHealthService,
     private readonly clusterEventSyncService: ClusterEventSyncService,
+    private readonly clusterAccessService: ClusterAccessService,
   ) {}
 
   private buildAuditReason(requestId: string, reason?: string): string {
@@ -165,23 +173,27 @@ export class ClustersController {
 
   private async listAllClusters(
     query: ClusterListQueryWithSelectable,
+    accessibleClusterIds: readonly string[] | null,
   ): Promise<Awaited<ReturnType<ClustersService['list']>>['items']> {
     const pageSize = 500;
     const items: Awaited<ReturnType<ClustersService['list']>>['items'] = [];
     let page = 1;
 
     for (;;) {
-      const list = await this.clustersService.list({
-        keyword: query.keyword,
-        provider: query.provider,
-        state: query.state,
-        page: String(page),
-        pageSize: String(pageSize),
-        environment: query.environment,
-        status: query.status,
-        sortBy: query.sortBy,
-        sortOrder: query.sortOrder,
-      });
+      const list = await this.clustersService.list(
+        {
+          keyword: query.keyword,
+          provider: query.provider,
+          state: query.state,
+          page: String(page),
+          pageSize: String(pageSize),
+          environment: query.environment,
+          status: query.status,
+          sortBy: query.sortBy,
+          sortOrder: query.sortOrder,
+        },
+        { accessibleClusterIds },
+      );
       items.push(...list.items);
       if (list.items.length < pageSize) {
         break;
@@ -200,15 +212,17 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const selectableOnly = this.parseBoolean(query.selectableOnly);
+    const accessibleClusterIds =
+      await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
     const list = selectableOnly
       ? {
-          items: await this.listAllClusters(query),
+          items: await this.listAllClusters(query, accessibleClusterIds),
           page: 1,
           pageSize: 0,
           total: 0,
           timestamp: new Date().toISOString(),
         }
-      : await this.clustersService.list(query);
+      : await this.clustersService.list(query, { accessibleClusterIds });
     let items = list.items;
     if (selectableOnly) {
       items = list.items.filter(
@@ -260,6 +274,20 @@ export class ClustersController {
       unsubscribe();
       res.end();
     });
+  }
+
+  /** Returns the resolved role for the current user in this cluster. */
+  @Get(':id/access')
+  async accessContext(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+    @Param('id') id: string,
+  ) {
+    const requestId = resolveRequestId(req, res);
+    const access =
+      req.clusterAccess ??
+      (await this.clusterAccessService.assertCanAccess(req.user?.user, id));
+    return this.ok(access, requestId, { action: 'access-context' });
   }
 
   @Get(':id')

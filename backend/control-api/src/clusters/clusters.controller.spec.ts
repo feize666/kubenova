@@ -30,6 +30,10 @@ describe('ClustersController', () => {
       ensureClusterWatching: jest.fn(),
       subscribe: jest.fn(),
     } as any;
+    const clusterAccessService = {
+      assertCanAccess: jest.fn(),
+      listAccessibleClusterIds: jest.fn().mockResolvedValue(null),
+    } as any;
 
     return {
       controller: new ClustersController(
@@ -37,6 +41,7 @@ describe('ClustersController', () => {
         clusterSyncService,
         clusterHealthService,
         clusterEventSyncService,
+        clusterAccessService,
       ),
       clustersService,
       clusterHealthService,
@@ -58,7 +63,10 @@ describe('ClustersController', () => {
       timestamp: new Date().toISOString(),
     });
 
-    const req = { headers: {} } as any;
+    const req = {
+      headers: {},
+      user: { user: { id: 'admin-1', role: 'platform-admin' } },
+    } as any;
     const res = {
       getHeader: jest.fn().mockReturnValue(undefined),
       setHeader: jest.fn(),

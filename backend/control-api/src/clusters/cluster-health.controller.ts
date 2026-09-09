@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../common/auth.guard';
+import { ClusterAccessGuard } from '../common/cluster-access.guard';
 import { appendAudit, type PlatformRole } from '../common/governance';
 import { resolveRequestId } from '../common/request-id';
 import {
@@ -18,6 +19,7 @@ import {
 } from './cluster-health.service';
 
 interface AuthenticatedUser {
+  id?: string;
   username?: string;
   role?: PlatformRole;
 }
@@ -39,7 +41,7 @@ interface Envelope<
 }
 
 @Controller(['api/cluster-health', 'api/v1/cluster-health'])
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, ClusterAccessGuard)
 export class ClusterHealthController {
   constructor(private readonly clusterHealthService: ClusterHealthService) {}
 

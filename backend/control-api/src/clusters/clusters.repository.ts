@@ -33,6 +33,8 @@ export interface ClusterListParams {
   sortOrder?: 'asc' | 'desc';
   page: number;
   pageSize: number;
+  /** An empty array deliberately returns no records for an unbound user. */
+  accessibleClusterIds?: readonly string[] | null;
 }
 
 export interface ClusterListResult {
@@ -84,6 +86,13 @@ export class ClustersRepository {
     } = params;
 
     const where: Prisma.ClusterRegistryWhereInput = {};
+
+    if (
+      params.accessibleClusterIds !== null &&
+      params.accessibleClusterIds !== undefined
+    ) {
+      where.id = { in: [...params.accessibleClusterIds] };
+    }
 
     if (state) {
       if (state === 'deleted') {
