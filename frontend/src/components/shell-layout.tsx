@@ -1,25 +1,16 @@
 "use client";
 
 import {
-  ApartmentOutlined,
   AppstoreOutlined,
   BellOutlined,
-  BranchesOutlined,
-  DatabaseOutlined,
-  DeploymentUnitOutlined,
-  HddOutlined,
   HomeOutlined,
   MenuOutlined,
-  SafetyOutlined,
-  MonitorOutlined,
   MoonFilled,
   NodeIndexOutlined,
-  PartitionOutlined,
-  RadarChartOutlined,
   ReloadOutlined,
   SearchOutlined,
+  SafetyOutlined,
   SunFilled,
-  ToolOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { App, Avatar, Badge, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Popover, Skeleton, Space } from "antd";
@@ -28,7 +19,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useAuth } from "@/components/auth-context";
-import { getNavDisplayLabel, getTitleFromPath, filterNavSectionsByRole, navSections } from "@/config/navigation";
+import { getTitleFromPath } from "@/config/navigation";
 import { useThemeMode } from "@/components/theme-context";
 import { getClusters } from "@/lib/api/clusters";
 import { listCapabilities } from "@/lib/api/capabilities";
@@ -41,36 +32,28 @@ import { OpsIconActionButton } from "@/components/ops";
 import { QUERY_CACHE_TIMINGS, queryKeys } from "@/lib/query";
 
 const { Header, Sider, Content } = Layout;
-const SIDEBAR_OPEN_SECTION_KEY = "kubenova.nav.sidebar.openSection.v2";
-const SIDEBAR_SECTION_ORDER = [
-  "section-overview",
-  "section-resource-panorama",
-  "section-cluster-domain",
-  "section-workloads",
-  "section-network",
-  "section-storage-config",
-  "section-configs",
-  "section-app-delivery",
-  "section-observability",
-  "section-intelligence",
-  "section-iam-security",
-  "section-system-management",
-] as const;
-const PREFETCHABLE_NAV_PATHS = new Set(navSections.flatMap((section) => [section.path, ...section.items.map((item) => item.path)].filter(Boolean) as string[]));
 const MAX_REMEMBERED_PREFETCH_PATHS = 48;
-const MAX_IDLE_PREFETCH_PATHS = 5;
-const MAX_OPEN_SIDEBAR_SECTIONS = 1;
 const ROUTE_TRANSITION_QUIET_MS = 650;
 const ENABLE_ROUTE_PREFETCH = process.env.NODE_ENV === "production";
 const UPDATE_NOTICE_VERSION_KEY = "kubenova.system-update.notice-version";
 
-type SidebarOpenSectionKey = string | null;
-
-type StoredSidebarOpenState = {
-  openSectionKey: SidebarOpenSectionKey;
-  openSectionKeys?: string[];
-  updatedAt?: number;
+type PlatformNavigationItem = {
+  key: "platform-overview" | "platform-clusters" | "platform-access" | "platform-applications";
+  label: string;
+  path: string;
+  icon: React.ReactNode;
+  requiredRole?: "admin";
 };
+
+const PLATFORM_NAVIGATION: readonly PlatformNavigationItem[] = [
+  { key: "platform-overview", label: "概览", path: "/", icon: <HomeOutlined /> },
+  { key: "platform-clusters", label: "集群", path: "/clusters", icon: <NodeIndexOutlined /> },
+  { key: "platform-access", label: "授权管理", path: "/users", icon: <SafetyOutlined />, requiredRole: "admin" },
+  // 应用中心将随着集群工作台路由迁移；过渡期先落到已有的应用发布入口。
+  { key: "platform-applications", label: "应用中心", path: "/workloads/deployments", icon: <AppstoreOutlined /> },
+];
+
+const PREFETCHABLE_NAV_PATHS = new Set(PLATFORM_NAVIGATION.map((item) => item.path));
 
 function logNavigationMetric(name: string, detail: Record<string, unknown>) {
   if (process.env.NODE_ENV !== "development") return;
@@ -84,91 +67,16 @@ function logNavigationMetric(name: string, detail: Record<string, unknown>) {
   }, 0);
 }
 
-const sectionIconMap: Record<string, React.ReactNode> = {
-  "section-overview": <HomeOutlined />,
-  "section-resource-panorama": <AppstoreOutlined />,
-  "section-cluster-domain": <NodeIndexOutlined />,
-  "section-workloads": <DeploymentUnitOutlined />,
-  "section-network": <ApartmentOutlined />,
-  "section-storage-config": <HddOutlined />,
-  "section-configs": <DatabaseOutlined />,
-  "section-app-delivery": <BranchesOutlined />,
-  "section-observability": <MonitorOutlined />,
-  "section-intelligence": <RadarChartOutlined />,
-  "section-iam-security": <SafetyOutlined />,
-  "section-system-management": <ToolOutlined />,
-};
-
-function getSectionOrder(key: string) {
-  const index = SIDEBAR_SECTION_ORDER.indexOf(key as (typeof SIDEBAR_SECTION_ORDER)[number]);
-  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
-}
-
 function matchesPath(pathname: string, candidate: string) {
   return pathname === candidate || pathname.startsWith(`${candidate}/`);
 }
 
-function findActiveSectionKey(
-  pathname: string,
-  sections: Array<{ key: string; path?: string; items: Array<{ path: string }> }>,
-) {
-  for (const section of sections) {
-    if (section.path && matchesPath(pathname, section.path)) {
-      return section.key;
-    }
-    if (section.items.some((item) => matchesPath(pathname, item.path))) {
-      return section.key;
-    }
-  }
-  return undefined;
-}
-
-function readStoredSidebarOpenState(): StoredSidebarOpenState | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const raw = window.localStorage.getItem(SIDEBAR_OPEN_SECTION_KEY);
-  if (!raw) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw) as Partial<StoredSidebarOpenState>;
-    if (Array.isArray(parsed.openSectionKeys)) {
-      return {
-        openSectionKey: typeof parsed.openSectionKey === "string" || parsed.openSectionKey === null ? parsed.openSectionKey : null,
-        openSectionKeys: parsed.openSectionKeys.filter((item): item is string => typeof item === "string"),
-        updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : undefined,
-      };
-    }
-    if (typeof parsed.openSectionKey === "string" || parsed.openSectionKey === null) {
-      return {
-        openSectionKey: parsed.openSectionKey,
-        updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : undefined,
-      };
-    }
-  } catch {
-    return { openSectionKey: raw };
-  }
-  return null;
-}
-
-function writeStoredSidebarOpenKeys(openSectionKeys: string[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(
-    SIDEBAR_OPEN_SECTION_KEY,
-    JSON.stringify({
-      openSectionKey: openSectionKeys[openSectionKeys.length - 1] ?? null,
-      openSectionKeys,
-      updatedAt: Date.now(),
-    }),
+function getVisiblePlatformNavigation(userRole: string, disabledPaths?: Set<string> | null) {
+  const normalizedRole = userRole.trim().toLowerCase();
+  const canManagePlatform = normalizedRole === "admin" || normalizedRole === "platform-admin";
+  return PLATFORM_NAVIGATION.filter(
+    (item) => (!item.requiredRole || canManagePlatform) && !disabledPaths?.has(item.path),
   );
-}
-
-function normalizeOpenSectionKeys(keys: string[], sectionKeySet: Set<string>) {
-  const next = keys.filter((key, index) => sectionKeySet.has(key) && keys.indexOf(key) === index);
-  return next.slice(-MAX_OPEN_SIDEBAR_SECTIONS);
 }
 
 function scheduleIdleTask(task: () => void, timeout = 900) {
@@ -270,45 +178,19 @@ const AppSider = memo(function AppSider({
   mode,
   userRole,
   disabledPaths,
-  updateAvailable = false,
 }: {
   pathname: string;
   mode: string;
   userRole: string;
   disabledPaths?: Set<string> | null;
-  updateAvailable?: boolean;
 }) {
-  const visibleSections = useMemo(
-    () =>
-      [...filterNavSectionsByRole(userRole, disabledPaths)].sort(
-        (left, right) => getSectionOrder(left.key) - getSectionOrder(right.key),
-      ),
+  const visibleNavigation = useMemo(
+    () => getVisiblePlatformNavigation(userRole, disabledPaths),
     [disabledPaths, userRole],
   );
-  const sectionKeys = useMemo(
-    () =>
-      visibleSections
-        .filter((section) => section.items.length > 0)
-        .map((section) => section.key),
-    [visibleSections],
-  );
-  const sectionKeySet = useMemo(() => new Set(sectionKeys), [sectionKeys]);
-  const activeSectionKey = useMemo(
-    () => findActiveSectionKey(pathname, visibleSections),
-    [pathname, visibleSections],
-  );
-  const activeExpandableSectionKey =
-    activeSectionKey && sectionKeySet.has(activeSectionKey) ? activeSectionKey : undefined;
-  const [openSectionKeys, setOpenSectionKeys] = useState<string[]>([]);
-  const [sidebarStateRestored, setSidebarStateRestored] = useState(false);
-  const previousPathnameRef = useRef(pathname);
   const prefetchedPathsRef = useRef(new Set<string>());
   const pendingPrefetchPathsRef = useRef(new Set<string>());
   const router = useRouter();
-  const expandedSectionKeys = useMemo(
-    () => normalizeOpenSectionKeys(openSectionKeys, sectionKeySet),
-    [openSectionKeys, sectionKeySet],
-  );
   const prefetchPath = useCallback((path: string, timeout = 700) => {
     if (
       !ENABLE_ROUTE_PREFETCH ||
@@ -329,187 +211,28 @@ const AppSider = memo(function AppSider({
       }
     }, timeout);
   }, [router]);
-  const prefetchPaths = useCallback((paths: readonly string[], timeout = 700, stepMs = 120) => {
-    paths.forEach((path, index) => {
-      prefetchPath(path, timeout + index * stepMs);
-    });
-  }, [prefetchPath]);
-  const activeSectionPrefetchPaths = useMemo(() => {
-    if (!activeSectionKey) {
-      return [];
-    }
-    const section = visibleSections.find((item) => item.key === activeSectionKey);
-    if (!section) {
-      return [];
-    }
-    const paths = section.items.length > 0 ? section.items.map((item) => item.path) : section.path ? [section.path] : [];
-    return paths.filter((path) => path !== pathname).slice(0, MAX_IDLE_PREFETCH_PATHS);
-  }, [activeSectionKey, pathname, visibleSections]);
 
-  // items 根据 role 过滤后生成
+  // 平台入口只保留一级直达项；资源域导航由后续的集群工作台提供。
   const items: MenuProps["items"] = useMemo(
     () =>
-      visibleSections.map((section) => {
-        const icon = sectionIconMap[section.key] ?? <PartitionOutlined />;
-        const sectionClassName = `app-sidebar-menu__section app-sidebar-menu__section--${section.key}`;
-
-        // 顶级直跳 section（items 为空，有 path 字段）
-        if (section.items.length === 0 && section.path) {
-          return {
-            key: section.path,
-            className: sectionClassName,
-            icon,
-            label: (
-              <Link
-                className="app-sidebar-menu__link app-sidebar-menu__link--section"
-                href={section.path}
-                prefetch={false}
-                style={{ display: "block" }}
-                onMouseEnter={() => prefetchPath(section.path as string, 250)}
-                onFocus={() => prefetchPath(section.path as string, 250)}
-              >
-                <span className="app-sidebar-menu__label">{section.label}</span>
-              </Link>
-            ),
-          };
-        }
-
-        // 普通含子菜单的 section
-        return {
-          key: section.key,
-          className: sectionClassName,
-          icon,
+      visibleNavigation.map((item) => ({
+          key: item.path,
+          className: `app-sidebar-menu__section app-sidebar-menu__section--${item.key}`,
+          icon: item.icon,
           label: (
-            <span
-              className="app-sidebar-menu__label"
-              onMouseEnter={() => prefetchPaths(section.items.map((item) => item.path).slice(0, MAX_IDLE_PREFETCH_PATHS), 250)}
-              onFocus={() => prefetchPaths(section.items.map((item) => item.path).slice(0, MAX_IDLE_PREFETCH_PATHS), 250)}
+            <Link
+              className="app-sidebar-menu__link app-sidebar-menu__link--section"
+              href={item.path}
+              prefetch={false}
+              onMouseEnter={() => prefetchPath(item.path, 250)}
+              onFocus={() => prefetchPath(item.path, 250)}
             >
-              {section.key === "section-system-management" ? (
-                <Badge dot={updateAvailable} offset={[7, -2]}>
-                  {section.label}
-                </Badge>
-              ) : section.label}
-            </span>
+              <span className="app-sidebar-menu__label">{item.label}</span>
+            </Link>
           ),
-          children: section.items.map((item) => ({
-            key: item.path,
-            // Link 包裹 label：鼠标悬停自动触发 Next.js prefetch，点击由 Link 接管导航
-            label: (
-              <Link
-                className="app-sidebar-menu__link app-sidebar-menu__link--nested"
-                href={item.path}
-                prefetch={false}
-                style={{ display: "block" }}
-                onMouseEnter={() => prefetchPath(item.path, 250)}
-                onFocus={() => prefetchPath(item.path, 250)}
-              >
-                <span className="app-sidebar-menu__label app-sidebar-menu__label--nested">
-                  {getNavDisplayLabel(item)}
-                </span>
-              </Link>
-            ),
-          })),
-        };
-      }),
-    [prefetchPath, prefetchPaths, updateAvailable, visibleSections],
+        })),
+    [prefetchPath, visibleNavigation],
   );
-
-  useEffect(() => {
-    if (sidebarStateRestored) {
-      return undefined;
-    }
-    const timer = window.setTimeout(() => {
-      const storedState = readStoredSidebarOpenState();
-      const storedOpenSectionKeys = storedState?.openSectionKeys;
-      const storedOpenSectionKey = storedState?.openSectionKey;
-      if (activeExpandableSectionKey) {
-        setOpenSectionKeys([activeExpandableSectionKey]);
-      } else if (storedOpenSectionKeys?.length) {
-        setOpenSectionKeys(normalizeOpenSectionKeys(storedOpenSectionKeys, sectionKeySet));
-      } else if (storedOpenSectionKey && sectionKeySet.has(storedOpenSectionKey)) {
-        setOpenSectionKeys(normalizeOpenSectionKeys([storedOpenSectionKey], sectionKeySet));
-      } else if (storedOpenSectionKey === null) {
-        setOpenSectionKeys([]);
-      } else {
-        setOpenSectionKeys([]);
-      }
-      setSidebarStateRestored(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [activeExpandableSectionKey, sectionKeySet, sidebarStateRestored]);
-
-  useEffect(() => {
-    if (!sidebarStateRestored) {
-      return undefined;
-    }
-    const nextOpenSectionKeys = normalizeOpenSectionKeys(openSectionKeys, sectionKeySet);
-    if (nextOpenSectionKeys.length === openSectionKeys.length && nextOpenSectionKeys.every((key, index) => key === openSectionKeys[index])) {
-      return undefined;
-    }
-    const timer = window.setTimeout(() => setOpenSectionKeys(nextOpenSectionKeys), 0);
-    return () => window.clearTimeout(timer);
-  }, [activeExpandableSectionKey, openSectionKeys, sectionKeySet, sidebarStateRestored]);
-
-  useEffect(() => {
-    if (!sidebarStateRestored) {
-      return undefined;
-    }
-    const previousPathname = previousPathnameRef.current;
-    if (previousPathname === pathname) {
-      return undefined;
-    }
-    previousPathnameRef.current = pathname;
-    const timer = window.setTimeout(() => {
-      setOpenSectionKeys(activeExpandableSectionKey ? [activeExpandableSectionKey] : []);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [activeExpandableSectionKey, pathname, sectionKeySet, sidebarStateRestored]);
-
-  useEffect(() => {
-    if (!sidebarStateRestored || activeSectionPrefetchPaths.length === 0) {
-      return undefined;
-    }
-    return scheduleIdleTask(() => {
-      prefetchPaths(activeSectionPrefetchPaths, 450);
-    }, 1400);
-  }, [activeSectionPrefetchPaths, prefetchPaths, sidebarStateRestored]);
-
-  useEffect(() => {
-    if (!sidebarStateRestored) {
-      return undefined;
-    }
-    const visiblePaths = visibleSections.flatMap((section) =>
-      section.items.length > 0 ? section.items.map((item) => item.path) : section.path ? [section.path] : [],
-    );
-    const currentIndex = visiblePaths.findIndex((path) => matchesPath(pathname, path));
-    const sectionIndex = activeSectionKey ? visibleSections.findIndex((section) => section.key === activeSectionKey) : -1;
-    const candidates = new Set<string>();
-    activeSectionPrefetchPaths.forEach((path) => candidates.add(path));
-    [currentIndex - 1, currentIndex + 1].forEach((index) => {
-      const path = visiblePaths[index];
-      if (path) candidates.add(path);
-    });
-    [sectionIndex - 1, sectionIndex + 1].forEach((index) => {
-      const section = visibleSections[index];
-      const path = section?.path ?? section?.items[0]?.path;
-      if (path) candidates.add(path);
-    });
-    const paths = [...candidates].filter((path) => path !== pathname).slice(0, MAX_IDLE_PREFETCH_PATHS);
-    if (paths.length === 0) {
-      return undefined;
-    }
-    return scheduleIdleTask(() => {
-      prefetchPaths(paths, 650);
-    }, 1800);
-  }, [activeSectionKey, activeSectionPrefetchPaths, pathname, prefetchPath, prefetchPaths, sidebarStateRestored, visibleSections]);
-
-  useEffect(() => {
-    if (!sidebarStateRestored) {
-      return;
-    }
-    writeStoredSidebarOpenKeys(expandedSectionKeys);
-  }, [expandedSectionKeys, sidebarStateRestored]);
 
   return (
     <Sider
@@ -576,16 +299,8 @@ const AppSider = memo(function AppSider({
         className="app-sidebar-menu"
         mode="inline"
         theme={mode as "dark" | "light"}
-        selectedKeys={[pathname]}
-        openKeys={expandedSectionKeys}
+        selectedKeys={visibleNavigation.filter((item) => matchesPath(pathname, item.path)).map((item) => item.path)}
         items={items}
-        // Link 已接管导航，无需 onClick 处理路由跳转
-        onOpenChange={(keys) => {
-          markRouteTransitionQuietWindow();
-          const expandedRaw = (keys as string[]).filter((key) => sectionKeySet.has(key));
-          const latestOpenKey = expandedRaw.find((key) => !expandedSectionKeys.includes(key)) ?? expandedRaw.at(-1);
-          setOpenSectionKeys(latestOpenKey ? [latestOpenKey] : []);
-        }}
         onClick={({ key }) => {
           markRouteTransitionQuietWindow();
           logNavigationMetric("sidebar-click", { key, pathname });
@@ -691,28 +406,11 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     );
   }, [accessToken, capabilitiesQuery.data, isAuthenticated]);
   const mobileNavItems = useMemo<MenuProps["items"]>(() => {
-    const visibleSections = [...filterNavSectionsByRole(role, disabledPaths)].sort(
-      (left, right) => getSectionOrder(left.key) - getSectionOrder(right.key),
-    );
-    return visibleSections.map((section) => {
-      const icon = sectionIconMap[section.key] ?? <PartitionOutlined />;
-      if (section.items.length === 0 && section.path) {
-        return {
-          key: section.path,
-          icon,
-          label: section.label,
-        };
-      }
-      return {
-        key: section.key,
-        icon,
-        label: section.label,
-        children: section.items.map((item) => ({
-          key: item.path,
-          label: getNavDisplayLabel(item),
-        })),
-      };
-    });
+    return getVisiblePlatformNavigation(role, disabledPaths).map((item) => ({
+      key: item.path,
+      icon: item.icon,
+      label: item.label,
+    }));
   }, [disabledPaths, role]);
   const shellClusterMap = useMemo(
     () => {
@@ -848,7 +546,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
       </a>
       <Layout className="kubenova-shell" style={{ minHeight: "100dvh" }}>
         {/* AppSider 用 memo 隔离，pathname 变化时只有 selectedKeys/openKeys 更新，父级其余 state 不会触发它重渲染 */}
-        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} updateAvailable={updateAvailable} />
+        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} />
         <Layout>
         <Header
           className="app-header"
