@@ -1,5 +1,6 @@
 jest.mock('@kubernetes/client-node', () => ({}));
 
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ClusterHealthController } from './cluster-health.controller';
 
 describe('ClusterHealthController', () => {
@@ -9,9 +10,18 @@ describe('ClusterHealthController', () => {
       getClusterHealthDetail: jest.fn(),
       probeCluster: jest.fn(),
     } as any;
+    const clusterAccessService = {
+      listAccessibleClusterIds: jest.fn().mockResolvedValue(null),
+      assertCanRead: jest.fn(),
+      assertCanMutate: jest.fn(),
+    } as any;
     return {
-      controller: new ClusterHealthController(clusterHealthService),
+      controller: new ClusterHealthController(
+        clusterHealthService,
+        clusterAccessService,
+      ),
       service: clusterHealthService,
+      clusterAccessService,
     };
   }
 
@@ -34,6 +44,59 @@ describe('ClusterHealthController', () => {
     const resp = await controller.list(req, res, {} as any);
     expect(resp.data.total).toBe(0);
     expect(resp.meta.action).toBe('list');
+  });
+
+  it('filters health list through the current user cluster bindings', async () => {
+    const { controller, service, clusterAccessService } = createController();
+    clusterAccessService.listAccessibleClusterIds.mockResolvedValue(['c1']);
+    service.listClusterHealth.mockResolvedValue({
+      items: [],
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      timestamp: new Date().toISOString(),
+    });
+
+    await controller.list(
+      { headers: {}, user: { user: { id: 'u1', role: 'user' } } } as any,
+      { getHeader: jest.fn(), setHeader: jest.fn() } as any,
+      {} as any,
+    );
+
+    expect(service.listClusterHealth).toHaveBeenCalledWith(
+      {},
+      { accessibleClusterIds: ['c1'] },
+    );
+  });
+
+  it('authorizes health detail before loading it', async () => {
+    const { controller, service, clusterAccessService } = createController();
+    clusterAccessService.assertCanRead.mockRejectedValue(
+      new NotFoundException(),
+    );
+    await expect(
+      controller.detail(
+        { headers: {}, user: { user: { id: 'u1', role: 'user' } } } as any,
+        { getHeader: jest.fn(), setHeader: jest.fn() } as any,
+        'c1',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(service.getClusterHealthDetail).not.toHaveBeenCalled();
+  });
+
+  it('authorizes manual probe mutation before Kubernetes work', async () => {
+    const { controller, service, clusterAccessService } = createController();
+    clusterAccessService.assertCanMutate.mockRejectedValue(
+      new ForbiddenException(),
+    );
+    await expect(
+      controller.manualProbe(
+        { headers: {}, user: { user: { id: 'u1', role: 'user' } } } as any,
+        { getHeader: jest.fn(), setHeader: jest.fn() } as any,
+        'c1',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(service.probeCluster).not.toHaveBeenCalled();
   });
 
   it('manualProbe forwards source=manual and bypassBackoff=true', async () => {

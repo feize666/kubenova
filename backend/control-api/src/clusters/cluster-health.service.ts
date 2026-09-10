@@ -49,6 +49,10 @@ export interface ClusterHealthListQuery {
   sortOrder?: 'asc' | 'desc';
 }
 
+export interface ClusterHealthListOptions {
+  accessibleClusterIds?: readonly string[] | null;
+}
+
 export interface ClusterHealthListItem {
   clusterId: string;
   clusterName: string;
@@ -130,17 +134,21 @@ export class ClusterHealthService {
 
   async listClusterHealth(
     query: ClusterHealthListQuery,
+    options: ClusterHealthListOptions = {},
   ): Promise<ClusterHealthListResponse> {
-    const list = await this.clustersService.list({
-      keyword: query.keyword,
-      provider: query.provider,
-      environment: query.environment,
-      state: query.lifecycleState,
-      page: query.page,
-      pageSize: query.pageSize,
-      sortBy: query.sortBy,
-      sortOrder: query.sortOrder,
-    });
+    const list = await this.clustersService.list(
+      {
+        keyword: query.keyword,
+        provider: query.provider,
+        environment: query.environment,
+        state: query.lifecycleState,
+        page: query.page,
+        pageSize: query.pageSize,
+        sortBy: query.sortBy,
+        sortOrder: query.sortOrder,
+      },
+      { accessibleClusterIds: options.accessibleClusterIds },
+    );
 
     const clusterIds = list.items.map((item) => item.id);
     const snapshots =

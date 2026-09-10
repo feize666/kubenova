@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { ClusterAccessService } from '../common/cluster-access.service';
 import { ClusterAutoSyncService } from './cluster-auto-sync.service';
 import { ClusterEventSyncService } from './cluster-event-sync.service';
 import { ClusterHealthController } from './cluster-health.controller';
@@ -21,6 +22,7 @@ import { ClusterSyncService } from './cluster-sync.service';
     ClusterHealthSchedulerService,
     ClusterAutoSyncService,
     ClusterEventSyncService,
+    ClusterAccessService,
   ],
   exports: [
     ClustersService,
@@ -28,6 +30,7 @@ import { ClusterSyncService } from './cluster-sync.service';
     ClusterSyncService,
     ClusterHealthService,
     ClusterEventSyncService,
+    ClusterAccessService,
   ],
 })
 export class ClustersModule {}

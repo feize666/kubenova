@@ -81,6 +81,15 @@ export class ClusterAccessService {
     );
   }
 
+  assertPlatformAdmin(subject: ClusterAccessSubject | undefined): void {
+    if (!this.isPlatformAdmin(subject)) {
+      throw new ForbiddenException({
+        code: 'PLATFORM_ADMIN_REQUIRED',
+        message: '当前操作需要平台管理员权限',
+      });
+    }
+  }
+
   async assertCanAccess(
     subject: ClusterAccessSubject | undefined,
     clusterId: string,
@@ -136,7 +145,10 @@ export class ClusterAccessService {
       },
       select: { clusterId: true, role: true },
     });
-    if (!binding || !BINDING_ROLES.includes(binding.role as ClusterAccessRole)) {
+    if (
+      !binding ||
+      !BINDING_ROLES.includes(binding.role as ClusterAccessRole)
+    ) {
       throw inaccessibleCluster();
     }
 

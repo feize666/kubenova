@@ -33,14 +33,14 @@ describe('ClusterAccessService', () => {
     });
     prisma.clusterRegistry.findFirst.mockResolvedValueOnce(null);
     await expect(
-      service.assertCanRead(
-        { id: 'admin', role: 'platform-admin' },
-        'missing',
-      ),
+      service.assertCanRead({ id: 'admin', role: 'platform-admin' }, 'missing'),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it.each([null, { role: 'viewer', clusterId: 'cluster-a', state: 'disabled' }])(
+  it.each([
+    null,
+    { role: 'viewer', clusterId: 'cluster-a', state: 'disabled' },
+  ])(
     'returns the same 404 for an inaccessible or missing non-admin cluster',
     async (binding) => {
       const { service, prisma } = harness(binding);
@@ -98,8 +98,54 @@ describe('ClusterAccessService', () => {
   it('accepts operator as a cluster-operator platform role alias', async () => {
     const { service } = harness({ role: 'operator', clusterId: 'cluster-a' });
     await expect(
-      service.assertCanMutate({ id: 'operator', role: 'operator' }, 'cluster-a'),
+      service.assertCanMutate(
+        { id: 'operator', role: 'operator' },
+        'cluster-a',
+      ),
     ).resolves.toMatchObject({ accessRole: 'operator' });
+  });
+
+  it('reserves registry lifecycle operations for platform admins', () => {
+    const { service } = harness();
+    expect(() =>
+      service.assertPlatformAdmin({ id: 'admin', role: 'admin' }),
+    ).not.toThrow();
+    expect(() =>
+      service.assertPlatformAdmin({
+        id: 'operator',
+        role: 'cluster-operator',
+      }),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('requires cluster-admin access and a writable platform role for kubeconfig export', async () => {
+    const operator = harness({
+      role: 'operator',
+      clusterId: 'cluster-a',
+    });
+    await expect(
+      operator.service.assertClusterAdmin(
+        { id: 'operator', role: 'cluster-operator' },
+        'cluster-a',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    const clusterAdmin = harness({
+      role: 'cluster-admin',
+      clusterId: 'cluster-a',
+    });
+    await expect(
+      clusterAdmin.service.assertClusterAdmin(
+        { id: 'cluster-admin', role: 'cluster-operator' },
+        'cluster-a',
+      ),
+    ).resolves.toMatchObject({ accessRole: 'cluster-admin' });
+    await expect(
+      clusterAdmin.service.assertClusterAdmin(
+        { id: 'cluster-admin', role: 'user' },
+        'cluster-a',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('fails closed for unknown binding and platform roles', async () => {

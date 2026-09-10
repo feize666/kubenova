@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../common/auth.guard';
+import { ClusterAccessService } from '../common/cluster-access.service';
 import {
   appendAudit,
   assertWritePermission,
@@ -35,6 +36,7 @@ import { ClusterEventSyncService } from './cluster-event-sync.service';
 import { ClusterSyncService } from './cluster-sync.service';
 
 interface AuthenticatedUser {
+  id?: string;
   username?: string;
   role?: PlatformRole;
 }
@@ -73,6 +75,7 @@ export class ClustersController {
     private readonly clusterSyncService: ClusterSyncService,
     private readonly clusterHealthService: ClusterHealthService,
     private readonly clusterEventSyncService: ClusterEventSyncService,
+    private readonly clusterAccessService: ClusterAccessService,
   ) {}
 
   private buildAuditReason(requestId: string, reason?: string): string {
@@ -179,23 +182,27 @@ export class ClustersController {
 
   private async listAllClusters(
     query: ClusterListQueryWithSelectable,
+    accessibleClusterIds: readonly string[] | null,
   ): Promise<Awaited<ReturnType<ClustersService['list']>>['items']> {
     const pageSize = 500;
     const items: Awaited<ReturnType<ClustersService['list']>>['items'] = [];
     let page = 1;
 
     for (;;) {
-      const list = await this.clustersService.list({
-        keyword: query.keyword,
-        provider: query.provider,
-        state: query.state,
-        page: String(page),
-        pageSize: String(pageSize),
-        environment: query.environment,
-        status: query.status,
-        sortBy: query.sortBy,
-        sortOrder: query.sortOrder,
-      });
+      const list = await this.clustersService.list(
+        {
+          keyword: query.keyword,
+          provider: query.provider,
+          state: query.state,
+          page: String(page),
+          pageSize: String(pageSize),
+          environment: query.environment,
+          status: query.status,
+          sortBy: query.sortBy,
+          sortOrder: query.sortOrder,
+        },
+        { accessibleClusterIds },
+      );
       items.push(...list.items);
       if (list.items.length < pageSize) {
         break;
@@ -214,15 +221,17 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const selectableOnly = this.parseBoolean(query.selectableOnly);
+    const accessibleClusterIds =
+      await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
     const list = selectableOnly
       ? {
-          items: await this.listAllClusters(query),
+          items: await this.listAllClusters(query, accessibleClusterIds),
           page: 1,
           pageSize: 0,
           total: 0,
           timestamp: new Date().toISOString(),
         }
-      : await this.clustersService.list(query);
+      : await this.clustersService.list(query, { accessibleClusterIds });
     let items = list.items;
     if (selectableOnly) {
       items = list.items.filter(
@@ -283,6 +292,7 @@ export class ClustersController {
     @Param('id') id: string,
   ) {
     const requestId = resolveRequestId(req, res);
+    await this.clusterAccessService.assertCanRead(req.user?.user, id);
     const detail = await this.clustersService.getDetail(id);
     return this.ok(detail, requestId, { action: 'detail' });
   }
@@ -294,6 +304,7 @@ export class ClustersController {
     @Param('id') id: string,
   ) {
     const requestId = resolveRequestId(req, res);
+    await this.clusterAccessService.assertCanRead(req.user?.user, id);
     const nodes = await this.clustersService.listNodes(id);
     return this.ok(nodes, requestId, { action: 'nodes' });
   }
@@ -306,7 +317,7 @@ export class ClustersController {
   ): Promise<void> {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    await this.clusterAccessService.assertClusterAdmin(actor, id);
     const exported = await this.clustersService.exportReadonlyKubeconfig(id);
 
     appendAudit({
@@ -344,7 +355,7 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    this.clusterAccessService.assertPlatformAdmin(actor);
 
     const created = await this.clustersService.create(body);
     if (created.state === 'active' && created.hasKubeconfig) {
@@ -374,7 +385,7 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    this.clusterAccessService.assertPlatformAdmin(actor);
 
     const updated = await this.clustersService.update(id, body);
     if (
@@ -408,7 +419,7 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    this.clusterAccessService.assertPlatformAdmin(actor);
 
     const updated = await this.clustersService.updateProfile(id, body);
     appendAudit({
@@ -432,7 +443,7 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    this.clusterAccessService.assertPlatformAdmin(actor);
 
     const deleted = await this.clustersService.remove(id);
     appendAudit({
@@ -457,7 +468,7 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    this.clusterAccessService.assertPlatformAdmin(actor);
 
     const next = await this.clustersService.disable(id);
     appendAudit({
@@ -482,7 +493,7 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    this.clusterAccessService.assertPlatformAdmin(actor);
 
     const next = await this.clustersService.enable(id);
     if (next.state === 'active' && next.hasKubeconfig) {
@@ -561,7 +572,7 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    await this.clusterAccessService.assertCanMutate(actor, id);
 
     const cluster = await this.clustersService.findById(id);
     if (!cluster) {
@@ -603,6 +614,7 @@ export class ClustersController {
     @Param('id') id: string,
   ) {
     const requestId = resolveRequestId(req, res);
+    await this.clusterAccessService.assertCanRead(req.user?.user, id);
     const result = await this.clusterHealthService.getLegacyHealthResult(id);
     return this.ok(result, requestId, { action: 'health' });
   }
@@ -618,6 +630,8 @@ export class ClustersController {
     @Param('id') id: string,
   ) {
     const requestId = resolveRequestId(req, res);
+
+    await this.clusterAccessService.assertCanRead(req.user?.user, id);
 
     const cluster = await this.clustersService.findById(id);
     if (!cluster) {

@@ -91,6 +91,11 @@ type DetailIdentityRef = {
   name: string;
 };
 
+export type ResourceDetailClusterScope = {
+  clusterId: string;
+  scope: 'cluster' | 'namespace';
+};
+
 const LIVE_NETWORK_DETAIL_KINDS = new Set([
   'Node',
   'Service',
@@ -537,6 +542,10 @@ export interface DynamicResourceQuery {
   missingAsEmpty?: string;
 }
 
+export interface DynamicResourceAccessOptions {
+  accessibleClusterIds?: readonly string[] | null;
+}
+
 export interface DynamicResourceIdentity {
   clusterId: string;
   group?: string;
@@ -959,7 +968,10 @@ export class ResourcesService {
     };
   }
 
-  async listDynamicResources(query: DynamicResourceQuery): Promise<{
+  async listDynamicResources(
+    query: DynamicResourceQuery,
+    access?: DynamicResourceAccessOptions,
+  ): Promise<{
     clusterId: string;
     group: string;
     version: string;
@@ -1084,7 +1096,10 @@ export class ResourcesService {
       };
     }
 
-    const clusterIds = await this.resolveDynamicClusterIds(undefined);
+    const clusterIds = await this.resolveDynamicClusterIds(
+      undefined,
+      access?.accessibleClusterIds,
+    );
     if (clusterIds.length === 0) {
       return {
         clusterId: '',
@@ -1196,12 +1211,29 @@ export class ResourcesService {
 
   private async resolveDynamicClusterIds(
     clusterId?: string,
+    accessibleClusterIds?: readonly string[] | null,
   ): Promise<string[]> {
     if (clusterId?.trim()) {
-      return [clusterId.trim()];
+      const normalizedClusterId = clusterId.trim();
+      if (
+        accessibleClusterIds &&
+        !accessibleClusterIds.includes(normalizedClusterId)
+      ) {
+        return [];
+      }
+      return [normalizedClusterId];
+    }
+    if (accessibleClusterIds?.length === 0) {
+      return [];
     }
     // 统一仅使用“可读且在线”的集群集合，避免把离线/历史快照集群回流到全站列表。
-    return this.clusterHealthService.listReadableClusterIdsForResourceRead();
+    const readableClusterIds =
+      await this.clusterHealthService.listReadableClusterIdsForResourceRead();
+    if (!accessibleClusterIds) {
+      return readableClusterIds;
+    }
+    const accessible = new Set(accessibleClusterIds);
+    return readableClusterIds.filter((id) => accessible.has(id));
   }
 
   private normalizeDynamicSortBy(
@@ -2046,6 +2078,182 @@ export class ResourcesService {
       relationships,
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  async resolveDetailClusterScope(
+    kindRaw: string,
+    idRaw: string,
+    accessibleClusterIds?: readonly string[] | null,
+  ): Promise<ResourceDetailClusterScope> {
+    const id = this.decodeRouteId(idRaw?.trim() ?? '');
+    if (!id || accessibleClusterIds?.length === 0) {
+      throw this.detailScopeNotFound();
+    }
+
+    const normalizedKind = this.normalizeKindKey(kindRaw);
+    if (normalizedKind === 'helmrelease') {
+      try {
+        const ref = this.parseHelmReleaseDetailId(id);
+        return this.checkedDetailScope(
+          ref.clusterId,
+          'namespace',
+          accessibleClusterIds,
+        );
+      } catch {
+        throw this.detailScopeNotFound();
+      }
+    }
+    if (normalizedKind === 'helmrepository') {
+      try {
+        const ref = this.parseHelmRepositoryDetailId(id);
+        return this.checkedDetailScope(
+          ref.clusterId,
+          'cluster',
+          accessibleClusterIds,
+        );
+      } catch {
+        throw this.detailScopeNotFound();
+      }
+    }
+    if (normalizedKind === 'dynamic' || normalizedKind === 'customresource') {
+      const ref = this.parseDynamicDetailId(id);
+      if (!ref) {
+        throw this.detailScopeNotFound();
+      }
+      return this.checkedDetailScope(
+        ref.clusterId,
+        ref.namespace ? 'namespace' : 'cluster',
+        accessibleClusterIds,
+      );
+    }
+
+    const meta = this.resolveKind(kindRaw);
+    const scope = meta.namespaced ? 'namespace' : 'cluster';
+    if (meta.detailSource === 'cluster') {
+      return this.checkedDetailScope(id, scope, accessibleClusterIds);
+    }
+
+    if (meta.detailSource === 'node') {
+      const ref = this.parseLiveNodeId(id);
+      if (!ref) {
+        throw this.detailScopeNotFound();
+      }
+      return this.checkedDetailScope(
+        ref.clusterId,
+        scope,
+        accessibleClusterIds,
+      );
+    }
+
+    if (meta.detailSource === 'network' && id.startsWith('live:')) {
+      const ref = this.parseLiveNetworkId(id);
+      if (!ref || ref.kind !== meta.kind) {
+        throw this.detailScopeNotFound();
+      }
+      return this.checkedDetailScope(
+        ref.clusterId,
+        scope,
+        accessibleClusterIds,
+      );
+    }
+
+    if (meta.detailSource === 'namespace' && id.startsWith('live-namespace:')) {
+      const ref = this.parseLiveNamespaceId(id);
+      if (!ref) {
+        throw this.detailScopeNotFound();
+      }
+      return this.checkedDetailScope(
+        ref.clusterId,
+        scope,
+        accessibleClusterIds,
+      );
+    }
+
+    const identity = this.parseDetailIdentityId(id);
+    if (identity) {
+      return this.checkedDetailScope(
+        identity.clusterId,
+        scope,
+        accessibleClusterIds,
+      );
+    }
+    if (meta.detailSource === 'autoscaling') {
+      throw this.detailScopeNotFound();
+    }
+
+    const clusterFilter = accessibleClusterIds
+      ? { clusterId: { in: [...accessibleClusterIds] } }
+      : {};
+    let row: { clusterId: string } | null = null;
+    if (meta.detailSource === 'workload') {
+      row = await this.prisma.workloadRecord.findFirst({
+        where: {
+          id,
+          ...clusterFilter,
+          kind: meta.kind,
+          state: { not: 'deleted' },
+        },
+        select: { clusterId: true },
+      });
+    } else if (meta.detailSource === 'network') {
+      row = await this.prisma.networkResource.findFirst({
+        where: {
+          id,
+          ...clusterFilter,
+          kind: meta.kind,
+          state: { not: 'deleted' },
+        },
+        select: { clusterId: true },
+      });
+    } else if (meta.detailSource === 'config') {
+      row = await this.prisma.configResource.findFirst({
+        where: {
+          id,
+          ...clusterFilter,
+          kind: meta.kind,
+          state: { not: 'deleted' },
+        },
+        select: { clusterId: true },
+      });
+    } else if (meta.detailSource === 'namespace') {
+      row = await this.prisma.namespaceRecord.findFirst({
+        where: { id, ...clusterFilter, state: { not: 'deleted' } },
+        select: { clusterId: true },
+      });
+    } else if (meta.detailSource === 'storage') {
+      row = await this.prisma.storageResource.findFirst({
+        where: {
+          id,
+          ...clusterFilter,
+          kind: meta.storageKind,
+          state: { not: 'deleted' },
+        },
+        select: { clusterId: true },
+      });
+    }
+
+    if (!row) {
+      throw this.detailScopeNotFound();
+    }
+    return { clusterId: row.clusterId, scope };
+  }
+
+  private checkedDetailScope(
+    clusterId: string,
+    scope: 'cluster' | 'namespace',
+    accessibleClusterIds?: readonly string[] | null,
+  ): ResourceDetailClusterScope {
+    if (accessibleClusterIds && !accessibleClusterIds.includes(clusterId)) {
+      throw this.detailScopeNotFound();
+    }
+    return { clusterId, scope };
+  }
+
+  private detailScopeNotFound(): NotFoundException {
+    return new NotFoundException({
+      code: 'RESOURCE_NOT_FOUND_OR_INACCESSIBLE',
+      message: '资源不存在或当前用户无权访问',
+    });
   }
 
   private async buildHelmReleaseDetail(

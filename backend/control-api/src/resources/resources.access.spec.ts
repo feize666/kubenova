@@ -24,6 +24,10 @@ describe('ResourcesController explicit cluster authorization', () => {
       deleteDynamicResource: jest.fn(),
       createDynamicResource: jest.fn(),
       getYaml: jest.fn(),
+      resolveDetailClusterScope: jest.fn().mockResolvedValue({
+        clusterId: 'cluster-a',
+        scope: 'namespace',
+      }),
       getDetail: jest.fn(),
       updateYaml: jest.fn(),
       applyYaml: jest.fn(),
@@ -44,6 +48,7 @@ describe('ResourcesController explicit cluster authorization', () => {
       assertCanMutate: options?.deny
         ? jest.fn().mockRejectedValue(rejection)
         : jest.fn().mockResolvedValue(undefined),
+      listAccessibleClusterIds: jest.fn().mockResolvedValue(['cluster-a']),
     };
     const ControllerConstructor = ResourcesController as unknown as new (
       ...args: unknown[]
@@ -203,6 +208,44 @@ describe('ResourcesController explicit cluster authorization', () => {
     ).toBeLessThan(
       harness.resourcesService.listDynamicResources.mock.invocationCallOrder[0],
     );
+  });
+
+  it('limits a dynamic list without clusterId to the actor accessible clusters', async () => {
+    const harness = createHarness();
+    harness.resourcesService.listDynamicResources.mockResolvedValue({
+      items: [],
+      total: 0,
+    });
+
+    await harness.controller.listDynamic(request, {});
+
+    expect(
+      harness.clusterAccessService.listAccessibleClusterIds,
+    ).toHaveBeenCalledWith(actor);
+    expect(harness.resourcesService.listDynamicResources).toHaveBeenCalledWith(
+      {},
+      { accessibleClusterIds: ['cluster-a'] },
+    );
+  });
+
+  it('resolves opaque detail ownership inside the accessible scope before loading it', async () => {
+    const harness = createHarness({ deny: true });
+
+    await expect(
+      harness.controller.getDetail(request, 'deployment', 'opaque-cuid'),
+    ).rejects.toThrow('cluster access denied');
+
+    expect(
+      harness.clusterAccessService.listAccessibleClusterIds,
+    ).toHaveBeenCalledWith(actor);
+    expect(
+      harness.resourcesService.resolveDetailClusterScope,
+    ).toHaveBeenCalledWith('deployment', 'opaque-cuid', ['cluster-a']);
+    expect(harness.clusterAccessService.assertCanRead).toHaveBeenCalledWith(
+      actor,
+      'cluster-a',
+    );
+    expect(harness.resourcesService.getDetail).not.toHaveBeenCalled();
   });
 
   it('keeps dry-run YAML updates from triggering a cluster sync', async () => {

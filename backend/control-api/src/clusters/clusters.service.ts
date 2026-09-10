@@ -30,6 +30,11 @@ export interface ClustersListQuery {
   status?: string;
 }
 
+export interface ClustersListOptions {
+  /** `null` means unrestricted platform-admin access. */
+  accessibleClusterIds?: readonly string[] | null;
+}
+
 export interface ClusterMutationInput {
   name?: string;
   environment?: string;
@@ -413,7 +418,10 @@ export class ClustersService implements OnModuleInit {
     };
   }
 
-  async list(query: ClustersListQuery): Promise<ClustersListResponse> {
+  async list(
+    query: ClustersListQuery,
+    options: ClustersListOptions = {},
+  ): Promise<ClustersListResponse> {
     const page = this.parsePositiveInt(query.page, 1);
     const pageSize = this.parsePositiveInt(query.pageSize, 10);
     const targetState = query.state
@@ -430,6 +438,7 @@ export class ClustersService implements OnModuleInit {
       state: targetState,
       page,
       pageSize,
+      accessibleClusterIds: options.accessibleClusterIds,
     };
 
     const result = await this.repository.list(params);

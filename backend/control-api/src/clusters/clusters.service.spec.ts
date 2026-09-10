@@ -182,6 +182,30 @@ function prepareReadonlyExport(options?: {
   };
 }
 
+describe('ClustersService access-filtered listing', () => {
+  it('passes the caller accessible cluster ids to the repository', async () => {
+    const { service } = buildService();
+    const repository = (
+      service as unknown as { repository: { list: jest.Mock } }
+    ).repository;
+    repository.list.mockResolvedValue({
+      items: [],
+      page: 1,
+      pageSize: 10,
+      total: 0,
+    });
+
+    await service.list(
+      { page: '1', pageSize: '10' },
+      { accessibleClusterIds: ['cluster-a'] },
+    );
+
+    expect(repository.list).toHaveBeenCalledWith(
+      expect.objectContaining({ accessibleClusterIds: ['cluster-a'] }),
+    );
+  });
+});
+
 describe('ClustersService detail', () => {
   it('does not expose a raw kubeconfig export method', () => {
     const { service } = buildService();

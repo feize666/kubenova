@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../common/auth.guard';
+import { ClusterAccessService } from '../common/cluster-access.service';
 import { appendAudit, type PlatformRole } from '../common/governance';
 import { resolveRequestId } from '../common/request-id';
 import {
@@ -18,6 +19,7 @@ import {
 } from './cluster-health.service';
 
 interface AuthenticatedUser {
+  id?: string;
   username?: string;
   role?: PlatformRole;
 }
@@ -41,7 +43,10 @@ interface Envelope<
 @Controller(['api/cluster-health', 'api/v1/cluster-health'])
 @UseGuards(AuthGuard)
 export class ClusterHealthController {
-  constructor(private readonly clusterHealthService: ClusterHealthService) {}
+  constructor(
+    private readonly clusterHealthService: ClusterHealthService,
+    private readonly clusterAccessService: ClusterAccessService,
+  ) {}
 
   private ok<
     TData,
@@ -65,7 +70,11 @@ export class ClusterHealthController {
     @Query() query: ClusterHealthListQuery,
   ) {
     const requestId = resolveRequestId(req, res);
-    const list = await this.clusterHealthService.listClusterHealth(query);
+    const accessibleClusterIds =
+      await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+    const list = await this.clusterHealthService.listClusterHealth(query, {
+      accessibleClusterIds,
+    });
     return this.ok(list, requestId, {
       action: 'list',
       page: list.page,
@@ -82,6 +91,7 @@ export class ClusterHealthController {
     @Param('id') id: string,
   ) {
     const requestId = resolveRequestId(req, res);
+    await this.clusterAccessService.assertCanRead(req.user?.user, id);
     const detail = await this.clusterHealthService.getClusterHealthDetail(id);
     return this.ok(detail, requestId, { action: 'detail' });
   }
@@ -93,6 +103,7 @@ export class ClusterHealthController {
     @Param('id') id: string,
   ) {
     const requestId = resolveRequestId(req, res);
+    await this.clusterAccessService.assertCanMutate(req.user?.user, id);
     const snapshot = await this.clusterHealthService.probeCluster(id, {
       source: 'manual',
       bypassBackoff: true,

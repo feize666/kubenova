@@ -1303,6 +1303,59 @@ describe('ResourcesService dynamic listing', () => {
     );
   });
 
+  it('limits cross-cluster dynamic fan-out to the caller accessible clusters', async () => {
+    const prisma: MockedPrisma = {
+      workloadRecord: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      networkResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      storageResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      configResource: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      apiResourceCapability: {
+        findFirst: jest.fn().mockImplementation(({ where }) =>
+          Promise.resolve({
+            clusterId: where.clusterId,
+            group: '',
+            version: 'v1',
+            resource: 'deployments',
+            kind: 'Deployment',
+            namespaced: true,
+          }),
+        ),
+      },
+    };
+    const { service, clustersService, clusterHealthService } =
+      buildDynamicService(prisma);
+    clusterHealthService.listReadableClusterIdsForResourceRead.mockResolvedValue(
+      ['cluster-a', 'cluster-b'],
+    );
+    clustersService.getKubeconfig.mockImplementation(
+      async (clusterId: string) => `kubeconfig-${clusterId.slice(-1)}`,
+    );
+
+    const result = await service.listDynamicResources(
+      { version: 'v1', resource: 'deployments' },
+      { accessibleClusterIds: ['cluster-a'] },
+    );
+
+    expect(result.total).toBe(1);
+    expect(result.items).toEqual([
+      expect.objectContaining({ clusterId: 'cluster-a', name: 'web-a' }),
+    ]);
+    expect(clustersService.getKubeconfig).toHaveBeenCalledWith('cluster-a');
+    expect(clustersService.getKubeconfig).not.toHaveBeenCalledWith('cluster-b');
+  });
+
   it('keeps single-cluster dynamic listing behavior when clusterId is set', async () => {
     const prisma: MockedPrisma = {
       workloadRecord: {

@@ -107,8 +107,13 @@ export class ResourcesController {
     const clusterId = query.clusterId?.trim();
     if (clusterId) {
       await this.clusterAccessService.assertCanRead(req.user?.user, clusterId);
+      return this.resourcesService.listDynamicResources(query);
     }
-    return this.resourcesService.listDynamicResources(query);
+    const accessibleClusterIds =
+      await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+    return this.resourcesService.listDynamicResources(query, {
+      accessibleClusterIds,
+    });
   }
 
   @Get('dynamic/detail')
@@ -253,11 +258,27 @@ export class ResourcesController {
   }
 
   @Get(':kind/:id/detail')
-  getDetail(@Param('kind') kind: string, @Param('id') id: string) {
+  async getDetail(
+    @Req() req: ResourcesRequest,
+    @Param('kind') kind: string,
+    @Param('id') id: string,
+  ) {
     if (!id?.trim()) {
       throw new BadRequestException('id 不能为空');
     }
-    return this.resourcesService.getDetail(kind, id.trim());
+    const normalizedId = id.trim();
+    const accessibleClusterIds =
+      await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+    const scope = await this.resourcesService.resolveDetailClusterScope(
+      kind,
+      normalizedId,
+      accessibleClusterIds,
+    );
+    await this.clusterAccessService.assertCanRead(
+      req.user?.user,
+      scope.clusterId,
+    );
+    return this.resourcesService.getDetail(kind, normalizedId);
   }
 
   @Put('yaml')

@@ -1,6 +1,10 @@
 jest.mock('@kubernetes/client-node', () => ({}));
 
-import { ForbiddenException, RequestMethod } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+  RequestMethod,
+} from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { listAudits } from '../common/governance';
 import { ClustersController } from './clusters.controller';
@@ -22,6 +26,7 @@ describe('ClustersController', () => {
       getKubeconfigById: jest.fn(),
       getExportableKubeconfig: jest.fn(),
       exportReadonlyKubeconfig: jest.fn(),
+      findById: jest.fn(),
     } as any;
     const clusterSyncService = {
       syncCluster: jest.fn(),
@@ -35,6 +40,25 @@ describe('ClustersController', () => {
       ensureClusterWatching: jest.fn(),
       subscribe: jest.fn(),
     } as any;
+    const clusterAccessService = {
+      listAccessibleClusterIds: jest.fn().mockResolvedValue(null),
+      assertCanRead: jest.fn().mockResolvedValue({
+        clusterId: 'c-1',
+        accessRole: 'viewer',
+        source: 'role-binding',
+      }),
+      assertCanMutate: jest.fn().mockResolvedValue({
+        clusterId: 'c-1',
+        accessRole: 'operator',
+        source: 'role-binding',
+      }),
+      assertClusterAdmin: jest.fn().mockResolvedValue({
+        clusterId: 'c-1',
+        accessRole: 'cluster-admin',
+        source: 'role-binding',
+      }),
+      assertPlatformAdmin: jest.fn(),
+    } as any;
 
     return {
       controller: new ClustersController(
@@ -42,9 +66,12 @@ describe('ClustersController', () => {
         clusterSyncService,
         clusterHealthService,
         clusterEventSyncService,
+        clusterAccessService,
       ),
       clustersService,
       clusterHealthService,
+      clusterSyncService,
+      clusterAccessService,
     };
   }
 
@@ -144,7 +171,11 @@ describe('ClustersController', () => {
   });
 
   it('rejects read-only users before requesting any export credential', async () => {
-    const { controller, clustersService } = createController();
+    const { controller, clustersService, clusterAccessService } =
+      createController();
+    clusterAccessService.assertClusterAdmin.mockRejectedValue(
+      new ForbiddenException(),
+    );
     const req = {
       headers: {},
       user: { user: { username: 'viewer', role: 'read-only' } },
@@ -211,7 +242,7 @@ describe('ClustersController', () => {
   });
 
   it('list filters selectable clusters when selectableOnly is enabled', async () => {
-    const { controller, clustersService, clusterHealthService } =
+    const { controller, clustersService, clusterAccessService } =
       createController();
     clustersService.list.mockResolvedValue({
       items: [
@@ -236,10 +267,116 @@ describe('ClustersController', () => {
     } as any);
 
     expect(clustersService.list).toHaveBeenCalled();
+    expect(clusterAccessService.listAccessibleClusterIds).toHaveBeenCalled();
     expect(resp.data.items).toHaveLength(1);
     expect(resp.data.items[0].id).toBe('c-1');
     expect(resp.data.total).toBe(1);
     expect(resp.meta.selectableOnly).toBe(true);
+  });
+
+  it('passes active bound cluster ids into regular list queries', async () => {
+    const { controller, clustersService, clusterAccessService } =
+      createController();
+    clusterAccessService.listAccessibleClusterIds.mockResolvedValue([
+      'cluster-a',
+    ]);
+    clustersService.list.mockResolvedValue({
+      items: [],
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      timestamp: new Date().toISOString(),
+    });
+
+    await controller.list(
+      { headers: {}, user: { user: { id: 'u1', role: 'user' } } } as any,
+      createResponse(),
+      {} as any,
+    );
+
+    expect(clustersService.list).toHaveBeenCalledWith(
+      {},
+      { accessibleClusterIds: ['cluster-a'] },
+    );
+  });
+
+  it.each([
+    ['detail', 'detail', 'getDetail'],
+    ['nodes', 'nodes', 'listNodes'],
+    ['health', 'healthCheck', 'getLegacyHealthResult'],
+    ['sync status', 'syncStatus', 'findById'],
+  ])(
+    'authorizes %s reads before downstream work',
+    async (_label, method, downstream) => {
+      const h = createController();
+      h.clusterAccessService.assertCanRead.mockRejectedValue(
+        new NotFoundException(),
+      );
+      await expect(
+        h.controller[method](
+          { headers: {}, user: { user: { id: 'u1', role: 'user' } } },
+          createResponse(),
+          'cluster-a',
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(
+        h.clustersService[downstream] ?? h.clusterHealthService[downstream],
+      ).not.toHaveBeenCalled();
+    },
+  );
+
+  it('authorizes sync mutation before reading cluster credentials', async () => {
+    const h = createController();
+    h.clusterAccessService.assertCanMutate.mockRejectedValue(
+      new ForbiddenException(),
+    );
+    await expect(
+      h.controller.triggerSync(
+        { headers: {}, user: { user: { id: 'u1', role: 'user' } } } as any,
+        createResponse(),
+        'cluster-a',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(h.clustersService.findById).not.toHaveBeenCalled();
+    expect(h.clustersService.getKubeconfig).not.toHaveBeenCalled();
+    expect(h.clusterSyncService.syncCluster).not.toHaveBeenCalled();
+  });
+
+  it('requires platform admin before registry lifecycle work', async () => {
+    const h = createController();
+    h.clusterAccessService.assertPlatformAdmin.mockImplementation(() => {
+      throw new ForbiddenException();
+    });
+    await expect(
+      h.controller.update(
+        {
+          headers: {},
+          user: { user: { id: 'u1', role: 'cluster-operator' } },
+        } as any,
+        createResponse(),
+        'cluster-a',
+        {},
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(h.clustersService.update).not.toHaveBeenCalled();
+  });
+
+  it('requires writable cluster-admin access before kubeconfig export', async () => {
+    const h = createController();
+    h.clusterAccessService.assertClusterAdmin.mockRejectedValue(
+      new ForbiddenException(),
+    );
+    await expect(
+      h.controller.exportReadonlyKubeconfig(
+        {
+          headers: {},
+          user: { user: { id: 'u1', role: 'cluster-operator' } },
+        } as any,
+        createResponse(),
+        'cluster-a',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(h.clustersService.exportReadonlyKubeconfig).not.toHaveBeenCalled();
   });
 
   it('healthCheck returns legacy runtime status from health service', async () => {
