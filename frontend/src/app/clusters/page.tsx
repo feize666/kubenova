@@ -76,6 +76,7 @@ import {
 import type { Cluster } from "@/lib/api/types";
 import { QUERY_CACHE_TIMINGS, queryKeys } from "@/lib/query";
 import { useAntdTableSortPagination } from "@/lib/table";
+import { buildClusterWorkspaceHref } from "@/lib/cluster-workspace";
 
 export type ClusterTableRecord = Cluster & { key: string };
 type ClusterTableChangeHandler = NonNullable<TableProps<ClusterTableRecord>["onChange"]>;
@@ -636,10 +637,7 @@ export default function ClustersPage() {
         <Space orientation="vertical" size={2}>
           <Typography.Link
             strong
-            onClick={() => {
-              setSelectedCluster(row);
-              setDetailOpen(true);
-            }}
+            href={buildClusterWorkspaceHref(row.id)}
           >
             {name}
           </Typography.Link>
