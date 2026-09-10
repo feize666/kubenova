@@ -266,6 +266,7 @@ export function getClusterWorkspaceNavigation(clusterId: string): ClusterWorkspa
         item("observability", "可观测性", "observability"),
         item("inspection", "资源巡检", "inspection"),
         item("aiops", "智能运维", "aiops"),
+        item("logs", "日志", "logs"),
         item("terminal", "终端", "terminal"),
       ],
     },

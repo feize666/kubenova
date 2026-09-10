@@ -28,6 +28,7 @@ test("单集群工作区只保留当前集群资源菜单", () => {
   assert.deepEqual(baseResources?.items.map((item) => item.label), ["Node", "Namespace"]);
   assert.equal(labels.includes("Cluster"), false);
   assert.equal(labels.includes("系统设置"), false);
+  assert.equal(labels.includes("日志"), true);
   assert.ok(
     sections.flatMap((section) => section.items).every((item) => item.href.startsWith("/clusters/ack-prod/")),
   );
