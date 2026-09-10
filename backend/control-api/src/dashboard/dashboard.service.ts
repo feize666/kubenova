@@ -726,12 +726,14 @@ export class DashboardService {
           actorUser: { select: { email: true, name: true } },
         },
       }),
-      Promise.resolve(
-        listAudits({
-          page: 1,
-          pageSize: 8,
-        }).items,
-      ),
+      options.clusterSelector
+        ? Promise.resolve([])
+        : Promise.resolve(
+            listAudits({
+              page: 1,
+              pageSize: 8,
+            }).items,
+          ),
     ]);
 
     const durable = auditLogs.map((item) => ({

@@ -13,7 +13,7 @@ import type {
   ClusterLiveUsageSnapshot,
   LiveMetricsService,
 } from '../metrics/live-metrics.service';
-import { appendAudit } from '../common/governance';
+import * as governance from '../common/governance';
 
 const buildSnapshot = (
   clusterId: string,
@@ -100,6 +100,10 @@ function createService(clusterIds: string[]) {
 }
 
 describe('DashboardService', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('returns an empty dashboard without touching data sources for no accessible clusters', async () => {
     const { service, prisma, clustersService, liveMetricsService } =
       createService(['cluster-a']);
@@ -177,7 +181,7 @@ describe('DashboardService', () => {
 
   it('does not infer scoped volatile audit ownership from partial id matches', async () => {
     const { service } = createService(['c1']);
-    appendAudit({
+    governance.appendAudit({
       actor: 'test',
       role: 'read-only',
       action: 'query',
@@ -190,6 +194,36 @@ describe('DashboardService', () => {
 
     expect(stats.recentOperations).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ resourceId: 'c10' })]),
+    );
+  });
+
+  it('does not read the volatile audit source for a restricted cluster scope', async () => {
+    const listAudits = jest.spyOn(governance, 'listAudits');
+    const { service } = createService(['c1']);
+
+    await service.getStats({ accessibleClusterIds: ['c1'] });
+
+    expect(listAudits).not.toHaveBeenCalled();
+  });
+
+  it('reads and returns volatile audits for the platform-admin global scope', async () => {
+    const resourceId = `global-audit-${Date.now()}`;
+    governance.appendAudit({
+      actor: 'platform-admin-test',
+      role: 'platform-admin',
+      action: 'query',
+      resourceType: 'dashboard',
+      resourceId,
+      result: 'success',
+    });
+    const listAudits = jest.spyOn(governance, 'listAudits');
+    const { service } = createService([]);
+
+    const stats = await service.getStats({ accessibleClusterIds: null });
+
+    expect(listAudits).toHaveBeenCalledWith({ page: 1, pageSize: 8 });
+    expect(stats.recentOperations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ resourceId })]),
     );
   });
 
