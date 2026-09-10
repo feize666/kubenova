@@ -11,6 +11,8 @@ import type { ClusterRealtimeEvent } from './cluster-event-sync.service';
 import { ClustersController } from './clusters.controller';
 
 describe('ClustersController', () => {
+  const accessRevalidationIntervalMs = 30_000;
+
   function createController() {
     const clustersService = {
       list: jest.fn(),
@@ -436,6 +438,99 @@ describe('ClustersController', () => {
     );
     connection.close();
     jest.useRealTimers();
+  });
+
+  it('stops streaming revoked cluster events after the access revalidation window', async () => {
+    jest.useFakeTimers();
+    const h = createController();
+    const connection = createSseConnection();
+    let listener: ((event: ClusterRealtimeEvent) => void) | undefined;
+    h.clusterAccessService.listAccessibleClusterIds
+      .mockResolvedValueOnce(['cluster-a'])
+      .mockResolvedValue([]);
+    h.clusterEventSyncService.subscribe.mockImplementation(
+      (next: (event: ClusterRealtimeEvent) => void) => {
+        listener = next;
+        return jest.fn();
+      },
+    );
+
+    try {
+      await h.controller.streamEvents(connection.req, connection.res);
+      listener?.(realtimeEvent('cluster-a', 'visible-before-revocation'));
+      expect(connection.res.write).toHaveBeenCalledWith(
+        expect.stringContaining('visible-before-revocation'),
+      );
+
+      connection.res.write.mockClear();
+      await jest.advanceTimersByTimeAsync(accessRevalidationIntervalMs);
+      listener?.(realtimeEvent('cluster-a', 'hidden-after-revocation'));
+
+      expect(
+        h.clusterAccessService.listAccessibleClusterIds,
+      ).toHaveBeenCalledTimes(2);
+      expect(connection.res.write).not.toHaveBeenCalledWith(
+        expect.stringContaining('hidden-after-revocation'),
+      );
+    } finally {
+      connection.close();
+      jest.useRealTimers();
+    }
+  });
+
+  it('closes the event stream when periodic access revalidation fails', async () => {
+    jest.useFakeTimers();
+    const h = createController();
+    const connection = createSseConnection();
+    const unsubscribe = jest.fn();
+    h.clusterAccessService.listAccessibleClusterIds
+      .mockResolvedValueOnce(['cluster-a'])
+      .mockRejectedValueOnce(new Error('authorization store unavailable'));
+    h.clusterEventSyncService.subscribe.mockReturnValue(unsubscribe);
+
+    try {
+      await h.controller.streamEvents(connection.req, connection.res);
+      await jest.advanceTimersByTimeAsync(accessRevalidationIntervalMs);
+
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(connection.res.end).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      connection.close();
+      jest.useRealTimers();
+    }
+  });
+
+  it('does not initialize event streaming when the client closes during authorization', async () => {
+    jest.useFakeTimers();
+    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+    const h = createController();
+    const connection = createSseConnection();
+    let resolveAccess: ((clusterIds: string[]) => void) | undefined;
+    h.clusterAccessService.listAccessibleClusterIds.mockImplementation(
+      () =>
+        new Promise<string[]>((resolve) => {
+          resolveAccess = resolve;
+        }),
+    );
+    h.clusterEventSyncService.subscribe.mockReturnValue(jest.fn());
+
+    try {
+      const stream = h.controller.streamEvents(connection.req, connection.res);
+      connection.close();
+      resolveAccess?.(['cluster-a']);
+      await stream;
+
+      expect(connection.res.end).toHaveBeenCalledTimes(1);
+      expect(h.clusterEventSyncService.subscribe).not.toHaveBeenCalled();
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+      expect(connection.res.write).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      connection.close();
+      setIntervalSpy.mockRestore();
+      jest.useRealTimers();
+    }
   });
 
   it('unsubscribes and closes the SSE response when the client disconnects', async () => {

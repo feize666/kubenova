@@ -61,6 +61,9 @@ interface Envelope<
   requestId: string;
 }
 
+const CLUSTER_EVENT_ACCESS_REVALIDATION_INTERVAL_MS = 30_000;
+const CLUSTER_EVENT_HEARTBEAT_INTERVAL_MS = 25_000;
+
 @Controller(['api/clusters', 'api/v1/clusters'])
 @UseGuards(AuthGuard)
 export class ClustersController {
@@ -273,12 +276,40 @@ export class ClustersController {
     @Res() res: Response,
   ): Promise<void> {
     resolveRequestId(req, res);
-    // 权限在建连时生成快照；客户端重连时会重新认证并刷新授权范围。
+    let closed = false;
+    let revalidationPending = false;
+    const lifecycle: {
+      unsubscribe?: () => void;
+      heartbeat?: ReturnType<typeof setInterval>;
+      accessRevalidation?: ReturnType<typeof setInterval>;
+    } = {};
+
+    const close = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      if (lifecycle.heartbeat) {
+        clearInterval(lifecycle.heartbeat);
+      }
+      if (lifecycle.accessRevalidation) {
+        clearInterval(lifecycle.accessRevalidation);
+      }
+      lifecycle.unsubscribe?.();
+      res.end();
+    };
+    req.on('close', close);
+
+    const actor = req.user?.user;
     const accessibleClusterIds =
-      await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
-    const accessibleClusters = accessibleClusterIds
-      ? new Set(accessibleClusterIds)
-      : null;
+      await this.clusterAccessService.listAccessibleClusterIds(actor);
+    if (closed) {
+      return;
+    }
+    let accessibleClusters =
+      accessibleClusterIds === null
+        ? null
+        : new Set(accessibleClusterIds ?? []);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -286,7 +317,7 @@ export class ClustersController {
     res.flushHeaders?.();
     res.write(`retry: 1500\n\n`);
 
-    const unsubscribe = this.clusterEventSyncService.subscribe((event) => {
+    lifecycle.unsubscribe = this.clusterEventSyncService.subscribe((event) => {
       if (accessibleClusters) {
         const clusterId = this.realtimeEventClusterId(event);
         if (!clusterId || !accessibleClusters.has(clusterId)) {
@@ -295,15 +326,28 @@ export class ClustersController {
       }
       res.write(`data: ${JSON.stringify(event)}\n\n`);
     });
-    const heartbeat = setInterval(() => {
+    lifecycle.heartbeat = setInterval(() => {
       res.write(`: ping ${Date.now()}\n\n`);
-    }, 25000);
+    }, CLUSTER_EVENT_HEARTBEAT_INTERVAL_MS);
 
-    req.on('close', () => {
-      clearInterval(heartbeat);
-      unsubscribe();
-      res.end();
-    });
+    lifecycle.accessRevalidation = setInterval(() => {
+      if (closed || revalidationPending) {
+        return;
+      }
+      revalidationPending = true;
+      void this.clusterAccessService
+        .listAccessibleClusterIds(actor)
+        .then((clusterIds) => {
+          if (!closed) {
+            accessibleClusters =
+              clusterIds === null ? null : new Set(clusterIds ?? []);
+          }
+        })
+        .catch(() => close())
+        .finally(() => {
+          revalidationPending = false;
+        });
+    }, CLUSTER_EVENT_ACCESS_REVALIDATION_INTERVAL_MS);
   }
 
   @Get(':id')
