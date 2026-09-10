@@ -250,4 +250,85 @@ describe('ResourcesController explicit cluster authorization', () => {
       'kubeconfig',
     );
   });
+
+  it.each([
+    [
+      'dynamic YAML update',
+      'updateDynamicYaml',
+      [request, { clusterId: 'cluster-a', yaml: '{}', dryRun: false }],
+    ],
+    ['dynamic delete', 'deleteDynamic', [request, { clusterId: 'cluster-a' }]],
+    [
+      'dynamic create',
+      'createDynamic',
+      [request, { clusterId: 'cluster-a', body: {} }],
+    ],
+    [
+      'resource YAML update',
+      'updateYaml',
+      [
+        request,
+        {
+          clusterId: 'cluster-a',
+          kind: 'Deployment',
+          name: 'api',
+          yaml: '{}',
+          dryRun: false,
+        },
+      ],
+    ],
+    [
+      'resource YAML apply',
+      'applyYaml',
+      [request, { clusterId: 'cluster-a', yaml: '{}', dryRun: false }],
+    ],
+    [
+      'scale',
+      'scale',
+      [
+        request,
+        {
+          clusterId: 'cluster-a',
+          kind: 'Deployment',
+          name: 'api',
+          replicas: 2,
+        },
+      ],
+    ],
+    [
+      'image update',
+      'updateImage',
+      [
+        request,
+        {
+          clusterId: 'cluster-a',
+          kind: 'Deployment',
+          name: 'api',
+          image: 'nginx:2',
+        },
+      ],
+    ],
+  ])(
+    'syncs the authorized input cluster after %s even when the service returns another cluster',
+    async (_label, method, args) => {
+      const harness = createHarness();
+      for (const serviceCall of Object.values(harness.resourcesService)) {
+        serviceCall.mockResolvedValue({ clusterId: 'cluster-b' });
+      }
+
+      await harness.controller[method](...args);
+
+      expect(harness.clustersService.getKubeconfig).toHaveBeenCalledWith(
+        'cluster-a',
+      );
+      expect(harness.clustersService.getKubeconfig).not.toHaveBeenCalledWith(
+        'cluster-b',
+      );
+      await Promise.resolve();
+      expect(harness.clusterSyncService.syncCluster).toHaveBeenCalledWith(
+        'cluster-a',
+        'kubeconfig',
+      );
+    },
+  );
 });

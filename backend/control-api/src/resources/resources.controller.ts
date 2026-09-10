@@ -167,7 +167,7 @@ export class ResourcesController {
     );
     const result = await this.resourcesService.updateDynamicYaml(identity);
     if (!identity.dryRun) {
-      this.triggerClusterSync(result.clusterId);
+      this.triggerClusterSync(identity.clusterId);
     }
     return result;
   }
@@ -198,7 +198,7 @@ export class ResourcesController {
       identity.clusterId,
     );
     const result = await this.resourcesService.deleteDynamicResource(identity);
-    this.triggerClusterSync(result.clusterId);
+    this.triggerClusterSync(identity.clusterId);
     return result;
   }
 
@@ -232,7 +232,7 @@ export class ResourcesController {
       ...identity,
       body: body?.body ?? {},
     });
-    this.triggerClusterSync(result.clusterId);
+    this.triggerClusterSync(identity.clusterId);
     return result;
   }
 
@@ -289,7 +289,7 @@ export class ResourcesController {
     );
     const result = await this.resourcesService.updateYaml(req);
     if (!req.dryRun) {
-      this.triggerClusterSync(result.clusterId);
+      this.triggerClusterSync(req.clusterId);
     }
     return result;
   }
@@ -317,7 +317,7 @@ export class ResourcesController {
     );
     const result = await this.resourcesService.applyYaml(req);
     if (!req.dryRun) {
-      this.triggerClusterSync(result.clusterId);
+      this.triggerClusterSync(req.clusterId);
     }
     return result;
   }
@@ -347,7 +347,7 @@ export class ResourcesController {
       identity,
       replicas,
     );
-    this.triggerClusterSync(result.clusterId);
+    this.triggerClusterSync(identity.clusterId);
     return result;
   }
 
@@ -379,7 +379,7 @@ export class ResourcesController {
       image,
       container,
     );
-    this.triggerClusterSync(result.clusterId);
+    this.triggerClusterSync(identity.clusterId);
     return result;
   }
 
