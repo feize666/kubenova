@@ -7,9 +7,14 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../common/auth.guard';
+import {
+  ClusterAccessService,
+  type ClusterAccessSubject,
+} from '../common/cluster-access.service';
 import {
   type DynamicResourceIdentity,
   type DynamicResourceQuery,
@@ -21,6 +26,12 @@ import {
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
 
+interface ResourcesRequest {
+  user?: {
+    user?: ClusterAccessSubject;
+  };
+}
+
 @Controller('api/resources')
 @UseGuards(AuthGuard)
 export class ResourcesController {
@@ -28,6 +39,7 @@ export class ResourcesController {
     private readonly resourcesService: ResourcesService,
     private readonly clustersService: ClustersService,
     private readonly clusterSyncService: ClusterSyncService,
+    private readonly clusterAccessService: ClusterAccessService,
   ) {}
 
   private triggerClusterSync(clusterId?: string): void {
@@ -51,7 +63,8 @@ export class ResourcesController {
   }
 
   @Post('discovery/refresh')
-  refreshDiscovery(
+  async refreshDiscovery(
+    @Req() req: ResourcesRequest,
     @Body()
     body?: {
       clusterId?: string;
@@ -61,11 +74,13 @@ export class ResourcesController {
     if (!clusterId) {
       throw new BadRequestException('clusterId 不能为空');
     }
+    await this.clusterAccessService.assertCanMutate(req.user?.user, clusterId);
     return this.resourcesService.refreshDiscoveryCatalog(clusterId);
   }
 
   @Get('discovery/catalog')
-  getDiscoveryCatalog(
+  async getDiscoveryCatalog(
+    @Req() req: ResourcesRequest,
     @Query('clusterId') clusterId?: string,
     @Query('refresh') refresh?: string,
   ) {
@@ -73,6 +88,10 @@ export class ResourcesController {
     if (!normalizedClusterId) {
       throw new BadRequestException('clusterId 不能为空');
     }
+    await this.clusterAccessService.assertCanRead(
+      req.user?.user,
+      normalizedClusterId,
+    );
     const refreshFlag =
       refresh === 'true' || refresh === '1' || refresh === 'yes';
     return this.resourcesService.getDiscoveryCatalog(normalizedClusterId, {
@@ -81,12 +100,20 @@ export class ResourcesController {
   }
 
   @Get('dynamic')
-  listDynamic(@Query() query: DynamicResourceQuery) {
+  async listDynamic(
+    @Req() req: ResourcesRequest,
+    @Query() query: DynamicResourceQuery,
+  ) {
+    const clusterId = query.clusterId?.trim();
+    if (clusterId) {
+      await this.clusterAccessService.assertCanRead(req.user?.user, clusterId);
+    }
     return this.resourcesService.listDynamicResources(query);
   }
 
   @Get('dynamic/detail')
-  getDynamicDetail(
+  async getDynamicDetail(
+    @Req() req: ResourcesRequest,
     @Query('clusterId') clusterId?: string,
     @Query('group') group?: string,
     @Query('version') version?: string,
@@ -102,11 +129,16 @@ export class ResourcesController {
       namespace: namespace?.trim() ?? '',
       name: name?.trim() ?? '',
     };
+    await this.clusterAccessService.assertCanRead(
+      req.user?.user,
+      identity.clusterId,
+    );
     return this.resourcesService.getDynamicResourceDetail(identity);
   }
 
   @Put('dynamic/yaml')
   async updateDynamicYaml(
+    @Req() req: ResourcesRequest,
     @Body()
     body?: {
       clusterId?: string;
@@ -129,6 +161,10 @@ export class ResourcesController {
       yaml: body?.yaml,
       dryRun: Boolean(body?.dryRun),
     };
+    await this.clusterAccessService.assertCanMutate(
+      req.user?.user,
+      identity.clusterId,
+    );
     const result = await this.resourcesService.updateDynamicYaml(identity);
     if (!identity.dryRun) {
       this.triggerClusterSync(result.clusterId);
@@ -138,6 +174,7 @@ export class ResourcesController {
 
   @Post('dynamic/delete')
   async deleteDynamic(
+    @Req() req: ResourcesRequest,
     @Body()
     body?: {
       clusterId?: string;
@@ -156,6 +193,10 @@ export class ResourcesController {
       namespace: body?.namespace?.trim() ?? '',
       name: body?.name?.trim() ?? '',
     };
+    await this.clusterAccessService.assertCanMutate(
+      req.user?.user,
+      identity.clusterId,
+    );
     const result = await this.resourcesService.deleteDynamicResource(identity);
     this.triggerClusterSync(result.clusterId);
     return result;
@@ -163,6 +204,7 @@ export class ResourcesController {
 
   @Post('dynamic/create')
   async createDynamic(
+    @Req() req: ResourcesRequest,
     @Body()
     body?: {
       clusterId?: string;
@@ -182,6 +224,10 @@ export class ResourcesController {
       namespace: body?.namespace?.trim() ?? '',
       name: body?.name?.trim() ?? '',
     };
+    await this.clusterAccessService.assertCanMutate(
+      req.user?.user,
+      identity.clusterId,
+    );
     const result = await this.resourcesService.createDynamicResource({
       ...identity,
       body: body?.body ?? {},
@@ -191,13 +237,18 @@ export class ResourcesController {
   }
 
   @Get('yaml')
-  getYaml(
+  async getYaml(
+    @Req() req: ResourcesRequest,
     @Query('clusterId') clusterId?: string,
     @Query('namespace') namespace?: string,
     @Query('kind') kind?: string,
     @Query('name') name?: string,
   ) {
     const identity = this.parseIdentity({ clusterId, namespace, kind, name });
+    await this.clusterAccessService.assertCanRead(
+      req.user?.user,
+      identity.clusterId,
+    );
     return this.resourcesService.getYaml(identity);
   }
 
@@ -211,6 +262,7 @@ export class ResourcesController {
 
   @Put('yaml')
   async updateYaml(
+    @Req() httpRequest: ResourcesRequest,
     @Body()
     body?: {
       clusterId?: string;
@@ -231,6 +283,10 @@ export class ResourcesController {
       yaml,
       dryRun: Boolean(body?.dryRun),
     };
+    await this.clusterAccessService.assertCanMutate(
+      httpRequest.user?.user,
+      req.clusterId,
+    );
     const result = await this.resourcesService.updateYaml(req);
     if (!req.dryRun) {
       this.triggerClusterSync(result.clusterId);
@@ -240,6 +296,7 @@ export class ResourcesController {
 
   @Post('yaml/apply')
   async applyYaml(
+    @Req() httpRequest: ResourcesRequest,
     @Body()
     body?: {
       clusterId?: string;
@@ -254,6 +311,10 @@ export class ResourcesController {
       yaml: body?.yaml?.trim() ?? '',
       dryRun: Boolean(body?.dryRun),
     };
+    await this.clusterAccessService.assertCanMutate(
+      httpRequest.user?.user,
+      req.clusterId,
+    );
     const result = await this.resourcesService.applyYaml(req);
     if (!req.dryRun) {
       this.triggerClusterSync(result.clusterId);
@@ -263,6 +324,7 @@ export class ResourcesController {
 
   @Post('scale')
   async scale(
+    @Req() req: ResourcesRequest,
     @Body()
     body?: {
       clusterId?: string;
@@ -277,6 +339,10 @@ export class ResourcesController {
     if (!Number.isInteger(replicas) || replicas < 0) {
       throw new BadRequestException('replicas 必须为大于等于 0 的整数');
     }
+    await this.clusterAccessService.assertCanMutate(
+      req.user?.user,
+      identity.clusterId,
+    );
     const result = await this.resourcesService.scaleResource(
       identity,
       replicas,
@@ -287,6 +353,7 @@ export class ResourcesController {
 
   @Post('image')
   async updateImage(
+    @Req() req: ResourcesRequest,
     @Body()
     body?: {
       clusterId?: string;
@@ -303,6 +370,10 @@ export class ResourcesController {
       throw new BadRequestException('image 不能为空');
     }
     const container = body?.container?.trim() || undefined;
+    await this.clusterAccessService.assertCanMutate(
+      req.user?.user,
+      identity.clusterId,
+    );
     const result = await this.resourcesService.updateImage(
       identity,
       image,
