@@ -9,6 +9,7 @@ import type { MonitoringRange } from '../monitoring/monitoring.service';
 import { MonitoringService } from '../monitoring/monitoring.service';
 
 export interface AiopsTimeFilter {
+  clusterId?: string;
   range?: MonitoringRange;
   from?: Date;
   to?: Date;
@@ -165,6 +166,7 @@ export class AiopsService {
     const [observability, alerts, inspection] = await Promise.all([
       this.monitoringService.getObservabilitySummary(timeFilter),
       this.monitoringService.getAlerts({
+        clusterId: timeFilter.clusterId,
         page: 1,
         pageSize: 20,
         status: 'firing',
@@ -173,13 +175,17 @@ export class AiopsService {
         to: timeFilter.to,
       }),
       this.monitoringService.getClusterInspection(
-        undefined,
+        timeFilter.clusterId,
         undefined,
         timeFilter,
       ),
     ]);
-    const incidentsFromAlerts: AiopsIncidentItem[] = alerts.items.map(
-      (alert) => ({
+    const incidentsFromAlerts: AiopsIncidentItem[] = alerts.items
+      .filter(
+        (alert) =>
+          !timeFilter.clusterId || alert.clusterId === timeFilter.clusterId,
+      )
+      .map((alert) => ({
         id: `alert:${alert.id}`,
         title: alert.title,
         severity:
@@ -202,9 +208,12 @@ export class AiopsService {
           ? `${alert.resourceType}/${alert.resourceName ?? '-'}`
           : '待关联资源',
         source: alerts.dataSource === 'monitoring-alert' ? 'alert' : 'derived',
-      }),
-    );
+      }));
     const incidentsFromInspection: AiopsIncidentItem[] = inspection.items
+      .filter(
+        (issue) =>
+          !timeFilter.clusterId || issue.clusterId === timeFilter.clusterId,
+      )
       .slice(0, Math.max(0, 12 - incidentsFromAlerts.length))
       .map((issue) => ({
         id: `inspection:${issue.id}`,
@@ -281,6 +290,7 @@ export class AiopsService {
 
   private summaryCacheKey(timeFilter: AiopsTimeFilter): string {
     return [
+      timeFilter.clusterId?.trim() ?? '',
       timeFilter.range ?? '24h',
       timeFilter.from?.toISOString() ?? '',
       timeFilter.to?.toISOString() ?? '',

@@ -103,12 +103,12 @@ export interface AiopsSummary {
 }
 
 export async function getAiopsSummary(
-  options: { range?: MonitoringTimePreset; from?: string; to?: string } = {},
+  options: { range?: MonitoringTimePreset; from?: string; to?: string; clusterId?: string } = {},
   token?: string,
   requestOptions: { signal?: AbortSignal } = {},
 ): Promise<AiopsSummary> {
   return apiRequest<AiopsSummary>("/api/aiops/summary", {
-    query: { range: options.range, from: options.from, to: options.to },
+    query: { range: options.range, from: options.from, to: options.to, clusterId: options.clusterId },
     token,
     signal: requestOptions.signal,
   });

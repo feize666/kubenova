@@ -29,11 +29,11 @@ function createService() {
   const prisma = {
     clusterRegistry: {
       count: jest.fn().mockResolvedValue(1),
-      findMany: jest.fn(async (args: { select?: Record<string, unknown> }) => {
+      findMany: jest.fn((args: { select?: Record<string, unknown> }) => {
         if (args.select?.status) {
-          return [];
+          return Promise.resolve([]);
         }
-        return [];
+        return Promise.resolve([]);
       }),
     },
     namespaceRecord: {
@@ -56,8 +56,8 @@ function createService() {
     },
     monitoringAlert: {
       count: jest.fn().mockResolvedValue(1),
-      findMany: jest.fn(async (args: { take?: number; skip?: number }) =>
-        args.take === 300 ? [] : [alertRow],
+      findMany: jest.fn((args: { take?: number; skip?: number }) =>
+        Promise.resolve(args.take === 300 ? [] : [alertRow]),
       ),
     },
   };
@@ -107,5 +107,89 @@ describe('MonitoringService observability summary cache', () => {
 
     expect(prisma.monitoringAlert.count).toHaveBeenCalledTimes(3);
     expect(prisma.monitoringAlert.findMany).toHaveBeenCalledTimes(3);
+  });
+
+  it('partitions summaries and every backing query by cluster', async () => {
+    const { service, prisma } = createService();
+    prisma.namespaceRecord.count.mockImplementation(
+      (args: { where?: { clusterId?: string } }) =>
+        Promise.resolve(args.where?.clusterId === 'cluster-a' ? 2 : 7),
+    );
+
+    const first = await service.getObservabilitySummary({
+      ...timeFilter,
+      clusterId: 'cluster-a',
+    });
+    const second = await service.getObservabilitySummary({
+      ...timeFilter,
+      clusterId: 'cluster-b',
+    });
+
+    expect(
+      first.entities.find((item) => item.scope === 'namespace')?.total,
+    ).toBe(2);
+    expect(
+      second.entities.find((item) => item.scope === 'namespace')?.total,
+    ).toBe(7);
+    const namespaceCountCalls = prisma.namespaceRecord.count.mock
+      .calls as unknown as Array<[{ where: { clusterId?: string } }]>;
+    expect(namespaceCountCalls.map(([args]) => args.where.clusterId)).toEqual([
+      'cluster-a',
+      'cluster-b',
+    ]);
+    const alertCountCalls = prisma.monitoringAlert.count.mock
+      .calls as unknown as Array<[{ where: { clusterId?: string } }]>;
+    expect(
+      alertCountCalls
+        .map(([args]) => args.where.clusterId)
+        .filter((clusterId): clusterId is string => Boolean(clusterId)),
+    ).toEqual([
+      'cluster-a',
+      'cluster-a',
+      'cluster-a',
+      'cluster-b',
+      'cluster-b',
+      'cluster-b',
+    ]);
+  });
+
+  it('keeps an empty target cluster inspection from querying alerts in other clusters', async () => {
+    const { service, prisma } = createService();
+    prisma.clusterRegistry.findMany.mockResolvedValue([]);
+
+    const report = await service.getClusterInspection(
+      'missing-cluster',
+      undefined,
+      timeFilter,
+    );
+
+    expect(report.clusterId).toBe('missing-cluster');
+    const inspectionAlertCalls = prisma.monitoringAlert.findMany.mock
+      .calls as unknown as Array<
+      [{ where: { clusterId?: { in: string[] } }; take?: number }]
+    >;
+    expect(
+      inspectionAlertCalls.find(([args]) => args.take === 300)?.[0].where
+        .clusterId,
+    ).toEqual({ in: [] });
+  });
+
+  it('keeps observability resource links inside the target workspace', async () => {
+    const { service } = createService();
+
+    const summary = await service.getObservabilitySummary({
+      ...timeFilter,
+      clusterId: 'cluster-a',
+    });
+
+    expect(summary.entities.map((item) => item.detailPath)).toEqual([
+      '/clusters/cluster-a/overview',
+      '/clusters/cluster-a/namespaces',
+      '/clusters/cluster-a/workloads/pods',
+      '/clusters/cluster-a/network/services',
+      '/clusters/cluster-a/workloads/pods',
+      '/clusters/cluster-a/nodes',
+      '/clusters/cluster-a/network/services',
+    ]);
   });
 });

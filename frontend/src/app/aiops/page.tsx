@@ -4,6 +4,7 @@ import { ReloadOutlined, RobotOutlined, SafetyOutlined, WarningOutlined } from "
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, App, Col, Descriptions, Empty, Row, Select, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { usePathname } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { OpsCommandPreview, OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
@@ -19,9 +20,9 @@ import {
   type AiopsRecommendationPrecheck,
 } from "@/lib/api/aiops";
 import type { MonitoringTimePreset } from "@/lib/api/monitoring";
+import { getClusterIdFromPathname } from "@/lib/cluster-workspace";
 import { listQueryOptions } from "@/lib/query";
 
-const AIOPS_PATH = "/aiops";
 const AIOPS_RANGE_OPTIONS: Array<{ label: string; value: MonitoringTimePreset }> = [
   { label: "15 分钟", value: "15m" },
   { label: "1 小时", value: "1h" },
@@ -83,15 +84,18 @@ function formatApprovalResult(approval: AiopsRecommendationApproval) {
 export default function AiopsCenterPage() {
   const { message } = App.useApp();
   const { accessToken, isInitializing } = useAuth();
+  const pathname = usePathname();
+  const clusterId = getClusterIdFromPathname(pathname);
   const [range, setRange] = useState<MonitoringTimePreset>("24h");
   const [selectedIncidentId, setSelectedIncidentId] = useState("");
   const [precheckResults, setPrecheckResults] = useState<Record<string, AiopsRecommendationPrecheck>>({});
   const [approvalResults, setApprovalResults] = useState<Record<string, AiopsRecommendationApproval>>({});
-  const enabled = !isInitializing && Boolean(accessToken);
+  const enabled = !isInitializing && Boolean(accessToken && clusterId);
   const summaryQuery = useQuery({
     ...listQueryOptions,
-    queryKey: ["aiops", "summary", range, accessToken],
-    queryFn: ({ signal }) => getAiopsSummary({ range }, accessToken || undefined, { signal }),
+    queryKey: ["aiops", "summary", clusterId, range, accessToken],
+    queryFn: ({ signal }) =>
+      getAiopsSummary({ range, clusterId: clusterId || undefined }, accessToken || undefined, { signal }),
     enabled,
     refetchInterval: enabled ? 30_000 : false,
     refetchOnWindowFocus: false,
@@ -234,7 +238,7 @@ export default function AiopsCenterPage() {
     <Space className="resource-workbench ops-aiops-cockpit" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
-          path={AIOPS_PATH}
+          path={pathname}
           embedded
           className="resource-workbench__header"
           title={
@@ -263,7 +267,11 @@ export default function AiopsCenterPage() {
         />
       </OpsSurface>
 
-      {!enabled ? <Alert className="ops-center-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后查看 KubeNova 中台。" /> : null}
+      {!clusterId ? (
+        <Alert className="ops-center-state-alert" type="warning" showIcon title="请从集群列表进入单集群智能运维工作台。" />
+      ) : !enabled ? (
+        <Alert className="ops-center-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后查看 KubeNova 中台。" />
+      ) : null}
       {summaryQuery.isError ? (
         <Alert
           className="ops-center-state-alert"

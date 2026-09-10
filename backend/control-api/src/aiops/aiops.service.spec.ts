@@ -107,4 +107,115 @@ describe('AiopsService', () => {
       harness.monitoringService.getClusterInspection,
     ).toHaveBeenCalledTimes(1);
   });
+
+  it('partitions cached summaries by cluster and forwards the target scope', async () => {
+    const service = createService({
+      getObservabilitySummary: jest
+        .fn()
+        .mockImplementation((filter: { clusterId?: string }) =>
+          Promise.resolve({
+            range: '24h',
+            timestamp: new Date().toISOString(),
+            activeAlerts: { degraded: true },
+            degraded: true,
+            note: filter.clusterId,
+          }),
+        ),
+    });
+
+    const first = await service.getSummary({
+      range: '24h',
+      clusterId: 'cluster-a',
+    });
+    const second = await service.getSummary({
+      range: '24h',
+      clusterId: 'cluster-b',
+    });
+
+    expect(first.note).toBe('cluster-a');
+    expect(second.note).toBe('cluster-b');
+    const harness = service as unknown as {
+      monitoringService: Record<string, jest.Mock>;
+    };
+    expect(harness.monitoringService.getAlerts).toHaveBeenCalledWith(
+      expect.objectContaining({ clusterId: 'cluster-a' }),
+    );
+    expect(harness.monitoringService.getAlerts).toHaveBeenCalledWith(
+      expect.objectContaining({ clusterId: 'cluster-b' }),
+    );
+    expect(harness.monitoringService.getClusterInspection).toHaveBeenCalledWith(
+      'cluster-a',
+      undefined,
+      expect.objectContaining({ clusterId: 'cluster-a' }),
+    );
+    expect(harness.monitoringService.getClusterInspection).toHaveBeenCalledWith(
+      'cluster-b',
+      undefined,
+      expect.objectContaining({ clusterId: 'cluster-b' }),
+    );
+  });
+
+  it('does not build incidents or recommendations from another cluster', async () => {
+    const service = createService({
+      getAlerts: jest.fn().mockResolvedValue({
+        items: [
+          {
+            id: 'a1',
+            clusterId: 'cluster-a',
+            namespace: 'default',
+            severity: 'critical',
+            title: 'cluster-a issue',
+            resourceType: 'Deployment',
+            resourceName: 'api-a',
+            firedAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            id: 'b1',
+            clusterId: 'cluster-b',
+            namespace: 'default',
+            severity: 'critical',
+            title: 'cluster-b issue',
+            resourceType: 'Deployment',
+            resourceName: 'api-b',
+            firedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        dataSource: 'monitoring-alert',
+        degraded: false,
+      }),
+      getClusterInspection: jest.fn().mockResolvedValue({
+        timestamp: '2026-01-01T00:00:00.000Z',
+        items: [
+          {
+            id: 'i-a',
+            clusterId: 'cluster-a',
+            title: 'inspection a',
+            severity: 'warning',
+            resourceRef: 'cluster-a/default/Pod/api-a',
+          },
+          {
+            id: 'i-b',
+            clusterId: 'cluster-b',
+            title: 'inspection b',
+            severity: 'warning',
+            resourceRef: 'cluster-b/default/Pod/api-b',
+          },
+        ],
+      }),
+    });
+
+    const summary = await service.getSummary({
+      range: '24h',
+      clusterId: 'cluster-a',
+    });
+
+    expect(summary.incidentQueue.map((item) => item.title)).toEqual([
+      'cluster-a issue',
+      'inspection a',
+    ]);
+    expect(summary.recommendations).toHaveLength(2);
+    expect(
+      summary.recommendations.every((item) => !item.id.includes('b1')),
+    ).toBe(true);
+  });
 });

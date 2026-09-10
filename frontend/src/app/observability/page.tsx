@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Alert, Col, Descriptions, Empty, Row, Select, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
@@ -21,9 +22,9 @@ import {
   type ObservabilitySourceStatus,
 } from "@/lib/api/observability";
 import type { MonitoringTimePreset } from "@/lib/api/monitoring";
+import { getClusterIdFromPathname } from "@/lib/cluster-workspace";
 import { listQueryOptions } from "@/lib/query";
 
-const OBSERVABILITY_PATH = "/observability";
 const OBSERVABILITY_RANGE_OPTIONS: Array<{ label: string; value: MonitoringTimePreset }> = [
   { label: "15 分钟", value: "15m" },
   { label: "1 小时", value: "1h" },
@@ -67,13 +68,16 @@ function eventLevelTag(level: ObservabilityEvent["level"]) {
 
 export default function ObservabilityCenterPage() {
   const { accessToken, isInitializing } = useAuth();
+  const pathname = usePathname();
+  const clusterId = getClusterIdFromPathname(pathname);
   const [range, setRange] = useState<MonitoringTimePreset>("24h");
   const [selectedScope, setSelectedScope] = useState<ObservabilityEntityHealth["scope"] | "">("");
-  const enabled = !isInitializing && Boolean(accessToken);
+  const enabled = !isInitializing && Boolean(accessToken && clusterId);
   const summaryQuery = useQuery({
     ...listQueryOptions,
-    queryKey: ["observability", "summary", range, accessToken],
-    queryFn: ({ signal }) => getObservabilitySummary({ range }, accessToken || undefined, { signal }),
+    queryKey: ["observability", "summary", clusterId, range, accessToken],
+    queryFn: ({ signal }) =>
+      getObservabilitySummary({ range, clusterId: clusterId || undefined }, accessToken || undefined, { signal }),
     enabled,
     refetchInterval: enabled ? 30_000 : false,
     refetchOnWindowFocus: false,
@@ -205,7 +209,7 @@ export default function ObservabilityCenterPage() {
     <Space className="resource-workbench ops-observability-cockpit" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
-          path={OBSERVABILITY_PATH}
+          path={pathname}
           embedded
           className="resource-workbench__header"
           title={
@@ -234,7 +238,11 @@ export default function ObservabilityCenterPage() {
         />
       </OpsSurface>
 
-      {!enabled ? <Alert className="ops-center-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后查看可观测性中心。" /> : null}
+      {!clusterId ? (
+        <Alert className="ops-center-state-alert" type="warning" showIcon title="请从集群列表进入单集群可观测性工作台。" />
+      ) : !enabled ? (
+        <Alert className="ops-center-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后查看可观测性中心。" />
+      ) : null}
       {summaryQuery.isError ? (
         <Alert
           className="ops-center-state-alert"

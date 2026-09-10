@@ -54,16 +54,18 @@ describe('AiopsController', () => {
     };
   }
 
-  it('forwards summary time filters', async () => {
+  it('forwards summary cluster and time filters', async () => {
     const { controller, service } = createController();
 
     await controller.getSummary(
       '1h',
       '2026-01-01T00:00:00.000Z',
       '2026-01-01T01:00:00.000Z',
+      ' cluster-a ',
     );
 
     expect(service.getSummary).toHaveBeenCalledWith({
+      clusterId: 'cluster-a',
       range: '1h',
       from: new Date('2026-01-01T00:00:00.000Z'),
       to: new Date('2026-01-01T01:00:00.000Z'),
@@ -88,9 +90,9 @@ describe('AiopsController', () => {
     ).toThrow(BadRequestException);
   });
 
-  it('prechecks recommendation with actor context', async () => {
+  it('prechecks recommendation with actor context', () => {
     const { controller, service } = createController();
-    await controller.precheckRecommendation(
+    controller.precheckRecommendation(
       { user: { user: { username: 'admin@local.dev', role: 'admin' } } },
       { recommendationId: ' rec:alert:a1 ' },
     );
@@ -104,9 +106,9 @@ describe('AiopsController', () => {
     );
   });
 
-  it('approves recommendation with actor context', async () => {
+  it('approves recommendation with actor context', () => {
     const { controller, service } = createController();
-    await controller.approveRecommendation(
+    controller.approveRecommendation(
       {
         user: {
           user: { username: 'operator@local.dev', role: 'cluster-operator' },

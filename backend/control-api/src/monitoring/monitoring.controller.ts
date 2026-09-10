@@ -54,10 +54,12 @@ export class MonitoringController {
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('clusterId') clusterId?: string,
   ): Promise<MonitoringOverviewResponse> {
-    return this.monitoringService.getOverview(
-      this.parseTimeFilter(range, from, to, '24h'),
-    );
+    return this.monitoringService.getOverview({
+      ...this.parseTimeFilter(range, from, to, '24h'),
+      clusterId: this.normalizeClusterId(clusterId),
+    });
   }
 
   @Get('observability/summary')
@@ -65,10 +67,12 @@ export class MonitoringController {
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('clusterId') clusterId?: string,
   ) {
-    return this.monitoringService.getObservabilitySummary(
-      this.parseTimeFilter(range, from, to, '24h'),
-    );
+    return this.monitoringService.getObservabilitySummary({
+      ...this.parseTimeFilter(range, from, to, '24h'),
+      clusterId: this.normalizeClusterId(clusterId),
+    });
   }
 
   @Get('events')
@@ -76,10 +80,12 @@ export class MonitoringController {
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('clusterId') clusterId?: string,
   ): Promise<MonitoringEventsResponse> {
-    return this.monitoringService.getEvents(
-      this.parseTimeFilter(range, from, to, '1h'),
-    );
+    return this.monitoringService.getEvents({
+      ...this.parseTimeFilter(range, from, to, '1h'),
+      clusterId: this.normalizeClusterId(clusterId),
+    });
   }
 
   @Get('alerts')
@@ -91,8 +97,10 @@ export class MonitoringController {
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('clusterId') clusterId?: string,
   ) {
     const query: AlertsQuery = {
+      clusterId: this.normalizeClusterId(clusterId),
       severity,
       status,
       page: page ? parseInt(page, 10) : undefined,
@@ -174,11 +182,13 @@ export class MonitoringController {
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('clusterId') clusterId?: string,
   ): Promise<void> {
     const exportFormat = this.parseExportFormat(format);
     const timeFilter = this.parseTimeFilter(range, from, to, '24h');
     const result = await this.monitoringService.exportAlerts(
       {
+        clusterId: this.normalizeClusterId(clusterId),
         severity,
         status,
         ...timeFilter,
@@ -320,6 +330,10 @@ export class MonitoringController {
       throw new BadRequestException(`无效的 ${field} 时间格式`);
     }
     return parsed;
+  }
+
+  private normalizeClusterId(clusterId?: string): string | undefined {
+    return clusterId?.trim() || undefined;
   }
 
   private parseExportFormat(

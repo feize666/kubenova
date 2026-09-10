@@ -31,11 +31,13 @@ export class AiopsController {
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('clusterId') clusterId?: string,
   ) {
     const fromDate = from ? this.parseDate(from, 'from') : undefined;
     const toDate = to ? this.parseDate(to, 'to') : undefined;
     this.assertDateRange(fromDate, toDate);
     return this.aiopsService.getSummary({
+      clusterId: clusterId?.trim() || undefined,
       range: this.parseRange(range),
       from: fromDate,
       to: toDate,

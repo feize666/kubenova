@@ -3,7 +3,7 @@ jest.mock('@kubernetes/client-node', () => ({}));
 import { MonitoringController } from './monitoring.controller';
 
 describe('MonitoringController', () => {
-  it('forwards observability summary time filters', async () => {
+  it('forwards observability summary cluster and time filters', async () => {
     const monitoringService = {
       getObservabilitySummary: jest.fn().mockResolvedValue({
         range: '1h',
@@ -34,9 +34,11 @@ describe('MonitoringController', () => {
       '1h',
       '2026-01-01T00:00:00.000Z',
       '2026-01-01T01:00:00.000Z',
+      ' cluster-a ',
     );
 
     expect(monitoringService.getObservabilitySummary).toHaveBeenCalledWith({
+      clusterId: 'cluster-a',
       range: '1h',
       from: new Date('2026-01-01T00:00:00.000Z'),
       to: new Date('2026-01-01T01:00:00.000Z'),

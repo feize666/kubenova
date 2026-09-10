@@ -93,6 +93,7 @@ export interface AlertItem {
 }
 
 export interface AlertsQuery {
+  clusterId?: string;
   severity?: string;
   status?: string;
   page?: number;
@@ -177,6 +178,7 @@ export interface ExecuteInspectionActionRequest {
 }
 
 export interface InspectionTimeFilter {
+  clusterId?: string;
   range?: MonitoringRange;
   from?: Date;
   to?: Date;
@@ -319,7 +321,15 @@ export class MonitoringService {
 
   private activeClusterAlertWhere(
     base: Prisma.MonitoringAlertWhereInput = {},
+    clusterId?: string,
   ): Prisma.MonitoringAlertWhereInput {
+    if (clusterId) {
+      return {
+        ...base,
+        clusterId,
+        cluster: { is: { deletedAt: null, status: { not: 'deleted' } } },
+      };
+    }
     return {
       ...base,
       OR: [
@@ -438,31 +448,44 @@ export class MonitoringService {
     timeFilter: InspectionTimeFilter,
   ): Promise<MonitoringOverviewResponse> {
     const { range, from, to } = this.resolveTimeWindow(timeFilter, '24h');
+    const clusterId = timeFilter.clusterId?.trim() || undefined;
     const firedAt = this.buildDateRangeWhere(from, to);
+    const activeClusterWhere: Prisma.ClusterRegistryWhereInput = {
+      deletedAt: null,
+      status: { not: 'deleted' },
+      ...(clusterId ? { id: clusterId } : {}),
+    };
     const [clusterTotal, clusterHealthy, warningCountRaw, criticalCountRaw] =
       await Promise.all([
         this.prisma.clusterRegistry.count({
-          where: { deletedAt: null, status: { not: 'deleted' } },
+          where: activeClusterWhere,
         }),
         this.prisma.clusterRegistry.count({
           where: {
             deletedAt: null,
             status: { in: ['healthy', '正常'] },
+            ...(clusterId ? { id: clusterId } : {}),
           },
         }),
         this.prisma.monitoringAlert.count({
-          where: this.activeClusterAlertWhere({
-            severity: 'warning',
-            status: 'firing',
-            ...(firedAt ? { firedAt } : {}),
-          }),
+          where: this.activeClusterAlertWhere(
+            {
+              severity: 'warning',
+              status: 'firing',
+              ...(firedAt ? { firedAt } : {}),
+            },
+            clusterId,
+          ),
         }),
         this.prisma.monitoringAlert.count({
-          where: this.activeClusterAlertWhere({
-            severity: 'critical',
-            status: 'firing',
-            ...(firedAt ? { firedAt } : {}),
-          }),
+          where: this.activeClusterAlertWhere(
+            {
+              severity: 'critical',
+              status: 'firing',
+              ...(firedAt ? { firedAt } : {}),
+            },
+            clusterId,
+          ),
         }),
       ]);
 
@@ -475,7 +498,7 @@ export class MonitoringService {
     let note: string | undefined;
 
     if (firingTotal === 0) {
-      const derived = await this.buildDerivedAlerts(400);
+      const derived = await this.buildDerivedAlerts(400, clusterId);
       warningCount = derived.filter(
         (item) => item.severity === 'warning',
       ).length;
@@ -495,7 +518,7 @@ export class MonitoringService {
     );
 
     const activeClusters = await this.prisma.clusterRegistry.findMany({
-      where: { deletedAt: null, status: { not: 'deleted' } },
+      where: activeClusterWhere,
       select: { id: true },
     });
     const liveSnapshots = await this.runBounded(
@@ -569,7 +592,10 @@ export class MonitoringService {
   async getObservabilitySummary(
     timeFilter: InspectionTimeFilter,
   ): Promise<ObservabilitySummaryResponse> {
-    const window = this.resolveTimeWindow(timeFilter, '24h');
+    const window = {
+      ...this.resolveTimeWindow(timeFilter, '24h'),
+      clusterId: timeFilter.clusterId?.trim() || undefined,
+    };
     const key = this.observabilitySummaryCacheKey(window);
     const now = Date.now();
     this.pruneObservabilitySummaryCache(now);
@@ -600,6 +626,7 @@ export class MonitoringService {
   }
 
   private async buildObservabilitySummary(window: {
+    clusterId?: string;
     range: MonitoringRange;
     from?: Date;
     to?: Date;
@@ -607,6 +634,7 @@ export class MonitoringService {
     const [overview, alerts, events, inspection] = await Promise.all([
       this.getOverview(window),
       this.getAlerts({
+        clusterId: window.clusterId,
         page: 1,
         pageSize: 8,
         status: 'firing',
@@ -615,7 +643,7 @@ export class MonitoringService {
         to: window.to,
       }),
       this.getEvents(window),
-      this.getClusterInspection(undefined, undefined, window),
+      this.getClusterInspection(window.clusterId, undefined, window),
     ]);
     const [
       namespaceTotal,
@@ -627,12 +655,14 @@ export class MonitoringService {
       this.prisma.namespaceRecord.count({
         where: {
           state: { not: 'deleted' },
+          ...(window.clusterId ? { clusterId: window.clusterId } : {}),
           cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
       this.prisma.workloadRecord.count({
         where: {
           state: { not: 'deleted' },
+          ...(window.clusterId ? { clusterId: window.clusterId } : {}),
           cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
@@ -640,6 +670,7 @@ export class MonitoringService {
         where: {
           state: { not: 'deleted' },
           kind: 'Service',
+          ...(window.clusterId ? { clusterId: window.clusterId } : {}),
           cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
@@ -647,12 +678,14 @@ export class MonitoringService {
         where: {
           state: { not: 'deleted' },
           kind: 'Pod',
+          ...(window.clusterId ? { clusterId: window.clusterId } : {}),
           cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
       this.prisma.networkResource.count({
         where: {
           state: { not: 'deleted' },
+          ...(window.clusterId ? { clusterId: window.clusterId } : {}),
           cluster: { deletedAt: null, status: { not: 'deleted' } },
         },
       }),
@@ -850,43 +883,59 @@ export class MonitoringService {
     const clusterCategory = inspectionByCategory.get('cluster');
     const clusterIssues =
       (clusterCategory?.warning ?? 0) + (clusterCategory?.critical ?? 0);
+    const workspacePath = (path: string, globalPath: string) =>
+      window.clusterId
+        ? `/clusters/${encodeURIComponent(window.clusterId)}/${path}`
+        : globalPath;
     const entities: ObservabilityEntityHealth[] = [
       buildEntity(
         'cluster',
         'Cluster',
         overview.clusterTotal,
         'cluster',
-        '/observability/cluster-health',
+        workspacePath('overview', '/observability/cluster-health'),
       ),
       buildEntity(
         'namespace',
         'Namespace',
         namespaceTotal,
         'namespace',
-        '/namespaces',
+        workspacePath('namespaces', '/namespaces'),
       ),
       buildEntity(
         'workload',
         'Workload',
         workloadTotal,
         'workload',
-        '/workloads/pods',
+        workspacePath('workloads/pods', '/workloads/pods'),
       ),
       buildEntity(
         'service',
         'Service',
         serviceTotal,
         'network',
-        '/network/services',
+        workspacePath('network/services', '/network/services'),
       ),
-      buildEntity('pod', 'Pod', podTotal, 'workload', '/workloads/pods'),
-      buildEntity('node', 'Node', 0, 'cluster', '/clusters/nodes'),
+      buildEntity(
+        'pod',
+        'Pod',
+        podTotal,
+        'workload',
+        workspacePath('workloads/pods', '/workloads/pods'),
+      ),
+      buildEntity(
+        'node',
+        'Node',
+        0,
+        'cluster',
+        workspacePath('nodes', '/clusters/nodes'),
+      ),
       buildEntity(
         'network',
         'Network',
         networkTotal,
         'network',
-        '/network/services',
+        workspacePath('network/services', '/network/services'),
       ),
     ].map((entity) =>
       entity.scope === 'cluster'
@@ -996,11 +1045,13 @@ export class MonitoringService {
   }
 
   private observabilitySummaryCacheKey(window: {
+    clusterId?: string;
     range: MonitoringRange;
     from?: Date;
     to?: Date;
   }): string {
     return [
+      window.clusterId ?? '',
       window.range,
       window.from?.toISOString() ?? '',
       window.to?.toISOString() ?? '',
@@ -1059,11 +1110,15 @@ export class MonitoringService {
     timeFilter: InspectionTimeFilter,
   ): Promise<MonitoringEventsResponse> {
     const { range, from, to } = this.resolveTimeWindow(timeFilter, '1h');
+    const clusterId = timeFilter.clusterId?.trim() || undefined;
     const firedAt = this.buildDateRangeWhere(from, to);
     const rows = await this.prisma.monitoringAlert.findMany({
-      where: this.activeClusterAlertWhere({
-        ...(firedAt ? { firedAt } : {}),
-      }),
+      where: this.activeClusterAlertWhere(
+        {
+          ...(firedAt ? { firedAt } : {}),
+        },
+        clusterId,
+      ),
       orderBy: { firedAt: 'desc' },
       take: 200,
     });
@@ -1098,7 +1153,7 @@ export class MonitoringService {
       };
     }
 
-    const derived = await this.buildDerivedAlerts(200);
+    const derived = await this.buildDerivedAlerts(200, clusterId);
     const items: MonitoringEventItem[] = derived.map((item) => ({
       id: item.id,
       level: item.severity === 'critical' ? 'CRITICAL' : 'WARN',
@@ -1181,7 +1236,8 @@ export class MonitoringService {
       where['firedAt'] = firedAt;
     }
 
-    const normalizedWhere = this.activeClusterAlertWhere(where);
+    const clusterId = query.clusterId?.trim() || undefined;
+    const normalizedWhere = this.activeClusterAlertWhere(where, clusterId);
 
     const [total, records] = await Promise.all([
       this.prisma.monitoringAlert.count({ where: normalizedWhere }),
@@ -1195,7 +1251,7 @@ export class MonitoringService {
 
     // Fallback to derived real-time alerts from synced workload data
     if (total === 0) {
-      const derivedItems = (await this.buildDerivedAlerts(300))
+      const derivedItems = (await this.buildDerivedAlerts(300, clusterId))
         .filter((item) =>
           query.severity ? item.severity === query.severity : true,
         )
@@ -1350,7 +1406,7 @@ export class MonitoringService {
         this.prisma.monitoringAlert.findMany({
           where: this.activeClusterAlertWhere({
             status: 'firing',
-            ...(clusterIds.length > 0 ? { clusterId: { in: clusterIds } } : {}),
+            clusterId: { in: clusterIds },
             ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
             ...(firedAt ? { firedAt } : {}),
           }),
@@ -1795,10 +1851,14 @@ export class MonitoringService {
     };
   }
 
-  private async buildDerivedAlerts(limit: number): Promise<AlertItem[]> {
+  private async buildDerivedAlerts(
+    limit: number,
+    clusterId?: string,
+  ): Promise<AlertItem[]> {
     const derived = await this.prisma.workloadRecord.findMany({
       where: {
         state: { not: 'deleted' },
+        ...(clusterId ? { clusterId } : {}),
         cluster: { deletedAt: null },
         OR: [
           {

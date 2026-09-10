@@ -87,12 +87,12 @@ export interface ObservabilitySummary {
 }
 
 export async function getObservabilitySummary(
-  options: { range?: MonitoringTimePreset; from?: string; to?: string } = {},
+  options: { range?: MonitoringTimePreset; from?: string; to?: string; clusterId?: string } = {},
   token?: string,
   requestOptions: { signal?: AbortSignal } = {},
 ): Promise<ObservabilitySummary> {
   return apiRequest<ObservabilitySummary>("/api/monitoring/observability/summary", {
-    query: { range: options.range, from: options.from, to: options.to },
+    query: { range: options.range, from: options.from, to: options.to, clusterId: options.clusterId },
     token,
     signal: requestOptions.signal,
   });
