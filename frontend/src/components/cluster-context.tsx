@@ -36,7 +36,7 @@ export function ClusterContextProvider({
   const { accessToken } = useAuth();
   const normalizedClusterId = normalizeRouteClusterId(clusterId);
   const query = useQuery({
-    queryKey: [...queryKeys.clusters.detail(normalizedClusterId), "workspace", accessToken],
+    queryKey: [...queryKeys.clusters.detail(normalizedClusterId), accessToken],
     queryFn: () => getClusterDetail(normalizedClusterId, accessToken || undefined),
     enabled: Boolean(accessToken),
     staleTime: QUERY_CACHE_TIMINGS.listStaleTimeMs,

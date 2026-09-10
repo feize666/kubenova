@@ -48,7 +48,7 @@ export function ClusterWorkspaceShell({ children }: { children: React.ReactNode 
   const { accessToken, isAuthenticated, isInitializing, username, logout } = useAuth();
   const clusterId = getClusterIdFromPathname(pathname);
   const clusterQuery = useQuery({
-    queryKey: [...queryKeys.clusters.detail(clusterId ?? ""), "workspace-shell", accessToken],
+    queryKey: [...queryKeys.clusters.detail(clusterId ?? ""), accessToken],
     queryFn: () => getClusterDetail(clusterId!, accessToken || undefined),
     enabled: Boolean(accessToken && clusterId),
     staleTime: QUERY_CACHE_TIMINGS.listStaleTimeMs,

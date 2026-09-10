@@ -662,4 +662,56 @@ describe('ClustersService detail', () => {
     expect(detail.nodeSummary.degradationReason).toContain('kubeconfig');
     expect(detail.runtimeStatus).toBe('offline-mode');
   });
+
+  it('returns degraded cluster detail when the Kubernetes node API stalls', async () => {
+    const previousTimeout = process.env.CLUSTER_NODE_REQUEST_TIMEOUT_MS;
+    process.env.CLUSTER_NODE_REQUEST_TIMEOUT_MS = '10';
+
+    try {
+      const { service, prismaMock, k8sClientService } = buildService();
+      const repository = (
+        service as unknown as { repository: { findById: jest.Mock } }
+      ).repository;
+      repository.findById.mockResolvedValue(BASE_RECORD);
+      (
+        prismaMock.clusterHealthSnapshot.findUnique as jest.Mock
+      ).mockResolvedValue({
+        checkedAt: new Date('2026-01-02T00:00:00.000Z'),
+        status: 'offline',
+        ok: false,
+        reason: 'probe timeout',
+        detailJson: { version: 'v1.30.2' },
+      });
+      (k8sClientService.getCoreApi as jest.Mock).mockReturnValue({
+        listNode: jest.fn(() => new Promise(() => undefined)),
+      });
+
+      const result = await Promise.race([
+        service.getDetail('c-001'),
+        new Promise<'test-timeout'>((resolve) =>
+          setTimeout(() => resolve('test-timeout'), 100),
+        ),
+      ]);
+
+      expect(result).not.toBe('test-timeout');
+      expect(result).toMatchObject({
+        id: 'c-001',
+        runtimeStatus: 'offline',
+        nodeSummary: {
+          items: [],
+          degraded: true,
+        },
+      });
+      expect(
+        (result as Awaited<ReturnType<typeof service.getDetail>>).nodeSummary
+          .degradationReason,
+      ).toContain('timeout after 10ms');
+    } finally {
+      if (previousTimeout === undefined) {
+        delete process.env.CLUSTER_NODE_REQUEST_TIMEOUT_MS;
+      } else {
+        process.env.CLUSTER_NODE_REQUEST_TIMEOUT_MS = previousTimeout;
+      }
+    }
+  });
 });

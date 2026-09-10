@@ -222,6 +222,10 @@ export class ClustersService implements OnModuleInit {
   private readonly prisma: PrismaService;
   private readonly k8sClientService: K8sClientService;
   private readonly logger = new Logger(ClustersService.name);
+  private readonly nodeRequestTimeoutMs = this.parsePositiveInt(
+    process.env.CLUSTER_NODE_REQUEST_TIMEOUT_MS,
+    3_000,
+  );
 
   constructor(
     prismaService: PrismaService,
@@ -1362,9 +1366,11 @@ export class ClustersService implements OnModuleInit {
     }
 
     try {
-      const metricsByNode = await this.fetchNodeMetrics(kubeconfig);
       const coreApi = this.k8sClientService.getCoreApi(kubeconfig);
-      const resp = await coreApi.listNode();
+      const [metricsByNode, resp] = await this.withTimeout(
+        Promise.all([this.fetchNodeMetrics(kubeconfig), coreApi.listNode()]),
+        this.nodeRequestTimeoutMs,
+      );
       const items = resp.items
         .map((node): ClusterNodeListItem | null => {
           const name = node.metadata?.name?.trim() ?? '';
@@ -1443,6 +1449,28 @@ export class ClustersService implements OnModuleInit {
         degraded: true,
         degradationReason: `读取 Kubernetes 节点清单失败：${message}`,
       };
+    }
+  }
+
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`timeout after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
     }
   }
 
