@@ -79,6 +79,7 @@ import {
 } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { filterClusterScopedColumns } from "@/lib/cluster-workspace";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import {
   readResourceFilterFromSearchParams,
@@ -862,7 +863,7 @@ export default function DeploymentsPage() {
     }
   };
 
-  const antd列: Array<HeadlampResourceTableColumn<DeploymentRow>> = [
+  const antd列: Array<HeadlampResourceTableColumn<DeploymentRow>> = filterClusterScopedColumns(workspace?.clusterId, [
     {
       title: "名称",
       dataIndex: "名称",
@@ -1028,7 +1029,7 @@ export default function DeploymentsPage() {
         </ResourceActionIsolation>
       ),
     },
-  ];
+  ]);
   const scopeFilterControl = useMemo(
     () => (
       <div className="workload-workbench__scope">

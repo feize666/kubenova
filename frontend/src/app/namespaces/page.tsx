@@ -22,6 +22,7 @@ import {
 } from "@/components/ops";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import {
   ResourceCreateMethodTabs,
   type ResourceCreateMode,
@@ -52,6 +53,7 @@ import {
   type ResourceIdentity,
 } from "@/lib/api/resources";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { filterClusterScopedColumns } from "@/lib/cluster-workspace";
 import {
   useAntdTableSortPagination,
   type HeadlampResourceTableColumn,
@@ -111,6 +113,7 @@ function buildNamespaceDetailTarget(
 }
 
 export default function NamespacesPage() {
+  const workspace = useOptionalClusterWorkspace();
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
@@ -310,7 +313,7 @@ export default function NamespacesPage() {
     setKeyword(value.trim());
   };
 
-  const columns: HeadlampResourceTableColumn<NamespaceListItem>[] = [
+  const columns: HeadlampResourceTableColumn<NamespaceListItem>[] = filterClusterScopedColumns(workspace?.clusterId, [
     {
       title: "名称空间",
       dataIndex: "namespace",
@@ -413,7 +416,7 @@ export default function NamespacesPage() {
         />
       ),
     },
-  ];
+  ]);
 
   const modalSubmitting =
     mutateCreate.isPending ||

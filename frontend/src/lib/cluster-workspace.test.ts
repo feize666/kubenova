@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error -- Node 24 native TypeScript tests require an explicit extension.
-import { buildClusterResourceHref, buildClusterWorkspaceHref, getClusterIdFromPathname, getClusterWorkspaceNavigation, isSupportedClusterWorkspaceResource, resolveResourceFilterBasePath, resolveWorkspaceClusterId, resolveWorkspaceResourceHref, scopeWorkspaceClusterFormData, scopeWorkspaceClusterValues } from "./cluster-workspace.ts";
+import { buildClusterResourceHref, buildClusterWorkspaceHref, filterClusterScopedColumns, getClusterIdFromPathname, getClusterWorkspaceNavigation, isSupportedClusterWorkspaceResource, resolveResourceFilterBasePath, resolveWorkspaceClusterId, resolveWorkspaceResourceHref, scopeWorkspaceClusterFormData, scopeWorkspaceClusterValues } from "./cluster-workspace.ts";
 
 test("集群入口生成固定集群的 canonical 概览地址", () => {
   assert.equal(buildClusterWorkspaceHref(" ack-prod "), "/clusters/ack-prod/overview");
@@ -107,4 +107,21 @@ test("工作区请求边界覆盖 FormData 中的外来 clusterId", () => {
   assert.equal(scoped.get("clusterId"), "ack-prod");
   assert.equal(scoped.get("name"), "web");
   assert.equal(body.get("clusterId"), "other");
+});
+
+test("单集群工作区隐藏集群列且不影响 legacy 页面", () => {
+  const columns = [
+    { key: "name", title: "名称" },
+    { key: "clusterId", title: "集群" },
+    { key: "namespace", title: "名称空间" },
+  ] as const;
+
+  assert.deepEqual(
+    filterClusterScopedColumns("ack-prod", columns).map((column) => column.key),
+    ["name", "namespace"],
+  );
+  assert.deepEqual(
+    filterClusterScopedColumns(null, columns).map((column) => column.key),
+    ["name", "clusterId", "namespace"],
+  );
 });

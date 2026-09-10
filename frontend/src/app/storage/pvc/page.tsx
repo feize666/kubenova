@@ -54,9 +54,11 @@ import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } 
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { RESOURCE_LIST_REFRESH_OPTIONS } from "@/lib/resource-list-refresh";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { filterClusterScopedColumns } from "@/lib/cluster-workspace";
 import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
@@ -130,6 +132,7 @@ const ACCESS_MODE_OPTIONS = [
 ];
 
 export default function PvcPage() {
+  const workspace = useOptionalClusterWorkspace();
   const searchParams = useSearchParams();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
@@ -433,7 +436,7 @@ export default function PvcPage() {
     setModalOpen(true);
   };
 
-  const columns: HeadlampResourceTableColumn<StorageResource>[] = [
+  const columns: HeadlampResourceTableColumn<StorageResource>[] = filterClusterScopedColumns(workspace?.clusterId, [
     {
       title: "声明名称",
       dataIndex: "name",
@@ -565,7 +568,7 @@ export default function PvcPage() {
         );
       },
     },
-  ];
+  ]);
 
   const scopeFilterControl = (
     <div className="workload-workbench__scope">

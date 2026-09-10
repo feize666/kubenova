@@ -45,6 +45,7 @@ import type {
 } from "@/lib/api/resources";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { filterClusterScopedColumns } from "@/lib/cluster-workspace";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { buildTerminalRoute } from "@/lib/workloads/terminal";
 import {
@@ -820,7 +821,7 @@ export default function PodsPage() {
   );
 
   const columns: Array<HeadlampResourceTableColumn<PodRow>> = useMemo(
-    () => [
+    () => filterClusterScopedColumns(workspace?.clusterId, [
       {
         title: "Pod 名称",
         dataIndex: "name",
@@ -1009,7 +1010,7 @@ export default function PodsPage() {
           </ResourceActionIsolation>
         ),
       },
-    ],
+    ]),
     [
       buildLogsParams,
       buildTerminalParams,
@@ -1020,6 +1021,7 @@ export default function PodsPage() {
       nameWidth,
       router,
       terminalHref,
+      workspace?.clusterId,
     ],
   );
   const loadingState = useMemo(

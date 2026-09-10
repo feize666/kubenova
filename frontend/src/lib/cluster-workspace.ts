@@ -159,6 +159,19 @@ export function scopeWorkspaceClusterFormData(
   return scoped;
 }
 
+/**
+ * A cluster column adds no information once a resource page is locked to one
+ * cluster. Keep the column on legacy/global pages, but omit it from the
+ * canonical workspace without mutating the caller's column definition.
+ */
+export function filterClusterScopedColumns<T extends { key?: unknown }>(
+  workspaceClusterId: string | null | undefined,
+  columns: readonly T[],
+): T[] {
+  if (!workspaceClusterId?.trim()) return [...columns];
+  return columns.filter((column) => String(column.key ?? "") !== "clusterId");
+}
+
 export function getClusterWorkspaceNavigation(clusterId: string): ClusterWorkspaceNavigationSection[] {
   const item = (key: string, label: string, path: string): ClusterWorkspaceNavigationItem => ({
     key,

@@ -39,10 +39,12 @@ import { applyResourceYaml, type ResourceDetailRequest, type ResourceIdentity } 
 import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
+import { filterClusterScopedColumns } from "@/lib/cluster-workspace";
 import { QUERY_CACHE_TIMINGS } from "@/lib/query";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
 import { useAntdTableSortPagination, type HeadlampResourceTableColumn, type HeadlampTableFilters } from "@/lib/table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
@@ -241,6 +243,7 @@ export default function ServicesPage() {
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
+  const workspace = useOptionalClusterWorkspace();
   const queryClient = useQueryClient();
   const { clusterId, namespace, namespaceDisabled, onClusterChange, onNamespaceChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
@@ -567,7 +570,7 @@ export default function ServicesPage() {
   });
 
   const columns: HeadlampResourceTableColumn<NetworkResource>[] = useMemo(
-    () => [
+    () => filterClusterScopedColumns(workspace?.clusterId, [
       {
         title: "服务名称",
         dataIndex: "name",
@@ -642,8 +645,8 @@ export default function ServicesPage() {
           />
         ),
       },
-    ],
-    [clusterMap, deleteService, handleOpenEdit, isTableBusy, nameWidth, sortBy, sortOrder],
+    ]),
+    [clusterMap, deleteService, handleOpenEdit, isTableBusy, nameWidth, sortBy, sortOrder, workspace?.clusterId],
   );
 
   const scopeFilterControl = (
