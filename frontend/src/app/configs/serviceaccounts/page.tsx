@@ -15,6 +15,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { OpsFilterChip, OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
@@ -850,7 +851,7 @@ export default function ServiceAccountsPage() {
                 label="集群"
                 rules={[{ required: true, message: "请选择集群" }]}
               >
-                <Select
+                <ClusterSelect
                   showSearch
                   placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
                   options={clusterOptions}

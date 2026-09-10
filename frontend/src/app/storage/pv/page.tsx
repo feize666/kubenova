@@ -15,6 +15,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTable } from "@/components/resource-table";
 import { StorageCapacityCell, StorageModeListCell, StorageStateCell } from "@/components/storage/storage-table-cells";
 import {
@@ -674,7 +675,7 @@ export default function PvPage() {
                   name="clusterId"
                   rules={[{ required: true, message: "请选择集群" }]}
                 >
-                  <Select
+                  <ClusterSelect
                     placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
                     options={clusterOptions}
                     loading={clustersQuery.isLoading}

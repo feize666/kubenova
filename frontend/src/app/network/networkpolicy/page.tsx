@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { ClusterSelect } from "@/components/cluster-select";
 import { NetworkPreviewListCell } from "@/components/network/network-table-cells";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
@@ -698,7 +699,7 @@ export default function NetworkPolicyPage() {
               <Input disabled placeholder="例如：default" />
             </Form.Item>
             <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
-              <Select disabled placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} />
+              <ClusterSelect disabled placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} />
             </Form.Item>
             <Form.Item label="Pod 标签键" name="podSelectorKey">
               <Input placeholder="例如：app" />
@@ -746,7 +747,7 @@ export default function NetworkPolicyPage() {
                   <Input placeholder="例如：default" />
                 </Form.Item>
                 <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
-                  <Select
+                  <ClusterSelect
                     placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
                     options={clusterOptions}
                     loading={clustersQuery.isLoading}

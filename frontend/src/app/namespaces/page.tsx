@@ -8,7 +8,6 @@ import {
   Button,
   Form,
   Input,
-  Select,
   Space,
   Typography,
 } from "antd";
@@ -21,6 +20,7 @@ import {
   OpsSurface,
 } from "@/components/ops";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import {
@@ -623,7 +623,7 @@ export default function NamespacesPage() {
                     label="集群"
                     rules={[{ required: true, message: "请选择集群" }]}
                   >
-                    <Select
+                    <ClusterSelect
                       options={clusterOptions}
                       placeholder={
                         clusterUnavailable ? "集群状态不可用" : "请选择集群"
@@ -679,7 +679,7 @@ export default function NamespacesPage() {
                 label="集群"
                 rules={[{ required: true, message: "请选择集群" }]}
               >
-                <Select
+                <ClusterSelect
                   options={(clustersQuery.data?.items ?? []).map((item) => ({
                     label: item.name,
                     value: item.id,

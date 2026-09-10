@@ -5,7 +5,6 @@ import {
   Alert,
   Form,
   Input,
-  Select,
   Space,
   Typography,
   message,
@@ -13,6 +12,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import {
@@ -577,7 +577,7 @@ export default function EndpointsPage() {
                 <Input placeholder="例如：default" />
               </Form.Item>
               <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
-                <Select
+                <ClusterSelect
                   placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
                   options={clusterOptions}
                   loading={clustersQuery.isLoading}

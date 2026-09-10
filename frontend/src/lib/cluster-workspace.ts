@@ -106,6 +106,18 @@ export function resolveWorkspaceClusterId(
   return workspaceClusterId?.trim() || legacyClusterId.trim();
 }
 
+/**
+ * Form controls may receive a stale or user-selected cluster value while a
+ * resource page is mounted in a locked workspace. Always prefer the
+ * workspace identity so the visible field and submitted payload agree.
+ */
+export function resolveWorkspaceClusterFieldValue(
+  workspaceClusterId: string | null | undefined,
+  requestedClusterId: string | null | undefined,
+) {
+  return workspaceClusterId?.trim() || requestedClusterId?.trim() || "";
+}
+
 export function resolveResourceFilterBasePath(
   workspaceClusterId: string | null | undefined,
   pathname: string,

@@ -5,7 +5,6 @@ import {
   Alert,
   Form,
   Input,
-  Select,
   Space,
   Typography,
   message,
@@ -41,6 +40,7 @@ import { getClusters } from "@/lib/api/clusters";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
@@ -633,7 +633,7 @@ export default function IngressPage() {
               <Input disabled placeholder="例如：default" />
             </Form.Item>
             <Form.Item label="所属集群" name="clusterId" rules={[{ required: true, message: "请选择集群" }]}>
-              <Select disabled placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} />
+              <ClusterSelect disabled placeholder="请选择集群" options={clusterOptions} loading={clustersQuery.isLoading} />
             </Form.Item>
             <Form.Item label="域名（Host）" name="host" rules={[{ required: true, message: "请输入域名" }]}>
               <Input placeholder="例如：example.com" />
@@ -681,7 +681,7 @@ export default function IngressPage() {
             name="clusterId"
             rules={[{ required: true, message: "请选择集群" }]}
           >
-            <Select
+                <ClusterSelect
               placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
               options={clusterOptions}
               loading={clustersQuery.isLoading}

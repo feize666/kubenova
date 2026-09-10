@@ -26,6 +26,7 @@ import { ResourceFilterToolbar, ResourceFilterToolbarItem } from "@/components/r
 import { ResourceFacetFilterButton } from "@/components/resource-facet-filter-button";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
@@ -1145,7 +1146,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             />
             <Form layout="vertical">
               <Form.Item label="集群" required>
-                <Select
+                <ClusterSelect
                   value={createYamlClusterId}
                   onChange={setCreateYamlClusterId}
                   options={clusterOptions}
@@ -1212,7 +1213,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
             </Col>
             <Col span={8}>
               <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
-                <Select
+                <ClusterSelect
                   options={clusterOptions}
                   loading={clustersQuery.isLoading}
                   placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}

@@ -35,6 +35,7 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { useClusterWorkspaceHref, useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { ResourceTable } from "@/components/resource-table";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
@@ -1100,7 +1101,7 @@ export default function StatefulSetsPage() {
               name="clusterId"
               rules={[{ required: true, message: "请选择集群" }]}
             >
-              <Select
+              <ClusterSelect
                 placeholder="请选择集群"
                 options={clusterSelectOptions}
                 loading={clustersQuery.isLoading}

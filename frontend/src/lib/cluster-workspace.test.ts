@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error -- Node 24 native TypeScript tests require an explicit extension.
-import { buildClusterResourceHref, buildClusterWorkspaceHref, filterClusterScopedColumns, getClusterIdFromPathname, getClusterWorkspaceNavigation, isSupportedClusterWorkspaceResource, resolveResourceFilterBasePath, resolveWorkspaceClusterId, resolveWorkspaceResourceHref, scopeWorkspaceClusterFormData, scopeWorkspaceClusterValues } from "./cluster-workspace.ts";
+import { buildClusterResourceHref, buildClusterWorkspaceHref, filterClusterScopedColumns, getClusterIdFromPathname, getClusterWorkspaceNavigation, isSupportedClusterWorkspaceResource, resolveResourceFilterBasePath, resolveWorkspaceClusterFieldValue, resolveWorkspaceClusterId, resolveWorkspaceResourceHref, scopeWorkspaceClusterFormData, scopeWorkspaceClusterValues } from "./cluster-workspace.ts";
 
 test("集群入口生成固定集群的 canonical 概览地址", () => {
   assert.equal(buildClusterWorkspaceHref(" ack-prod "), "/clusters/ack-prod/overview");
@@ -43,6 +43,12 @@ test("工作区集群标识覆盖旧查询范围且不可清空", () => {
   assert.equal(resolveWorkspaceClusterId("ack-prod", "other-cluster"), "ack-prod");
   assert.equal(resolveWorkspaceClusterId("ack-prod", ""), "ack-prod");
   assert.equal(resolveWorkspaceClusterId(null, "legacy-cluster"), "legacy-cluster");
+});
+
+test("工作区集群表单值始终锁定当前集群", () => {
+  assert.equal(resolveWorkspaceClusterFieldValue("ack-prod", "other-cluster"), "ack-prod");
+  assert.equal(resolveWorkspaceClusterFieldValue(" ack-prod ", ""), "ack-prod");
+  assert.equal(resolveWorkspaceClusterFieldValue(null, "legacy-cluster"), "legacy-cluster");
 });
 
 test("工作区菜单中的每个资源地址都有 canonical 页面承接", () => {

@@ -14,7 +14,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Select,
   Space,
   Typography,
 } from "antd";
@@ -26,6 +25,7 @@ import type {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTable } from "@/components/resource-table";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import {
@@ -770,7 +770,7 @@ export default function JobsPage() {
                     name="clusterId"
                     rules={[{ required: true, message: "请选择集群" }]}
                   >
-                    <Select
+                    <ClusterSelect
                       placeholder={
                         clusterUnavailable ? "集群状态不可用" : "请选择集群"
                       }
@@ -828,7 +828,7 @@ export default function JobsPage() {
                 name="clusterId"
                 rules={[{ required: true, message: "请选择集群" }]}
               >
-                <Select
+                <ClusterSelect
                   placeholder="请选择集群"
                   options={clusterSelectOptions}
                   loading={clustersQuery.isLoading}

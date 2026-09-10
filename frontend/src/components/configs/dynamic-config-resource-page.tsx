@@ -6,6 +6,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { OpsFilterChip, OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -923,7 +924,7 @@ export function DynamicConfigResourcePage({
                 <Row gutter={12}>
                   <Col xs={24} md={12}>
                     <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
-                      <Select
+                      <ClusterSelect
                         showSearch
                         optionFilterProp="label"
                         options={clusterOptions}

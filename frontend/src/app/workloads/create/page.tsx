@@ -20,6 +20,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { OpsCommandPreview, OpsConfirmModal, OpsFilterChip, OpsFormSection, OpsPageHeader, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
@@ -1092,7 +1093,7 @@ export default function WorkloadCreateWorkspacePage() {
               <Row gutter={[16, 16]}>
                 {!workspace ? <Col xs={24} md={8}>
                   <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
-                    <Select
+                    <ClusterSelect
                       options={clusterOptions}
                       loading={clustersQuery.isLoading}
                       placeholder={clusterUnavailable ? "集群状态不可用" : "选择集群"}

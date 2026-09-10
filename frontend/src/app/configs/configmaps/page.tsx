@@ -12,7 +12,6 @@ import {
   Form,
   Input,
   Row,
-  Select,
   Space,
   Typography,
   message,
@@ -21,6 +20,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ConfigCountCell, ConfigVersionCell } from "@/components/configs/config-table-cells";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampTableFilters, HeadlampResourceTableColumn } from "@/components/resource-table";
@@ -631,7 +631,7 @@ export default function ConfigMapsPage() {
               name="clusterId"
               rules={[{ required: true, message: "请选择集群" }]}
             >
-              <Select
+              <ClusterSelect
                 placeholder="请选择集群"
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
@@ -762,7 +762,7 @@ export default function ConfigMapsPage() {
             name="clusterId"
             rules={[{ required: true, message: "请选择集群" }]}
           >
-            <Select
+            <ClusterSelect
               placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
               options={clusterOptions}
               loading={clustersQuery.isLoading}

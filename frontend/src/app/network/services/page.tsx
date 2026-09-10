@@ -42,6 +42,7 @@ import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { filterClusterScopedColumns } from "@/lib/cluster-workspace";
 import { QUERY_CACHE_TIMINGS } from "@/lib/query";
 import { ResourceAddButton } from "@/components/resource-add-button";
+import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
@@ -780,7 +781,7 @@ export default function ServicesPage() {
               name="clusterId"
               rules={[{ required: true, message: "请选择集群" }]}
             >
-              <Select
+              <ClusterSelect
                 placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
                 options={clusterOptions}
                 loading={clustersQuery.isLoading}
@@ -865,7 +866,7 @@ export default function ServicesPage() {
             name="clusterId"
             rules={[{ required: true, message: "请选择集群" }]}
           >
-            <Select
+            <ClusterSelect
               placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
               options={clusterOptions}
               loading={clustersQuery.isLoading}
