@@ -174,11 +174,6 @@ export interface ClusterDetailResponse {
   };
 }
 
-export interface ClusterKubeconfigExportPayload {
-  name: string;
-  kubeconfig: string;
-}
-
 export interface ExportedClusterKubeconfig {
   filename: string;
   contentType: string;
@@ -214,6 +209,7 @@ export interface BatchStateResponse {
 export class ClustersService implements OnModuleInit {
   private static readonly EXPORT_NAMESPACE = 'default';
   private static readonly EXPORT_TOKEN_EXPIRATION_SECONDS = 3600;
+  private static readonly EXPORT_EXPIRATION_CLOCK_SKEW_SECONDS = 300;
   private static readonly EXPORT_CLUSTER_ROLE_NAME =
     'aiops:kubeconfig-export:read-only';
   private static readonly EXPORT_SERVICE_ACCOUNT_PREFIX = 'aiops-export-reader';
@@ -344,25 +340,6 @@ export class ClustersService implements OnModuleInit {
     };
   }
 
-  async getExportableKubeconfig(
-    id: string,
-  ): Promise<ClusterKubeconfigExportPayload> {
-    const record = await this.mustFind(id);
-    if (record.state === 'deleted') {
-      throw new BadRequestException('已删除的集群不可导出 kubeconfig');
-    }
-
-    const kubeconfig = record.kubeconfig?.trim();
-    if (!kubeconfig) {
-      throw new BadRequestException('该集群未配置 kubeconfig，无法导出');
-    }
-
-    return {
-      name: record.name,
-      kubeconfig,
-    };
-  }
-
   /** 返回集群的 kubeconfig 原文（内部使用，不对外暴露） */
   async getKubeconfig(id: string): Promise<string | null> {
     const normalizedId = id?.trim();
@@ -412,6 +389,9 @@ export class ClustersService implements OnModuleInit {
     if (!token) {
       throw new BadRequestException('生成只读导出 token 失败');
     }
+    const expiresAt = this.validateReadonlyTokenExpiration(
+      tokenRequest.status?.expirationTimestamp,
+    );
 
     const exportedYaml = this.k8sClientService.exportKubeconfig({
       clusterName: `cluster-${record.name}`,
@@ -429,11 +409,7 @@ export class ClustersService implements OnModuleInit {
       contentType: 'application/yaml; charset=utf-8',
       content: exportedYaml,
       serviceAccountName,
-      expiresAt:
-        tokenRequest.status?.expirationTimestamp ??
-        new Date(
-          Date.now() + ClustersService.EXPORT_TOKEN_EXPIRATION_SECONDS * 1000,
-        ).toISOString(),
+      expiresAt,
     };
   }
 
@@ -463,7 +439,7 @@ export class ClustersService implements OnModuleInit {
       where: { clusterId: { in: result.items.map((item) => item.id) } },
     });
     const profileMap = new Map<string, ClusterProfileResponse>(
-      profiles.map((row: any) => [row.clusterId, this.toProfileResponse(row)]),
+      profiles.map((row) => [row.clusterId, this.toProfileResponse(row)]),
     );
 
     return {
@@ -847,50 +823,34 @@ export class ClustersService implements OnModuleInit {
   private async ensureReadonlyExportRbac(kubeconfig: string): Promise<void> {
     const rbacApi = this.k8sClientService.getRbacAuthorizationApi(kubeconfig);
     const clusterRoleName = ClustersService.EXPORT_CLUSTER_ROLE_NAME;
+    const rules = this.buildReadonlyExportRules();
+    let existing: k8s.V1ClusterRole;
     try {
-      await rbacApi.readClusterRole({ name: clusterRoleName });
-    } catch {
+      existing = await rbacApi.readClusterRole({ name: clusterRoleName });
+    } catch (error) {
+      if (!this.isKubernetesNotFound(error)) {
+        throw error;
+      }
       await rbacApi.createClusterRole({
         body: {
           metadata: { name: clusterRoleName },
-          rules: [
-            {
-              apiGroups: [''],
-              resources: [
-                'namespaces',
-                'nodes',
-                'pods',
-                'services',
-                'endpoints',
-              ],
-              verbs: ['get', 'list', 'watch'],
-            },
-            {
-              apiGroups: ['apps'],
-              resources: [
-                'deployments',
-                'statefulsets',
-                'daemonsets',
-                'replicasets',
-              ],
-              verbs: ['get', 'list', 'watch'],
-            },
-            {
-              apiGroups: ['batch'],
-              resources: ['jobs', 'cronjobs'],
-              verbs: ['get', 'list', 'watch'],
-            },
-            {
-              apiGroups: ['networking.k8s.io'],
-              resources: ['ingresses', 'networkpolicies'],
-              verbs: ['get', 'list', 'watch'],
-            },
-            {
-              apiGroups: ['storage.k8s.io'],
-              resources: ['storageclasses'],
-              verbs: ['get', 'list', 'watch'],
-            },
-          ],
+          rules,
+        },
+      });
+      return;
+    }
+
+    if (!this.hasExactReadonlyRules(existing.rules, rules)) {
+      await rbacApi.replaceClusterRole({
+        name: clusterRoleName,
+        body: {
+          metadata: {
+            name: clusterRoleName,
+            ...(existing.metadata?.resourceVersion
+              ? { resourceVersion: existing.metadata.resourceVersion }
+              : {}),
+          },
+          rules,
         },
       });
     }
@@ -910,7 +870,10 @@ export class ClustersService implements OnModuleInit {
         name: serviceAccountName,
         namespace,
       });
-    } catch {
+    } catch (error) {
+      if (!this.isKubernetesNotFound(error)) {
+        throw error;
+      }
       await coreApi.createNamespacedServiceAccount({
         namespace,
         body: {
@@ -919,27 +882,173 @@ export class ClustersService implements OnModuleInit {
       });
     }
 
+    const roleRef: k8s.V1RoleRef = {
+      apiGroup: 'rbac.authorization.k8s.io',
+      kind: 'ClusterRole',
+      name: ClustersService.EXPORT_CLUSTER_ROLE_NAME,
+    };
+    const subjects: k8s.RbacV1Subject[] = [
+      {
+        kind: 'ServiceAccount',
+        name: serviceAccountName,
+        namespace,
+      },
+    ];
+    let existingBinding: k8s.V1ClusterRoleBinding;
     try {
-      await rbacApi.readClusterRoleBinding({ name: bindingName });
-    } catch {
+      existingBinding = await rbacApi.readClusterRoleBinding({
+        name: bindingName,
+      });
+    } catch (error) {
+      if (!this.isKubernetesNotFound(error)) {
+        throw error;
+      }
       await rbacApi.createClusterRoleBinding({
         body: {
           metadata: { name: bindingName },
-          roleRef: {
-            apiGroup: 'rbac.authorization.k8s.io',
-            kind: 'ClusterRole',
-            name: ClustersService.EXPORT_CLUSTER_ROLE_NAME,
+          roleRef,
+          subjects,
+        },
+      });
+      return;
+    }
+
+    if (
+      !this.hasExactReadonlyBinding(
+        existingBinding.roleRef,
+        existingBinding.subjects,
+        roleRef,
+        subjects,
+      )
+    ) {
+      await rbacApi.replaceClusterRoleBinding({
+        name: bindingName,
+        body: {
+          metadata: {
+            name: bindingName,
+            ...(existingBinding.metadata?.resourceVersion
+              ? { resourceVersion: existingBinding.metadata.resourceVersion }
+              : {}),
           },
-          subjects: [
-            {
-              kind: 'ServiceAccount',
-              name: serviceAccountName,
-              namespace,
-            },
-          ],
+          roleRef,
+          subjects,
         },
       });
     }
+  }
+
+  private buildReadonlyExportRules(): k8s.V1PolicyRule[] {
+    return [
+      {
+        apiGroups: [''],
+        resources: ['namespaces', 'nodes', 'pods', 'services', 'endpoints'],
+        verbs: ['get', 'list', 'watch'],
+      },
+      {
+        apiGroups: ['apps'],
+        resources: ['deployments', 'statefulsets', 'daemonsets', 'replicasets'],
+        verbs: ['get', 'list', 'watch'],
+      },
+      {
+        apiGroups: ['batch'],
+        resources: ['jobs', 'cronjobs'],
+        verbs: ['get', 'list', 'watch'],
+      },
+      {
+        apiGroups: ['networking.k8s.io'],
+        resources: ['ingresses', 'networkpolicies'],
+        verbs: ['get', 'list', 'watch'],
+      },
+      {
+        apiGroups: ['storage.k8s.io'],
+        resources: ['storageclasses'],
+        verbs: ['get', 'list', 'watch'],
+      },
+    ];
+  }
+
+  private validateReadonlyTokenExpiration(value: string | undefined): string {
+    const expiresAt = value?.trim();
+    if (!expiresAt) {
+      throw new BadRequestException('生成只读导出 token 失败：缺少过期时间');
+    }
+    const expirationTime = Date.parse(expiresAt);
+    if (!Number.isFinite(expirationTime) || expirationTime <= Date.now()) {
+      throw new BadRequestException('生成只读导出 token 失败：过期时间无效');
+    }
+    const maximumExpirationTime =
+      Date.now() +
+      (ClustersService.EXPORT_TOKEN_EXPIRATION_SECONDS +
+        ClustersService.EXPORT_EXPIRATION_CLOCK_SKEW_SECONDS) *
+        1000;
+    if (expirationTime > maximumExpirationTime) {
+      throw new BadRequestException('生成只读导出 token 失败：有效期超过限制');
+    }
+    return new Date(expirationTime).toISOString();
+  }
+
+  private hasExactReadonlyRules(
+    actual: k8s.V1PolicyRule[] | undefined,
+    expected: k8s.V1PolicyRule[],
+  ): boolean {
+    const normalize = (rules: k8s.V1PolicyRule[]) =>
+      rules
+        .map((rule) => ({
+          apiGroups: [...(rule.apiGroups ?? [])].sort(),
+          nonResourceURLs: [...(rule.nonResourceURLs ?? [])].sort(),
+          resourceNames: [...(rule.resourceNames ?? [])].sort(),
+          resources: [...(rule.resources ?? [])].sort(),
+          verbs: [...(rule.verbs ?? [])].sort(),
+        }))
+        .sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        );
+    return (
+      JSON.stringify(normalize(actual ?? [])) ===
+      JSON.stringify(normalize(expected))
+    );
+  }
+
+  private hasExactReadonlyBinding(
+    actualRoleRef: k8s.V1RoleRef,
+    actualSubjects: k8s.RbacV1Subject[] | undefined,
+    expectedRoleRef: k8s.V1RoleRef,
+    expectedSubjects: k8s.RbacV1Subject[],
+  ): boolean {
+    const normalizeSubjects = (subjects: k8s.RbacV1Subject[]) =>
+      subjects
+        .map((subject) => ({
+          apiGroup: subject.apiGroup ?? '',
+          kind: subject.kind,
+          name: subject.name,
+          namespace: subject.namespace ?? '',
+        }))
+        .sort((left, right) =>
+          JSON.stringify(left).localeCompare(JSON.stringify(right)),
+        );
+    return (
+      actualRoleRef.apiGroup === expectedRoleRef.apiGroup &&
+      actualRoleRef.kind === expectedRoleRef.kind &&
+      actualRoleRef.name === expectedRoleRef.name &&
+      JSON.stringify(normalizeSubjects(actualSubjects ?? [])) ===
+        JSON.stringify(normalizeSubjects(expectedSubjects))
+    );
+  }
+
+  private isKubernetesNotFound(error: unknown): boolean {
+    const candidate = error as {
+      code?: number;
+      statusCode?: number;
+      body?: { code?: number };
+      response?: { status?: number; statusCode?: number };
+    };
+    return (
+      candidate?.code === 404 ||
+      candidate?.statusCode === 404 ||
+      candidate?.body?.code === 404 ||
+      candidate?.response?.status === 404 ||
+      candidate?.response?.statusCode === 404
+    );
   }
 
   private async createReadonlyExportToken(
@@ -1424,12 +1533,12 @@ export class ClustersService implements OnModuleInit {
     return amount * base;
   }
 
-  private requireClusterProfileModel(): {
-    findMany(args: unknown): Promise<any[]>;
-    findUnique(args: unknown): Promise<any | null>;
-    upsert(args: unknown): Promise<any>;
-  } {
-    const model = (this.prisma as any).clusterProfile;
+  private requireClusterProfileModel(): PrismaService['clusterProfile'] {
+    const model = (
+      this.prisma as unknown as {
+        clusterProfile?: PrismaService['clusterProfile'];
+      }
+    ).clusterProfile;
     if (!model) {
       throw new BadRequestException(
         'ClusterProfile 模型未就绪，请先执行 prisma generate',

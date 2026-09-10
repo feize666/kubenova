@@ -24,6 +24,36 @@ const BASE_RECORD: ClusterRecord = {
   kubeconfig: 'apiVersion: v1',
 };
 
+const READONLY_ROLE_NAME = 'aiops:kubeconfig-export:read-only';
+const READONLY_SERVICE_ACCOUNT = 'aiops-export-reader-c-001';
+const EXPECTED_READONLY_RULES = [
+  {
+    apiGroups: [''],
+    resources: ['namespaces', 'nodes', 'pods', 'services', 'endpoints'],
+    verbs: ['get', 'list', 'watch'],
+  },
+  {
+    apiGroups: ['apps'],
+    resources: ['deployments', 'statefulsets', 'daemonsets', 'replicasets'],
+    verbs: ['get', 'list', 'watch'],
+  },
+  {
+    apiGroups: ['batch'],
+    resources: ['jobs', 'cronjobs'],
+    verbs: ['get', 'list', 'watch'],
+  },
+  {
+    apiGroups: ['networking.k8s.io'],
+    resources: ['ingresses', 'networkpolicies'],
+    verbs: ['get', 'list', 'watch'],
+  },
+  {
+    apiGroups: ['storage.k8s.io'],
+    resources: ['storageclasses'],
+    verbs: ['get', 'list', 'watch'],
+  },
+];
+
 function buildService() {
   const prismaMock = {
     clusterRegistry: {
@@ -66,7 +96,379 @@ function buildService() {
   return { service, prismaMock, k8sClientService };
 }
 
+function prepareReadonlyExport(options?: {
+  cluster?: Partial<ClusterRecord>;
+  token?: string;
+  expirationTimestamp?: string;
+}) {
+  const { service, k8sClientService } = buildService();
+  const repository = (
+    service as unknown as { repository: { findById: jest.Mock } }
+  ).repository;
+  repository.findById.mockResolvedValue({
+    ...BASE_RECORD,
+    ...options?.cluster,
+  });
+
+  const coreApi = {
+    readNamespacedServiceAccount: jest.fn().mockResolvedValue({}),
+    createNamespacedServiceAccount: jest.fn().mockResolvedValue({}),
+    createNamespacedServiceAccountToken: jest.fn().mockResolvedValue({
+      status: {
+        token: options?.token ?? 'short-lived-readonly-token',
+        ...(options?.expirationTimestamp
+          ? { expirationTimestamp: options.expirationTimestamp }
+          : {}),
+      },
+    }),
+  };
+  const rbacApi = {
+    readClusterRole: jest.fn().mockResolvedValue({
+      metadata: { name: READONLY_ROLE_NAME, resourceVersion: 'role-v1' },
+      rules: EXPECTED_READONLY_RULES,
+    }),
+    createClusterRole: jest.fn().mockResolvedValue({}),
+    replaceClusterRole: jest.fn().mockResolvedValue({}),
+    readClusterRoleBinding: jest.fn().mockResolvedValue({
+      metadata: {
+        name: `${READONLY_SERVICE_ACCOUNT}-binding`,
+        resourceVersion: 'binding-v1',
+      },
+      roleRef: {
+        apiGroup: 'rbac.authorization.k8s.io',
+        kind: 'ClusterRole',
+        name: READONLY_ROLE_NAME,
+      },
+      subjects: [
+        {
+          kind: 'ServiceAccount',
+          name: READONLY_SERVICE_ACCOUNT,
+          namespace: 'default',
+        },
+      ],
+    }),
+    createClusterRoleBinding: jest.fn().mockResolvedValue({}),
+    replaceClusterRoleBinding: jest.fn().mockResolvedValue({}),
+  };
+  Object.assign(k8sClientService as object, {
+    createClient: jest.fn().mockReturnValue({
+      getCurrentCluster: jest.fn().mockReturnValue({
+        server: 'https://api.example.test:6443',
+        caData: 'cluster-ca-data',
+      }),
+    }),
+    getCoreApi: jest.fn().mockReturnValue(coreApi),
+    getRbacAuthorizationApi: jest.fn().mockReturnValue(rbacApi),
+    exportKubeconfig: jest
+      .fn()
+      .mockReturnValue(
+        [
+          'apiVersion: v1',
+          'users:',
+          '- user:',
+          `    token: ${options?.token ?? 'short-lived-readonly-token'}`,
+          '',
+        ].join('\n'),
+      ),
+  });
+
+  return {
+    service,
+    k8sClientService: k8sClientService as unknown as {
+      exportKubeconfig: jest.Mock;
+    },
+    coreApi,
+    rbacApi,
+  };
+}
+
 describe('ClustersService detail', () => {
+  it('does not expose a raw kubeconfig export method', () => {
+    const { service } = buildService();
+
+    expect(
+      (service as unknown as Record<string, unknown>)[
+        'getExportableKubeconfig'
+      ],
+    ).toBeUndefined();
+  });
+
+  it('fails closed when the token response has no expiration timestamp', async () => {
+    const { service, k8sClientService } = prepareReadonlyExport();
+
+    await expect(service.exportReadonlyKubeconfig('c-001')).rejects.toThrow(
+      '过期时间',
+    );
+    expect(k8sClientService.exportKubeconfig).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the issued token lifetime is not short-lived', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-09-10T08:00:00.000Z'));
+    try {
+      const { service, k8sClientService } = prepareReadonlyExport({
+        expirationTimestamp: '2026-09-10T10:00:00.000Z',
+      });
+
+      await expect(service.exportReadonlyKubeconfig('c-001')).rejects.toThrow(
+        '有效期',
+      );
+      expect(k8sClientService.exportKubeconfig).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('requests a one-hour scoped token and exports only that credential', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const { service, k8sClientService, coreApi } = prepareReadonlyExport({
+      token: 'short-lived-readonly-token',
+      expirationTimestamp: expiresAt,
+      cluster: {
+        kubeconfig:
+          'apiVersion: v1\nusers:\n- user:\n    client-key-data: source-admin-secret\n',
+      },
+    });
+
+    const result = await service.exportReadonlyKubeconfig('c-001');
+
+    expect(coreApi.createNamespacedServiceAccountToken).toHaveBeenCalledWith({
+      name: READONLY_SERVICE_ACCOUNT,
+      namespace: 'default',
+      body: {
+        spec: {
+          audiences: ['api'],
+          expirationSeconds: 3600,
+        },
+      },
+    });
+    expect(k8sClientService.exportKubeconfig).toHaveBeenCalledWith({
+      clusterName: 'cluster-prod-cn-hz',
+      server: 'https://api.example.test:6443',
+      caData: 'cluster-ca-data',
+      skipTLSVerify: false,
+      userName: `${READONLY_SERVICE_ACCOUNT}-token`,
+      contextName: 'prod-cn-hz-readonly',
+      namespace: 'default',
+      token: 'short-lived-readonly-token',
+    });
+    expect(result.expiresAt).toBe(expiresAt);
+    expect(result.content).not.toContain('source-admin-secret');
+    expect(result.content).not.toContain('client-key-data');
+  });
+
+  it('reconciles an over-privileged existing ClusterRole to exact read-only rules', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const { service, rbacApi, coreApi } = prepareReadonlyExport({
+      expirationTimestamp: expiresAt,
+    });
+    rbacApi.readClusterRole.mockResolvedValue({
+      metadata: { name: READONLY_ROLE_NAME, resourceVersion: 'role-dangerous' },
+      rules: [{ apiGroups: ['*'], resources: ['*'], verbs: ['*'] }],
+    });
+
+    await service.exportReadonlyKubeconfig('c-001');
+
+    expect(rbacApi.replaceClusterRole).toHaveBeenCalledWith({
+      name: READONLY_ROLE_NAME,
+      body: {
+        metadata: {
+          name: READONLY_ROLE_NAME,
+          resourceVersion: 'role-dangerous',
+        },
+        rules: EXPECTED_READONLY_RULES,
+      },
+    });
+    expect(rbacApi.replaceClusterRole.mock.invocationCallOrder[0]).toBeLessThan(
+      coreApi.createNamespacedServiceAccountToken.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('reconciles an existing binding that points at cluster-admin', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const { service, rbacApi, coreApi } = prepareReadonlyExport({
+      expirationTimestamp: expiresAt,
+    });
+    rbacApi.readClusterRoleBinding.mockResolvedValue({
+      metadata: {
+        name: `${READONLY_SERVICE_ACCOUNT}-binding`,
+        resourceVersion: 'binding-dangerous',
+      },
+      roleRef: {
+        apiGroup: 'rbac.authorization.k8s.io',
+        kind: 'ClusterRole',
+        name: 'cluster-admin',
+      },
+      subjects: [
+        {
+          kind: 'ServiceAccount',
+          name: READONLY_SERVICE_ACCOUNT,
+          namespace: 'default',
+        },
+      ],
+    });
+
+    await service.exportReadonlyKubeconfig('c-001');
+
+    expect(rbacApi.replaceClusterRoleBinding).toHaveBeenCalledWith({
+      name: `${READONLY_SERVICE_ACCOUNT}-binding`,
+      body: {
+        metadata: {
+          name: `${READONLY_SERVICE_ACCOUNT}-binding`,
+          resourceVersion: 'binding-dangerous',
+        },
+        roleRef: {
+          apiGroup: 'rbac.authorization.k8s.io',
+          kind: 'ClusterRole',
+          name: READONLY_ROLE_NAME,
+        },
+        subjects: [
+          {
+            kind: 'ServiceAccount',
+            name: READONLY_SERVICE_ACCOUNT,
+            namespace: 'default',
+          },
+        ],
+      },
+    });
+    expect(
+      rbacApi.replaceClusterRoleBinding.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      coreApi.createNamespacedServiceAccountToken.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('reconciles an existing binding with any additional subject', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const { service, rbacApi } = prepareReadonlyExport({
+      expirationTimestamp: expiresAt,
+    });
+    rbacApi.readClusterRoleBinding.mockResolvedValue({
+      metadata: {
+        name: `${READONLY_SERVICE_ACCOUNT}-binding`,
+        resourceVersion: 'binding-extra-subject',
+      },
+      roleRef: {
+        apiGroup: 'rbac.authorization.k8s.io',
+        kind: 'ClusterRole',
+        name: READONLY_ROLE_NAME,
+      },
+      subjects: [
+        {
+          kind: 'ServiceAccount',
+          name: READONLY_SERVICE_ACCOUNT,
+          namespace: 'default',
+        },
+        {
+          apiGroup: 'rbac.authorization.k8s.io',
+          kind: 'Group',
+          name: 'system:masters',
+        },
+      ],
+    });
+
+    await service.exportReadonlyKubeconfig('c-001');
+
+    expect(rbacApi.replaceClusterRoleBinding).toHaveBeenCalledWith({
+      name: `${READONLY_SERVICE_ACCOUNT}-binding`,
+      body: {
+        metadata: {
+          name: `${READONLY_SERVICE_ACCOUNT}-binding`,
+          resourceVersion: 'binding-extra-subject',
+        },
+        roleRef: {
+          apiGroup: 'rbac.authorization.k8s.io',
+          kind: 'ClusterRole',
+          name: READONLY_ROLE_NAME,
+        },
+        subjects: [
+          {
+            kind: 'ServiceAccount',
+            name: READONLY_SERVICE_ACCOUNT,
+            namespace: 'default',
+          },
+        ],
+      },
+    });
+  });
+
+  it('does not request a token when reading export RBAC fails', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const { service, rbacApi, coreApi } = prepareReadonlyExport({
+      expirationTimestamp: expiresAt,
+    });
+    rbacApi.readClusterRole.mockRejectedValue({
+      response: { statusCode: 403 },
+      message: 'forbidden',
+    });
+
+    await expect(service.exportReadonlyKubeconfig('c-001')).rejects.toEqual(
+      expect.objectContaining({ message: 'forbidden' }),
+    );
+    expect(rbacApi.createClusterRole).not.toHaveBeenCalled();
+    expect(coreApi.createNamespacedServiceAccountToken).not.toHaveBeenCalled();
+  });
+
+  it('does not request a token when reconciling export RBAC fails', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const { service, rbacApi, coreApi } = prepareReadonlyExport({
+      expirationTimestamp: expiresAt,
+    });
+    rbacApi.readClusterRole.mockResolvedValue({
+      metadata: { name: READONLY_ROLE_NAME, resourceVersion: 'role-dangerous' },
+      rules: [{ apiGroups: ['*'], resources: ['*'], verbs: ['*'] }],
+    });
+    rbacApi.replaceClusterRole.mockRejectedValue(new Error('replace denied'));
+
+    await expect(service.exportReadonlyKubeconfig('c-001')).rejects.toThrow(
+      'replace denied',
+    );
+    expect(coreApi.createNamespacedServiceAccountToken).not.toHaveBeenCalled();
+  });
+
+  it('does not request a token when reading the export binding fails', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const { service, rbacApi, coreApi } = prepareReadonlyExport({
+      expirationTimestamp: expiresAt,
+    });
+    rbacApi.readClusterRoleBinding.mockRejectedValue({
+      response: { statusCode: 403 },
+      message: 'binding forbidden',
+    });
+
+    await expect(service.exportReadonlyKubeconfig('c-001')).rejects.toEqual(
+      expect.objectContaining({ message: 'binding forbidden' }),
+    );
+    expect(rbacApi.createClusterRoleBinding).not.toHaveBeenCalled();
+    expect(coreApi.createNamespacedServiceAccountToken).not.toHaveBeenCalled();
+  });
+
+  it('does not request a token when reconciling the export binding fails', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const { service, rbacApi, coreApi } = prepareReadonlyExport({
+      expirationTimestamp: expiresAt,
+    });
+    rbacApi.readClusterRoleBinding.mockResolvedValue({
+      metadata: {
+        name: `${READONLY_SERVICE_ACCOUNT}-binding`,
+        resourceVersion: 'binding-dangerous',
+      },
+      roleRef: {
+        apiGroup: 'rbac.authorization.k8s.io',
+        kind: 'ClusterRole',
+        name: 'cluster-admin',
+      },
+      subjects: [],
+    });
+    rbacApi.replaceClusterRoleBinding.mockRejectedValue(
+      new Error('binding replace denied'),
+    );
+
+    await expect(service.exportReadonlyKubeconfig('c-001')).rejects.toThrow(
+      'binding replace denied',
+    );
+    expect(coreApi.createNamespacedServiceAccountToken).not.toHaveBeenCalled();
+  });
+
   it('creates cluster with API Server parsed from kubeconfig and ignores manual version', async () => {
     const { service, k8sClientService } = buildService();
     const repository = (

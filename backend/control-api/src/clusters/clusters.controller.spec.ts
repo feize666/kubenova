@@ -1,5 +1,8 @@
 jest.mock('@kubernetes/client-node', () => ({}));
 
+import { ForbiddenException, RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { listAudits } from '../common/governance';
 import { ClustersController } from './clusters.controller';
 
 describe('ClustersController', () => {
@@ -17,6 +20,8 @@ describe('ClustersController', () => {
       applyBatchState: jest.fn(),
       getDetail: jest.fn(),
       getKubeconfigById: jest.fn(),
+      getExportableKubeconfig: jest.fn(),
+      exportReadonlyKubeconfig: jest.fn(),
     } as any;
     const clusterSyncService = {
       syncCluster: jest.fn(),
@@ -42,6 +47,168 @@ describe('ClustersController', () => {
       clusterHealthService,
     };
   }
+
+  function createResponse() {
+    return {
+      getHeader: jest.fn().mockReturnValue(undefined),
+      setHeader: jest.fn(),
+      send: jest.fn(),
+    } as any;
+  }
+
+  function findKubeconfigExportHandlers(): string[] {
+    return Object.getOwnPropertyNames(ClustersController.prototype).filter(
+      (methodName) => {
+        const handler = (
+          ClustersController.prototype as unknown as Record<string, unknown>
+        )[methodName];
+        return (
+          typeof handler === 'function' &&
+          Reflect.getMetadata(PATH_METADATA, handler) ===
+            ':id/kubeconfig/export' &&
+          Reflect.getMetadata(METHOD_METADATA, handler) === RequestMethod.GET
+        );
+      },
+    );
+  }
+
+  it('registers exactly one GET kubeconfig export handler', () => {
+    expect(findKubeconfigExportHandlers()).toEqual([
+      'exportReadonlyKubeconfig',
+    ]);
+  });
+
+  it('exports only the short-lived read-only kubeconfig with hardened headers', async () => {
+    const { controller, clustersService } = createController();
+    const readonlyContent = [
+      'apiVersion: v1',
+      'users:',
+      '- user:',
+      '    token: short-lived-token',
+      '',
+    ].join('\n');
+    clustersService.exportReadonlyKubeconfig.mockResolvedValue({
+      filename: 'prod-readonly.kubeconfig',
+      contentType: 'application/yaml; charset=utf-8',
+      content: readonlyContent,
+      serviceAccountName: 'aiops-export-reader-c-1',
+      expiresAt: '2026-01-01T01:00:00.000Z',
+    });
+    clustersService.getExportableKubeconfig.mockResolvedValue({
+      name: 'prod',
+      kubeconfig: 'client-key-data: RAW-CLUSTER-ADMIN-KEY',
+    });
+    const req = {
+      headers: { 'x-request-id': 'readonly-export-success' },
+      user: {
+        user: { username: 'operator', role: 'cluster-operator' },
+      },
+    } as any;
+    const res = createResponse();
+
+    await controller.exportReadonlyKubeconfig(req, res, 'c-1');
+
+    expect(clustersService.exportReadonlyKubeconfig).toHaveBeenCalledWith(
+      'c-1',
+    );
+    expect(clustersService.getExportableKubeconfig).not.toHaveBeenCalled();
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Type',
+      'application/yaml; charset=utf-8',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      `attachment; filename="prod-readonly.kubeconfig"; filename*=UTF-8''prod-readonly.kubeconfig`,
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Cache-Control',
+      'no-store, max-age=0',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith('Pragma', 'no-cache');
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'X-Content-Type-Options',
+      'nosniff',
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'X-Kubeconfig-Mode',
+      'readonly-export',
+    );
+    expect(res.send).toHaveBeenCalledWith(readonlyContent);
+
+    const audit = listAudits({ requestId: 'readonly-export-success' });
+    expect(audit.items).toHaveLength(1);
+    expect(JSON.stringify(audit.items[0])).not.toContain('short-lived-token');
+    expect(JSON.stringify(audit.items[0])).not.toContain(
+      'RAW-CLUSTER-ADMIN-KEY',
+    );
+  });
+
+  it('rejects read-only users before requesting any export credential', async () => {
+    const { controller, clustersService } = createController();
+    const req = {
+      headers: {},
+      user: { user: { username: 'viewer', role: 'read-only' } },
+    } as any;
+    const res = createResponse();
+
+    await expect(
+      controller.exportReadonlyKubeconfig(req, res, 'c-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(clustersService.exportReadonlyKubeconfig).not.toHaveBeenCalled();
+    expect(clustersService.getExportableKubeconfig).not.toHaveBeenCalled();
+    expect(res.send).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes the download filename before writing response headers', async () => {
+    const { controller, clustersService } = createController();
+    clustersService.exportReadonlyKubeconfig.mockResolvedValue({
+      filename: 'prod"\r\nX-Injected: yes/readonly.kubeconfig',
+      contentType: 'application/yaml; charset=utf-8',
+      content: 'apiVersion: v1\n',
+      serviceAccountName: 'aiops-export-reader-c-1',
+      expiresAt: '2026-01-01T01:00:00.000Z',
+    });
+    const req = {
+      headers: {},
+      user: {
+        user: { username: 'operator', role: 'cluster-operator' },
+      },
+    } as any;
+    const res = createResponse();
+
+    await controller.exportReadonlyKubeconfig(req, res, 'c-1');
+
+    const disposition = res.setHeader.mock.calls.find(
+      ([name]: [string]) => name === 'Content-Disposition',
+    )?.[1] as string;
+    expect(disposition).toBe(
+      `attachment; filename="prod-X-Injected-yes-readonly.kubeconfig"; filename*=UTF-8''prod-X-Injected-yes-readonly.kubeconfig`,
+    );
+    expect(disposition).not.toMatch(/[\r\n]/);
+  });
+
+  it('fails closed when read-only credential generation fails', async () => {
+    const { controller, clustersService } = createController();
+    clustersService.exportReadonlyKubeconfig.mockRejectedValue(
+      new Error('token request failed'),
+    );
+    const req = {
+      headers: { 'x-request-id': 'readonly-export-failure' },
+      user: {
+        user: { username: 'operator', role: 'cluster-operator' },
+      },
+    } as any;
+    const res = createResponse();
+
+    await expect(
+      controller.exportReadonlyKubeconfig(req, res, 'c-1'),
+    ).rejects.toThrow('token request failed');
+    expect(clustersService.getExportableKubeconfig).not.toHaveBeenCalled();
+    expect(res.send).not.toHaveBeenCalled();
+    expect(
+      listAudits({ requestId: 'readonly-export-failure' }).items,
+    ).toHaveLength(0);
+  });
 
   it('list filters selectable clusters when selectableOnly is enabled', async () => {
     const { controller, clustersService, clusterHealthService } =

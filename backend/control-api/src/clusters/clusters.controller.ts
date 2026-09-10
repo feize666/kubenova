@@ -145,21 +145,35 @@ export class ClustersController {
     return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
   }
 
-  private buildKubeconfigFilename(clusterName: string): {
+  private buildKubeconfigDownloadFilename(filename: string): {
     ascii: string;
     utf8: string;
   } {
-    const base = clusterName.trim() || 'cluster';
-    const asciiBase =
-      base
-        .normalize('NFKD')
-        .replace(/[^\x20-\x7E]+/g, '')
-        .replace(/[^A-Za-z0-9._-]+/g, '-')
-        .replace(/^-+|-+$/g, '') || 'cluster';
-    const filename = `${base}-kubeconfig.yaml`;
+    const extension = '.kubeconfig';
+    const trimmed = filename.trim();
+    const sourceStem = trimmed.toLowerCase().endsWith(extension)
+      ? trimmed.slice(0, -extension.length)
+      : trimmed;
+    const sanitize = (value: string) =>
+      Array.from(value, (character) => {
+        const code = character.charCodeAt(0);
+        return code < 32 || code === 127 ? '-' : character;
+      })
+        .join('')
+        .replace(/[\\/"':;?*<>|%]+/g, '-')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^[.-]+|[.-]+$/g, '')
+        .slice(0, 100);
+    const utf8Stem =
+      sanitize(sourceStem.normalize('NFKC')) || 'cluster-readonly';
+    const asciiStem =
+      sanitize(utf8Stem.normalize('NFKD').replace(/[^\x20-\x7e]+/g, '')) ||
+      'cluster-readonly';
+    const safeUtf8 = `${utf8Stem}${extension}`;
     return {
-      ascii: `${asciiBase}-kubeconfig.yaml`,
-      utf8: encodeURIComponent(filename),
+      ascii: `${asciiStem}${extension}`,
+      utf8: encodeURIComponent(safeUtf8),
     };
   }
 
@@ -239,7 +253,7 @@ export class ClustersController {
   }
 
   @Get('events/stream')
-  async streamEvents(@Req() req: AuthenticatedRequest, @Res() res: Response) {
+  streamEvents(@Req() req: AuthenticatedRequest, @Res() res: Response): void {
     resolveRequestId(req, res);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -285,48 +299,6 @@ export class ClustersController {
   }
 
   @Get(':id/kubeconfig/export')
-  async exportKubeconfig(
-    @Req() req: AuthenticatedRequest,
-    @Res() res: Response,
-    @Param('id') id: string,
-  ) {
-    const requestId = resolveRequestId(req, res);
-    const actor = req.user?.user;
-    assertWritePermission(actor);
-    const exported = await this.clustersService.getExportableKubeconfig(id);
-    const filename = this.buildKubeconfigFilename(exported.name);
-    const banner = [
-      '# Kubenova exported kubeconfig',
-      '# Sensitive credential. Store and transfer securely.',
-      '# Read-only troubleshooting use only. Source credential permissions are not downgraded by this export.',
-      '',
-    ].join('\n');
-    const body = exported.kubeconfig.endsWith('\n')
-      ? `${banner}${exported.kubeconfig}`
-      : `${banner}${exported.kubeconfig}\n`;
-
-    appendAudit({
-      actor: actor?.username ?? 'unknown',
-      role: actor?.role ?? 'read-only',
-      action: 'query',
-      resourceType: 'cluster',
-      resourceId: id,
-      result: 'success',
-      reason: this.buildAuditReason(requestId),
-    });
-
-    res.setHeader('Content-Type', 'application/yaml; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${filename.ascii}"; filename*=UTF-8''${filename.utf8}`,
-    );
-    res.setHeader('Cache-Control', 'no-store, max-age=0');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.send(body);
-  }
-
-  @Get(':id/kubeconfig/export')
   async exportReadonlyKubeconfig(
     @Req() req: AuthenticatedRequest,
     @Res() res: Response,
@@ -334,6 +306,7 @@ export class ClustersController {
   ): Promise<void> {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
+    assertWritePermission(actor);
     const exported = await this.clustersService.exportReadonlyKubeconfig(id);
 
     appendAudit({
@@ -343,20 +316,22 @@ export class ClustersController {
       resourceType: 'cluster-kubeconfig-export',
       resourceId: id,
       result: 'success',
+      requestId,
       reason: this.buildAuditReason(
         requestId,
         `readonly export expiresAt=${exported.expiresAt}`,
       ),
     });
 
-    const encodedFilename = encodeURIComponent(exported.filename);
+    const filename = this.buildKubeconfigDownloadFilename(exported.filename);
     res.setHeader('Content-Type', exported.contentType);
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${exported.filename}"; filename*=UTF-8''${encodedFilename}`,
+      `attachment; filename="${filename.ascii}"; filename*=UTF-8''${filename.utf8}`,
     );
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     res.setHeader('Pragma', 'no-cache');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Kubeconfig-Mode', 'readonly-export');
     res.send(exported.content);
   }
