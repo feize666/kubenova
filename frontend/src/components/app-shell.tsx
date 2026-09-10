@@ -4,9 +4,10 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
+import { getConsoleSurface } from "@/lib/console-routing";
 
-const ShellLayout = dynamic(
-  () => import("@/components/shell-layout").then((mod) => mod.ShellLayout),
+const PortalShell = dynamic(
+  () => import("@/components/shell-layout").then((mod) => mod.PortalShell),
   {
     loading: () => <BootstrapScreen description="正在加载控制台布局..." />,
     ssr: false,
@@ -15,13 +16,14 @@ const ShellLayout = dynamic(
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (pathname === "/login" || pathname === "/login-new") {
+  const surface = getConsoleSurface(pathname);
+  if (surface === "public") {
     return <>{children}</>;
   }
 
   return (
     <Suspense fallback={<BootstrapScreen description="正在加载控制台布局..." />}>
-      <ShellLayout>{children}</ShellLayout>
+      <PortalShell>{children}</PortalShell>
     </Suspense>
   );
 }

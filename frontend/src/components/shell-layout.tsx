@@ -10,26 +10,24 @@ import {
   ReloadOutlined,
   SearchOutlined,
   SafetyOutlined,
+  SettingOutlined,
   SunFilled,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { App, Avatar, Badge, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Popover, Skeleton, Space } from "antd";
 import type { MenuProps } from "antd";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useAuth } from "@/components/auth-context";
-import { getTitleFromPath } from "@/config/navigation";
 import { useThemeMode } from "@/components/theme-context";
-import { getClusters } from "@/lib/api/clusters";
 import { listCapabilities } from "@/lib/api/capabilities";
-import { getClusterDisplayName, rememberClusterDisplayNames } from "@/lib/cluster-display-name";
 import { getSystemUpdateStatus, type SystemUpdateStatusPayload } from "@/lib/api/system-update";
 import { buildLoginRoute, buildInternalReturnTo } from "@/lib/login-return";
-import { RESOURCE_SCOPE_CHANGE_EVENT, type ResourceScopeChangeDetail } from "@/lib/resource-scope-events";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
 import { OpsIconActionButton } from "@/components/ops";
 import { QUERY_CACHE_TIMINGS, queryKeys } from "@/lib/query";
+import { getPlatformNavigation, getPlatformTitle, type PlatformNavigationItem } from "@/lib/console-routing";
 
 const { Header, Sider, Content } = Layout;
 const MAX_REMEMBERED_PREFETCH_PATHS = 48;
@@ -37,23 +35,15 @@ const ROUTE_TRANSITION_QUIET_MS = 650;
 const ENABLE_ROUTE_PREFETCH = process.env.NODE_ENV === "production";
 const UPDATE_NOTICE_VERSION_KEY = "kubenova.system-update.notice-version";
 
-type PlatformNavigationItem = {
-  key: "platform-overview" | "platform-clusters" | "platform-access" | "platform-applications";
-  label: string;
-  path: string;
-  icon: React.ReactNode;
-  requiredRole?: "admin";
+const platformIconMap: Record<PlatformNavigationItem["icon"], React.ReactNode> = {
+  home: <HomeOutlined />,
+  clusters: <NodeIndexOutlined />,
+  authorization: <SafetyOutlined />,
+  applications: <AppstoreOutlined />,
+  settings: <SettingOutlined />,
 };
 
-const PLATFORM_NAVIGATION: readonly PlatformNavigationItem[] = [
-  { key: "platform-overview", label: "概览", path: "/", icon: <HomeOutlined /> },
-  { key: "platform-clusters", label: "集群", path: "/clusters", icon: <NodeIndexOutlined /> },
-  { key: "platform-access", label: "授权管理", path: "/users", icon: <SafetyOutlined />, requiredRole: "admin" },
-  // 应用中心将随着集群工作台路由迁移；过渡期先落到已有的应用发布入口。
-  { key: "platform-applications", label: "应用中心", path: "/workloads/deployments", icon: <AppstoreOutlined /> },
-];
-
-const PREFETCHABLE_NAV_PATHS = new Set(PLATFORM_NAVIGATION.map((item) => item.path));
+const PREFETCHABLE_NAV_PATHS = new Set(getPlatformNavigation("platform-admin").map((item) => item.path));
 
 function logNavigationMetric(name: string, detail: Record<string, unknown>) {
   if (process.env.NODE_ENV !== "development") return;
@@ -69,14 +59,6 @@ function logNavigationMetric(name: string, detail: Record<string, unknown>) {
 
 function matchesPath(pathname: string, candidate: string) {
   return pathname === candidate || pathname.startsWith(`${candidate}/`);
-}
-
-function getVisiblePlatformNavigation(userRole: string, disabledPaths?: Set<string> | null) {
-  const normalizedRole = userRole.trim().toLowerCase();
-  const canManagePlatform = normalizedRole === "admin" || normalizedRole === "platform-admin";
-  return PLATFORM_NAVIGATION.filter(
-    (item) => (!item.requiredRole || canManagePlatform) && !disabledPaths?.has(item.path),
-  );
 }
 
 function scheduleIdleTask(task: () => void, timeout = 900) {
@@ -178,14 +160,16 @@ const AppSider = memo(function AppSider({
   mode,
   userRole,
   disabledPaths,
+  updateAvailable,
 }: {
   pathname: string;
   mode: string;
   userRole: string;
   disabledPaths?: Set<string> | null;
+  updateAvailable: boolean;
 }) {
   const visibleNavigation = useMemo(
-    () => getVisiblePlatformNavigation(userRole, disabledPaths),
+    () => getPlatformNavigation(userRole, disabledPaths),
     [disabledPaths, userRole],
   );
   const prefetchedPathsRef = useRef(new Set<string>());
@@ -218,7 +202,11 @@ const AppSider = memo(function AppSider({
       visibleNavigation.map((item) => ({
           key: item.path,
           className: `app-sidebar-menu__section app-sidebar-menu__section--${item.key}`,
-          icon: item.icon,
+          icon: item.key === "platform-settings" ? (
+            <Badge dot={updateAvailable} offset={[-2, 2]}>
+              <span className="app-sidebar-menu__settings-icon">{platformIconMap[item.icon]}</span>
+            </Badge>
+          ) : platformIconMap[item.icon],
           label: (
             <Link
               className="app-sidebar-menu__link app-sidebar-menu__link--section"
@@ -231,7 +219,7 @@ const AppSider = memo(function AppSider({
             </Link>
           ),
         })),
-    [prefetchPath, visibleNavigation],
+    [prefetchPath, updateAvailable, visibleNavigation],
   );
 
   return (
@@ -317,32 +305,18 @@ function LoadingSkeleton() {
   return <Skeleton active paragraph={{ rows: 8 }} style={{ padding: 24 }} />;
 }
 
-export function ShellLayout({ children }: { children: React.ReactNode }) {
+export function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const router = useRouter();
   const { mode, toggleTheme } = useThemeMode();
   const { accessToken, isAuthenticated, isInitializing, username, role, logout } = useAuth();
   const { notification } = App.useApp();
   const [notificationOpen, setNotificationOpen] = useState(false);
   const isLoginPage = pathname === "/login";
-  const isTopologyRoute = pathname === "/network/topology";
-  const currentTitle = getTitleFromPath(pathname);
+  const currentTitle = getPlatformTitle(pathname);
   const capabilitiesQuery = useQuery({
     queryKey: queryKeys.capabilities.list(accessToken),
     queryFn: () => listCapabilities(accessToken),
-    enabled: !isLoginPage && !isInitializing && isAuthenticated && Boolean(accessToken),
-    staleTime: QUERY_CACHE_TIMINGS.shellCapabilityStaleTimeMs,
-    gcTime: QUERY_CACHE_TIMINGS.shellCapabilityGcTimeMs,
-    refetchInterval: false,
-    refetchIntervalInBackground: false,
-    refetchOnMount: false,
-    refetchOnReconnect: true,
-    refetchOnWindowFocus: false,
-  });
-  const shellClustersQuery = useQuery({
-    queryKey: queryKeys.clusters.list({ scope: "shell" }),
-    queryFn: () => getClusters({ page: 1, pageSize: 500 }, accessToken),
     enabled: !isLoginPage && !isInitializing && isAuthenticated && Boolean(accessToken),
     staleTime: QUERY_CACHE_TIMINGS.shellCapabilityStaleTimeMs,
     gcTime: QUERY_CACHE_TIMINGS.shellCapabilityGcTimeMs,
@@ -379,7 +353,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
       btn: (
         <Button type="link" size="small" onClick={() => {
           notification.destroy(`system-update-${version}`);
-          router.push("/system/update");
+          router.push("/settings/update");
         }}>
           查看更新
         </Button>
@@ -406,49 +380,12 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
     );
   }, [accessToken, capabilitiesQuery.data, isAuthenticated]);
   const mobileNavItems = useMemo<MenuProps["items"]>(() => {
-    return getVisiblePlatformNavigation(role, disabledPaths).map((item) => ({
+    return getPlatformNavigation(role, disabledPaths).map((item) => ({
       key: item.path,
-      icon: item.icon,
+      icon: platformIconMap[item.icon],
       label: item.label,
     }));
   }, [disabledPaths, role]);
-  const shellClusterMap = useMemo(
-    () => {
-      const items = shellClustersQuery.data?.items ?? [];
-      rememberClusterDisplayNames(items);
-      return Object.fromEntries(items.map((item) => [item.id, item.name]));
-    },
-    [shellClustersQuery.data?.items],
-  );
-  const [resourceScopeOverride, setResourceScopeOverride] = useState<
-    (ResourceScopeChangeDetail & { pathname: string }) | null
-  >(null);
-  useEffect(() => {
-    const handleResourceScopeChange = (event: Event) => {
-      const detail = (event as CustomEvent<ResourceScopeChangeDetail>).detail;
-      if (!detail || typeof detail.clusterId !== "string") {
-        return;
-      }
-      setResourceScopeOverride({
-        clusterId: detail.clusterId,
-        clusterName: detail.clusterName,
-        namespace: detail.namespace,
-        pathname,
-      });
-    };
-    window.addEventListener(RESOURCE_SCOPE_CHANGE_EVENT, handleResourceScopeChange);
-    return () => window.removeEventListener(RESOURCE_SCOPE_CHANGE_EVENT, handleResourceScopeChange);
-  }, [pathname]);
-  const shellScope = useMemo(() => {
-    const activeOverride = resourceScopeOverride?.pathname === pathname ? resourceScopeOverride : null;
-    const clusterId = searchParams.get("clusterId")?.trim() || activeOverride?.clusterId?.trim() || "";
-    const clusterName = searchParams.get("clusterName")?.trim() || activeOverride?.clusterName?.trim() || "";
-    const namespace = searchParams.get("namespace")?.trim() || activeOverride?.namespace?.trim() || "";
-    return {
-      cluster: clusterId || clusterName ? getClusterDisplayName(shellClusterMap, clusterId, clusterName) : "全部集群",
-      namespace: namespace || "全部名称空间",
-    };
-  }, [pathname, resourceScopeOverride, searchParams, shellClusterMap]);
   const capabilityStats = useMemo(() => {
     const items = capabilitiesQuery.data ?? [];
     const enabled = items.filter((item) => item.enabled).length;
@@ -546,7 +483,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
       </a>
       <Layout className="kubenova-shell" style={{ minHeight: "100dvh" }}>
         {/* AppSider 用 memo 隔离，pathname 变化时只有 selectedKeys/openKeys 更新，父级其余 state 不会触发它重渲染 */}
-        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} />
+        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} updateAvailable={updateAvailable} />
         <Layout>
         <Header
           className="app-header"
@@ -601,18 +538,6 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
             ]}
           />
           <div className="shell-status-band" aria-label="当前工作区状态">
-            {!isTopologyRoute ? (
-              <>
-                <span className="shell-status-chip shell-status-chip--scope">
-                  <span>集群</span>
-                  <strong>{shellScope.cluster}</strong>
-                </span>
-                <span className="shell-status-chip shell-status-chip--scope">
-                  <span>命名空间</span>
-                  <strong>{shellScope.namespace}</strong>
-                </span>
-              </>
-            ) : null}
             <span className="shell-status-chip shell-status-chip--success">
               <i aria-hidden="true" />
               <span>能力</span>
@@ -627,12 +552,6 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
               <strong>{role || "user"}</strong>
             </span>
           </div>
-          {!isTopologyRoute ? (
-            <div className="shell-mobile-scope" aria-label="当前移动端工作区范围">
-              <span>{shellScope.cluster}</span>
-              <strong>{shellScope.namespace}</strong>
-            </div>
-          ) : null}
           <Space size={12} className="shell-topbar-actions">
             <Input
               id="shell-global-search"
@@ -683,7 +602,7 @@ export function ShellLayout({ children }: { children: React.ReactNode }) {
                         <strong>系统更新可用</strong>
                       </div>
                       <span>最新版本 {updateStatus.latestVersion}，当前运行 {updateStatus.runningVersion}</span>
-                      <Link href="/system/update" onClick={() => setNotificationOpen(false)}>
+                      <Link href="/settings/update" onClick={() => setNotificationOpen(false)}>
                         查看并升级
                       </Link>
                     </div>

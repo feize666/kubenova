@@ -12,6 +12,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { useThemeMode } from "@/components/theme-context";
 import { sanitizeInternalReturnTo } from "@/lib/login-return";
+import { PLATFORM_HOME_PATH } from "@/lib/console-routing";
 
 type LoginForm = {
   username: string;
@@ -54,7 +55,7 @@ function LoginPageV2Content() {
 
   useEffect(() => {
     if (!isInitializing && isAuthenticated) {
-      router.replace(returnTo || "/dashboard");
+      router.replace(returnTo || PLATFORM_HOME_PATH);
     }
   }, [isAuthenticated, isInitializing, returnTo, router]);
 
@@ -100,7 +101,7 @@ function LoginPageV2Content() {
     }
 
     message.success("登录成功，正在进入控制台");
-    router.replace(returnTo || "/dashboard");
+    router.replace(returnTo || PLATFORM_HOME_PATH);
   };
 
   const isDark = mode === "dark";
