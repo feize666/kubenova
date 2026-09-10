@@ -125,6 +125,7 @@ export interface DashboardResourceMetric {
 
 export interface DashboardStatsOptions {
   clusterId?: string;
+  accessibleClusterIds?: string[] | null;
 }
 
 @Injectable()
@@ -168,7 +169,13 @@ export class DashboardService {
   async getStats(options: DashboardStatsOptions = {}): Promise<DashboardStats> {
     const now = Date.now();
     const clusterId = this.normalizeClusterId(options.clusterId);
-    const cacheKey = this.getStatsCacheKey(clusterId);
+    const accessibleClusterIds = clusterId
+      ? undefined
+      : this.normalizeAccessibleClusterIds(options.accessibleClusterIds);
+    if (accessibleClusterIds?.length === 0) {
+      return this.buildEmptyStats();
+    }
+    const cacheKey = this.getStatsCacheKey(clusterId, accessibleClusterIds);
     const cached = this.statsCache.get(cacheKey);
     if (cached && cached.expiresAt > now) {
       return this.cloneDashboardStats(cached.value);
@@ -178,7 +185,7 @@ export class DashboardService {
       return this.cloneDashboardStats(await inFlight);
     }
 
-    const next = this.buildStats({ clusterId });
+    const next = this.buildStats({ clusterId, accessibleClusterIds });
     this.statsInFlight.set(cacheKey, next);
     try {
       const stats = await next;
@@ -194,32 +201,38 @@ export class DashboardService {
 
   private async buildStats(options: {
     clusterId?: string;
+    accessibleClusterIds?: string[];
   }): Promise<DashboardStats> {
     const clusterId = options.clusterId;
     const clusterScope = Boolean(clusterId);
+    const clusterSelector = clusterId
+      ? clusterId
+      : options.accessibleClusterIds
+        ? { in: options.accessibleClusterIds }
+        : undefined;
     const activeClusterWhere = {
       deletedAt: null,
       status: { not: 'deleted' },
-      ...(clusterId ? { id: clusterId } : {}),
+      ...(clusterSelector ? { id: clusterSelector } : {}),
     };
     const activeClusterRelationWhere = {
       deletedAt: null,
       status: { not: 'deleted' },
-      ...(clusterId ? { id: clusterId } : {}),
+      ...(clusterSelector ? { id: clusterSelector } : {}),
     };
     const activeWorkloadWhere = {
       state: 'active',
-      ...(clusterId ? { clusterId } : {}),
+      ...(clusterSelector ? { clusterId: clusterSelector } : {}),
       cluster: activeClusterRelationWhere,
     };
     const activeNamespaceWhere = {
       state: 'active',
-      ...(clusterId ? { clusterId } : {}),
+      ...(clusterSelector ? { clusterId: clusterSelector } : {}),
       cluster: activeClusterRelationWhere,
     };
     const activeNetworkWhere = {
       state: 'active',
-      ...(clusterId ? { clusterId } : {}),
+      ...(clusterSelector ? { clusterId: clusterSelector } : {}),
       cluster: activeClusterRelationWhere,
     };
 
@@ -249,7 +262,7 @@ export class DashboardService {
         where: {
           deletedAt: null,
           status: { in: ['healthy', '正常'] },
-          ...(clusterId ? { id: clusterId } : {}),
+          ...(clusterSelector ? { id: clusterSelector } : {}),
         },
       }),
       this.prisma.workloadRecord.count({
@@ -263,14 +276,14 @@ export class DashboardService {
       }),
       this.prisma.monitoringAlert.count({
         where: this.activeAlertWhere({
-          ...(clusterId ? { clusterId } : {}),
+          ...(clusterSelector ? { clusterId: clusterSelector } : {}),
           severity: 'critical',
           status: 'firing',
         }),
       }),
       this.prisma.monitoringAlert.count({
         where: this.activeAlertWhere({
-          ...(clusterId ? { clusterId } : {}),
+          ...(clusterSelector ? { clusterId: clusterSelector } : {}),
           severity: 'warning',
           status: 'firing',
         }),
@@ -316,7 +329,7 @@ export class DashboardService {
       }),
       this.prisma.monitoringAlert.findMany({
         where: this.activeAlertWhere({
-          ...(clusterId ? { clusterId } : {}),
+          ...(clusterSelector ? { clusterId: clusterSelector } : {}),
           status: 'firing',
         }),
         orderBy: { firedAt: 'desc' },
@@ -333,8 +346,11 @@ export class DashboardService {
         where: activeClusterWhere,
         select: { id: true, name: true, metadata: true },
       }),
-      this.buildServiceImpact({ clusterId, activeClusterRelationWhere }),
-      this.buildRecentOperations({ clusterId }),
+      this.buildServiceImpact({
+        clusterSelector,
+        activeClusterRelationWhere,
+      }),
+      this.buildRecentOperations({ clusterSelector }),
     ]);
 
     const clusterWarning = clusterTotal - clusterHealthy;
@@ -468,17 +484,21 @@ export class DashboardService {
   }
 
   private async buildServiceImpact(options: {
-    clusterId?: string;
+    clusterSelector?: string | { in: string[] };
     activeClusterRelationWhere: Record<string, unknown>;
   }): Promise<DashboardStats['serviceImpact']> {
     const activeNetworkWhere = {
       state: 'active',
-      ...(options.clusterId ? { clusterId: options.clusterId } : {}),
+      ...(options.clusterSelector
+        ? { clusterId: options.clusterSelector }
+        : {}),
       cluster: options.activeClusterRelationWhere,
     };
     const activeWorkloadWhere = {
       state: 'active',
-      ...(options.clusterId ? { clusterId: options.clusterId } : {}),
+      ...(options.clusterSelector
+        ? { clusterId: options.clusterSelector }
+        : {}),
       cluster: options.activeClusterRelationWhere,
     };
     const [services, ingresses, workloads, alerts] = await Promise.all([
@@ -522,7 +542,9 @@ export class DashboardService {
       }),
       this.prisma.monitoringAlert.findMany({
         where: this.activeAlertWhere({
-          ...(options.clusterId ? { clusterId: options.clusterId } : {}),
+          ...(options.clusterSelector
+            ? { clusterId: options.clusterSelector }
+            : {}),
           status: 'firing',
         }),
         orderBy: { firedAt: 'desc' },
@@ -682,12 +704,14 @@ export class DashboardService {
   }
 
   private async buildRecentOperations(options: {
-    clusterId?: string;
+    clusterSelector?: string | { in: string[] };
   }): Promise<DashboardStats['recentOperations']> {
     const [auditLogs, volatileAudits] = await Promise.all([
       this.prisma.auditLog.findMany({
         where: {
-          ...(options.clusterId ? { clusterId: options.clusterId } : {}),
+          ...(options.clusterSelector
+            ? { clusterId: options.clusterSelector }
+            : {}),
         },
         orderBy: { createdAt: 'desc' },
         take: 8,
@@ -721,10 +745,7 @@ export class DashboardService {
       reason: item.message ?? undefined,
     }));
     const volatile = volatileAudits
-      .filter(
-        (item) =>
-          !options.clusterId || item.resourceId.includes(options.clusterId),
-      )
+      .filter(() => !options.clusterSelector)
       .map((item) => ({
         id: item.id,
         action: item.action,
@@ -891,6 +912,66 @@ export class DashboardService {
   ): string | undefined {
     const normalized = clusterId?.trim();
     return normalized ? normalized : undefined;
+  }
+
+  private normalizeAccessibleClusterIds(
+    clusterIds: string[] | null | undefined,
+  ): string[] | undefined {
+    if (clusterIds === null || clusterIds === undefined) return undefined;
+    return [
+      ...new Set(clusterIds.map((id) => id.trim()).filter(Boolean)),
+    ].sort();
+  }
+
+  private buildEmptyStats(): DashboardStats {
+    const generatedAt = new Date().toISOString();
+    const unavailableMetric = (
+      unit: 'cores' | 'bytes',
+    ): DashboardResourceMetric => ({
+      value: null,
+      used: null,
+      capacity: null,
+      unit,
+      source: 'none',
+      capturedAt: null,
+      freshness: 'unavailable',
+      degraded: true,
+      note: '当前用户没有可访问的集群。',
+    });
+    return {
+      clusters: { total: 0, healthy: 0, warning: 0 },
+      workloads: { total: 0, healthy: 0, unhealthy: 0 },
+      alerts: { critical: 0, warning: 0, total: 0 },
+      namespaces: 0,
+      healthScore: 100,
+      resourceUsage: {
+        cpu: unavailableMetric('cores'),
+        memory: unavailableMetric('bytes'),
+        dataSource: 'none',
+        degraded: true,
+        note: '当前用户没有可访问的集群。',
+      },
+      topology: {
+        services: 0,
+        ingresses: 0,
+        deployments: 0,
+        statefulsets: 0,
+        daemonsets: 0,
+        pods: 0,
+        edges: 0,
+      },
+      recentEvents: [],
+      serviceImpact: {
+        nodes: [],
+        edges: [],
+        impactedServices: [],
+        generatedAt,
+        degraded: true,
+        note: '当前用户没有可访问的集群。',
+      },
+      recentOperations: [],
+      scope: { mode: 'all', generatedAt },
+    };
   }
 
   private buildResourceMetric(
@@ -1089,8 +1170,14 @@ export class DashboardService {
       : 'stale';
   }
 
-  private getStatsCacheKey(clusterId: string | undefined): string {
-    return clusterId ? `cluster:${clusterId}` : 'all';
+  private getStatsCacheKey(
+    clusterId: string | undefined,
+    accessibleClusterIds: string[] | undefined,
+  ): string {
+    if (clusterId) return `cluster:${clusterId}`;
+    return accessibleClusterIds
+      ? `accessible:${accessibleClusterIds.join(',')}`
+      : 'all';
   }
 
   private cloneLiveSnapshot<

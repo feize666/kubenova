@@ -13,6 +13,7 @@ import type {
   ClusterLiveUsageSnapshot,
   LiveMetricsService,
 } from '../metrics/live-metrics.service';
+import { appendAudit } from '../common/governance';
 
 const buildSnapshot = (
   clusterId: string,
@@ -99,6 +100,99 @@ function createService(clusterIds: string[]) {
 }
 
 describe('DashboardService', () => {
+  it('returns an empty dashboard without touching data sources for no accessible clusters', async () => {
+    const { service, prisma, clustersService, liveMetricsService } =
+      createService(['cluster-a']);
+
+    const stats = await service.getStats({ accessibleClusterIds: [] });
+
+    expect(stats).toMatchObject({
+      clusters: { total: 0, healthy: 0, warning: 0 },
+      workloads: { total: 0, healthy: 0, unhealthy: 0 },
+      alerts: { critical: 0, warning: 0, total: 0 },
+      namespaces: 0,
+      healthScore: 100,
+      topology: {
+        services: 0,
+        ingresses: 0,
+        deployments: 0,
+        statefulsets: 0,
+        daemonsets: 0,
+        pods: 0,
+        edges: 0,
+      },
+      recentEvents: [],
+      recentOperations: [],
+      scope: { mode: 'all' },
+    });
+    expect(prisma.clusterRegistry.count).not.toHaveBeenCalled();
+    expect(prisma.clusterRegistry.findMany).not.toHaveBeenCalled();
+    expect(prisma.monitoringAlert.findMany).not.toHaveBeenCalled();
+    expect(prisma.auditLog.findMany).not.toHaveBeenCalled();
+    expect(clustersService.getKubeconfig).not.toHaveBeenCalled();
+    expect(liveMetricsService.getClusterSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('applies accessible cluster ids to every dashboard query family', async () => {
+    const { service, prisma } = createService(['cluster-a']);
+
+    await service.getStats({ accessibleClusterIds: ['cluster-a'] });
+
+    expect(prisma.clusterRegistry.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: { in: ['cluster-a'] } }),
+    });
+    expect(prisma.workloadRecord.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({ clusterId: { in: ['cluster-a'] } }),
+    });
+    expect(prisma.namespaceRecord.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({ clusterId: { in: ['cluster-a'] } }),
+    });
+    expect(prisma.networkResource.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({ clusterId: { in: ['cluster-a'] } }),
+    });
+    expect(prisma.monitoringAlert.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({ clusterId: { in: ['cluster-a'] } }),
+    });
+    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { clusterId: { in: ['cluster-a'] } },
+      }),
+    );
+  });
+
+  it('keeps authorized collection caches isolated by cluster id set', async () => {
+    const { service, prisma } = createService(['cluster-a']);
+
+    await service.getStats({ accessibleClusterIds: ['cluster-a'] });
+    await service.getStats({ accessibleClusterIds: ['cluster-b'] });
+
+    expect(prisma.clusterRegistry.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.clusterRegistry.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ['cluster-b'] } }),
+      }),
+    );
+  });
+
+  it('does not infer scoped volatile audit ownership from partial id matches', async () => {
+    const { service } = createService(['c1']);
+    appendAudit({
+      actor: 'test',
+      role: 'read-only',
+      action: 'query',
+      resourceType: 'cluster',
+      resourceId: 'c10',
+      result: 'success',
+    });
+
+    const stats = await service.getStats({ accessibleClusterIds: ['c1'] });
+
+    expect(stats.recentOperations).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ resourceId: 'c10' })]),
+    );
+  });
+
   it('reuses short cached stats for repeated dashboard hits', async () => {
     const { service, prisma, clustersService, liveMetricsService } =
       createService(['cluster-a']);
