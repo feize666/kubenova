@@ -119,6 +119,8 @@ test("单集群工作区隐藏集群列且不影响 legacy 页面", () => {
   const columns = [
     { key: "name", title: "名称" },
     { key: "clusterId", title: "集群" },
+    { key: "cluster", title: "集群" },
+    { title: "集群名称" },
     { key: "namespace", title: "名称空间" },
   ] as const;
 
@@ -128,6 +130,28 @@ test("单集群工作区隐藏集群列且不影响 legacy 页面", () => {
   );
   assert.deepEqual(
     filterClusterScopedColumns(null, columns).map((column) => column.key),
-    ["name", "clusterId", "namespace"],
+    ["name", "clusterId", "cluster", undefined, "namespace"],
+  );
+});
+
+test("单集群工作区递归清理分组中的集群列", () => {
+  const columns = [
+    {
+      key: "identity",
+      title: "身份",
+      children: [
+        { key: "clusterId", title: "集群" },
+        { key: "name", title: "名称" },
+      ],
+    },
+  ] as const;
+
+  assert.deepEqual(
+    filterClusterScopedColumns("ack-prod", columns),
+    [{ key: "identity", title: "身份", children: [{ key: "name", title: "名称" }] }],
+  );
+  assert.deepEqual(
+    filterClusterScopedColumns("ack-prod", [{ key: "identity", title: "身份", children: [{ key: "clusterId", title: "集群" }] }]),
+    [],
   );
 });

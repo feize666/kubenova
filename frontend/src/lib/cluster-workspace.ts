@@ -176,12 +176,31 @@ export function scopeWorkspaceClusterFormData(
  * cluster. Keep the column on legacy/global pages, but omit it from the
  * canonical workspace without mutating the caller's column definition.
  */
-export function filterClusterScopedColumns<T extends { key?: unknown }>(
+export function filterClusterScopedColumns<T extends object>(
   workspaceClusterId: string | null | undefined,
   columns: readonly T[],
 ): T[] {
   if (!workspaceClusterId?.trim()) return [...columns];
-  return columns.filter((column) => String(column.key ?? "") !== "clusterId");
+
+  const isClusterColumn = (column: T) => {
+    const value = column as T & {
+      key?: unknown;
+      title?: unknown;
+      children?: readonly T[];
+    };
+    const key = String(value.key ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+    const title = typeof value.title === "string" ? value.title.trim() : "";
+    return key === "clusterid" || key === "cluster" || title === "集群" || title === "集群名称";
+  };
+
+  return columns.flatMap((column) => {
+    if (isClusterColumn(column)) return [];
+    const value = column as T & { children?: readonly T[] };
+    if (!Array.isArray(value.children)) return [column];
+    const children = filterClusterScopedColumns(workspaceClusterId, value.children);
+    if (!children.length) return [];
+    return [{ ...value, children } as T];
+  });
 }
 
 export function getClusterWorkspaceNavigation(clusterId: string): ClusterWorkspaceNavigationSection[] {

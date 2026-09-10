@@ -41,6 +41,8 @@ import {
   type OpsMobileResourceCardMeta,
 } from "@/components/ops";
 import { useAuth } from "@/components/auth-context";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
+import { filterClusterScopedColumns } from "@/lib/cluster-workspace";
 
 export const RESOURCE_TABLE_CLASS_NAME = "resource-table";
 const RESOURCE_TABLE_VIEWPORT_SCROLL_Y = "clamp(240px, calc(100dvh - 420px), 560px)";
@@ -459,6 +461,11 @@ export function ResourceTable<T extends object>({
   ...restProps
 }: ResourceTableProps<T>) {
   const { accessToken } = useAuth();
+  const workspace = useOptionalClusterWorkspace();
+  const scopedColumns = useMemo(
+    () => filterClusterScopedColumns(workspace?.clusterId, columns),
+    [columns, workspace?.clusterId],
+  );
   const [fallbackDetailTarget, setFallbackDetailTarget] = useState<ResourceTableNavigateRequest | null>(null);
   const handleFallbackNavigate = useCallback((request: ResourceTableNavigateRequest) => {
     setFallbackDetailTarget(request);
@@ -471,7 +478,7 @@ export function ResourceTable<T extends object>({
         bordered={bordered}
         className={className}
         columnSettings={columnSettings}
-        columns={columns}
+        columns={scopedColumns}
         emptyDescription={emptyDescription}
         filters={filters}
         globalSearch={globalSearch}
@@ -502,7 +509,7 @@ export function ResourceTable<T extends object>({
       {...restProps}
       bordered={bordered}
       className={className}
-      columns={columns}
+      columns={scopedColumns}
       emptyDescription={emptyDescription}
       layoutOptions={layoutOptions}
       loading={loading}
