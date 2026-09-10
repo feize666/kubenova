@@ -30,7 +30,7 @@ export function getPlatformNavigation(userRole: string, disabledPaths?: Readonly
 
 export function getConsoleSurface(pathname: string): ConsoleSurface {
   if (pathname === "/login" || pathname === "/login-new") return "public";
-  if (/^\/clusters\/[^/?#]+\/(?:overview|nodes|namespaces|workloads|network|storage|configs)(?:\/|$)/.test(pathname)) {
+  if (/^\/clusters\/[^/?#]+\/[^/?#]+/.test(pathname)) {
     return "cluster-workspace";
   }
   if (pathname === PLATFORM_HOME_PATH || PORTAL_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {

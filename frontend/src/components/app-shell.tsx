@@ -14,11 +14,27 @@ const PortalShell = dynamic(
   },
 );
 
+const ClusterWorkspaceShell = dynamic(
+  () => import("@/components/cluster-workspace-shell").then((mod) => mod.ClusterWorkspaceShell),
+  {
+    loading: () => <BootstrapScreen description="正在加载集群工作区..." />,
+    ssr: false,
+  },
+);
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const surface = getConsoleSurface(pathname);
   if (surface === "public") {
     return <>{children}</>;
+  }
+
+  if (surface === "cluster-workspace") {
+    return (
+      <Suspense fallback={<BootstrapScreen description="正在加载集群工作区..." />}>
+        <ClusterWorkspaceShell>{children}</ClusterWorkspaceShell>
+      </Suspense>
+    );
   }
 
   return (
