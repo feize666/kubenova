@@ -5,6 +5,8 @@ import {
   CloudServerOutlined,
   DatabaseOutlined,
   DeploymentUnitOutlined,
+  GlobalOutlined,
+  NodeIndexOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
@@ -15,7 +17,11 @@ import { ClusterContextProvider, useClusterContext } from "@/components/cluster-
 import { OpsFilterChip, OpsLoadingState, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { useAuth } from "@/components/auth-context";
-import { getDashboardStats } from "@/lib/api/dashboard";
+import {
+  formatDashboardMetric,
+  getDashboardStats,
+  type DashboardResourceMetric,
+} from "@/lib/api/dashboard";
 import { QUERY_CACHE_TIMINGS } from "@/lib/query";
 
 const panelStyle = {
@@ -30,7 +36,7 @@ const softBlueStyle = {
 };
 
 function displayValue(value: string | number | null | undefined) {
-  return value === null || value === undefined || value === "" ? "-" : value;
+  return value === null || value === undefined || value === "" ? "--" : value;
 }
 
 function usageTone(value: number | undefined) {
@@ -38,6 +44,65 @@ function usageTone(value: number | undefined) {
   if (value >= 90) return "exception";
   if (value >= 75) return "active";
   return "success";
+}
+
+function formatCapturedAt(value: string | null) {
+  if (!value) return "--";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "--" : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function ResourceMetricPanel({
+  label,
+  metric,
+}: {
+  label: string;
+  metric: DashboardResourceMetric;
+}) {
+  const presentation = formatDashboardMetric(metric);
+  return (
+    <div style={{ display: "grid", gap: 12, minHeight: 176 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+        <div>
+          <Typography.Text strong>{label}</Typography.Text>
+          <div style={{ marginTop: 4, color: "#0b4f9c", fontSize: 26, fontWeight: 700 }}>
+            {presentation.valueLabel}
+          </div>
+          <Typography.Text type="secondary">{presentation.capacityLabel}</Typography.Text>
+        </div>
+        <OpsStatusTag tone={metric.degraded ? "warning" : "success"}>
+          {presentation.freshnessLabel}
+        </OpsStatusTag>
+      </div>
+      {presentation.percent === null ? (
+        <div
+          style={{
+            minHeight: 30,
+            borderRadius: 6,
+            background: "#edf5ff",
+            color: "#5e7691",
+            display: "grid",
+            placeItems: "center",
+            fontSize: 12,
+          }}
+        >
+          缺少明确容量，暂不计算百分比
+        </div>
+      ) : (
+        <Progress
+          percent={Math.round(presentation.percent)}
+          status={usageTone(presentation.percent)}
+          strokeColor="#1677ff"
+          trailColor="#dcecff"
+        />
+      )}
+      <div style={{ display: "grid", gap: 2 }}>
+        <Typography.Text type="secondary">来源：{presentation.sourceLabel}</Typography.Text>
+        <Typography.Text type="secondary">采集时间：{formatCapturedAt(metric.capturedAt)}</Typography.Text>
+        {metric.note ? <Typography.Text type="warning">{metric.note}</Typography.Text> : null}
+      </div>
+    </div>
+  );
 }
 
 function ClusterInfoContent() {
@@ -107,11 +172,21 @@ function ClusterInfoContent() {
         />
       ) : null}
 
+      {cluster.nodeSummary.degraded ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="节点数据已降级"
+          description={cluster.nodeSummary.degradationReason || "节点实时清单不可用，当前数量可能不完整。"}
+        />
+      ) : null}
+
       <section style={{ ...softBlueStyle, borderRadius: 8, padding: 20 }}>
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={14}>
             <Typography.Text type="secondary">当前集群</Typography.Text>
             <Typography.Title level={3} style={{ margin: "4px 0 8px", color: "#0b4f9c" }}>{cluster.displayName || cluster.name}</Typography.Title>
+            <Typography.Text type="secondary" copyable={{ text: cluster.id }}>ID：{cluster.id}</Typography.Text>
             <Space size={[8, 8]} wrap>
               <OpsFilterChip tone="info">{cluster.metadata.provider || "未识别供应商"}</OpsFilterChip>
               <OpsFilterChip tone="neutral">{cluster.metadata.environment || "未标注环境"}</OpsFilterChip>
@@ -129,27 +204,37 @@ function ClusterInfoContent() {
         </Row>
       </section>
 
+      {statsQuery.isError ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="资源统计加载失败"
+          description={statsQuery.error instanceof Error ? statsQuery.error.message : "无法读取当前集群的已同步资源统计。"}
+          action={<Button size="small" onClick={() => void statsQuery.refetch()}>重试</Button>}
+        />
+      ) : null}
+
       <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} xl={6}><OpsMetricTile tone="info" icon={<CloudServerOutlined />} label="节点" value={cluster.nodeSummary.total} meta={`就绪 ${cluster.nodeSummary.ready} · 未就绪 ${cluster.nodeSummary.notReady}`} /></Col>
-        <Col xs={24} sm={12} xl={6}><OpsMetricTile tone="info" icon={<ApiOutlined />} label="名称空间" value={displayValue(statsQuery.data?.namespaces)} meta={statsQuery.isLoading ? "正在同步资源统计" : "当前集群已同步记录"} /></Col>
-        <Col xs={24} sm={12} xl={6}><OpsMetricTile tone="success" icon={<DeploymentUnitOutlined />} label="工作负载" value={displayValue(workloadTotal)} meta={workloadTotal === undefined ? "暂无统计数据" : `健康 ${workloadHealthy ?? 0} · 异常 ${workloadUnhealthy ?? 0}`} /></Col>
-        <Col xs={24} sm={12} xl={6}><OpsMetricTile tone="info" icon={<DatabaseOutlined />} label="拓扑资源" value={displayValue(topology?.pods)} meta={topology ? `服务 ${topology.services} · 入口 ${topology.ingresses}` : "暂无拓扑统计"} /></Col>
+        <Col xs={24} sm={12} xl={8}><OpsMetricTile tone={cluster.nodeSummary.degraded ? "warning" : "info"} icon={<CloudServerOutlined />} label="节点" value={cluster.nodeSummary.degraded && cluster.nodeSummary.total === 0 ? "--" : cluster.nodeSummary.total} meta={`就绪 ${cluster.nodeSummary.ready} · 未就绪 ${cluster.nodeSummary.notReady}`} /></Col>
+        <Col xs={24} sm={12} xl={8}><OpsMetricTile tone="info" icon={<ApiOutlined />} label="Namespace" value={displayValue(statsQuery.data?.namespaces)} meta={statsQuery.isLoading ? "正在同步资源统计" : "当前集群已同步记录"} /></Col>
+        <Col xs={24} sm={12} xl={8}><OpsMetricTile tone="success" icon={<DeploymentUnitOutlined />} label="Workload" value={displayValue(workloadTotal)} meta={workloadTotal === undefined ? "暂无统计数据" : `健康 ${workloadHealthy ?? 0} · 异常 ${workloadUnhealthy ?? 0}`} /></Col>
+        <Col xs={24} sm={12} xl={8}><OpsMetricTile tone="info" icon={<DatabaseOutlined />} label="Pod" value={displayValue(topology?.pods)} meta="当前集群已同步 Pod" /></Col>
+        <Col xs={24} sm={12} xl={8}><OpsMetricTile tone="info" icon={<NodeIndexOutlined />} label="Service" value={displayValue(topology?.services)} meta="当前集群服务入口" /></Col>
+        <Col xs={24} sm={12} xl={8}><OpsMetricTile tone="info" icon={<GlobalOutlined />} label="Ingress" value={displayValue(topology?.ingresses)} meta="当前集群外部入口" /></Col>
       </Row>
 
       <OpsSurface variant="panel" padding="md" style={panelStyle} title="资源使用率">
-        {resourceUsage ? (
+        {resourceUsage?.cpu && resourceUsage.memory ? (
           <Row gutter={[32, 20]}>
             <Col xs={24} md={12}>
-              <Typography.Text strong>CPU</Typography.Text>
-              <Progress percent={Math.round(resourceUsage.cpuUsagePercent)} status={usageTone(resourceUsage.cpuUsagePercent)} strokeColor="#1677ff" trailColor="#dcecff" />
+              <ResourceMetricPanel label="CPU" metric={resourceUsage.cpu} />
             </Col>
             <Col xs={24} md={12}>
-              <Typography.Text strong>内存</Typography.Text>
-              <Progress percent={Math.round(resourceUsage.memoryUsagePercent)} status={usageTone(resourceUsage.memoryUsagePercent)} strokeColor="#1677ff" trailColor="#dcecff" />
+              <ResourceMetricPanel label="内存" metric={resourceUsage.memory} />
             </Col>
           </Row>
         ) : (
-          <Typography.Text type="secondary">当前没有可用的实时资源使用率数据。</Typography.Text>
+          <Typography.Text type="secondary">{statsQuery.isLoading ? "正在加载资源指标。" : "当前没有可用的资源指标。"}</Typography.Text>
         )}
       </OpsSurface>
     </div>

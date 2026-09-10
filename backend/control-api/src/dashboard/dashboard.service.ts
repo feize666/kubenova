@@ -26,8 +26,12 @@ export interface DashboardStats {
   namespaces: number;
   healthScore: number;
   resourceUsage: {
-    cpuUsagePercent: number;
-    memoryUsagePercent: number;
+    cpu: DashboardResourceMetric;
+    memory: DashboardResourceMetric;
+    /** @deprecated Prefer cpu.value. Omitted when no trustworthy percentage exists. */
+    cpuUsagePercent?: number;
+    /** @deprecated Prefer memory.value. Omitted when no trustworthy percentage exists. */
+    memoryUsagePercent?: number;
     dataSource: 'metrics-server' | 'k8s-metadata' | 'none';
     degraded: boolean;
     note?: string;
@@ -95,6 +99,30 @@ export interface DashboardStats {
   };
 }
 
+export type DashboardMetricSource =
+  | 'metrics-server'
+  | 'cluster-metrics-cache'
+  | 'k8s-node-allocatable-requested'
+  | 'none';
+
+export type DashboardMetricFreshness =
+  | 'fresh'
+  | 'cached'
+  | 'stale'
+  | 'unavailable';
+
+export interface DashboardResourceMetric {
+  value: number | null;
+  used: number | null;
+  capacity: number | null;
+  unit: 'cores' | 'bytes';
+  source: DashboardMetricSource;
+  capturedAt: string | null;
+  freshness: DashboardMetricFreshness;
+  degraded: boolean;
+  note?: string;
+}
+
 export interface DashboardStatsOptions {
   clusterId?: string;
 }
@@ -106,6 +134,7 @@ export class DashboardService {
   private readonly maxLiveSnapshotCacheEntries = 200;
   private readonly liveMetricsFanoutLimit = 4;
   private readonly liveMetricsTimeoutMs = 3_000;
+  private readonly metadataFreshnessWindowMs = 5 * 60_000;
   private readonly statsCache = new Map<
     string,
     { expiresAt: number; value: DashboardStats }
@@ -318,58 +347,6 @@ export class DashboardService {
       Math.max(0, Math.round(healthyRatio * 70 + (1 - criticalRatio) * 30)),
     );
 
-    let usageCount = 0;
-    let cpuTotal = 0;
-    let memoryTotal = 0;
-    for (const row of activeClusters) {
-      const meta =
-        row.metadata &&
-        typeof row.metadata === 'object' &&
-        !Array.isArray(row.metadata)
-          ? (row.metadata as Record<string, unknown>)
-          : {};
-      const usageMetrics =
-        meta.usageMetrics &&
-        typeof meta.usageMetrics === 'object' &&
-        !Array.isArray(meta.usageMetrics)
-          ? (meta.usageMetrics as Record<string, unknown>)
-          : undefined;
-      const cpu =
-        usageMetrics &&
-        typeof usageMetrics.cpu === 'object' &&
-        usageMetrics.cpu !== null &&
-        !Array.isArray(usageMetrics.cpu) &&
-        typeof (usageMetrics.cpu as Record<string, unknown>).usagePercent ===
-          'number'
-          ? ((usageMetrics.cpu as Record<string, unknown>)
-              .usagePercent as number)
-          : typeof meta.cpuUsage === 'number'
-            ? meta.cpuUsage
-            : null;
-      const memory =
-        usageMetrics &&
-        typeof usageMetrics.memory === 'object' &&
-        usageMetrics.memory !== null &&
-        !Array.isArray(usageMetrics.memory) &&
-        typeof (usageMetrics.memory as Record<string, unknown>).usagePercent ===
-          'number'
-          ? ((usageMetrics.memory as Record<string, unknown>)
-              .usagePercent as number)
-          : typeof meta.memoryUsage === 'number'
-            ? meta.memoryUsage
-            : null;
-
-      if (typeof cpu === 'number' && typeof memory === 'number') {
-        usageCount += 1;
-        cpuTotal += cpu;
-        memoryTotal += memory;
-      }
-    }
-    const hasUsage = usageCount > 0;
-    const cpuUsagePercent = hasUsage ? Math.round(cpuTotal / usageCount) : 0;
-    const memoryUsagePercent = hasUsage
-      ? Math.round(memoryTotal / usageCount)
-      : 0;
     const liveSnapshots = await this.runBounded(
       activeClusters,
       this.liveMetricsFanoutLimit,
@@ -379,6 +356,24 @@ export class DashboardService {
       (snapshot): snapshot is ClusterLiveUsageSnapshot =>
         Boolean(snapshot?.available),
     );
+    const cpuMetric = this.buildResourceMetric(
+      'cpu',
+      activeClusters,
+      liveSnapshots,
+    );
+    const memoryMetric = this.buildResourceMetric(
+      'memory',
+      activeClusters,
+      liveSnapshots,
+    );
+    const hasLiveMetric =
+      cpuMetric.source === 'metrics-server' ||
+      cpuMetric.source === 'cluster-metrics-cache' ||
+      memoryMetric.source === 'metrics-server' ||
+      memoryMetric.source === 'cluster-metrics-cache';
+    const hasMetadataMetric =
+      cpuMetric.source === 'k8s-node-allocatable-requested' ||
+      memoryMetric.source === 'k8s-node-allocatable-requested';
 
     const recentEvents =
       recentAlertRows.length > 0
@@ -427,21 +422,24 @@ export class DashboardService {
       namespaces: namespaceCount,
       healthScore,
       resourceUsage: {
-        cpuUsagePercent,
-        memoryUsagePercent,
-        dataSource:
-          availableSnapshots.length > 0
-            ? 'metrics-server'
-            : hasUsage
-              ? 'k8s-metadata'
-              : 'none',
-        degraded: !hasUsage && availableSnapshots.length === 0,
+        cpu: cpuMetric,
+        memory: memoryMetric,
+        ...(cpuMetric.value !== null
+          ? { cpuUsagePercent: cpuMetric.value }
+          : {}),
+        ...(memoryMetric.value !== null
+          ? { memoryUsagePercent: memoryMetric.value }
+          : {}),
+        dataSource: hasLiveMetric
+          ? 'metrics-server'
+          : hasMetadataMetric
+            ? 'k8s-metadata'
+            : 'none',
+        degraded: cpuMetric.degraded || memoryMetric.degraded,
         note:
-          availableSnapshots.length > 0
-            ? undefined
-            : hasUsage
-              ? undefined
-              : '未检测到可用的 live metrics 数据，请先确认 metrics-server 与集群连通性。',
+          cpuMetric.note === memoryMetric.note
+            ? cpuMetric.note
+            : [cpuMetric.note, memoryMetric.note].filter(Boolean).join('；'),
         liveSnapshot: availableSnapshots[0] ?? undefined,
       },
       topology: {
@@ -867,6 +865,8 @@ export class DashboardService {
       healthScore: stats.healthScore,
       resourceUsage: {
         ...stats.resourceUsage,
+        cpu: { ...stats.resourceUsage.cpu },
+        memory: { ...stats.resourceUsage.memory },
         liveSnapshot: this.cloneLiveSnapshot(stats.resourceUsage.liveSnapshot),
       },
       topology: { ...stats.topology },
@@ -891,6 +891,202 @@ export class DashboardService {
   ): string | undefined {
     const normalized = clusterId?.trim();
     return normalized ? normalized : undefined;
+  }
+
+  private buildResourceMetric(
+    kind: 'cpu' | 'memory',
+    clusters: Array<{ metadata: unknown }>,
+    liveSnapshots: Array<ClusterLiveUsageSnapshot | null>,
+  ): DashboardResourceMetric {
+    const unit = kind === 'cpu' ? 'cores' : 'bytes';
+    const metadata = clusters.map((cluster) =>
+      this.readMetadataMetric(cluster.metadata, kind),
+    );
+    const liveEntries = liveSnapshots.flatMap((snapshot, index) => {
+      const used = kind === 'cpu' ? snapshot?.cpuUsage : snapshot?.memoryUsage;
+      if (!snapshot?.available || typeof used !== 'number') {
+        return [];
+      }
+      return [{ snapshot, used, capacity: metadata[index].capacity }];
+    });
+
+    if (liveEntries.length > 0) {
+      const completeCoverage = liveEntries.length === clusters.length;
+      const hasCapacity =
+        completeCoverage &&
+        liveEntries.every((entry) => typeof entry.capacity === 'number');
+      const used = liveEntries.reduce((sum, entry) => sum + entry.used, 0);
+      const capacity = hasCapacity
+        ? liveEntries.reduce((sum, entry) => sum + (entry.capacity ?? 0), 0)
+        : null;
+      const value =
+        capacity !== null && capacity > 0
+          ? this.toPercent(used, capacity)
+          : null;
+      const capturedAt = this.oldestTimestamp(
+        liveEntries.map((entry) => entry.snapshot.capturedAt),
+      );
+      const source: DashboardMetricSource = liveEntries.some(
+        (entry) => entry.snapshot.source === 'cluster-metrics-cache',
+      )
+        ? 'cluster-metrics-cache'
+        : 'metrics-server';
+      const freshness = this.liveMetricFreshness(
+        source,
+        capturedAt,
+        Math.min(
+          ...liveEntries.map((entry) => entry.snapshot.freshnessWindowMs),
+        ),
+      );
+      const degraded = value === null || freshness !== 'fresh';
+      return {
+        value,
+        used,
+        capacity,
+        unit,
+        source,
+        capturedAt,
+        freshness,
+        degraded,
+        ...(value === null
+          ? {
+              note: completeCoverage
+                ? '已获取实时使用量，但缺少节点可分配容量，无法计算使用率。'
+                : '仅部分集群返回实时使用量，无法计算完整使用率。',
+            }
+          : freshness === 'stale'
+            ? { note: '实时采集不可达，当前展示已缓存的历史采样。' }
+            : source === 'cluster-metrics-cache'
+              ? { note: '当前展示 metrics-server 的短期缓存采样。' }
+              : {}),
+      };
+    }
+
+    const metadataEntries = metadata.filter(
+      (entry) => entry.used !== null || entry.capacity !== null,
+    );
+    if (metadataEntries.length > 0) {
+      const completeCoverage =
+        metadataEntries.length === clusters.length &&
+        metadataEntries.every(
+          (entry) => entry.used !== null && entry.capacity !== null,
+        );
+      const used = metadataEntries.some((entry) => entry.used !== null)
+        ? metadataEntries.reduce((sum, entry) => sum + (entry.used ?? 0), 0)
+        : null;
+      const capacity = completeCoverage
+        ? metadataEntries.reduce((sum, entry) => sum + (entry.capacity ?? 0), 0)
+        : null;
+      const capturedAt = this.oldestTimestamp(
+        metadataEntries.map((entry) => entry.capturedAt),
+      );
+      const freshness = this.metadataMetricFreshness(capturedAt);
+      return {
+        value:
+          used !== null && capacity !== null && capacity > 0
+            ? this.toPercent(used, capacity)
+            : null,
+        used,
+        capacity,
+        unit,
+        source: 'k8s-node-allocatable-requested',
+        capturedAt,
+        freshness,
+        degraded: true,
+        note:
+          freshness === 'stale'
+            ? '实时指标不可用；当前展示陈旧的资源请求量 / 节点可分配量快照，并非实时使用率。'
+            : '实时指标不可用；当前展示资源请求量 / 节点可分配量快照，并非实时使用率。',
+      };
+    }
+
+    return {
+      value: null,
+      used: null,
+      capacity: null,
+      unit,
+      source: 'none',
+      capturedAt: null,
+      freshness: 'unavailable',
+      degraded: true,
+      note: '未获取到实时指标或已同步的容量快照。',
+    };
+  }
+
+  private readMetadataMetric(
+    rawMetadata: unknown,
+    kind: 'cpu' | 'memory',
+  ): {
+    used: number | null;
+    capacity: number | null;
+    capturedAt: string | null;
+  } {
+    const metadata = this.asRecord(rawMetadata);
+    const usageMetrics = this.asRecord(metadata.usageMetrics);
+    const metric = this.asRecord(usageMetrics[kind]);
+    const usedKey = kind === 'cpu' ? 'requestedCores' : 'requestedBytes';
+    const capacityKey =
+      kind === 'cpu' ? 'allocatableCores' : 'allocatableBytes';
+    return {
+      used: this.nonNegativeNumber(metric[usedKey]),
+      capacity: this.positiveNumber(metric[capacityKey]),
+      capturedAt:
+        typeof usageMetrics.calculatedAt === 'string'
+          ? usageMetrics.calculatedAt
+          : null,
+    };
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private nonNegativeNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0
+      ? value
+      : null;
+  }
+
+  private positiveNumber(value: unknown): number | null {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0
+      ? value
+      : null;
+  }
+
+  private toPercent(used: number, capacity: number): number {
+    return Math.max(0, Math.min(100, Math.round((used / capacity) * 100)));
+  }
+
+  private oldestTimestamp(values: Array<string | null>): string | null {
+    const parsed = values
+      .filter((value): value is string => Boolean(value))
+      .map((value) => ({ value, timestamp: new Date(value).getTime() }))
+      .filter((entry) => Number.isFinite(entry.timestamp))
+      .sort((left, right) => left.timestamp - right.timestamp);
+    return parsed[0]?.value ?? null;
+  }
+
+  private liveMetricFreshness(
+    source: DashboardMetricSource,
+    capturedAt: string | null,
+    freshnessWindowMs: number,
+  ): DashboardMetricFreshness {
+    if (!capturedAt) return 'stale';
+    const age = Date.now() - new Date(capturedAt).getTime();
+    if (!Number.isFinite(age) || age > freshnessWindowMs) return 'stale';
+    return source === 'cluster-metrics-cache' ? 'cached' : 'fresh';
+  }
+
+  private metadataMetricFreshness(
+    capturedAt: string | null,
+  ): DashboardMetricFreshness {
+    if (!capturedAt) return 'stale';
+    const age = Date.now() - new Date(capturedAt).getTime();
+    return Number.isFinite(age) && age <= this.metadataFreshnessWindowMs
+      ? 'cached'
+      : 'stale';
   }
 
   private getStatsCacheKey(clusterId: string | undefined): string {

@@ -14,8 +14,11 @@ import type {
   LiveMetricsService,
 } from '../metrics/live-metrics.service';
 
-const buildSnapshot = (clusterId: string): ClusterLiveUsageSnapshot => ({
-  capturedAt: '2026-06-06T00:00:00.000Z',
+const buildSnapshot = (
+  clusterId: string,
+  overrides: Partial<ClusterLiveUsageSnapshot> = {},
+): ClusterLiveUsageSnapshot => ({
+  capturedAt: new Date().toISOString(),
   source: 'metrics-server',
   available: true,
   freshnessWindowMs: 60_000,
@@ -30,6 +33,7 @@ const buildSnapshot = (clusterId: string): ClusterLiveUsageSnapshot => ({
     },
   ],
   note: `snapshot ${clusterId}`,
+  ...overrides,
 });
 
 const buildClusterRows = (clusterIds: string[]) =>
@@ -38,6 +42,8 @@ const buildClusterRows = (clusterIds: string[]) =>
     name: id,
     metadata: {
       usageMetrics: {
+        source: 'k8s-node-allocatable-requested',
+        calculatedAt: new Date().toISOString(),
         cpu: { usagePercent: 35 },
         memory: { usagePercent: 45 },
       },
@@ -98,9 +104,10 @@ describe('DashboardService', () => {
       createService(['cluster-a']);
 
     const first = await service.getStats();
+    first.resourceUsage.cpu.note = 'caller mutation';
     const second = await service.getStats();
 
-    expect(second).toEqual(first);
+    expect(second.resourceUsage.cpu.note).not.toBe('caller mutation');
     expect(second).not.toBe(first);
     expect(prisma.clusterRegistry.count).toHaveBeenCalledTimes(2);
     expect(prisma.clusterRegistry.findMany).toHaveBeenCalledTimes(1);
@@ -261,6 +268,265 @@ describe('DashboardService', () => {
       },
       select: { id: true, name: true, metadata: true },
     });
+  });
+
+  it('calculates live utilization only when matching capacity is available', async () => {
+    const { service, prisma, liveMetricsService } = createService([
+      'cluster-a',
+    ]);
+    const capturedAt = new Date().toISOString();
+    prisma.clusterRegistry.findMany.mockResolvedValueOnce([
+      {
+        id: 'cluster-a',
+        name: 'cluster-a',
+        metadata: {
+          usageMetrics: {
+            source: 'k8s-node-allocatable-requested',
+            calculatedAt: capturedAt,
+            cpu: { requestedCores: 1, allocatableCores: 4, usagePercent: 25 },
+            memory: {
+              requestedBytes: 1024,
+              allocatableBytes: 8192,
+              usagePercent: 13,
+            },
+          },
+        },
+      },
+    ]);
+    liveMetricsService.getClusterSnapshot.mockResolvedValueOnce(
+      buildSnapshot('cluster-a', {
+        capturedAt,
+        cpuUsage: 2,
+        memoryUsage: 4096,
+      }),
+    );
+
+    const stats = await service.getStats({ clusterId: 'cluster-a' });
+
+    expect(stats.resourceUsage.cpu).toEqual({
+      value: 50,
+      used: 2,
+      capacity: 4,
+      unit: 'cores',
+      source: 'metrics-server',
+      capturedAt,
+      freshness: 'fresh',
+      degraded: false,
+    });
+    expect(stats.resourceUsage.memory).toEqual({
+      value: 50,
+      used: 4096,
+      capacity: 8192,
+      unit: 'bytes',
+      source: 'metrics-server',
+      capturedAt,
+      freshness: 'fresh',
+      degraded: false,
+    });
+    expect(stats.resourceUsage.cpuUsagePercent).toBe(50);
+    expect(stats.resourceUsage.memoryUsagePercent).toBe(50);
+  });
+
+  it('returns live usage without inventing a percentage when capacity is unavailable', async () => {
+    const { service, prisma, liveMetricsService } = createService([
+      'cluster-a',
+    ]);
+    const capturedAt = new Date().toISOString();
+    prisma.clusterRegistry.findMany.mockResolvedValueOnce([
+      { id: 'cluster-a', name: 'cluster-a', metadata: {} },
+    ]);
+    liveMetricsService.getClusterSnapshot.mockResolvedValueOnce(
+      buildSnapshot('cluster-a', {
+        capturedAt,
+        cpuUsage: 0.75,
+        memoryUsage: 2048,
+      }),
+    );
+
+    const stats = await service.getStats({ clusterId: 'cluster-a' });
+
+    expect(stats.resourceUsage.cpu).toMatchObject({
+      value: null,
+      used: 0.75,
+      capacity: null,
+      unit: 'cores',
+      source: 'metrics-server',
+      capturedAt,
+      freshness: 'fresh',
+      degraded: true,
+    });
+    expect(stats.resourceUsage.memory).toMatchObject({
+      value: null,
+      used: 2048,
+      capacity: null,
+      unit: 'bytes',
+      source: 'metrics-server',
+      capturedAt,
+      freshness: 'fresh',
+      degraded: true,
+    });
+    expect(stats.resourceUsage.cpuUsagePercent).toBeUndefined();
+    expect(stats.resourceUsage.memoryUsagePercent).toBeUndefined();
+  });
+
+  it('labels requested versus allocatable metadata as a degraded synchronized fallback', async () => {
+    const { service, prisma, liveMetricsService } = createService([
+      'cluster-a',
+    ]);
+    const calculatedAt = new Date().toISOString();
+    prisma.clusterRegistry.findMany.mockResolvedValueOnce([
+      {
+        id: 'cluster-a',
+        name: 'cluster-a',
+        metadata: {
+          usageMetrics: {
+            source: 'k8s-node-allocatable-requested',
+            calculatedAt,
+            cpu: { requestedCores: 1.5, allocatableCores: 6, usagePercent: 25 },
+            memory: {
+              requestedBytes: 2048,
+              allocatableBytes: 8192,
+              usagePercent: 25,
+            },
+          },
+        },
+      },
+    ]);
+    liveMetricsService.getClusterSnapshot.mockResolvedValueOnce(
+      buildSnapshot('cluster-a', {
+        available: false,
+        source: 'none',
+        cpuUsage: null,
+        memoryUsage: null,
+        pods: [],
+        history: [],
+        note: 'metrics-server unavailable',
+      }),
+    );
+
+    const stats = await service.getStats({ clusterId: 'cluster-a' });
+
+    expect(stats.resourceUsage.cpu).toMatchObject({
+      value: 25,
+      used: 1.5,
+      capacity: 6,
+      unit: 'cores',
+      source: 'k8s-node-allocatable-requested',
+      capturedAt: calculatedAt,
+      freshness: 'cached',
+      degraded: true,
+    });
+    expect(stats.resourceUsage.memory).toMatchObject({
+      value: 25,
+      used: 2048,
+      capacity: 8192,
+      unit: 'bytes',
+      source: 'k8s-node-allocatable-requested',
+      capturedAt: calculatedAt,
+      freshness: 'cached',
+      degraded: true,
+    });
+    expect(stats.resourceUsage.dataSource).toBe('k8s-metadata');
+  });
+
+  it('uses null metric values instead of zero when no source data exists', async () => {
+    const { service, prisma, liveMetricsService } = createService([
+      'cluster-a',
+    ]);
+    prisma.clusterRegistry.findMany.mockResolvedValueOnce([
+      { id: 'cluster-a', name: 'cluster-a', metadata: {} },
+    ]);
+    liveMetricsService.getClusterSnapshot.mockResolvedValueOnce(
+      buildSnapshot('cluster-a', {
+        available: false,
+        source: 'none',
+        cpuUsage: null,
+        memoryUsage: null,
+        pods: [],
+        history: [],
+        note: 'metrics-server unavailable',
+      }),
+    );
+
+    const stats = await service.getStats({ clusterId: 'cluster-a' });
+
+    expect(stats.resourceUsage.cpu).toMatchObject({
+      value: null,
+      used: null,
+      capacity: null,
+      source: 'none',
+      capturedAt: null,
+      freshness: 'unavailable',
+      degraded: true,
+    });
+    expect(stats.resourceUsage.memory).toMatchObject({
+      value: null,
+      used: null,
+      capacity: null,
+      source: 'none',
+      capturedAt: null,
+      freshness: 'unavailable',
+      degraded: true,
+    });
+    expect(stats.resourceUsage.cpuUsagePercent).toBeUndefined();
+    expect(stats.resourceUsage.memoryUsagePercent).toBeUndefined();
+  });
+
+  it('partitions metric values and snapshots by cluster cache key', async () => {
+    const { service, prisma, liveMetricsService } = createService([
+      'cluster-a',
+      'cluster-b',
+    ]);
+    prisma.clusterRegistry.findMany.mockImplementation(
+      ({ where }: { where: { id: string } }) => {
+        const clusterId = where.id;
+        return Promise.resolve([
+          {
+            id: clusterId,
+            name: clusterId,
+            metadata: {
+              usageMetrics: {
+                source: 'k8s-node-allocatable-requested',
+                calculatedAt: new Date().toISOString(),
+                cpu: {
+                  requestedCores: 1,
+                  allocatableCores: 4,
+                  usagePercent: 25,
+                },
+                memory: {
+                  requestedBytes: 1024,
+                  allocatableBytes: 4096,
+                  usagePercent: 25,
+                },
+              },
+            },
+          },
+        ]);
+      },
+    );
+    liveMetricsService.getClusterSnapshot.mockImplementation(
+      (clusterId: string) =>
+        Promise.resolve(
+          buildSnapshot(clusterId, {
+            cpuUsage: clusterId === 'cluster-a' ? 1 : 3,
+            memoryUsage: clusterId === 'cluster-a' ? 1024 : 3072,
+          }),
+        ),
+    );
+
+    const clusterA = await service.getStats({ clusterId: 'cluster-a' });
+    const clusterB = await service.getStats({ clusterId: 'cluster-b' });
+    const clusterAAgain = await service.getStats({ clusterId: 'cluster-a' });
+
+    expect(clusterA.resourceUsage.cpu.value).toBe(25);
+    expect(clusterB.resourceUsage.cpu.value).toBe(75);
+    expect(clusterAAgain.resourceUsage.cpu.value).toBe(25);
+    expect(clusterA.resourceUsage.liveSnapshot?.note).toBe(
+      'snapshot cluster-a',
+    );
+    expect(clusterB.resourceUsage.liveSnapshot?.note).toBe(
+      'snapshot cluster-b',
+    );
   });
 
   it('marks selected-cluster scope degraded when cluster cannot be scoped', async () => {
