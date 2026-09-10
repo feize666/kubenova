@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { listAudits } from '../common/governance';
+import type { ClusterRealtimeEvent } from './cluster-event-sync.service';
 import { ClustersController } from './clusters.controller';
 
 describe('ClustersController', () => {
@@ -71,6 +72,7 @@ describe('ClustersController', () => {
       clustersService,
       clusterHealthService,
       clusterSyncService,
+      clusterEventSyncService,
       clusterAccessService,
     };
   }
@@ -82,6 +84,54 @@ describe('ClustersController', () => {
       send: jest.fn(),
     } as any;
   }
+
+  function createSseConnection() {
+    let closeHandler: (() => void) | undefined;
+    const req = {
+      headers: {},
+      user: { user: { id: 'viewer-1', role: 'user' } },
+      on: jest.fn((event: string, handler: () => void) => {
+        if (event === 'close') {
+          closeHandler = handler;
+        }
+      }),
+    } as any;
+    const res = {
+      getHeader: jest.fn().mockReturnValue(undefined),
+      setHeader: jest.fn(),
+      flushHeaders: jest.fn(),
+      write: jest.fn(),
+      end: jest.fn(),
+    } as any;
+    return {
+      req,
+      res,
+      close: () => closeHandler?.(),
+    };
+  }
+
+  const realtimeEvent = (
+    clusterId: string,
+    name: string,
+  ): ClusterRealtimeEvent => ({
+    clusterId,
+    domains: ['workloads'],
+    kind: 'pods',
+    phase: 'MODIFIED',
+    action: 'upsert',
+    resource: {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      name,
+      namespace: 'default',
+      uid: `${name}-uid`,
+      resourceVersion: '2',
+      labels: { app: name },
+      annotations: {},
+      state: 'Running',
+    },
+    timestamp: '2026-09-10T10:00:00.000Z',
+  });
 
   function findKubeconfigExportHandlers(): string[] {
     return Object.getOwnPropertyNames(ClustersController.prototype).filter(
@@ -300,6 +350,110 @@ describe('ClustersController', () => {
     );
   });
 
+  it('streams only events from clusters in the connection access snapshot', async () => {
+    jest.useFakeTimers();
+    const h = createController();
+    const connection = createSseConnection();
+    const unsubscribe = jest.fn();
+    let listener: ((event: ClusterRealtimeEvent) => void) | undefined;
+    h.clusterAccessService.listAccessibleClusterIds.mockResolvedValue([
+      'cluster-a',
+    ]);
+    h.clusterEventSyncService.subscribe.mockImplementation(
+      (next: (event: ClusterRealtimeEvent) => void) => {
+        listener = next;
+        return unsubscribe;
+      },
+    );
+
+    await h.controller.streamEvents(connection.req, connection.res);
+    listener?.(realtimeEvent('cluster-a', 'allowed-pod'));
+    listener?.(realtimeEvent('cluster-b', 'blocked-pod'));
+    listener?.({
+      resource: { name: 'missing-cluster' },
+    } as ClusterRealtimeEvent);
+
+    expect(connection.res.write).toHaveBeenCalledWith(
+      `data: ${JSON.stringify(realtimeEvent('cluster-a', 'allowed-pod'))}\n\n`,
+    );
+    expect(connection.res.write).not.toHaveBeenCalledWith(
+      expect.stringContaining('blocked-pod'),
+    );
+    expect(connection.res.write).not.toHaveBeenCalledWith(
+      expect.stringContaining('missing-cluster'),
+    );
+    connection.close();
+    jest.useRealTimers();
+  });
+
+  it('streams every event to platform admins, including legacy events without clusterId', async () => {
+    jest.useFakeTimers();
+    const h = createController();
+    const connection = createSseConnection();
+    let listener: ((event: ClusterRealtimeEvent) => void) | undefined;
+    h.clusterAccessService.listAccessibleClusterIds.mockResolvedValue(null);
+    h.clusterEventSyncService.subscribe.mockImplementation(
+      (next: (event: ClusterRealtimeEvent) => void) => {
+        listener = next;
+        return jest.fn();
+      },
+    );
+
+    await h.controller.streamEvents(connection.req, connection.res);
+    listener?.(realtimeEvent('cluster-b', 'admin-visible'));
+    listener?.({
+      resource: { name: 'legacy-visible' },
+    } as ClusterRealtimeEvent);
+
+    expect(connection.res.write).toHaveBeenCalledWith(
+      expect.stringContaining('admin-visible'),
+    );
+    expect(connection.res.write).toHaveBeenCalledWith(
+      expect.stringContaining('legacy-visible'),
+    );
+    connection.close();
+    jest.useRealTimers();
+  });
+
+  it('does not stream resource events when the connection access snapshot is empty', async () => {
+    jest.useFakeTimers();
+    const h = createController();
+    const connection = createSseConnection();
+    let listener: ((event: ClusterRealtimeEvent) => void) | undefined;
+    h.clusterAccessService.listAccessibleClusterIds.mockResolvedValue([]);
+    h.clusterEventSyncService.subscribe.mockImplementation(
+      (next: (event: ClusterRealtimeEvent) => void) => {
+        listener = next;
+        return jest.fn();
+      },
+    );
+
+    await h.controller.streamEvents(connection.req, connection.res);
+    listener?.(realtimeEvent('cluster-a', 'not-visible'));
+
+    expect(connection.res.write).not.toHaveBeenCalledWith(
+      expect.stringContaining('not-visible'),
+    );
+    connection.close();
+    jest.useRealTimers();
+  });
+
+  it('unsubscribes and closes the SSE response when the client disconnects', async () => {
+    jest.useFakeTimers();
+    const h = createController();
+    const connection = createSseConnection();
+    const unsubscribe = jest.fn();
+    h.clusterEventSyncService.subscribe.mockReturnValue(unsubscribe);
+
+    await h.controller.streamEvents(connection.req, connection.res);
+    connection.close();
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(connection.res.end).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+    jest.useRealTimers();
+  });
+
   it.each([
     ['detail', 'detail', 'getDetail'],
     ['nodes', 'nodes', 'listNodes'],
@@ -359,6 +513,66 @@ describe('ClustersController', () => {
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(h.clustersService.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-admin batch lifecycle changes before any registry write', async () => {
+    const h = createController();
+    h.clusterAccessService.assertPlatformAdmin.mockImplementation(() => {
+      throw new ForbiddenException();
+    });
+
+    await expect(
+      h.controller.batchState(
+        {
+          headers: {},
+          user: {
+            user: { id: 'operator-1', role: 'cluster-operator' },
+          },
+        } as any,
+        createResponse(),
+        { ids: ['cluster-a'], action: 'disable' } as any,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(h.clusterAccessService.assertPlatformAdmin).toHaveBeenCalledWith({
+      id: 'operator-1',
+      role: 'cluster-operator',
+    });
+    expect(h.clustersService.applyBatchState).not.toHaveBeenCalled();
+  });
+
+  it('allows platform admins to apply batch lifecycle changes', async () => {
+    const h = createController();
+    h.clustersService.applyBatchState.mockResolvedValue({
+      status: 'success',
+      result: [
+        {
+          id: 'cluster-a',
+          action: 'disable',
+          status: 'success',
+          message: 'disabled',
+        },
+      ],
+    });
+
+    const response = await h.controller.batchState(
+      {
+        headers: {},
+        user: { user: { id: 'admin-1', role: 'admin' } },
+      } as any,
+      createResponse(),
+      { ids: ['cluster-a'], action: 'disable' } as any,
+    );
+
+    expect(h.clusterAccessService.assertPlatformAdmin).toHaveBeenCalledWith({
+      id: 'admin-1',
+      role: 'admin',
+    });
+    expect(h.clustersService.applyBatchState).toHaveBeenCalledWith({
+      ids: ['cluster-a'],
+      action: 'disable',
+    });
+    expect(response.data.status).toBe('success');
   });
 
   it('requires writable cluster-admin access before kubeconfig export', async () => {

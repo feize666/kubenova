@@ -62,6 +62,16 @@ export class ResourcesController {
     });
   }
 
+  private parseBoolean(value: string | boolean | undefined): boolean {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value !== 'string') {
+      return false;
+    }
+    return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+  }
+
   @Post('discovery/refresh')
   async refreshDiscovery(
     @Req() req: ResourcesRequest,
@@ -88,12 +98,18 @@ export class ResourcesController {
     if (!normalizedClusterId) {
       throw new BadRequestException('clusterId 不能为空');
     }
-    await this.clusterAccessService.assertCanRead(
-      req.user?.user,
-      normalizedClusterId,
-    );
-    const refreshFlag =
-      refresh === 'true' || refresh === '1' || refresh === 'yes';
+    const refreshFlag = this.parseBoolean(refresh);
+    if (refreshFlag) {
+      await this.clusterAccessService.assertCanMutate(
+        req.user?.user,
+        normalizedClusterId,
+      );
+    } else {
+      await this.clusterAccessService.assertCanRead(
+        req.user?.user,
+        normalizedClusterId,
+      );
+    }
     return this.resourcesService.getDiscoveryCatalog(normalizedClusterId, {
       refresh: refreshFlag,
     });

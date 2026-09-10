@@ -18,11 +18,7 @@ import {
 import type { Request, Response } from 'express';
 import { AuthGuard } from '../common/auth.guard';
 import { ClusterAccessService } from '../common/cluster-access.service';
-import {
-  appendAudit,
-  assertWritePermission,
-  type PlatformRole,
-} from '../common/governance';
+import { appendAudit, type PlatformRole } from '../common/governance';
 import { resolveRequestId } from '../common/request-id';
 import {
   type ClusterBatchStateRequest,
@@ -148,6 +144,16 @@ export class ClustersController {
     return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
   }
 
+  private realtimeEventClusterId(event: unknown): string | null {
+    if (!event || typeof event !== 'object') {
+      return null;
+    }
+    const clusterId = (event as { clusterId?: unknown }).clusterId;
+    return typeof clusterId === 'string' && clusterId.trim()
+      ? clusterId.trim()
+      : null;
+  }
+
   private buildKubeconfigDownloadFilename(filename: string): {
     ascii: string;
     utf8: string;
@@ -262,8 +268,17 @@ export class ClustersController {
   }
 
   @Get('events/stream')
-  streamEvents(@Req() req: AuthenticatedRequest, @Res() res: Response): void {
+  async streamEvents(
+    @Req() req: AuthenticatedRequest,
+    @Res() res: Response,
+  ): Promise<void> {
     resolveRequestId(req, res);
+    // 权限在建连时生成快照；客户端重连时会重新认证并刷新授权范围。
+    const accessibleClusterIds =
+      await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+    const accessibleClusters = accessibleClusterIds
+      ? new Set(accessibleClusterIds)
+      : null;
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -272,6 +287,12 @@ export class ClustersController {
     res.write(`retry: 1500\n\n`);
 
     const unsubscribe = this.clusterEventSyncService.subscribe((event) => {
+      if (accessibleClusters) {
+        const clusterId = this.realtimeEventClusterId(event);
+        if (!clusterId || !accessibleClusters.has(clusterId)) {
+          return;
+        }
+      }
       res.write(`data: ${JSON.stringify(event)}\n\n`);
     });
     const heartbeat = setInterval(() => {
@@ -522,7 +543,7 @@ export class ClustersController {
   ) {
     const requestId = resolveRequestId(req, res);
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    this.clusterAccessService.assertPlatformAdmin(actor);
 
     const response = await this.clustersService.applyBatchState(body);
     response.result.forEach((item) => {

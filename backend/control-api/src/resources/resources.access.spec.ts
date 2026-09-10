@@ -83,7 +83,7 @@ describe('ResourcesController explicit cluster authorization', () => {
     [
       'discovery catalog',
       'getDiscoveryCatalog',
-      [request, 'cluster-a', 'true'],
+      [request, 'cluster-a', 'false'],
     ],
     ['dynamic list', 'listDynamic', [request, { clusterId: 'cluster-a' }]],
     [
@@ -207,6 +207,58 @@ describe('ResourcesController explicit cluster authorization', () => {
       harness.clusterAccessService.assertCanRead.mock.invocationCallOrder[0],
     ).toBeLessThan(
       harness.resourcesService.listDynamicResources.mock.invocationCallOrder[0],
+    );
+  });
+
+  it.each(['true', '1', 'yes', 'on'])(
+    'requires mutation access before a discovery catalog refresh=%s',
+    async (refresh) => {
+      const harness = createHarness({ deny: true });
+
+      await expect(
+        harness.controller.getDiscoveryCatalog(request, 'cluster-a', refresh),
+      ).rejects.toThrow('cluster access denied');
+
+      expect(harness.clusterAccessService.assertCanMutate).toHaveBeenCalledWith(
+        actor,
+        'cluster-a',
+      );
+      expect(harness.clusterAccessService.assertCanRead).not.toHaveBeenCalled();
+      expectNoDownstreamCalls(harness);
+    },
+  );
+
+  it('normalizes whitespace and case before authorizing discovery refresh', async () => {
+    const harness = createHarness({ deny: true });
+
+    await expect(
+      harness.controller.getDiscoveryCatalog(request, 'cluster-a', ' TRUE '),
+    ).rejects.toThrow('cluster access denied');
+
+    expect(harness.clusterAccessService.assertCanMutate).toHaveBeenCalledWith(
+      actor,
+      'cluster-a',
+    );
+    expectNoDownstreamCalls(harness);
+  });
+
+  it('uses read access for discovery catalog requests without refresh', async () => {
+    const harness = createHarness();
+    const response = { clusterId: 'cluster-a', items: [] };
+    harness.resourcesService.getDiscoveryCatalog.mockResolvedValue(response);
+
+    await expect(
+      harness.controller.getDiscoveryCatalog(request, 'cluster-a', undefined),
+    ).resolves.toBe(response);
+
+    expect(harness.clusterAccessService.assertCanRead).toHaveBeenCalledWith(
+      actor,
+      'cluster-a',
+    );
+    expect(harness.clusterAccessService.assertCanMutate).not.toHaveBeenCalled();
+    expect(harness.resourcesService.getDiscoveryCatalog).toHaveBeenCalledWith(
+      'cluster-a',
+      { refresh: false },
     );
   });
 
