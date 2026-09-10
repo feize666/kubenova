@@ -5,6 +5,7 @@ import { Alert, Space, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { OpsEmptyState, OpsFilterChip, OpsSurface } from "@/components/ops";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
@@ -164,6 +165,7 @@ function renderRoles(roles: string[]) {
 
 export default function ClusterNodesPage() {
   const { accessToken, isInitializing } = useAuth();
+  const workspace = useOptionalClusterWorkspace();
   const now = useNowTicker();
   const [clusterId, setClusterId] = useState("");
   const [keyword, setKeyword] = useState("");
@@ -186,7 +188,7 @@ export default function ClusterNodesPage() {
         { pageSize: 200, state: "active", selectableOnly: true },
         accessToken!,
       ),
-    enabled: !isInitializing && Boolean(accessToken),
+    enabled: !workspace && !isInitializing && Boolean(accessToken),
   });
 
   const clusterOptions = useMemo(
@@ -197,7 +199,7 @@ export default function ClusterNodesPage() {
       })),
     [clustersQuery.data?.items],
   );
-  const effectiveClusterId = clusterId || clusterOptions[0]?.value || "";
+  const effectiveClusterId = workspace?.clusterId || clusterId || clusterOptions[0]?.value || "";
   const selectedClusterName =
     clusterOptions.find((item) => item.value === effectiveClusterId)?.label ??
     "";
@@ -402,7 +404,7 @@ export default function ClusterNodesPage() {
           }
         />
         <Space className="resource-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceFilterToolbar>
+            {!workspace ? <ResourceFilterToolbar>
             <ResourceFilterToolbarItem width="auto">
               <ResourceScopeFilterButton
                 label="集群"
@@ -416,7 +418,7 @@ export default function ClusterNodesPage() {
                 }}
               />
             </ResourceFilterToolbarItem>
-          </ResourceFilterToolbar>
+            </ResourceFilterToolbar> : null}
 
           {!isInitializing && !accessToken ? (
             <Alert
@@ -427,7 +429,7 @@ export default function ClusterNodesPage() {
             />
           ) : null}
 
-          {!clustersQuery.isLoading && clusterOptions.length === 0 ? (
+          {!workspace && !clustersQuery.isLoading && clusterOptions.length === 0 ? (
             <Alert
               className="cluster-resource-state-alert"
               type="info"

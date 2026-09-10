@@ -22,6 +22,7 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "@/components/auth-context";
+import { useClusterWorkspaceHref, useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { ResourceTable } from "@/components/resource-table";
 import type {
   HeadlampResourceTableColumn,
@@ -486,6 +487,11 @@ function textMatches(value: unknown, filterValue: string) {
 
 export default function PodsPage() {
   const router = useRouter();
+  const workspace = useOptionalClusterWorkspace();
+  const createWorkloadHref = useClusterWorkspaceHref("/workloads/create?kind=Pod");
+  const podsReturnHref = useClusterWorkspaceHref(POD_PATH);
+  const logsHref = useClusterWorkspaceHref("/logs");
+  const terminalHref = useClusterWorkspaceHref("/terminal");
   const searchParams = useSearchParams();
   const {
     clusterId: initialClusterId,
@@ -769,11 +775,11 @@ export default function PodsPage() {
         pod: row.name,
         containerNames: row.containerNames,
         from: "pods",
-        returnTo: POD_PATH,
-        returnClusterId: clusterId || row.clusterId,
+        returnTo: podsReturnHref,
+        returnClusterId: workspace?.clusterId || clusterId || row.clusterId,
         returnClusterName: getClusterDisplayName(
           clusterMap,
-          clusterId || row.clusterId,
+          workspace?.clusterId || clusterId || row.clusterId,
         ),
         returnNamespace: namespace || row.namespace,
         returnKeyword: keyword || row.name,
@@ -781,7 +787,7 @@ export default function PodsPage() {
         returnPage: page,
       }).replace(/^\/terminal\?/, "");
     },
-    [clusterId, clusterMap, keyword, namespace, page, phaseFilter],
+    [clusterId, clusterMap, keyword, namespace, page, phaseFilter, podsReturnHref, workspace?.clusterId],
   );
 
   const buildLogsParams = useCallback(
@@ -796,11 +802,11 @@ export default function PodsPage() {
         resourceName: row.name,
         resourceId: row.id,
         from: "pods",
-        returnTo: POD_PATH,
-        returnClusterId: clusterId || row.clusterId,
+        returnTo: podsReturnHref,
+        returnClusterId: workspace?.clusterId || clusterId || row.clusterId,
         returnClusterName: getClusterDisplayName(
           clusterMap,
-          clusterId || row.clusterId,
+          workspace?.clusterId || clusterId || row.clusterId,
         ),
         returnNamespace: namespace || row.namespace,
         returnKeyword: keyword || row.name,
@@ -810,7 +816,7 @@ export default function PodsPage() {
         sinceSeconds: 24 * 60 * 60,
       }).replace(/^\/logs\?/, "");
     },
-    [clusterId, clusterMap, keyword, namespace, page, phaseFilter],
+    [clusterId, clusterMap, keyword, namespace, page, phaseFilter, podsReturnHref, workspace?.clusterId],
   );
 
   const columns: Array<HeadlampResourceTableColumn<PodRow>> = useMemo(
@@ -973,12 +979,12 @@ export default function PodsPage() {
                   return;
                 }
                 if (key === "logs") {
-                  if (row.id) router.push(`/logs?${buildLogsParams(row)}`);
+                  if (row.id) router.push(`${logsHref}?${buildLogsParams(row)}`);
                   return;
                 }
                 if (key === "terminal") {
                   if (row.id)
-                    router.push(`/terminal?${buildTerminalParams(row)}`);
+                    router.push(`${terminalHref}?${buildTerminalParams(row)}`);
                   return;
                 }
                 if (key === "yaml") {
@@ -1010,8 +1016,10 @@ export default function PodsPage() {
       clusterMap,
       getSortableColumnProps,
       handleDelete,
+      logsHref,
       nameWidth,
       router,
+      terminalHref,
     ],
   );
   const loadingState = useMemo(
@@ -1073,7 +1081,7 @@ export default function PodsPage() {
           description="查看和管理集群中运行的 Pod 实例。"
           extra={
             <ResourceAddButton
-              onClick={() => router.push("/workloads/create?kind=Pod")}
+              onClick={() => router.push(createWorkloadHref)}
               aria-label="创建Pod"
             />
           }

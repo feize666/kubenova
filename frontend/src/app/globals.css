@@ -15313,6 +15313,13 @@ body.topology-overview-active {
   background: #f4f8ff;
 }
 
+.cluster-workspace-shell__content .ant-form-item:has(
+  > .ant-row > .ant-form-item-label > label[title="集群"],
+  > .ant-row > .ant-form-item-label > label[title="所属集群"]
+) {
+  display: none;
+}
+
 @media (max-width: 960px) {
   .cluster-workspace-shell__sidebar { display: none; }
   .cluster-workspace-header__id { display: none; }

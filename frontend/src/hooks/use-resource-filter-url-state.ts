@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
+import { resolveResourceFilterBasePath } from "@/lib/cluster-workspace";
 
 type FilterUrlValues = {
   clusterId: string;
@@ -66,21 +68,27 @@ export function useSyncResourceFilterUrlState({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const workspace = useOptionalClusterWorkspace();
 
   useEffect(() => {
+    const filterValues = workspace ? { clusterId: "", namespace, keyword } : { clusterId, namespace, keyword };
     const nextQuery = appendExtraParams(
-      normalizeFilterValues({ clusterId, namespace, keyword }),
+      normalizeFilterValues(filterValues),
       extraParams,
     ).toString();
+    const currentFilterValues = readResourceFilterFromSearchParams(searchParams);
     const currentQuery = appendExtraParams(
-      normalizeFilterValues(readResourceFilterFromSearchParams(searchParams)),
+      normalizeFilterValues(workspace ? { ...currentFilterValues, clusterId: "" } : currentFilterValues),
       extraParams,
     ).toString();
     const hasLegacyClusterParam = Boolean(searchParams.get("cluster")) && !Boolean(searchParams.get("clusterId"));
-    if (nextQuery === currentQuery && !hasLegacyClusterParam) {
+    const hasRedundantWorkspaceClusterParam = Boolean(
+      workspace && (searchParams.get("cluster") || searchParams.get("clusterId")),
+    );
+    if (nextQuery === currentQuery && !hasLegacyClusterParam && !hasRedundantWorkspaceClusterParam) {
       return;
     }
-    const basePath = path ?? pathname;
+    const basePath = resolveResourceFilterBasePath(workspace?.clusterId, pathname, path);
     router.replace(nextQuery ? `${basePath}?${nextQuery}` : basePath, { scroll: false });
-  }, [clusterId, namespace, keyword, path, pathname, router, searchParams, extraParams]);
+  }, [clusterId, namespace, keyword, path, pathname, router, searchParams, extraParams, workspace]);
 }

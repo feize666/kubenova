@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
+import { resolveWorkspaceClusterId } from "@/lib/cluster-workspace";
 
 type ClusterNamespaceFilterState = {
   clusterId: string;
@@ -13,12 +15,15 @@ type ClusterNamespaceFilterState = {
 };
 
 export function useClusterNamespaceFilter(initialClusterId = "", initialNamespace = ""): ClusterNamespaceFilterState {
-  const [clusterId, setClusterId] = useState(initialClusterId);
+  const workspace = useOptionalClusterWorkspace();
+  const [selectedClusterId, setSelectedClusterId] = useState(initialClusterId);
   const [namespace, setNamespace] = useState(initialNamespace);
+  const clusterId = resolveWorkspaceClusterId(workspace?.clusterId, selectedClusterId);
   const hasConcreteCluster = clusterId.trim().length > 0;
 
   const onClusterChange = (nextClusterId: string) => {
-    setClusterId(nextClusterId);
+    if (workspace) return;
+    setSelectedClusterId(nextClusterId);
     setNamespace("");
   };
 
@@ -27,8 +32,8 @@ export function useClusterNamespaceFilter(initialClusterId = "", initialNamespac
   };
 
   const onScopeChange = (nextClusterId: string, nextNamespace: string) => {
-    setClusterId(nextClusterId);
-    setNamespace(nextClusterId ? nextNamespace : "");
+    if (!workspace) setSelectedClusterId(nextClusterId);
+    setNamespace(workspace || nextClusterId ? nextNamespace : "");
   };
 
   return {

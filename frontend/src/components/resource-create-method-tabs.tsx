@@ -3,7 +3,8 @@
 import { UploadOutlined } from "@ant-design/icons";
 import { Alert, Button, Form, Input, Select, Space, Tabs, Typography, Upload, message } from "antd";
 import type { UploadProps } from "antd";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 
 export type ResourceCreateMode = "form" | "yaml";
 
@@ -42,6 +43,14 @@ export function ResourceCreateMethodTabs({
   kindHint,
   disabled,
 }: ResourceCreateMethodTabsProps) {
+  const workspace = useOptionalClusterWorkspace();
+
+  useEffect(() => {
+    if (workspace && clusterId !== workspace.clusterId) {
+      onClusterIdChange(workspace.clusterId);
+    }
+  }, [clusterId, onClusterIdChange, workspace]);
+
   const uploadProps: UploadProps = {
     accept: ".yaml,.yml,text/yaml,text/x-yaml,application/x-yaml",
     maxCount: 1,
@@ -80,21 +89,23 @@ export function ResourceCreateMethodTabs({
                 description="按 Kubernetes 原生 apiVersion、kind、metadata.name 识别资源；表单未覆盖的高级字段请写入 YAML。"
               />
               <Form layout="vertical">
-                <Form.Item label="集群" required>
-                  <Select
-                    value={clusterId}
-                    onChange={onClusterIdChange}
-                    placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
-                    options={clusterOptions}
-                    loading={clusterLoading}
-                    disabled={disabled || clusterUnavailable || (!clusterLoading && clusterOptions.length === 0)}
-                    notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
-                    showSearch
-                    filterOption={(input, option) =>
-                      String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-                    }
-                  />
-                </Form.Item>
+                {!workspace ? (
+                  <Form.Item label="集群" required>
+                    <Select
+                      value={clusterId}
+                      onChange={onClusterIdChange}
+                      placeholder={clusterUnavailable ? "集群状态不可用" : "请选择集群"}
+                      options={clusterOptions}
+                      loading={clusterLoading}
+                      disabled={disabled || clusterUnavailable || (!clusterLoading && clusterOptions.length === 0)}
+                      notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
+                      showSearch
+                      filterOption={(input, option) =>
+                        String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                      }
+                    />
+                  </Form.Item>
+                ) : null}
                 {onNamespaceChange ? (
                   <Form.Item label="默认名称空间">
                     <Input

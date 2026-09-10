@@ -20,6 +20,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { OpsCommandPreview, OpsConfirmModal, OpsFilterChip, OpsFormSection, OpsPageHeader, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import { getClusters } from "@/lib/api/clusters";
@@ -34,6 +35,7 @@ import {
   type WorkloadWorkspaceValidationIssue,
 } from "@/lib/api/workloads";
 import { mapApiErrorToWorkspaceIssues } from "./error-mapping";
+import { resolveWorkspaceResourceHref } from "@/lib/cluster-workspace";
 
 type SupportedKind = "Pod" | "Deployment" | "StatefulSet" | "ReplicaSet" | "DaemonSet";
 
@@ -477,10 +479,11 @@ export default function WorkloadCreateWorkspacePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { accessToken, isInitializing } = useAuth();
+  const workspace = useOptionalClusterWorkspace();
   const [submitting, setSubmitting] = useState(false);
   const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
   const [createYaml, setCreateYaml] = useState("");
-  const [createYamlClusterId, setCreateYamlClusterId] = useState("");
+  const [createYamlClusterId, setCreateYamlClusterId] = useState(workspace?.clusterId ?? "");
   const [createYamlNamespace, setCreateYamlNamespace] = useState("default");
   const [currentStep, setCurrentStep] = useState(0);
   const [isDirty, setIsDirty] = useState(false);
@@ -658,12 +661,18 @@ export default function WorkloadCreateWorkspacePage() {
     if (!raw) return;
     try {
       const parsed = JSON.parse(raw) as Partial<WorkspaceFormValues>;
-      form.setFieldsValue(parsed);
+      form.setFieldsValue({ ...parsed, clusterId: workspace?.clusterId ?? parsed.clusterId });
       setIsDirty(true);
     } catch {
       window.localStorage.removeItem(draftStorageKey);
     }
-  }, [draftStorageKey, form]);
+  }, [draftStorageKey, form, workspace?.clusterId]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    form.setFieldValue("clusterId", workspace.clusterId);
+    setCreateYamlClusterId(workspace.clusterId);
+  }, [form, workspace]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isDirty) return;
@@ -907,7 +916,8 @@ export default function WorkloadCreateWorkspacePage() {
       message.warning("请先登录");
       return;
     }
-    if (!createYamlClusterId.trim()) {
+    const targetClusterId = workspace?.clusterId || createYamlClusterId.trim();
+    if (!targetClusterId) {
       message.warning("请选择集群");
       return;
     }
@@ -919,7 +929,7 @@ export default function WorkloadCreateWorkspacePage() {
     try {
       const result = await applyResourceYaml(
         {
-          clusterId: createYamlClusterId.trim(),
+          clusterId: targetClusterId,
           namespace: createYamlNamespace.trim() || undefined,
           yaml: createYaml.trim(),
         },
@@ -929,7 +939,7 @@ export default function WorkloadCreateWorkspacePage() {
       clearDraft();
       const firstWorkload = result.items.find((item) => item.kind in TARGET_ROUTE_MAP);
       if (firstWorkload) {
-        router.push(TARGET_ROUTE_MAP[firstWorkload.kind as SupportedKind]);
+        router.push(resolveWorkspaceResourceHref(workspace?.clusterId, TARGET_ROUTE_MAP[firstWorkload.kind as SupportedKind]));
       }
     } catch (error) {
       message.error(error instanceof Error ? error.message : "YAML 创建失败");
@@ -977,7 +987,7 @@ export default function WorkloadCreateWorkspacePage() {
             onModeChange={(mode) => setCreateMode(mode)}
             yaml={createYaml}
             onYamlChange={setCreateYaml}
-            clusterId={createYamlClusterId}
+            clusterId={workspace?.clusterId || createYamlClusterId}
             onClusterIdChange={setCreateYamlClusterId}
             namespace={createYamlNamespace}
             onNamespaceChange={setCreateYamlNamespace}
@@ -1010,6 +1020,7 @@ export default function WorkloadCreateWorkspacePage() {
           form={form}
           layout="vertical"
           initialValues={{
+            clusterId: workspace?.clusterId,
             kind: initialKind,
             namespace: "default",
             replicas: 1,
@@ -1057,7 +1068,7 @@ export default function WorkloadCreateWorkspacePage() {
               await submitWorkloadWorkspace(payload, accessToken);
               message.success(payload.kind + " 创建成功");
               clearDraft();
-              router.push(TARGET_ROUTE_MAP[payload.kind]);
+              router.push(resolveWorkspaceResourceHref(workspace?.clusterId, TARGET_ROUTE_MAP[payload.kind]));
             } catch (error) {
               const issues = extractWorkspaceIssuesFromError(error);
               if (issues.length > 0) {
@@ -1079,7 +1090,7 @@ export default function WorkloadCreateWorkspacePage() {
           {currentStep === 0 ? (
             <OpsFormSection title="基础信息" description="选择创建目标、资源类型和基础副本设置。">
               <Row gutter={[16, 16]}>
-                <Col xs={24} md={8}>
+                {!workspace ? <Col xs={24} md={8}>
                   <Form.Item name="clusterId" label="集群" rules={[{ required: true, message: "请选择集群" }]}>
                     <Select
                       options={clusterOptions}
@@ -1089,7 +1100,7 @@ export default function WorkloadCreateWorkspacePage() {
                       notFoundContent={clusterUnavailable ? "集群状态不可用" : undefined}
                     />
                   </Form.Item>
-                </Col>
+                </Col> : null}
                 <Col xs={24} md={8}>
                   <Form.Item name="namespace" label="名称空间" rules={[{ required: true, message: "请输入名称空间" }]}>
                     <Input placeholder="default" />

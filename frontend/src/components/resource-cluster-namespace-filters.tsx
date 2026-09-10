@@ -13,6 +13,7 @@ import {
   ResourceKeywordSearch,
 } from "@/components/resource-filter-toolbar";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 
 type Option = { label: string; value: string };
 
@@ -61,6 +62,7 @@ export function ResourceClusterNamespaceFilters({
   marginBottom = 8,
   showKeywordSearch = false,
 }: ResourceClusterNamespaceFiltersProps) {
+  const workspace = useOptionalClusterWorkspace();
   const hasConcreteCluster = clusterId.trim().length > 0;
   const resolvedNamespaceDisabled = namespaceDisabled ?? !hasConcreteCluster;
   const resolvedNamespacePlaceholder =
@@ -70,7 +72,7 @@ export function ResourceClusterNamespaceFilters({
     ? getClusterDisplayName(Object.fromEntries(clusterNameById), clusterId)
     : "";
   const activeFilters: OpsActiveFilter[] = [
-    clusterId
+    clusterId && !workspace
       ? {
           key: "cluster",
           label: "集群",

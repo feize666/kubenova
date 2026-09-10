@@ -19,6 +19,7 @@ import { Alert, Button, Descriptions, Drawer, Input, Segmented, Select, Space, T
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import { useAuth } from "@/components/auth-context";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState } from "@/components/ops";
 import { ResourceDetailDrawer, type ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -33,6 +34,7 @@ import {
 } from "@/lib/api/topology-graph";
 import { getTopologyNamespaceSummaries } from "@/lib/api/topology-summary";
 import { emitResourceScopeChange } from "@/lib/resource-scope-events";
+import { resolveWorkspaceClusterId, resolveWorkspaceResourceHref } from "@/lib/cluster-workspace";
 import { buildResourceRefDetailRequest } from "@/lib/resource-navigation";
 import {
   KubejojoTopologyCanvas,
@@ -374,6 +376,7 @@ function freshnessMessage(data: Awaited<ReturnType<typeof getTopologyGraphV2>>):
 
 export default function NetworkTopologyPage() {
   const { accessToken: token } = useAuth();
+  const workspace = useOptionalClusterWorkspace();
   const router = useRouter();
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [selectedNamespace, setSelectedNamespace] = useState(ALL_NAMESPACE);
@@ -400,14 +403,16 @@ export default function NetworkTopologyPage() {
     staleTime: QUERY_STALE_MS,
   });
   const clusters = clusterQuery.data?.items ?? [];
-  const selectedCluster =
-    clusters.find((cluster) => cluster.id === selectedClusterId) ?? clusters[0] ?? null;
+  const selectedCluster = workspace
+    ? clusters.find((cluster) => cluster.id === workspace.clusterId) ?? null
+    : clusters.find((cluster) => cluster.id === selectedClusterId) ?? clusters[0] ?? null;
+  const effectiveClusterId = resolveWorkspaceClusterId(workspace?.clusterId, selectedCluster?.id ?? "");
 
   const namespaceQuery = useQuery({
-    queryKey: ["topology-v2", "namespaces", selectedCluster?.id, token],
+    queryKey: ["topology-v2", "namespaces", effectiveClusterId, token],
     queryFn: ({ signal }) =>
-      getTopologyNamespaceSummaries({ clusterId: selectedCluster!.id }, token, { signal }),
-    enabled: Boolean(token && selectedCluster?.id),
+      getTopologyNamespaceSummaries({ clusterId: effectiveClusterId }, token, { signal }),
+    enabled: Boolean(token && effectiveClusterId),
     staleTime: QUERY_STALE_MS,
   });
 
@@ -419,7 +424,7 @@ export default function NetworkTopologyPage() {
     queryKey: [
       "topology-v2",
       "graph",
-      selectedCluster?.id,
+      effectiveClusterId,
       selectedNamespace,
       requestedSources,
       token,
@@ -427,14 +432,14 @@ export default function NetworkTopologyPage() {
     queryFn: ({ signal }) =>
       getTopologyGraphV2(
         {
-          clusterId: selectedCluster!.id,
+          clusterId: effectiveClusterId,
           namespace: selectedNamespace === ALL_NAMESPACE ? undefined : selectedNamespace,
           sources: requestedSources,
         },
         token,
         { signal },
       ),
-    enabled: Boolean(token && selectedCluster?.id && requestedSources.length),
+    enabled: Boolean(token && effectiveClusterId && requestedSources.length),
     staleTime: QUERY_STALE_MS,
   });
 
@@ -579,24 +584,29 @@ export default function NetworkTopologyPage() {
   const selectNamespace = useCallback((namespace: string) => {
     setSelectedNamespace(namespace);
     resetFocus();
-    if (selectedCluster) {
+    if (effectiveClusterId) {
       emitResourceScopeChange({
-        clusterId: selectedCluster.id,
-        clusterName: selectedCluster.name,
+        clusterId: effectiveClusterId,
+        clusterName: selectedCluster?.name ?? effectiveClusterId,
         namespace: namespace === ALL_NAMESPACE ? undefined : namespace,
       });
     }
-  }, [resetFocus, selectedCluster]);
+  }, [effectiveClusterId, resetFocus, selectedCluster?.name]);
 
   const navigateToResource = useCallback((resource: TopologyGraphResource) => {
     const kind = normalizeKind(resource.kind);
     const routes = RESOURCE_MANAGEMENT_ROUTES;
-    const params = new URLSearchParams({ clusterId: resource.clusterId, keyword: resource.name });
+    const params = new URLSearchParams({ keyword: resource.name });
+    if (!workspace) params.set("clusterId", resource.clusterId);
     if (resource.namespace) params.set("namespace", resource.namespace);
-    router.push(`${routes[kind] ?? "/network/topology"}?${params.toString()}`);
+    const targetPath = resolveWorkspaceResourceHref(
+      workspace?.clusterId,
+      routes[kind] ?? "/network/topology",
+    );
+    router.push(`${targetPath}?${params.toString()}`);
     setTopologySelection(null);
     setDetail(null);
-  }, [router]);
+  }, [router, workspace]);
 
   const navigateDetailRequest = useCallback((request: DetailRequest) => {
     const kind = normalizeKind(request.kind);
@@ -606,18 +616,20 @@ export default function NetworkTopologyPage() {
       return;
     }
     const idParts = request.id.split("/");
-    const clusterId = idParts[0] && !request.id.startsWith("dynamic:")
-      ? idParts[0]
-      : selectedCluster?.id;
+    const clusterId = workspace?.clusterId || (
+      idParts[0] && !request.id.startsWith("dynamic:")
+        ? idParts[0]
+        : effectiveClusterId
+    );
     const params = new URLSearchParams({
-      ...(clusterId ? { clusterId } : {}),
+      ...(!workspace && clusterId ? { clusterId } : {}),
       keyword: request.name,
     });
     if (request.namespace) params.set("namespace", request.namespace);
-    router.push(`${route}?${params.toString()}`);
+    router.push(`${resolveWorkspaceResourceHref(workspace?.clusterId, route)}?${params.toString()}`);
     setDetail(null);
     setTopologySelection(null);
-  }, [router, selectedCluster?.id]);
+  }, [effectiveClusterId, router, workspace]);
 
   return (
     <section className="resource-map-shell resource-map-shell--workbench">
@@ -643,23 +655,25 @@ export default function NetworkTopologyPage() {
 
       <div className="resource-map-toolbar" aria-label="拓扑控制栏">
         <div className="resource-map-toolbar__scope">
-          <div className="resource-map-context-field">
-            <span className="resource-map-context-field__label">集群</span>
-            <Select
-              aria-label="选择集群"
-              value={selectedCluster?.id}
-              placeholder="选择集群"
-              disabled={clusters.length === 0}
-              options={clusters.map((cluster) => ({ value: cluster.id, label: cluster.name }))}
-              onChange={selectCluster}
-            />
-          </div>
+          {!workspace ? (
+            <div className="resource-map-context-field">
+              <span className="resource-map-context-field__label">集群</span>
+              <Select
+                aria-label="选择集群"
+                value={selectedCluster?.id}
+                placeholder="选择集群"
+                disabled={clusters.length === 0}
+                options={clusters.map((cluster) => ({ value: cluster.id, label: cluster.name }))}
+                onChange={selectCluster}
+              />
+            </div>
+          ) : null}
           <div className="resource-map-context-field">
             <span className="resource-map-context-field__label">范围</span>
             <Select
               aria-label="选择名称空间"
               value={selectedNamespace}
-              disabled={!selectedCluster}
+              disabled={!effectiveClusterId}
               options={[
                 { value: ALL_NAMESPACE, label: "全部名称空间" },
                 ...namespaceOptions.map((namespace) => ({ value: namespace, label: namespace })),

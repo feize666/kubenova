@@ -29,6 +29,7 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { useClusterWorkspaceHref, useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { ResourceTable } from "@/components/resource-table";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import {
@@ -132,6 +133,8 @@ interface ScaleConvergenceViewState {
 }
 
 export default function ReplicaSetsPage() {
+  const workspace = useOptionalClusterWorkspace();
+  const createWorkloadHref = useClusterWorkspaceHref("/workloads/create?kind=ReplicaSet");
   const { message } = App.useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -366,7 +369,7 @@ export default function ReplicaSetsPage() {
     const urlNamespace = searchParams.get("namespace")?.trim();
     const urlKind = searchParams.get("kind")?.trim();
     return {
-      clusterId: urlClusterId || item.clusterId || clusterId,
+      clusterId: workspace?.clusterId || urlClusterId || item.clusterId || clusterId,
       namespace: urlNamespace || item.namespace || namespace,
       kind: urlKind || "ReplicaSet",
       name: item.name,
@@ -715,7 +718,7 @@ export default function ReplicaSetsPage() {
           }
           extra={
             <ResourceAddButton
-              onClick={() => router.push("/workloads/create?kind=ReplicaSet")}
+              onClick={() => router.push(createWorkloadHref)}
               aria-label="创建ReplicaSet"
             />
           }

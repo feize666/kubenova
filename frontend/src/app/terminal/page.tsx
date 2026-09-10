@@ -35,6 +35,7 @@ import {
   type TerminalParsedMessage,
 } from "@/lib/ws/terminal";
 import { useAuth } from "@/components/auth-context";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import {
   OpsFilterChip,
   OpsFrameShell,
@@ -282,6 +283,7 @@ export default function TerminalPage() {
   const { token } = theme.useToken();
   const { message } = App.useApp();
   const { accessToken, isInitializing } = useAuth();
+  const workspace = useOptionalClusterWorkspace();
   const searchParams = useSearchParams();
   const clustersQuery = useQuery({
     queryKey: ["clusters", "list", accessToken],
@@ -328,11 +330,11 @@ export default function TerminalPage() {
 
   const targetBase = useMemo(
     () => ({
-      clusterId: searchParams.get("clusterId")?.trim() || "",
+      clusterId: workspace?.clusterId || searchParams.get("clusterId")?.trim() || "",
       namespace: searchParams.get("namespace")?.trim() || "",
       pod: searchParams.get("pod")?.trim() || "",
     }),
-    [searchParams],
+    [searchParams, workspace?.clusterId],
   );
   const clusterNameHint =
     searchParams.get("clusterName")?.trim() ||

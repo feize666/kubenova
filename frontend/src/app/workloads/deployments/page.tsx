@@ -29,6 +29,7 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { useClusterWorkspaceHref, useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { ResourceTable } from "@/components/resource-table";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import {
@@ -236,6 +237,8 @@ function extractScaleSnapshot(item: WorkloadItem): {
 export default function DeploymentsPage() {
   const { message } = App.useApp();
   const router = useRouter();
+  const workspace = useOptionalClusterWorkspace();
+  const createWorkloadHref = useClusterWorkspaceHref("/workloads/create?kind=Deployment");
   const searchParams = useSearchParams();
   const {
     clusterId: initialClusterId,
@@ -698,7 +701,7 @@ export default function DeploymentsPage() {
     const urlNamespace = searchParams.get("namespace")?.trim();
     const urlKind = searchParams.get("kind")?.trim();
     return {
-      clusterId: urlClusterId || row.集群 || clusterId,
+      clusterId: workspace?.clusterId || urlClusterId || row.集群 || clusterId,
       namespace: urlNamespace || row.名称空间 || namespace,
       kind: urlKind || "Deployment",
       name: row.原始名称,
@@ -707,7 +710,7 @@ export default function DeploymentsPage() {
 
   // CRUD handlers
   const openAddModal = () => {
-    router.push("/workloads/create?kind=Deployment");
+    router.push(createWorkloadHref);
   };
 
   const handleDelete = async (row: DeploymentRow) => {

@@ -5,6 +5,7 @@ import { Badge, Popover, Space, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { ClusterSelect, type ClusterOption } from "@/components/cluster-select";
 import { NamespaceSelect } from "@/components/namespace-select";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { OpsFilterTriggerButton, OpsPopoverPanel } from "@/components/ops";
 import { useClusterDisplayMap } from "@/hooks/use-cluster-display-map";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
@@ -39,6 +40,8 @@ export function ResourceScopeFilterButton({
   label = "资源范围",
   onApply,
 }: ResourceScopeFilterButtonProps) {
+  const workspace = useOptionalClusterWorkspace();
+  const isWorkspaceLocked = Boolean(workspace);
   const [open, setOpen] = useState(false);
   const [draftClusterId, setDraftClusterId] = useState(clusterId);
   const [draftNamespace, setDraftNamespace] = useState(namespace);
@@ -58,16 +61,17 @@ export function ResourceScopeFilterButton({
   const resolvedNamespaceDisabled = !hasConcreteDraftCluster || parentKeepsDraftDisabled;
   const resolvedNamespacePlaceholder =
     namespacePlaceholder ?? (hasConcreteDraftCluster ? "全部名称空间" : "请先选择具体集群");
-  const activeCount = Number(Boolean(clusterId)) + Number(Boolean(namespace));
+  const activeCount = Number(!isWorkspaceLocked && Boolean(clusterId)) + Number(Boolean(namespace));
 
   const summary = useMemo(() => {
+    if (isWorkspaceLocked) return namespaceVisible && namespace ? namespace : "全部名称空间";
     if (!clusterId && !namespace) return "全部资源";
     const clusterLabel = clusterId
       ? getClusterDisplayName(Object.fromEntries(clusterNameById), clusterId)
       : "全部集群";
     if (namespaceVisible && namespace) return `${clusterLabel} / ${namespace}`;
     return clusterLabel;
-  }, [clusterId, clusterNameById, namespace, namespaceVisible]);
+  }, [clusterId, clusterNameById, isWorkspaceLocked, namespace, namespaceVisible]);
 
   const applyDraft = () => {
     const nextNamespace = namespaceVisible ? draftNamespace : "";
@@ -81,10 +85,10 @@ export function ResourceScopeFilterButton({
   };
 
   const resetAndApply = () => {
-    setDraftClusterId("");
+    setDraftClusterId(isWorkspaceLocked ? clusterId : "");
     setDraftNamespace("");
-    emitResourceScopeChange({ clusterId: "", namespace: "" });
-    onApply({ clusterId: "", namespace: "" });
+    emitResourceScopeChange({ clusterId: isWorkspaceLocked ? clusterId : "", namespace: "" });
+    onApply({ clusterId: isWorkspaceLocked ? clusterId : "", namespace: "" });
     setOpen(false);
   };
 
@@ -97,20 +101,22 @@ export function ResourceScopeFilterButton({
       className="resource-scope-filter-panel"
     >
       <Space orientation="vertical" size={10} style={{ width: "100%" }}>
-        <div>
-          <Typography.Text className="resource-scope-filter-label">集群</Typography.Text>
-          <ClusterSelect
-            value={draftClusterId}
-            onChange={(value) => {
-              setDraftClusterId(value);
-              setDraftNamespace("");
-            }}
-            options={clusterOptions}
-            loading={clusterLoading}
-            unavailable={clusterUnavailable}
-            showAllOption
-          />
-        </div>
+        {!isWorkspaceLocked ? (
+          <div>
+            <Typography.Text className="resource-scope-filter-label">集群</Typography.Text>
+            <ClusterSelect
+              value={draftClusterId}
+              onChange={(value) => {
+                setDraftClusterId(value);
+                setDraftNamespace("");
+              }}
+              options={clusterOptions}
+              loading={clusterLoading}
+              unavailable={clusterUnavailable}
+              showAllOption
+            />
+          </div>
+        ) : null}
         {namespaceVisible ? (
           <div>
             <Typography.Text className="resource-scope-filter-label">名称空间</Typography.Text>
@@ -128,6 +134,8 @@ export function ResourceScopeFilterButton({
       </Space>
     </OpsPopoverPanel>
   );
+
+  if (isWorkspaceLocked && !namespaceVisible) return null;
 
   return (
     <Popover

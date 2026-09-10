@@ -1,5 +1,10 @@
 import type { ApiRequestOptions, QueryParams } from "./types";
 import { buildListQuery, withQuery } from "./query";
+import {
+  getClusterIdFromPathname,
+  scopeWorkspaceClusterFormData,
+  scopeWorkspaceClusterValues,
+} from "@/lib/cluster-workspace";
 
 // 浏览器端默认走同源 /api。仅当配置了绝对 URL 时，才使用外部基址。
 export const CONTROL_API_BASE = process.env.NEXT_PUBLIC_CONTROL_API_BASE ?? "";
@@ -225,6 +230,13 @@ export async function apiRequest<TResponse, TBody = unknown>(
   options: ApiRequestOptions<TBody> = {},
 ): Promise<TResponse> {
   const { method = "GET", token, query, body, headers, signal, suppressAuthExpiryBroadcast } = options;
+  const workspaceClusterId = typeof window === "undefined"
+    ? null
+    : getClusterIdFromPathname(window.location.pathname);
+  const scopedQuery = scopeWorkspaceClusterValues(workspaceClusterId, query);
+  const scopedBody = body instanceof FormData
+    ? scopeWorkspaceClusterFormData(workspaceClusterId, body)
+    : scopeWorkspaceClusterValues(workspaceClusterId, body);
 
   const requestHeaders = new Headers(headers);
 
@@ -232,17 +244,21 @@ export async function apiRequest<TResponse, TBody = unknown>(
     requestHeaders.set("Authorization", `Bearer ${token}`);
   }
 
-  const hasJsonBody = body !== undefined && !(body instanceof FormData);
+  const hasJsonBody = scopedBody !== undefined && !(scopedBody instanceof FormData);
   if (hasJsonBody && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", "application/json");
   }
 
-  const url = normalizePath(withQuery(path, query));
+  const url = normalizePath(withQuery(path, scopedQuery));
 
   const response = await fetch(url, {
     method,
     headers: requestHeaders,
-    body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
+    body: scopedBody === undefined
+      ? undefined
+      : scopedBody instanceof FormData
+        ? scopedBody
+        : JSON.stringify(scopedBody),
     signal: mergeSignals([signal, authExpiryController.signal]),
   });
 

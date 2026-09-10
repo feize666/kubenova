@@ -23,6 +23,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 import { useAuth } from "@/components/auth-context";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
+import { ClusterWorkspaceProvider } from "@/components/cluster-workspace-context";
 import { OpsIconActionButton } from "@/components/ops";
 import { getClusterDetail } from "@/lib/api/clusters";
 import { getClusterIdFromPathname, getClusterWorkspaceNavigation } from "@/lib/cluster-workspace";
@@ -105,45 +106,47 @@ export function ClusterWorkspaceShell({ children }: { children: React.ReactNode 
   const currentTitle = navigation.flatMap((section) => section.items).find((item) => selectedKeys.includes(item.href))?.label ?? "集群信息";
 
   return (
-    <Layout className="kubenova-shell cluster-workspace-shell" style={{ minHeight: "100dvh" }}>
-      <Sider width={248} className="app-sidebar cluster-workspace-shell__sidebar" theme="light">
-        <div className="cluster-workspace-brand">
-          <Link href="/clusters" className="cluster-workspace-brand__back" aria-label="返回集群列表">
-            <ArrowLeftOutlined />
-            <span>返回集群列表</span>
-          </Link>
-          <div className="cluster-workspace-brand__identity">
-            <NodeIndexOutlined />
-            <div>
-              <strong>{clusterName}</strong>
-              <span>单集群工作区</span>
+    <ClusterWorkspaceProvider clusterId={clusterId}>
+      <Layout className="kubenova-shell cluster-workspace-shell" style={{ minHeight: "100dvh" }}>
+        <Sider width={248} className="app-sidebar cluster-workspace-shell__sidebar" theme="light">
+          <div className="cluster-workspace-brand">
+            <Link href="/clusters" className="cluster-workspace-brand__back" aria-label="返回集群列表">
+              <ArrowLeftOutlined />
+              <span>返回集群列表</span>
+            </Link>
+            <div className="cluster-workspace-brand__identity">
+              <NodeIndexOutlined />
+              <div>
+                <strong>{clusterName}</strong>
+                <span>单集群工作区</span>
+              </div>
             </div>
           </div>
-        </div>
-        <Menu className="app-sidebar-menu cluster-workspace-menu" mode="inline" items={menuItems} selectedKeys={selectedKeys} defaultOpenKeys={openKeys} />
-      </Sider>
-      <Layout>
-        <Header className="app-header cluster-workspace-shell__header">
-          <Dropdown menu={{ items: mobileItems, onClick: ({ key }) => { if (typeof key === "string" && key.startsWith("/")) router.push(key); } }} trigger={["click"]}>
-            <OpsIconActionButton aria-label="打开集群工作区导航" className="shell-mobile-nav-trigger" icon={<MenuOutlined />} />
-          </Dropdown>
-          <Breadcrumb items={[{ title: <Link href="/clusters">集群</Link> }, { title: clusterName }, { title: currentTitle }]} />
-          <div className="cluster-workspace-header__context" aria-label="当前集群上下文">
-            <span className={`workspace-status ${statusTone}`}><i aria-hidden="true" />{statusLabel}</span>
-            <Typography.Text className="cluster-workspace-header__id">{clusterId}</Typography.Text>
-          </div>
-          <Space size={10} className="shell-topbar-actions">
-            <OpsIconActionButton className="shell-topbar-action" icon={<BellOutlined />} aria-label="打开通知中心" />
-            <OpsIconActionButton className="shell-topbar-action" icon={<ReloadOutlined />} aria-label="刷新页面" onClick={() => window.location.reload()} />
-            <Dropdown menu={{ items: [{ key: "logout", label: "退出登录" }], onClick: async ({ key }) => { if (key === "logout") { await logout(); window.location.replace("/login"); } } }} trigger={["click"]}>
-              <Avatar style={{ cursor: "pointer", background: "var(--kn-primary)", color: "var(--ops-on-primary)" }}>{(username || "管").slice(0, 1).toUpperCase()}</Avatar>
+          <Menu className="app-sidebar-menu cluster-workspace-menu" mode="inline" items={menuItems} selectedKeys={selectedKeys} defaultOpenKeys={openKeys} />
+        </Sider>
+        <Layout>
+          <Header className="app-header cluster-workspace-shell__header">
+            <Dropdown menu={{ items: mobileItems, onClick: ({ key }) => { if (typeof key === "string" && key.startsWith("/")) router.push(key); } }} trigger={["click"]}>
+              <OpsIconActionButton aria-label="打开集群工作区导航" className="shell-mobile-nav-trigger" icon={<MenuOutlined />} />
             </Dropdown>
-          </Space>
-        </Header>
-        <Content id="kubenova-main-content" className="app-content cluster-workspace-shell__content" tabIndex={-1}>
-          {children}
-        </Content>
+            <Breadcrumb items={[{ title: <Link href="/clusters">集群</Link> }, { title: clusterName }, { title: currentTitle }]} />
+            <div className="cluster-workspace-header__context" aria-label="当前集群上下文">
+              <span className={`workspace-status ${statusTone}`}><i aria-hidden="true" />{statusLabel}</span>
+              <Typography.Text className="cluster-workspace-header__id">{clusterId}</Typography.Text>
+            </div>
+            <Space size={10} className="shell-topbar-actions">
+              <OpsIconActionButton className="shell-topbar-action" icon={<BellOutlined />} aria-label="打开通知中心" />
+              <OpsIconActionButton className="shell-topbar-action" icon={<ReloadOutlined />} aria-label="刷新页面" onClick={() => window.location.reload()} />
+              <Dropdown menu={{ items: [{ key: "logout", label: "退出登录" }], onClick: async ({ key }) => { if (key === "logout") { await logout(); window.location.replace("/login"); } } }} trigger={["click"]}>
+                <Avatar style={{ cursor: "pointer", background: "var(--kn-primary)", color: "var(--ops-on-primary)" }}>{(username || "管").slice(0, 1).toUpperCase()}</Avatar>
+              </Dropdown>
+            </Space>
+          </Header>
+          <Content id="kubenova-main-content" className="app-content cluster-workspace-shell__content" tabIndex={-1}>
+            {children}
+          </Content>
+        </Layout>
       </Layout>
-    </Layout>
+    </ClusterWorkspaceProvider>
   );
 }

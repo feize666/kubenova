@@ -35,6 +35,7 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import { useClusterWorkspaceHref, useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { ResourceTable } from "@/components/resource-table";
 import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import {
@@ -337,6 +338,8 @@ function buildStatefulSetSpec(
 }
 
 export default function StatefulSetsPage() {
+  const workspace = useOptionalClusterWorkspace();
+  const createWorkloadHref = useClusterWorkspaceHref("/workloads/create?kind=StatefulSet");
   const { message } = App.useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -578,7 +581,7 @@ export default function StatefulSetsPage() {
     const urlNamespace = searchParams.get("namespace")?.trim();
     const urlKind = searchParams.get("kind")?.trim();
     return {
-      clusterId: urlClusterId || item.clusterId || clusterId,
+      clusterId: workspace?.clusterId || urlClusterId || item.clusterId || clusterId,
       namespace: urlNamespace || item.namespace || namespace,
       kind: urlKind || "StatefulSet",
       name: item.name,
@@ -954,7 +957,7 @@ export default function StatefulSetsPage() {
           }
           extra={
             <ResourceAddButton
-              onClick={() => router.push("/workloads/create?kind=StatefulSet")}
+              onClick={() => router.push(createWorkloadHref)}
               aria-label="创建StatefulSet"
             />
           }

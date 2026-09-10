@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error -- Node 24 native TypeScript tests require an explicit extension.
-import { buildClusterResourceHref, buildClusterWorkspaceHref, getClusterIdFromPathname, getClusterWorkspaceNavigation } from "./cluster-workspace.ts";
+import { buildClusterResourceHref, buildClusterWorkspaceHref, getClusterIdFromPathname, getClusterWorkspaceNavigation, isSupportedClusterWorkspaceResource, resolveResourceFilterBasePath, resolveWorkspaceClusterId, resolveWorkspaceResourceHref, scopeWorkspaceClusterFormData, scopeWorkspaceClusterValues } from "./cluster-workspace.ts";
 
 test("集群入口生成固定集群的 canonical 概览地址", () => {
   assert.equal(buildClusterWorkspaceHref(" ack-prod "), "/clusters/ack-prod/overview");
@@ -37,4 +37,74 @@ test("从工作区地址解析并解码唯一集群标识", () => {
   assert.equal(getClusterIdFromPathname("/clusters/ack-prod/overview"), "ack-prod");
   assert.equal(getClusterIdFromPathname("/clusters/ack%2Fprod/workloads/pods"), "ack/prod");
   assert.equal(getClusterIdFromPathname("/clusters"), null);
+});
+
+test("工作区集群标识覆盖旧查询范围且不可清空", () => {
+  assert.equal(resolveWorkspaceClusterId("ack-prod", "other-cluster"), "ack-prod");
+  assert.equal(resolveWorkspaceClusterId("ack-prod", ""), "ack-prod");
+  assert.equal(resolveWorkspaceClusterId(null, "legacy-cluster"), "legacy-cluster");
+});
+
+test("工作区菜单中的每个资源地址都有 canonical 页面承接", () => {
+  const resourcePaths = getClusterWorkspaceNavigation("ack-prod")
+    .flatMap((section) => section.items)
+    .map((item) => item.href.replace("/clusters/ack-prod/", ""))
+    .filter((path) => path !== "overview");
+
+  assert.ok(resourcePaths.length > 0);
+  assert.ok(resourcePaths.every(isSupportedClusterWorkspaceResource));
+  assert.equal(isSupportedClusterWorkspaceResource("workloads/unknown"), false);
+});
+
+test("工作区资源筛选同步不能把 canonical 地址改回旧页面", () => {
+  const canonicalPath = "/clusters/ack-prod/workloads/deployments";
+  assert.equal(
+    resolveResourceFilterBasePath("ack-prod", canonicalPath, "/workloads/deployments"),
+    canonicalPath,
+  );
+  assert.equal(
+    resolveResourceFilterBasePath(null, "/workloads/deployments", "/workloads/deployments"),
+    "/workloads/deployments",
+  );
+});
+
+test("工作区内的资源操作继续留在当前集群", () => {
+  assert.equal(
+    resolveWorkspaceResourceHref("ack-prod", "/workloads/create?kind=Deployment"),
+    "/clusters/ack-prod/workloads/create?kind=Deployment",
+  );
+  assert.equal(
+    resolveWorkspaceResourceHref(null, "/workloads/create?kind=Deployment"),
+    "/workloads/create?kind=Deployment",
+  );
+});
+
+test("工作区请求边界递归覆盖所有外来 clusterId", () => {
+  assert.deepEqual(
+    scopeWorkspaceClusterValues("ack-prod", {
+      clusterId: "other",
+      identity: { clusterId: "other", name: "web" },
+      items: [{ clusterId: "other" }],
+      namespace: "default",
+    }),
+    {
+      clusterId: "ack-prod",
+      identity: { clusterId: "ack-prod", name: "web" },
+      items: [{ clusterId: "ack-prod" }],
+      namespace: "default",
+    },
+  );
+  assert.equal(scopeWorkspaceClusterValues(null, "unchanged"), "unchanged");
+});
+
+test("工作区请求边界覆盖 FormData 中的外来 clusterId", () => {
+  const body = new FormData();
+  body.append("clusterId", "other");
+  body.append("name", "web");
+
+  const scoped = scopeWorkspaceClusterFormData("ack-prod", body);
+
+  assert.equal(scoped.get("clusterId"), "ack-prod");
+  assert.equal(scoped.get("name"), "web");
+  assert.equal(body.get("clusterId"), "other");
 });

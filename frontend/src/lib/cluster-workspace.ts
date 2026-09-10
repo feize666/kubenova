@@ -22,6 +22,52 @@ export type ClusterWorkspaceNavigationSection = {
   items: ClusterWorkspaceNavigationItem[];
 };
 
+export const CLUSTER_WORKSPACE_RESOURCE_PATHS = [
+  "nodes",
+  "namespaces",
+  "workloads/deployments",
+  "workloads/statefulsets",
+  "workloads/daemonsets",
+  "workloads/pods",
+  "workloads/jobs",
+  "workloads/cronjobs",
+  "workloads/replicasets",
+  "workloads/autoscaling",
+  "workloads/autoscaling/hpa",
+  "workloads/autoscaling/vpa",
+  "workloads/create",
+  "network/services",
+  "network/ingress",
+  "network/endpoints",
+  "network/endpointslices",
+  "network/networkpolicy",
+  "network/gateway-api",
+  "network/topology",
+  "storage/pv",
+  "storage/pvc",
+  "storage/sc",
+  "configs/configmaps",
+  "configs/secrets",
+  "configs/serviceaccounts",
+  "configs/limitranges",
+  "configs/resourcequotas",
+  "observability",
+  "inspection",
+  "aiops",
+  "logs",
+  "terminal",
+] as const;
+
+export type ClusterWorkspaceResourcePath = (typeof CLUSTER_WORKSPACE_RESOURCE_PATHS)[number];
+
+const clusterWorkspaceResourcePathSet = new Set<string>(CLUSTER_WORKSPACE_RESOURCE_PATHS);
+
+export function isSupportedClusterWorkspaceResource(
+  path: string,
+): path is ClusterWorkspaceResourcePath {
+  return clusterWorkspaceResourcePathSet.has(path);
+}
+
 function normalizeClusterId(clusterId: string) {
   const normalized = clusterId.trim();
   if (!normalized) {
@@ -51,6 +97,66 @@ export function getClusterIdFromPathname(pathname: string) {
   } catch {
     return null;
   }
+}
+
+export function resolveWorkspaceClusterId(
+  workspaceClusterId: string | null | undefined,
+  legacyClusterId: string,
+) {
+  return workspaceClusterId?.trim() || legacyClusterId.trim();
+}
+
+export function resolveResourceFilterBasePath(
+  workspaceClusterId: string | null | undefined,
+  pathname: string,
+  legacyPath?: string,
+) {
+  return workspaceClusterId?.trim() ? pathname : legacyPath ?? pathname;
+}
+
+export function resolveWorkspaceResourceHref(
+  workspaceClusterId: string | null | undefined,
+  legacyHref: string,
+) {
+  if (!workspaceClusterId?.trim()) return legacyHref;
+  const queryIndex = legacyHref.search(/[?#]/);
+  const path = queryIndex >= 0 ? legacyHref.slice(0, queryIndex) : legacyHref;
+  const suffix = queryIndex >= 0 ? legacyHref.slice(queryIndex) : "";
+  return `${buildClusterResourceHref(workspaceClusterId, path)}${suffix}`;
+}
+
+export function scopeWorkspaceClusterValues<T>(
+  workspaceClusterId: string | null | undefined,
+  value: T,
+): T {
+  const fixedClusterId = workspaceClusterId?.trim();
+  if (!fixedClusterId || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => scopeWorkspaceClusterValues(fixedClusterId, item)) as T;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      key === "clusterId" ? fixedClusterId : scopeWorkspaceClusterValues(fixedClusterId, item),
+    ]),
+  ) as T;
+}
+
+export function scopeWorkspaceClusterFormData(
+  workspaceClusterId: string | null | undefined,
+  value: FormData,
+) {
+  const fixedClusterId = workspaceClusterId?.trim();
+  if (!fixedClusterId || !value.has("clusterId")) return value;
+
+  const scoped = new FormData();
+  value.forEach((item, key) => {
+    scoped.append(key, key === "clusterId" ? fixedClusterId : item);
+  });
+  return scoped;
 }
 
 export function getClusterWorkspaceNavigation(clusterId: string): ClusterWorkspaceNavigationSection[] {
