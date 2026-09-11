@@ -126,11 +126,11 @@ test("单集群工作区隐藏集群列且不影响 legacy 页面", () => {
   ] as const;
 
   assert.deepEqual(
-    filterClusterScopedColumns("ack-prod", columns).map((column) => column.key),
+    filterClusterScopedColumns("ack-prod", columns).map((column) => ("key" in column ? column.key : undefined)),
     ["name", "namespace"],
   );
   assert.deepEqual(
-    filterClusterScopedColumns(null, columns).map((column) => column.key),
+    filterClusterScopedColumns(null, columns).map((column) => ("key" in column ? column.key : undefined)),
     ["name", "clusterId", "cluster", undefined, "namespace"],
   );
 });
