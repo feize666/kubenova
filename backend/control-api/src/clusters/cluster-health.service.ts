@@ -118,6 +118,8 @@ function toJsonInput(
 export class ClusterHealthService {
   private readonly logger = new Logger(ClusterHealthService.name);
   private readonly defaultTimeoutMs = 8000;
+  /** Node inventory is an optional health detail and must not make liveness fail. */
+  private readonly nodeCountTimeoutMs = 2000;
   private readonly freshnessWindowMs = 90_000;
   private readonly maxBackoffMs = 60_000;
   private readonly inFlight = new Map<
@@ -336,7 +338,7 @@ export class ClusterHealthService {
     if (!snapshot || snapshot.isStale) {
       snapshot = await this.probeCluster(clusterId, {
         source: 'auto',
-        timeoutMs: 5_000,
+        timeoutMs: this.defaultTimeoutMs,
       });
     }
 
@@ -658,8 +660,11 @@ export class ClusterHealthService {
     let apiServer = cluster.apiServer;
     try {
       apiServer = this.k8sClientService.inspectKubeconfig(kubeconfig).apiServer;
-      const result = await this.withTimeout(
-        this.fetchClusterVersionAndNodeCount(kubeconfig),
+      // The version endpoint is the liveness signal. Node inventory is fetched
+      // as best-effort detail with its own short timeout so a slow list call
+      // cannot mark an otherwise reachable API server offline.
+      const result = await this.fetchClusterVersionAndNodeCount(
+        kubeconfig,
         timeoutMs,
       );
       const latencyMs = Date.now() - startedAt;
@@ -720,14 +725,31 @@ export class ClusterHealthService {
 
   private async fetchClusterVersionAndNodeCount(
     kubeconfig: string,
+    timeoutMs = this.defaultTimeoutMs,
   ): Promise<{ version: string; nodeCount: number | null }> {
     const kc = this.k8sClientService.createClient(kubeconfig);
     const versionApi = kc.makeApiClient(k8s.VersionApi);
     const coreApi = kc.makeApiClient(k8s.CoreV1Api);
 
-    const versionResp = await (
-      versionApi as unknown as { getCode: () => Promise<unknown> }
-    ).getCode();
+    const versionRequest = this.withTimeout(
+      (versionApi as unknown as { getCode: () => Promise<unknown> }).getCode(),
+      timeoutMs,
+    );
+    const nodeRequest = coreApi
+      .listNode()
+      .then((nodes) => nodes.items.length)
+      .catch((error: unknown) => {
+        const message =
+          error instanceof Error ? error.message : 'unknown error';
+        this.logger.warn(
+          `cluster node count probe degraded: reason=${message}`,
+        );
+        return null;
+      });
+
+    // A failed version request means the API server is not usable. Node count
+    // remains optional and is deliberately allowed to time out independently.
+    const versionResp = await versionRequest;
     const versionInfo =
       versionResp &&
       typeof versionResp === 'object' &&
@@ -738,12 +760,13 @@ export class ClusterHealthService {
 
     let nodeCount: number | null = null;
     try {
-      const nodes = await coreApi.listNode();
-      nodeCount = nodes.items.length;
+      nodeCount = await this.withTimeout(
+        nodeRequest,
+        Math.min(timeoutMs, this.nodeCountTimeoutMs),
+      );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'unknown error';
       this.logger.warn(`cluster node count probe degraded: reason=${message}`);
-      nodeCount = null;
     }
 
     return {

@@ -141,7 +141,7 @@ describe('ClusterHealthService', () => {
     ).resolves.toBeUndefined();
     expect(service.probeCluster).toHaveBeenCalledWith('c1', {
       source: 'auto',
-      timeoutMs: 5000,
+      timeoutMs: 8000,
     });
   });
 
@@ -392,9 +392,6 @@ describe('ClusterHealthService', () => {
     service.clustersService.getKubeconfig.mockResolvedValue('valid config');
     service.fetchClusterVersionAndNodeCount = jest
       .fn()
-      .mockReturnValue(new Promise(() => undefined));
-    service.withTimeout = jest
-      .fn()
       .mockRejectedValue(new Error('PROBE_TIMEOUT'));
     service.prisma.clusterHealthSnapshot.findUnique.mockResolvedValue(null);
     service.prisma.clusterHealthSnapshot.upsert.mockImplementation(
@@ -410,5 +407,28 @@ describe('ClusterHealthService', () => {
       apiServer: 'https://api.example.test:6443',
       kubernetesVersion: 'unknown',
     });
+  });
+
+  it('keeps a reachable cluster online when node inventory exceeds its detail timeout', async () => {
+    const service = createService() as any;
+    const versionApi = {
+      getCode: jest.fn().mockResolvedValue({ gitVersion: 'v1.31.8' }),
+    };
+    const coreApi = {
+      listNode: jest.fn().mockReturnValue(new Promise(() => undefined)),
+    };
+    let apiCall = 0;
+    service.k8sClientService.createClient.mockReturnValue({
+      makeApiClient: jest.fn(() => (apiCall++ === 0 ? versionApi : coreApi)),
+    });
+
+    await expect(
+      service.fetchClusterVersionAndNodeCount('valid config', 100),
+    ).resolves.toEqual({
+      version: 'v1.31.8',
+      nodeCount: null,
+    });
+    expect(versionApi.getCode).toHaveBeenCalledTimes(1);
+    expect(coreApi.listNode).toHaveBeenCalledTimes(1);
   });
 });
