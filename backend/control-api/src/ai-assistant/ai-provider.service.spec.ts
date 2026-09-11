@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import { AiProviderService } from './ai-provider.service';
+import {
+  AiProviderService,
+  resolveAiCredentialEncryptionKey,
+} from './ai-provider.service';
 
 describe('AiProviderService', () => {
   const prisma = {
@@ -58,5 +61,26 @@ describe('AiProviderService', () => {
     expect(provider).toMatchObject({ apiKeyConfigured: true, apiKeyLast4: '1234' });
     expect(provider).not.toHaveProperty('apiKey');
     expect(provider).not.toHaveProperty('apiKeyCiphertext');
+  });
+
+  it('does not allow the development encryption fallback in production', () => {
+    expect(() => resolveAiCredentialEncryptionKey(undefined, 'production')).toThrow(
+      /AI_CREDENTIAL_ENCRYPTION_KEY/i,
+    );
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      expect(() => new AiProviderService(prisma)).toThrow(
+        /AI_CREDENTIAL_ENCRYPTION_KEY/i,
+      );
+      expect(() =>
+        new AiProviderService(
+          prisma,
+          '0123456789abcdef0123456789abcdef',
+        ),
+      ).not.toThrow();
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
   });
 });

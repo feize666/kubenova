@@ -53,17 +53,46 @@ export interface AiAgentInput {
 
 export type AiActor = { id?: string; username?: string; role?: string };
 
+const DEVELOPMENT_CREDENTIAL_ENCRYPTION_KEY =
+  'kubenova-development-key-change-me';
+
+/**
+ * Resolves the key used to encrypt provider credentials.
+ *
+ * The development fallback keeps unit tests and local development convenient,
+ * but it is deliberately unavailable in production. A production deployment
+ * must provide a stable, independently managed secret so existing credentials
+ * remain decryptable after restarts and releases.
+ */
+export function resolveAiCredentialEncryptionKey(
+  configured = process.env.AI_CREDENTIAL_ENCRYPTION_KEY,
+  nodeEnv = process.env.NODE_ENV,
+): string {
+  const value = configured?.trim();
+  if (nodeEnv === 'production' && (!value || value.length < 32)) {
+    throw new Error(
+      'AI_CREDENTIAL_ENCRYPTION_KEY must be configured with at least 32 characters in production',
+    );
+  }
+  return value || DEVELOPMENT_CREDENTIAL_ENCRYPTION_KEY;
+}
+
 function actorId(actor?: AiActor): string | undefined {
   return actor?.id?.trim() || undefined;
 }
 
 @Injectable()
 export class AiProviderService {
-  private readonly key = createHash('sha256')
-    .update(process.env.AI_CREDENTIAL_ENCRYPTION_KEY || 'kubenova-development-key-change-me')
-    .digest();
+  private readonly key: Buffer;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    encryptionKey = process.env.AI_CREDENTIAL_ENCRYPTION_KEY,
+  ) {
+    this.key = createHash('sha256')
+      .update(resolveAiCredentialEncryptionKey(encryptionKey))
+      .digest();
+  }
 
   listVendors(): Array<{ id: string; label: string; defaultBaseUrl: string }> {
     const labels: Record<string, string> = {

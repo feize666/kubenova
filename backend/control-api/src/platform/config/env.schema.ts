@@ -34,6 +34,17 @@ const envSchema = z.object({
     .positive()
     .optional()
     .default(30000),
+  AI_CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
+}).superRefine((value, ctx) => {
+  const key = value.AI_CREDENTIAL_ENCRYPTION_KEY?.trim();
+  if (value.NODE_ENV === 'production' && (!key || key.length < 32)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['AI_CREDENTIAL_ENCRYPTION_KEY'],
+      message:
+        'AI_CREDENTIAL_ENCRYPTION_KEY must be configured with at least 32 characters in production',
+    });
+  }
 });
 
 export type AppConfig = {
@@ -54,6 +65,7 @@ export type AppConfig = {
   aiModelName: string;
   aiModelMaxTokens: number;
   aiModelTimeoutMs: number;
+  aiCredentialEncryptionKey?: string;
 };
 
 export function parseEnv(env: Record<string, unknown>): AppConfig {
@@ -84,5 +96,6 @@ export function parseEnv(env: Record<string, unknown>): AppConfig {
     aiModelName: parsed.data.AI_MODEL_NAME,
     aiModelMaxTokens: parsed.data.AI_MODEL_MAX_TOKENS,
     aiModelTimeoutMs: parsed.data.AI_MODEL_TIMEOUT_MS,
+    aiCredentialEncryptionKey: parsed.data.AI_CREDENTIAL_ENCRYPTION_KEY,
   };
 }
