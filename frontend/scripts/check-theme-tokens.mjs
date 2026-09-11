@@ -138,7 +138,9 @@ function collectUnexpectedTokenValues(block, entries, label) {
   return failures;
 }
 
-const globalsCss = fs.readFileSync(globalsPath, "utf8");
+// Normalize mixed line endings so selector extraction remains stable across
+// macOS checkouts and generated release archives.
+const globalsCss = fs.readFileSync(globalsPath, "utf8").replaceAll("\r\n", "\n");
 const themeContext = fs.readFileSync(themeContextPath, "utf8");
 const darkBlock = extractRuleBlock(globalsCss, ':root,\n[data-theme="dark"]');
 const lightBlock = extractRuleBlock(globalsCss, '[data-theme="light"]');

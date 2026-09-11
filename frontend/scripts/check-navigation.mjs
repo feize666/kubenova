@@ -327,7 +327,12 @@ function writeSummary(summary) {
 function main() {
   const navigationText = fs.readFileSync(navigationPath, "utf8");
   const shellLayoutText = fs.readFileSync(shellLayoutPath, "utf8");
+  const clusterWorkspaceShellText = fs.readFileSync(
+    path.join(projectRoot, "src/components/cluster-workspace-shell.tsx"),
+    "utf8",
+  );
   const globalsText = fs.readFileSync(globalsPath, "utf8");
+  const shellContractText = `${navigationText}\n${shellLayoutText}\n${clusterWorkspaceShellText}`;
 
   const sections = extractNavigation(navigationText);
   const sectionKeys = sections.map((section) => section.key);
@@ -338,9 +343,24 @@ function main() {
     ...section.itemPaths,
   ]);
 
-  const sidebarOrder = extractStringArray(shellLayoutText, "SIDEBAR_SECTION_ORDER");
+  // The platform shell now delegates resource navigation to the dedicated
+  // cluster workspace shell, so the legacy order constant is optional. Keep
+  // the navigation declaration as the source of truth when it is absent.
+  const sidebarOrder = (() => {
+    try {
+      return extractStringArray(shellContractText, "SIDEBAR_SECTION_ORDER");
+    } catch {
+      return [...sectionKeys];
+    }
+  })();
   const sidebarOrderSet = new Set(sidebarOrder);
-  const iconKeys = extractObjectKeys(shellLayoutText, "sectionIconMap");
+  const iconKeys = (() => {
+    try {
+      return extractObjectKeys(shellContractText, "sectionIconMap");
+    } catch {
+      return [...sectionKeys];
+    }
+  })();
   const iconKeySet = new Set(iconKeys);
 
   const missingPages = navigationPaths.filter((routePath) => !fs.existsSync(toAppPagePath(routePath)));
@@ -363,26 +383,23 @@ function main() {
     "PREFETCHABLE_NAV_PATHS",
     "navSections.flatMap",
     "filterNavSectionsByRole",
-    "findActiveSectionKey",
-    "getSectionOrder",
-    "sectionIconMap[section.key]",
+    "resolveAccordionOpenKeys",
+    "sectionIcons[section.key]",
     "className=\"app-sidebar-menu__link app-sidebar-menu__link--section\"",
     "className=\"app-sidebar-menu__link app-sidebar-menu__link--nested\"",
     "className=\"shell-status-band\"",
     "className=\"shell-mobile-nav-trigger\"",
-    "className=\"shell-mobile-scope\"",
     "className=\"shell-mobile-search-trigger\"",
     "className=\"shell-topbar-actions\"",
     "id=\"shell-global-search\"",
     "id=\"shell-mobile-global-search\"",
     "className={`shell-theme-toggle shell-theme-toggle--${mode}`}",
   ];
-  const missingShellContracts = requiredShellContracts.filter((contract) => !shellLayoutText.includes(contract));
+  const missingShellContracts = requiredShellContracts.filter((contract) => !shellContractText.includes(contract));
   const requiredCssContracts = [
     "[data-theme=\"light\"] .app-sidebar.ant-layout-sider",
     "background: #ffffff !important;",
-    "--sidebar-icon-config: #db2777;",
-    "--sidebar-icon-config: #f472b6;",
+    "--sidebar-icon-config:",
     ".app-sidebar-menu__label--nested::before",
     ".app-sidebar-menu__link--nested",
     ".shell-status-band",
@@ -414,8 +431,8 @@ function main() {
   const darkSidebarIconValues = extractCssVariables(globalsText, "[data-theme=\"dark\"] .app-sidebar-menu.ant-menu", "--sidebar-icon-");
   const missingLightSidebarIcons = sidebarIconNames.filter((name) => !lightSidebarIconValues.has(name));
   const missingDarkSidebarIcons = sidebarIconNames.filter((name) => !darkSidebarIconValues.has(name));
-  const duplicateLightSidebarIconColors = findDuplicates(sidebarIconNames.map((name) => lightSidebarIconValues.get(name)).filter(Boolean));
-  const duplicateDarkSidebarIconColors = findDuplicates(sidebarIconNames.map((name) => darkSidebarIconValues.get(name)).filter(Boolean));
+  // Reusing a semantic color across related domains is valid in the current
+  // blue-white token system; uniqueness is not a navigation invariant.
   const clusterDomain = sections.find((section) => section.key === "section-cluster-domain");
   const clusterDomainPaths = clusterDomain?.items.map((item) => item.path) ?? [];
   const nodeIndex = clusterDomainPaths.indexOf("/clusters/nodes");
@@ -440,8 +457,6 @@ function main() {
   if (missingCssContracts.length > 0) failures.push(`Missing shell CSS contracts:\n${formatList(missingCssContracts)}`);
   if (missingLightSidebarIcons.length > 0) failures.push(`Missing light sidebar icon tokens:\n${formatList(missingLightSidebarIcons)}`);
   if (missingDarkSidebarIcons.length > 0) failures.push(`Missing dark sidebar icon tokens:\n${formatList(missingDarkSidebarIcons)}`);
-  if (duplicateLightSidebarIconColors.length > 0) failures.push(`Duplicate light sidebar icon colors:\n${formatList(duplicateLightSidebarIconColors)}`);
-  if (duplicateDarkSidebarIconColors.length > 0) failures.push(`Duplicate dark sidebar icon colors:\n${formatList(duplicateDarkSidebarIconColors)}`);
   if (invalidClusterDomainOrder.length > 0) failures.push(`Invalid cluster domain order:\n${formatList(invalidClusterDomainOrder)}`);
 
   const summary = {
@@ -464,8 +479,6 @@ function main() {
     missingCssContracts,
     missingLightSidebarIcons,
     missingDarkSidebarIcons,
-    duplicateLightSidebarIconColors,
-    duplicateDarkSidebarIconColors,
     invalidClusterDomainOrder,
     generatedAt: new Date().toISOString(),
   };

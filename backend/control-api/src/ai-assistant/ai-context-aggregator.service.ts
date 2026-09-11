@@ -5,7 +5,6 @@ import {
   ClustersService,
   type ClusterItemResponse,
 } from '../clusters/clusters.service';
-import { ClusterAccessService } from '../common/cluster-access.service';
 import {
   MonitoringService,
   type AlertsResponse,

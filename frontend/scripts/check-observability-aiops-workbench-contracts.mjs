@@ -21,7 +21,7 @@ const contracts = [
   },
   {
     path: "src/app/inspection/page.tsx",
-    required: ["OpsPageHeader", "OpsSurface", "OpsModalShell", "BusinessDetailDrawer", "ResourceTable"],
+    required: ["ResourcePageHeader", "OpsSurface", "OpsModalShell", "BusinessDetailDrawer", "ResourceTable"],
     forbidden: ["cyber-panel", "<Modal"],
   },
   {
@@ -42,7 +42,7 @@ const contracts = [
   },
   {
     path: "src/app/system/update/page.tsx",
-    required: ["OpsPageHeader", "OpsSurface", "BusinessDetailDrawer", "ResourceTable"],
+    required: ["ResourcePageHeader", "OpsSurface", "BusinessDetailDrawer", "ResourceTable"],
     forbidden: ["cyber-panel", "<Card"],
   },
   {
@@ -78,10 +78,10 @@ for (const contract of contracts) {
 
 const allowedLegacyRoutes = [
   {
-    path: "src/app/login/page.tsx",
-    required: ["OpsSurface", "login-card", "控制面服务暂不可达", "KubeNova"],
+    path: "src/components/login-page-v2.tsx",
+    required: ["login-v2__panel", "login-v2__form", "控制面服务暂不可达", "KubeNova"],
     forbidden: ["<Card"],
-    reason: "Login form now uses the shared OpsSurface container while authentication behavior and API probe warning are unchanged",
+    reason: "Login form uses the dedicated blue-white login surface while authentication behavior and API probe warning remain covered",
   },
 ];
 
