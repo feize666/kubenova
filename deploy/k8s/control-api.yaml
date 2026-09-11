@@ -117,6 +117,11 @@ spec:
                 secretKeyRef:
                   name: kubenova-platform-secret
                   key: JWT_SECRET
+            - name: AI_CREDENTIAL_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubenova-platform-secret
+                  key: AI_CREDENTIAL_ENCRYPTION_KEY
             - name: JWT_EXPIRES_IN
               valueFrom:
                 secretKeyRef:

@@ -40,6 +40,7 @@ stringData:
   DATABASE_URL: postgresql://kubenova:change-me@postgres:5432/kubenova
   REDIS_URL: redis://redis:6379/0
   JWT_SECRET: replace-with-long-random-jwt-secret
+  AI_CREDENTIAL_ENCRYPTION_KEY: replace-with-at-least-32-random-characters
   JWT_EXPIRES_IN: 15m
   REFRESH_TOKEN_EXPIRES_IN: 7d
   DEFAULT_ADMIN_EMAIL: admin@local.dev
