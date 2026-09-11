@@ -6,15 +6,17 @@ import {
   DatabaseOutlined,
   DeploymentUnitOutlined,
   GlobalOutlined,
+  MessageOutlined,
   NodeIndexOutlined,
   ReloadOutlined,
+  RobotOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Col, Progress, Row, Space, Typography } from "antd";
-import { useParams } from "next/navigation";
+import { Alert, Button, Col, Modal, Progress, Row, Space, Spin, Typography } from "antd";
+import { useParams, useRouter } from "next/navigation";
 import { ClusterContextProvider, useClusterContext } from "@/components/cluster-context";
-import { OpsFilterChip, OpsLoadingState, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { OpsFilterChip, OpsIconActionButton, OpsLoadingState, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { useAuth } from "@/components/auth-context";
 import {
@@ -22,7 +24,9 @@ import {
   getDashboardStats,
   type DashboardResourceMetric,
 } from "@/lib/api/dashboard";
+import { analyzeCluster } from "@/lib/api/ai-cluster";
 import { QUERY_CACHE_TIMINGS } from "@/lib/query";
+import { useState } from "react";
 
 const panelStyle = {
   background: "#ffffff",
@@ -50,6 +54,13 @@ function formatCapturedAt(value: string | null) {
   if (!value) return "--";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "--" : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function getAiText(payload: Record<string, unknown>) {
+  for (const key of ["response", "content", "text", "message"]) {
+    if (typeof payload[key] === "string" && payload[key]) return payload[key] as string;
+  }
+  return JSON.stringify(payload, null, 2);
 }
 
 function ResourceMetricPanel({
@@ -108,6 +119,11 @@ function ResourceMetricPanel({
 function ClusterInfoContent() {
   const { accessToken } = useAuth();
   const { clusterId, cluster, error, isFetching, isLoading, refresh } = useClusterContext();
+  const router = useRouter();
+  const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisText, setAnalysisText] = useState("");
+  const [analysisError, setAnalysisError] = useState("");
   const statsQuery = useQuery({
     queryKey: ["dashboard", "stats", "cluster-workspace", clusterId, accessToken],
     queryFn: () => getDashboardStats({ clusterId }, accessToken || undefined),
@@ -142,6 +158,31 @@ function ClusterInfoContent() {
   const topology = statsQuery.data?.topology;
   const statusTone = cluster.runtimeStatus === "running" ? "success" : cluster.runtimeStatus === "checking" ? "warning" : "danger";
 
+  const openAnalysis = async () => {
+    setAnalysisOpen(true);
+    setAnalysisLoading(true);
+    setAnalysisError("");
+    try {
+      const result = await analyzeCluster(
+        clusterId,
+        {
+          runtimeStatus: cluster.runtimeStatus,
+          nodeSummary: cluster.nodeSummary,
+          platform: cluster.platform,
+          workloads: statsQuery.data?.workloads,
+          resourceUsage: statsQuery.data?.resourceUsage,
+          topology: statsQuery.data?.topology,
+        },
+        accessToken || undefined,
+      );
+      setAnalysisText(getAiText(result));
+    } catch (analysisFailure) {
+      setAnalysisError(analysisFailure instanceof Error ? analysisFailure.message : "AI 分析请求失败，请稍后重试。");
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
   return (
     <div className="resource-workbench" style={{ display: "grid", gap: 16 }}>
       <OpsSurface variant="panel" padding="sm" style={panelStyle}>
@@ -150,13 +191,27 @@ function ClusterInfoContent() {
           embedded
           title="集群信息"
           description="当前集群的连接状态、节点概览与实时资源快照"
-          actions={(
-            <Space size={8} wrap>
-              <OpsStatusTag tone={statusTone}>{cluster.runtimeStatus}</OpsStatusTag>
-              <OpsFilterChip tone="info" icon={<SafetyCertificateOutlined />}>已锁定单集群范围</OpsFilterChip>
-              <Button size="small" icon={<ReloadOutlined />} loading={isFetching || statsQuery.isFetching} onClick={() => {
-                void refresh();
-                void statsQuery.refetch();
+            actions={(
+              <Space size={8} wrap>
+                <OpsStatusTag tone={statusTone}>{cluster.runtimeStatus}</OpsStatusTag>
+                <OpsFilterChip tone="info" icon={<SafetyCertificateOutlined />}>已锁定单集群范围</OpsFilterChip>
+                <OpsIconActionButton
+                  type="primary"
+                  icon={<RobotOutlined />}
+                  loading={analysisLoading}
+                  onClick={() => void openAnalysis()}
+                >
+                  AI 分析
+                </OpsIconActionButton>
+                <OpsIconActionButton
+                  icon={<MessageOutlined />}
+                  onClick={() => router.push(`/ai-assistant?clusterId=${encodeURIComponent(clusterId)}`)}
+                >
+                  AI 对话
+                </OpsIconActionButton>
+                <Button size="small" icon={<ReloadOutlined />} loading={isFetching || statsQuery.isFetching} onClick={() => {
+                  void refresh();
+                  void statsQuery.refetch();
               }}>刷新</Button>
             </Space>
           )}
@@ -237,6 +292,27 @@ function ClusterInfoContent() {
           <Typography.Text type="secondary">{statsQuery.isLoading ? "正在加载资源指标。" : "当前没有可用的资源指标。"}</Typography.Text>
         )}
       </OpsSurface>
+
+      <Modal
+        title={<Space><RobotOutlined style={{ color: "#1677ff" }} />当前集群 AI 健康分析</Space>}
+        open={analysisOpen}
+        onCancel={() => setAnalysisOpen(false)}
+        footer={<Button type="primary" onClick={() => void openAnalysis()} loading={analysisLoading}>重新分析</Button>}
+        width={720}
+      >
+        {analysisLoading ? (
+          <div style={{ minHeight: 180, display: "grid", placeItems: "center", gap: 12 }}>
+            <Spin />
+            <Typography.Text type="secondary">正在基于当前集群快照生成只读分析...</Typography.Text>
+          </div>
+        ) : analysisError ? (
+          <Alert type="error" showIcon title="分析暂不可用" description={analysisError} />
+        ) : (
+          <Typography.Paragraph style={{ whiteSpace: "pre-wrap", lineHeight: 1.8, marginBottom: 0 }}>
+            {analysisText || "暂无分析结果。"}
+          </Typography.Paragraph>
+        )}
+      </Modal>
     </div>
   );
 }

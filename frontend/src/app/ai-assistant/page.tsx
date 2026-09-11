@@ -47,7 +47,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useQuery } from "@tanstack/react-query";
@@ -602,6 +602,7 @@ function ModelSettingsDrawer({
 
 export default function AiAssistantPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { accessToken, isInitializing, role } = useAuth();
   const isAdmin = role === "admin" || role === "platform-admin";
   const screens = Grid.useBreakpoint();
@@ -629,6 +630,8 @@ export default function AiAssistantPage() {
   const [deleting, setDeleting] = useState(false);
   const [deferredQueryReady, setDeferredQueryReady] = useState(false);
   const [cacheHydrated, setCacheHydrated] = useState(false);
+
+  const requestedClusterId = searchParams.get("clusterId")?.trim() ?? "";
 
   const [alertForm, setAlertForm] = useState({
     title: "Pod 持续重启",
@@ -680,6 +683,12 @@ export default function AiAssistantPage() {
     gcTime: PAGE_QUERY_GC_TIME_MS,
     refetchOnWindowFocus: false,
   });
+
+  useEffect(() => {
+    if (requestedClusterId && requestedClusterId !== actionClusterId) {
+      setActionClusterId(requestedClusterId);
+    }
+  }, [actionClusterId, requestedClusterId]);
 
   useEffect(() => {
     if (!actionClusterId && clustersData?.items?.length) {

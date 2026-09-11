@@ -3,6 +3,7 @@
 import {
   LinkOutlined,
   ReloadOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Col, Descriptions, Empty, Row, Select, Space, Typography } from "antd";
@@ -230,6 +231,12 @@ export default function ObservabilityCenterPage() {
                 onChange={setRange}
                 options={OBSERVABILITY_RANGE_OPTIONS}
               />
+              <OpsIconActionButton
+                href={clusterId ? `/clusters/${encodeURIComponent(clusterId)}/observability/configuration` : "/observability/configuration"}
+                icon={<SettingOutlined />}
+              >
+                观测配置
+              </OpsIconActionButton>
               <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
                 刷新
               </OpsIconActionButton>
