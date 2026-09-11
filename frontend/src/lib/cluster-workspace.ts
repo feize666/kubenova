@@ -3,12 +3,7 @@
  * helpers while the legacy global routes are migrated incrementally.
  */
 export type ClusterWorkspaceSection =
-  | "overview"
-  | "workloads"
-  | "network"
-  | "storage"
-  | "configs"
-  | "topology";
+  "overview" | "workloads" | "network" | "storage" | "configs" | "topology";
 
 export type ClusterWorkspaceNavigationItem = {
   key: string;
@@ -58,9 +53,12 @@ export const CLUSTER_WORKSPACE_RESOURCE_PATHS = [
   "terminal",
 ] as const;
 
-export type ClusterWorkspaceResourcePath = (typeof CLUSTER_WORKSPACE_RESOURCE_PATHS)[number];
+export type ClusterWorkspaceResourcePath =
+  (typeof CLUSTER_WORKSPACE_RESOURCE_PATHS)[number];
 
-const clusterWorkspaceResourcePathSet = new Set<string>(CLUSTER_WORKSPACE_RESOURCE_PATHS);
+const clusterWorkspaceResourcePathSet = new Set<string>(
+  CLUSTER_WORKSPACE_RESOURCE_PATHS,
+);
 
 export function isSupportedClusterWorkspaceResource(
   path: string,
@@ -85,7 +83,10 @@ export function buildClusterWorkspaceHref(
   return `/clusters/${encodeURIComponent(normalizedClusterId)}/${normalizedSection}`;
 }
 
-export function buildClusterResourceHref(clusterId: string, resourcePath: string) {
+export function buildClusterResourceHref(
+  clusterId: string,
+  resourcePath: string,
+) {
   return buildClusterWorkspaceHref(clusterId, resourcePath);
 }
 
@@ -97,6 +98,19 @@ export function getClusterIdFromPathname(pathname: string) {
   } catch {
     return null;
   }
+}
+
+/** Keep the workspace resource navigation as a single-open accordion. */
+export function resolveAccordionOpenKeys(
+  nextKeys: readonly string[],
+  currentKeys: readonly string[] = [],
+): string[] {
+  const newlyOpenedKey = currentKeys.length
+    ? nextKeys.find((key) => !currentKeys.includes(key))
+    : undefined;
+  const fallbackKey = nextKeys[nextKeys.length - 1];
+  const key = newlyOpenedKey ?? fallbackKey;
+  return key ? [key] : [];
 }
 
 export function resolveWorkspaceClusterId(
@@ -123,7 +137,7 @@ export function resolveResourceFilterBasePath(
   pathname: string,
   legacyPath?: string,
 ) {
-  return workspaceClusterId?.trim() ? pathname : legacyPath ?? pathname;
+  return workspaceClusterId?.trim() ? pathname : (legacyPath ?? pathname);
 }
 
 export function resolveWorkspaceResourceHref(
@@ -142,9 +156,12 @@ export function scopeWorkspaceClusterValues<T>(
   value: T,
 ): T {
   const fixedClusterId = workspaceClusterId?.trim();
-  if (!fixedClusterId || value === null || typeof value !== "object") return value;
+  if (!fixedClusterId || value === null || typeof value !== "object")
+    return value;
   if (Array.isArray(value)) {
-    return value.map((item) => scopeWorkspaceClusterValues(fixedClusterId, item)) as T;
+    return value.map((item) =>
+      scopeWorkspaceClusterValues(fixedClusterId, item),
+    ) as T;
   }
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return value;
@@ -152,7 +169,9 @@ export function scopeWorkspaceClusterValues<T>(
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, item]) => [
       key,
-      key === "clusterId" ? fixedClusterId : scopeWorkspaceClusterValues(fixedClusterId, item),
+      key === "clusterId"
+        ? fixedClusterId
+        : scopeWorkspaceClusterValues(fixedClusterId, item),
     ]),
   ) as T;
 }
@@ -188,34 +207,58 @@ export function filterClusterScopedColumns<T extends object>(
       title?: unknown;
       children?: readonly T[];
     };
-    const key = String(value.key ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+    const key = String(value.key ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_-]+/g, "");
     const title = typeof value.title === "string" ? value.title.trim() : "";
-    return key === "clusterid" || key === "cluster" || title === "集群" || title === "集群名称";
+    return (
+      key === "clusterid" ||
+      key === "cluster" ||
+      title === "集群" ||
+      title === "集群名称"
+    );
   };
 
   return columns.flatMap((column) => {
     if (isClusterColumn(column)) return [];
     const value = column as T & { children?: readonly T[] };
     if (!Array.isArray(value.children)) return [column];
-    const children = filterClusterScopedColumns(workspaceClusterId, value.children);
+    const children = filterClusterScopedColumns(
+      workspaceClusterId,
+      value.children,
+    );
     if (!children.length) return [];
     return [{ ...value, children } as T];
   });
 }
 
-export function getClusterWorkspaceNavigation(clusterId: string): ClusterWorkspaceNavigationSection[] {
-  const item = (key: string, label: string, path: string): ClusterWorkspaceNavigationItem => ({
+export function getClusterWorkspaceNavigation(
+  clusterId: string,
+): ClusterWorkspaceNavigationSection[] {
+  const item = (
+    key: string,
+    label: string,
+    path: string,
+  ): ClusterWorkspaceNavigationItem => ({
     key,
     label,
     href: buildClusterResourceHref(clusterId, path),
   });
 
   return [
-    { key: "overview", label: "集群信息", items: [item("overview", "集群信息", "overview")] },
+    {
+      key: "overview",
+      label: "集群信息",
+      items: [item("overview", "集群信息", "overview")],
+    },
     {
       key: "base-resources",
       label: "基础资源",
-      items: [item("nodes", "Node", "nodes"), item("namespaces", "Namespace", "namespaces")],
+      items: [
+        item("nodes", "Node", "nodes"),
+        item("namespaces", "Namespace", "namespaces"),
+      ],
     },
     {
       key: "workloads",
@@ -245,7 +288,11 @@ export function getClusterWorkspaceNavigation(clusterId: string): ClusterWorkspa
     {
       key: "storage",
       label: "存储",
-      items: [item("pv", "PersistentVolume", "storage/pv"), item("pvc", "PersistentVolumeClaim", "storage/pvc"), item("sc", "StorageClass", "storage/sc")],
+      items: [
+        item("pv", "PersistentVolume", "storage/pv"),
+        item("pvc", "PersistentVolumeClaim", "storage/pvc"),
+        item("sc", "StorageClass", "storage/sc"),
+      ],
     },
     {
       key: "configs",
