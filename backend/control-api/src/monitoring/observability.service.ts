@@ -149,6 +149,13 @@ export class ObservabilityService {
     return { items, total: items.length, timestamp: new Date().toISOString() };
   }
 
+  async getDataSourceScope(id: string): Promise<{ clusterId: string | null } | null> {
+    return this.prisma.monitoringDataSource.findUnique({
+      where: { id },
+      select: { clusterId: true },
+    });
+  }
+
   async createDataSource(
     actor: ObservabilityActor | undefined,
     input: DataSourceInput,
