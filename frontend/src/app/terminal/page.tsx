@@ -1059,7 +1059,7 @@ export default function TerminalPage() {
             <span className="terminal-workbench-toolbar__select">
               <Select
                 value={effectiveContainer || undefined}
-                className="terminal-workbench-container-select"
+                className="terminal-workbench-container-select ops-control-select"
                 placeholder="选择容器"
                 options={availableContainers.map((container) => ({
                   label: container,
@@ -1423,6 +1423,22 @@ export default function TerminalPage() {
           border-color: var(--terminal-workbench-select-border) !important;
           background: var(--terminal-workbench-select-bg) !important;
           color: var(--terminal-workbench-select-text) !important;
+          border-radius: 6px !important;
+          box-shadow: none !important;
+          transition:
+            border-color var(--ops-motion-fast) var(--ops-motion-ease),
+            background-color var(--ops-motion-fast) var(--ops-motion-ease);
+        }
+
+        .terminal-workbench-container-select:hover .ant-select-selector,
+        .terminal-workbench-container-select.ant-select-focused .ant-select-selector {
+          border-color: var(--terminal-workbench-stage-active-border) !important;
+          background: color-mix(
+            in srgb,
+            var(--terminal-workbench-select-bg) 92%,
+            var(--kn-primary-subtle)
+          ) !important;
+          box-shadow: var(--ops-focus-ring) !important;
         }
 
         .terminal-workbench-container-select .ant-select-arrow,

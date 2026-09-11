@@ -1691,6 +1691,7 @@ export default function LogsPage() {
                             style={{ width: 120 }}
                           />
                           <Button
+                            className="ops-popover-command"
                             icon={<ReloadOutlined />}
                             onClick={hardRefresh}
                             loading={isConnecting}
@@ -1705,6 +1706,7 @@ export default function LogsPage() {
                               <Space wrap size={8}>
                                 {QUICK_TIME_OPTIONS.map((item) => (
                                   <Button
+                                    className="ops-time-option"
                                     key={item.from}
                                     size="small"
                                     type={
@@ -1743,6 +1745,7 @@ export default function LogsPage() {
                                   style={{ width: 150 }}
                                 />
                                 <Button
+                                  className="ops-popover-command ops-popover-command--primary"
                                   type="primary"
                                   onClick={applyRelativeTimeRange}
                                 >
@@ -1782,6 +1785,7 @@ export default function LogsPage() {
                               <Space wrap size={8}>
                                 {RECENT_TIME_OPTIONS.map((item) => (
                                   <Button
+                                    className="ops-time-option"
                                     key={item.from}
                                     size="small"
                                     type={
@@ -1814,7 +1818,7 @@ export default function LogsPage() {
                       </div>
                     }
                   >
-                    <Button className="headlamp-time-trigger">
+                    <Button className="headlamp-time-trigger ops-control-trigger">
                       <span>{selectedTimeLabel}</span>
                       <DownOutlined />
                     </Button>
@@ -2077,7 +2081,7 @@ export default function LogsPage() {
           {streamStatus === "连接异常" ? (
             <Button
               type="primary"
-              className="logs-reconnect-button"
+              className="logs-reconnect-button ops-control-primary"
               onClick={reconnectNow}
               loading={isConnecting}
             >
@@ -2219,6 +2223,107 @@ export default function LogsPage() {
           border-color: rgba(34, 211, 238, 0.48);
           background: color-mix(in srgb, var(--logs-control-bg) 92%, var(--kn-primary-subtle));
           color: var(--ant-color-primary);
+        }
+
+        /* Unified Ops control language for the log workbench and its portal popovers. */
+        :global(.logs-workbench-shell .ant-select-selector),
+        :global(.logs-workbench-shell .ant-input),
+        :global(.logs-workbench-shell .ant-picker),
+        :global(.logs-workbench-shell .ops-control-trigger),
+        :global(.logs-workbench-shell .ops-popover-command),
+        :global(.logs-workbench-shell .ops-time-option) {
+          border-radius: 6px !important;
+          border-color: var(--logs-control-border) !important;
+          background: var(--logs-control-bg) !important;
+          color: var(--logs-control-text) !important;
+          box-shadow: none !important;
+          transition:
+            border-color var(--ops-motion-fast) var(--ops-motion-ease),
+            background-color var(--ops-motion-fast) var(--ops-motion-ease),
+            color var(--ops-motion-fast) var(--ops-motion-ease);
+        }
+
+        :global(.logs-workbench-shell .ops-control-trigger) {
+          display: inline-flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          min-width: 148px;
+          height: 34px;
+          padding-inline: 10px;
+          font-size: 12px;
+          font-weight: 650;
+        }
+
+        :global(.logs-workbench-shell .ops-popover-command) {
+          min-height: 32px;
+          padding-inline: 12px;
+          font-size: 12px;
+          font-weight: 650;
+        }
+
+        :global(.logs-workbench-shell .ops-popover-command--primary),
+        :global(.logs-workbench-shell .ops-time-option.ant-btn-primary),
+        :global(.logs-workbench-shell .logs-reconnect-button) {
+          border-color: color-mix(in srgb, var(--ant-color-primary) 60%, transparent) !important;
+          background: var(--ant-color-primary) !important;
+          color: #fff !important;
+        }
+
+        :global(.logs-workbench-shell .ops-time-option) {
+          min-height: 28px;
+          padding-inline: 10px;
+          font-size: 12px;
+        }
+
+        :global(.logs-workbench-shell .ant-select:hover .ant-select-selector),
+        :global(.logs-workbench-shell .ant-select-focused .ant-select-selector),
+        :global(.logs-workbench-shell .ant-input:hover),
+        :global(.logs-workbench-shell .ant-input:focus),
+        :global(.logs-workbench-shell .ant-picker:hover),
+        :global(.logs-workbench-shell .ant-picker-focused),
+        :global(.logs-workbench-shell .ops-control-trigger:hover),
+        :global(.logs-workbench-shell .ops-control-trigger:focus-visible),
+        :global(.logs-workbench-shell .ops-popover-command:hover),
+        :global(.logs-workbench-shell .ops-popover-command:focus-visible),
+        :global(.logs-workbench-shell .ops-time-option:hover),
+        :global(.logs-workbench-shell .ops-time-option:focus-visible) {
+          border-color: var(--ant-color-primary) !important;
+          background: color-mix(in srgb, var(--logs-control-bg) 88%, var(--kn-primary-subtle, rgba(35, 92, 255, 0.1))) !important;
+          color: var(--ant-color-primary) !important;
+          outline: none;
+          box-shadow: var(--ops-focus-ring) !important;
+        }
+
+        /* Popovers render into document.body, so keep their controls explicitly themed. */
+        :global(.headlamp-time-popover .ant-select-selector),
+        :global(.headlamp-time-popover .ant-input),
+        :global(.headlamp-time-popover .ant-picker),
+        :global(.headlamp-time-popover .ant-btn),
+        :global(.headlamp-search-popover .ant-input) {
+          border-radius: 6px !important;
+          border-color: var(--logs-control-border, #cfd9e6) !important;
+          background: var(--logs-control-bg, #fff) !important;
+          color: var(--logs-control-text, #172033) !important;
+          box-shadow: none !important;
+        }
+
+        :global(.headlamp-time-popover .ant-btn-primary) {
+          border-color: var(--ant-color-primary) !important;
+          background: var(--ant-color-primary) !important;
+          color: #fff !important;
+        }
+
+        :global(.headlamp-time-popover .ant-btn:hover),
+        :global(.headlamp-time-popover .ant-btn:focus-visible),
+        :global(.headlamp-time-popover .ant-input:focus),
+        :global(.headlamp-time-popover .ant-picker-focused),
+        :global(.headlamp-time-popover .ant-select-focused .ant-select-selector),
+        :global(.headlamp-search-popover .ant-input:focus) {
+          border-color: var(--ant-color-primary) !important;
+          color: var(--ant-color-primary) !important;
+          outline: none;
+          box-shadow: var(--ops-focus-ring) !important;
         }
 
         :global(.logs-workbench-chips.ant-space) {
