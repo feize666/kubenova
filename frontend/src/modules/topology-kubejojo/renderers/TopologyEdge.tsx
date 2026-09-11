@@ -135,7 +135,7 @@ function edgeStyle(
     case "context":
       return {
         ...base,
-        stroke: neutralStroke,
+        stroke: typedStroke,
         strokeWidth: layer === "main" ? 1.35 : 0.9,
         opacity: (layer === "main" ? 0.5 : 0.24) * confidenceOpacity,
       };
@@ -149,7 +149,7 @@ function edgeStyle(
     default:
       return {
         ...base,
-        stroke: neutralStroke,
+        stroke: typedStroke,
         strokeWidth: layer === "main" ? 1.55 : 0.95,
         opacity: (layer === "main" ? 0.74 : 0.24) * confidenceOpacity,
       };
@@ -171,14 +171,15 @@ function EdgeRenderer({
   const viewState = edgeData?.viewState ?? "default";
   const status = edgeData?.status ?? "unknown";
   const style = edgeStyle(viewState, edgeData?.stroke, edgeData?.dashed, edgeData?.confidence, layer, status);
-  const labelPosition = pathMidpoint(sections, offset);
-  const showLabel = Boolean(edgeData?.label && edgeData.viewState === "focused");
+  const labelPosition = edgeData?.labelPosition ?? pathMidpoint(sections, offset);
+  const showLabel = Boolean(edgeData?.label && (edgeData.labelVisible || edgeData.viewState === "focused"));
   return (
     <>
       <BaseEdge
         id={id}
         path={path}
         markerEnd={markerEnd}
+        interactionWidth={24}
         className={`topology-kubejojo__edge-path is-${layer} is-${viewState} is-status-${status} is-domain-${edgeData?.relationDomain ?? "scope"}`}
         style={style}
       />

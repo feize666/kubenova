@@ -218,6 +218,13 @@ function kindDomain(kind?: string) {
   return "other";
 }
 
+function resourceKindClass(kind?: string, membersByKind?: Record<string, number>) {
+  const dominantKind = Object.entries(membersByKind ?? {})
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "en"))[0]?.[0];
+  const normalized = (dominantKind ?? kind)?.trim().replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+  return normalized ? `is-resource-${normalized}` : "is-resource-unknown";
+}
+
 function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>>) {
   const graphNode = data.graphNode;
   const children = getChildren(graphNode);
@@ -245,6 +252,7 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
         : "资源集合";
   const groupClass = graphNode.groupKind ? `is-group-${graphNode.groupKind}` : undefined;
   const kindClass = `is-kind-${kindDomain(nodeKind)}`;
+  const resourceClass = resourceKindClass(nodeKind, resource?.aggregation?.membersByKind);
   const openResource = () => {
     const resourceId = resource?.aggregation?.representativeId ?? resource?.id;
     if (resourceId) data.onOpenResource?.(resourceId);
@@ -260,6 +268,7 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
         isCollapsedGroup ? "is-collapsed" : undefined,
         isCollapsedGroup ? groupClass : undefined,
         kindClass,
+        resourceClass,
       ].filter(Boolean).join(" ")}
       role="button"
       tabIndex={0}

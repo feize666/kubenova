@@ -82,21 +82,34 @@ const WEIGHTS: Record<string, number> = {
  * jumping ahead of EndpointSlice between renders.
  */
 const ACCESS_PATH_ORDER: Record<string, number> = {
+  GatewayClass: 0,
+  Gateway: 5,
+  HTTPRoute: 8,
+  GRPCRoute: 8,
+  TCPRoute: 8,
+  TLSRoute: 8,
+  UDPRoute: 8,
   Ingress: 10,
   IngressRoute: 10,
-  Gateway: 10,
   Service: 20,
   EndpointSlice: 30,
   Endpoints: 31,
+  NetworkPolicy: 35,
   Pod: 40,
-  PersistentVolumeClaim: 50,
-  PersistentVolume: 60,
-  ConfigMap: 50,
-  Secret: 50,
   ReplicaSet: 50,
+  Job: 50,
+  HorizontalPodAutoscaler: 55,
+  VerticalPodAutoscaler: 55,
   Deployment: 60,
   StatefulSet: 60,
   DaemonSet: 60,
+  CronJob: 70,
+  PersistentVolumeClaim: 72,
+  ConfigMap: 74,
+  Secret: 76,
+  ServiceAccount: 78,
+  PersistentVolume: 82,
+  StorageClass: 90,
 };
 const DEFAULT_ASPECT_RATIO = 1.6;
 
@@ -133,7 +146,17 @@ const each = (node: KubejojoGraphNode, fn: (item: KubejojoGraphNode) => void) =>
 const compareNodes = (left: KubejojoGraphNode, right: KubejojoGraphNode) => weight(right) - weight(left) || left.id.localeCompare(right.id, "en");
 
 export function getKubejojoAccessPathOrder(node: KubejojoGraphNode): number {
-  return ACCESS_PATH_ORDER[node.resource?.kind ?? ""] ?? 45;
+  const resource = node.resource;
+  const explicitKind = resource?.aggregation?.semanticKey.kind;
+  if (explicitKind && explicitKind !== "Aggregate") return ACCESS_PATH_ORDER[explicitKind] ?? 45;
+  const members = Object.entries(resource?.aggregation?.membersByKind ?? {});
+  if (members.length > 0) {
+    const total = members.reduce((sum, [, count]) => sum + count, 0);
+    if (total > 0) {
+      return Math.round(members.reduce((sum, [kind, count]) => sum + (ACCESS_PATH_ORDER[kind] ?? 45) * count, 0) / total);
+    }
+  }
+  return ACCESS_PATH_ORDER[resource?.kind ?? ""] ?? 45;
 }
 
 const compareLayoutNodes = (left: KubejojoGraphNode, right: KubejojoGraphNode) =>
@@ -147,6 +170,12 @@ function visualEdgeEndpoints(edge: KubejojoRelation): { source: string; target: 
   return edge.type === "OWNS" || edge.role === "owner"
     ? { source: edge.target, target: edge.source }
     : { source: edge.source, target: edge.target };
+}
+
+function visualEdgeLabel(edge: KubejojoRelation): string {
+  return edge.type === "OWNS" || edge.role === "owner"
+    ? "受控于"
+    : getKubejojoRelationSemantics(edge.type, edge.role, edge.label).label;
 }
 
 function normalizeAspectRatio(aspectRatio: number) {
@@ -163,7 +192,9 @@ export function getKubejojoLayoutPolicy(hasEdges: boolean, aspectRatio: number):
 }
 
 export function getKubejojoPartition(node: KubejojoGraphNode) {
-  return -weight(node);
+  // A partition represents a semantic stage in the access path. Resources in
+  // the same stage share a column and fan out vertically.
+  return getKubejojoAccessPathOrder(node);
 }
 
 export function makeKubejojoGraph(resources: KubejojoResource[]) {
@@ -445,7 +476,7 @@ function toElk(node: KubejojoGraphNode, aspect: number): ElkNodeData {
       type: "topologyEdge",
       sources: [endpoints.source],
       targets: [endpoints.target],
-      labels: [{ text: edge.label || getKubejojoRelationSemantics(edge.type, edge.role).label, width: 76, height: 18 }],
+      labels: [{ text: visualEdgeLabel(edge), width: 76, height: 18 }],
       data: edge,
       };
     });
@@ -460,13 +491,19 @@ function toElk(node: KubejojoGraphNode, aspect: number): ElkNodeData {
       "elk.layered.cycleBreaking.strategy": "DEPTH_FIRST",
       "elk.layered.layering.strategy": "NETWORK_SIMPLEX",
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
       // Respect the deterministic child order above when several valid
       // layouts exist (notably Service -> EndpointSlice/Endpoints branches).
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
       "elk.layered.considerModelOrder.components": "true",
+      "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
       "elk.nodeSize.minimum": `(${KUBEJOJO_LAYOUT_METRICS.nodeWidth}.0,${KUBEJOJO_LAYOUT_METRICS.nodeHeight}.0)`,
       "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
       "elk.spacing.nodeNode": String(KUBEJOJO_LAYOUT_METRICS.layeredNodeSpacing),
+      "elk.spacing.edgeEdge": "16",
+      "elk.spacing.edgeNode": "20",
+      "elk.layered.spacing.edgeEdgeBetweenLayers": "14",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "18",
       "elk.layered.spacing.nodeNodeBetweenLayers": String(KUBEJOJO_LAYOUT_METRICS.layeredLayerSpacing),
       "elk.padding": "[left=16, top=60, right=16, bottom=18]",
     }
@@ -509,6 +546,7 @@ export async function layoutKubejojoGraph(root: KubejojoGraphNode, aspectRatio: 
       if (!edge.sections?.length) return;
       const relation = (edge as ElkExtendedEdge & { data?: KubejojoRelation }).data;
       const semantics = getKubejojoRelationSemantics(relation?.type, relation?.role, relation?.label);
+      const label = edge.labels?.[0];
       edges.push({
         id: edge.id,
         source: edge.sources?.[0] ?? "",
@@ -522,7 +560,13 @@ export async function layoutKubejojoGraph(root: KubejojoGraphNode, aspectRatio: 
           role: relation?.role,
           relationType: semantics.type,
           relationDomain: semantics.domain,
-          label: relation?.label || semantics.label,
+          label: relation ? visualEdgeLabel(relation) : semantics.label,
+          labelPosition: label && Number.isFinite(label.x) && Number.isFinite(label.y)
+            ? {
+              x: absolutePosition.x + (label.x ?? 0) + (label.width ?? 0) / 2,
+              y: absolutePosition.y + (label.y ?? 0) + (label.height ?? 0) / 2,
+            }
+            : undefined,
           stroke: semantics.stroke,
           dashed: semantics.dashed,
           ports: relation?.ports,

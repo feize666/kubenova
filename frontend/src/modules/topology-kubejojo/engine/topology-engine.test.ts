@@ -120,6 +120,11 @@ test("canonical access path has stable visual ordering", () => {
     resource: { id: kind, kind, name: kind },
   });
   assert.ok(order("Ingress") < order("Service"));
+  assert.ok(order("Gateway") < order("GRPCRoute"));
+  assert.ok(order("GRPCRoute") < order("Service"));
+  assert.equal(order("TCPRoute"), order("HTTPRoute"));
+  assert.equal(order("TLSRoute"), order("HTTPRoute"));
+  assert.equal(order("UDPRoute"), order("HTTPRoute"));
   assert.ok(order("Service") < order("EndpointSlice"));
   assert.ok(order("EndpointSlice") < order("Pod"));
   assert.ok(order("Pod") < order("PersistentVolumeClaim"));
@@ -319,7 +324,7 @@ test("selection paths and grouped identities remain deterministic", () => {
   assert.deepEqual(getKubejojoSelectionPath(forward, "missing").map((item) => item.id), ["root"]);
 });
 
-test("layout policy uses real aspect ratio, edge presence, weight, and stable compact metrics", () => {
+test("layout policy uses real aspect ratio, edge presence, semantic stages, and stable compact metrics", () => {
   assert.deepEqual(getKubejojoLayoutPolicy(true, 1.8), {
     algorithm: "layered",
     direction: "RIGHT",
@@ -340,8 +345,10 @@ test("layout policy uses real aspect ratio, edge presence, weight, and stable co
     direction: "RIGHT",
     aspectRatio: 1.6,
   });
-  assert.equal(getKubejojoPartition({ id: "weighted", weight: 73 }), -73);
-  assert.equal(getKubejojoPartition({ id: "deployment", resource: progressiveDisclosureResources[0] }), -980);
+  assert.equal(getKubejojoPartition({ id: "weighted", weight: 73 }), 45);
+  assert.equal(getKubejojoPartition({ id: "deployment", resource: progressiveDisclosureResources[0] }), 60);
+  assert.equal(getKubejojoPartition({ id: "pod-a", resource: { id: "pod-a", kind: "Pod", name: "a" } }), 40);
+  assert.equal(getKubejojoPartition({ id: "pod-b", resource: { id: "pod-b", kind: "Pod", name: "b" } }), 40);
   assert.deepEqual(KUBEJOJO_LAYOUT_METRICS, {
     nodeWidth: 220,
     nodeHeight: 88,
@@ -351,6 +358,128 @@ test("layout policy uses real aspect ratio, edge presence, weight, and stable co
     layeredLayerSpacing: 44,
     packedNodeSpacing: 14,
   });
+});
+
+test("workload access paths stay ordered and stable across input order", async () => {
+  const resources: KubejojoResource[] = [
+    { id: "ingress", kind: "Ingress", name: "public", namespace: "demo" },
+    { id: "service", kind: "Service", name: "api", namespace: "demo" },
+    { id: "endpoints", kind: "EndpointSlice", name: "api-random", namespace: "demo" },
+    { id: "pod-a", kind: "Pod", name: "api-a", namespace: "demo" },
+    { id: "pod-b", kind: "Pod", name: "api-b", namespace: "demo" },
+    { id: "replica-set", kind: "ReplicaSet", name: "api-rs", namespace: "demo" },
+    { id: "deployment", kind: "Deployment", name: "api", namespace: "demo" },
+  ];
+  const relations: KubejojoRelation[] = [
+    { id: "ingress-service", source: "ingress", target: "service", type: "ROUTES_TO" },
+    { id: "service-endpoints", source: "service", target: "endpoints", type: "ROUTES_TO" },
+    { id: "endpoints-pod-a", source: "endpoints", target: "pod-a", type: "ROUTES_TO" },
+    { id: "endpoints-pod-b", source: "endpoints", target: "pod-b", type: "ROUTES_TO" },
+    { id: "replica-set-pod-a", source: "replica-set", target: "pod-a", type: "OWNS" },
+    { id: "replica-set-pod-b", source: "replica-set", target: "pod-b", type: "OWNS" },
+    { id: "deployment-replica-set", source: "deployment", target: "replica-set", type: "OWNS" },
+  ];
+  const graph = (nodes: KubejojoResource[], edges: KubejojoRelation[]): KubejojoGraphNode => ({
+    id: "root",
+    label: "root",
+    nodes: nodes.map((resource) => ({
+      id: resource.id,
+      label: resource.name,
+      subtitle: resource.kind,
+      resource,
+    })),
+    edges,
+  });
+  const positions = async (nodes: KubejojoResource[], edges: KubejojoRelation[]) => {
+    const layout = await layoutKubejojoGraph(graph(nodes, edges), 1.6);
+    return new Map(layout.nodes.map((node) => [node.id, node.position]));
+  };
+
+  const forward = await positions(resources, relations);
+  const reversed = await positions([...resources].reverse(), [...relations].reverse());
+  const x = (id: string) => forward.get(id)?.x ?? Number.NaN;
+
+  assert.ok(x("ingress") < x("service"));
+  assert.ok(x("service") < x("endpoints"));
+  assert.ok(x("endpoints") < x("pod-a"));
+  assert.equal(x("pod-a"), x("pod-b"), "fan-out Pods must share one semantic stage");
+  assert.ok(x("pod-a") < x("replica-set"));
+  assert.ok(x("replica-set") < x("deployment"));
+  const ownershipEdge = (await layoutKubejojoGraph(graph(resources, relations), 1.6)).edges
+    .find((edge) => edge.id === "deployment-replica-set");
+  assert.equal(ownershipEdge?.source, "replica-set");
+  assert.equal(ownershipEdge?.target, "deployment");
+  assert.equal(ownershipEdge?.data?.label, "受控于");
+  assert.ok(ownershipEdge?.data?.labelPosition, "ELK must provide a collision-aware label position");
+  assert.deepEqual(reversed, forward, "API result order must not change the rendered layout");
+});
+
+test("storage and configuration dependencies continue after workload controllers", async () => {
+  const resources: KubejojoResource[] = [
+    { id: "pod", kind: "Pod", name: "api-0", namespace: "demo" },
+    { id: "replica-set", kind: "ReplicaSet", name: "api-rs", namespace: "demo" },
+    { id: "deployment", kind: "Deployment", name: "api", namespace: "demo" },
+    { id: "pvc", kind: "PersistentVolumeClaim", name: "api-data", namespace: "demo" },
+    { id: "config", kind: "ConfigMap", name: "api-config", namespace: "demo" },
+    { id: "secret", kind: "Secret", name: "api-secret", namespace: "demo" },
+  ];
+  const relations: KubejojoRelation[] = [
+    { id: "deployment-replica-set", source: "deployment", target: "replica-set", type: "OWNS" },
+    { id: "replica-set-pod", source: "replica-set", target: "pod", type: "OWNS" },
+    { id: "mount", source: "deployment", target: "pvc", type: "MOUNTS" },
+    { id: "config", source: "deployment", target: "config", type: "USES_CONFIG" },
+    { id: "secret", source: "deployment", target: "secret", type: "USES_SECRET" },
+  ];
+  const layout = await layoutKubejojoGraph({
+    id: "root",
+    nodes: resources.map((resource) => ({ id: resource.id, resource })),
+    edges: relations,
+  }, 1.6);
+  const x = new Map(layout.nodes.map((node) => [node.id, node.position.x]));
+
+  assert.ok(x.get("pod")! < x.get("replica-set")!);
+  assert.ok(x.get("replica-set")! < x.get("deployment")!);
+  assert.ok(x.get("deployment")! < x.get("pvc")!);
+  assert.ok(x.get("deployment")! < x.get("config")!);
+  assert.ok(x.get("deployment")! < x.get("secret")!);
+});
+
+test("capacity aggregates preserve the dominant resource stage", async () => {
+  const services = Array.from({ length: 250 }, (_, index) => ({
+    id: `service-${index}`,
+    kind: "Service",
+    namespace: "demo",
+    instanceName: "api",
+  }));
+  const pods = Array.from({ length: 400 }, (_, index) => ({
+    id: `pod-${index}`,
+    kind: "Pod",
+    namespace: "demo",
+    instanceName: "api",
+  }));
+  const relations = services.map((service, index) => ({
+    id: `route-${index}`,
+    source: service.id,
+    target: pods[index].id,
+    type: "ROUTES_TO" as const,
+  }));
+  const projected = applyTopologyCapacity([...services, ...pods], relations, "defaultCanvas");
+  const projectedResources = projected.resources as KubejojoResource[];
+  const projectedRelations = projected.relations as KubejojoRelation[];
+  const serviceAggregate = projectedResources.find((resource) => resource.aggregation?.membersByKind.Service);
+  const podAggregate = projectedResources.find((resource) => resource.aggregation?.membersByKind.Pod);
+
+  assert.ok(serviceAggregate?.aggregation);
+  assert.ok(podAggregate?.aggregation);
+  assert.equal(getKubejojoAccessPathOrder({ id: serviceAggregate!.id, resource: serviceAggregate! }), 20);
+  assert.equal(getKubejojoAccessPathOrder({ id: podAggregate!.id, resource: podAggregate! }), 40);
+  const layout = await layoutKubejojoGraph({
+    id: "root",
+    nodes: projectedResources.map((resource) => ({ id: resource.id, resource })),
+    edges: projectedRelations,
+  }, 1.6);
+  const x = new Map(layout.nodes.map((node) => [node.id, node.position.x]));
+  assert.ok(x.get(serviceAggregate!.id)! < x.get(podAggregate!.id)!);
 });
 
 test("capacity limits are exact and over-limit graphs use semantic aggregation", () => {

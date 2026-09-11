@@ -10,7 +10,6 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
-  getNodesBounds,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -66,6 +65,31 @@ type Layout = {
   nodes: Node<TopologyRendererNodeData>[];
   edges: Edge<TopologyRendererEdgeData>[];
 };
+
+function layoutBounds(nodes: Node<TopologyRendererNodeData>[]) {
+  const topLevel = nodes.filter((node) => !node.parentId);
+  if (!topLevel.length) return null;
+  const boxes = topLevel.map((node) => ({
+    x: node.position.x,
+    y: node.position.y,
+    width: Number(node.style?.width ?? node.width ?? 0),
+    height: Number(node.style?.height ?? node.height ?? 0),
+  })).filter((box) => box.width > 0 && box.height > 0);
+  if (!boxes.length) return null;
+  const left = Math.min(...boxes.map((box) => box.x));
+  const top = Math.min(...boxes.map((box) => box.y));
+  const right = Math.max(...boxes.map((box) => box.x + box.width));
+  const bottom = Math.max(...boxes.map((box) => box.y + box.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function viewportFrame(width: number, height: number, compact: boolean, hasFocusPath: boolean) {
+  const offsetY = compact ? (hasFocusPath ? 128 : 64) : 0;
+  return {
+    size: { width, height: Math.max(1, height - offsetY) },
+    offsetY,
+  };
+}
 
 const EDGE_MARKER_COLOR: Record<TopologyNodeStatus, string> = {
   healthy: "var(--tk-success)",
@@ -171,6 +195,7 @@ function Canvas({
   const [viewMode, setViewMode] = useState<"actual" | "fit" | "custom">("fit");
   const [layoutError, setLayoutError] = useState(false);
   const [layoutRetry, setLayoutRetry] = useState(0);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const capacityProjection = useMemo(
     () => projectCanvasCapacity(resources, relations, groupBy, focusedId, expandAll, includeOverlays),
     [expandAll, focusedId, groupBy, includeOverlays, relations, resources],
@@ -203,6 +228,7 @@ function Canvas({
       .then((next) => {
         if (requestId === layoutRequest.current) {
           setLayout(next);
+          setSelectedEdgeId((current) => current && next.edges.some((edge) => edge.id === current) ? current : null);
           setLayoutRevision(requestId);
           setLayoutError(false);
         }
@@ -218,21 +244,22 @@ function Canvas({
   const showActualSize = useCallback((duration = 180) => {
     setViewMode("actual");
     const canvas = canvasRef.current;
-    const visibleNodes = flow.getNodes();
-    if (!canvas || !visibleNodes.length) return;
+    const bounds = layoutBounds(layout.nodes);
+    if (!canvas || !bounds) return;
+    const frame = viewportFrame(canvas.clientWidth, canvas.clientHeight, aspectRatio < 0.9, selectionPath.length > 1);
     const viewport = getCenteredTopologyViewport(
-      getNodesBounds(visibleNodes),
-      { width: canvas.clientWidth, height: canvas.clientHeight },
+      bounds,
+      frame.size,
       { zoom: 1, minZoom: 1, maxZoom: 1 },
     );
-    if (viewport) void flow.setViewport(viewport, { duration });
-  }, [flow]);
+    if (viewport) void flow.setViewport({ ...viewport, y: viewport.y + frame.offsetY }, { duration });
+  }, [aspectRatio, flow, layout.nodes, selectionPath.length]);
 
   const fitGraph = useCallback(async (duration = 180) => {
     setViewMode("fit");
     const canvas = canvasRef.current;
-    const visibleNodes = flow.getNodes();
-    if (!canvas || !visibleNodes.length) {
+    const bounds = layoutBounds(layout.nodes);
+    if (!canvas || !bounds) {
       await flow.fitView({
         padding: aspectRatio < 0.9 ? 0.16 : 0.08,
         duration,
@@ -242,17 +269,18 @@ function Canvas({
       return;
     }
 
-    const bounds = getNodesBounds(visibleNodes);
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    const inset = aspectRatio < 0.9 ? 48 : 28;
+    const compact = aspectRatio < 0.9;
+    const inset = compact ? 48 : 28;
+    const frame = viewportFrame(width, height, compact, selectionPath.length > 1);
     const viewport = getCenteredTopologyViewport(
       bounds,
-      { width, height },
+      frame.size,
       { minZoom: 0.2, maxZoom: 1, padding: inset },
     );
-    if (viewport) await flow.setViewport(viewport, { duration });
-  }, [aspectRatio, flow]);
+    if (viewport) await flow.setViewport({ ...viewport, y: viewport.y + frame.offsetY }, { duration });
+  }, [aspectRatio, flow, layout.nodes, selectionPath.length]);
 
   useEffect(() => {
     if (!layout.nodes.length || appliedLayoutRevision.current === layoutRevision) return;
@@ -289,7 +317,11 @@ function Canvas({
       data: {
         ...node.data,
         onOpenResource: onOpen,
-        viewState: !selectedNodeId
+        viewState: selectedEdgeId
+          ? layout.edges.find((edge) => edge.id === selectedEdgeId && (edge.source === node.id || edge.target === node.id))
+            ? "focused"
+            : "muted"
+          : !selectedNodeId
           ? "default"
           : node.id === selectedNodeId
             ? "focused"
@@ -298,7 +330,7 @@ function Canvas({
               : "muted",
       },
     })),
-    [adjacent, layout.nodes, selectedNodeId],
+    [adjacent, layout.edges, layout.nodes, onOpen, selectedEdgeId, selectedNodeId],
   );
 
   const edges = useMemo(() => {
@@ -316,15 +348,19 @@ function Canvas({
         : edge.markerEnd,
       data: {
         ...edge.data,
+        labelVisible: layout.edges.length <= 18,
         route: "elk" as const,
         status: aggregateEdgeHealth(
           (edge.data?.relationIds ?? []).map((id) => relationHealth(relationById.get(id), resourceStatusById)),
         ),
-        viewState: edgeViewState(edge.data?.relationIds, relationById, selectedNodeId, adjacent),
+        viewState: selectedEdgeId
+          ? edge.id === selectedEdgeId ? "focused" as const : "muted" as const
+          : edgeViewState(edge.data?.relationIds, relationById, selectedNodeId, adjacent),
       },
     })) as Edge<TopologyRendererEdgeData>[];
-  }, [adjacent, layout.edges, projected.relations, selectedNodeId]);
+  }, [adjacent, layout.edges, projected.relations, projected.resources, selectedEdgeId, selectedNodeId]);
   const handleNodeClick = (node: Node<TopologyRendererNodeData>) => {
+    setSelectedEdgeId(null);
     const graphNode = node.data.graphNode;
     if (graphNode.nodes?.length) {
       setViewMode("fit");
@@ -454,7 +490,13 @@ function Canvas({
             const resource = projected.resources.find((item) => item.id === node.id);
             if (resource) onOpen(resource.aggregation?.representativeId ?? resource.id);
           }}
-          onPaneClick={() => onSelectResource(null)}
+          onEdgeClick={(_, edge) => {
+            setSelectedEdgeId(edge.id);
+          }}
+          onPaneClick={() => {
+            setSelectedEdgeId(null);
+            onSelectResource(null);
+          }}
           proOptions={{ hideAttribution: true }}
         >
           <Background color="var(--tk-grid)" gap={18} size={1} />

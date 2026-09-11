@@ -78,6 +78,8 @@ export interface TopologyRendererEdgeData extends Record<string, unknown> {
   evidence?: string[];
   route?: "elk" | "bridge";
   bridgeLabel?: string;
+  labelVisible?: boolean;
+  labelPosition?: TopologyElkPoint;
 }
 
 export type TopologyRendererNode = Node<TopologyRendererNodeData>;

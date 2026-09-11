@@ -540,7 +540,6 @@ export default function NetworkTopologyPage() {
 
   const selectTopologyResource = useCallback((selection: KubejojoTopologySelection | null) => {
     setTopologySelection(selection);
-    if (!selection) setNeighborhoodResourceId(null);
   }, []);
 
   useEffect(() => {
@@ -954,6 +953,7 @@ export default function NetworkTopologyPage() {
               <Button
                 onClick={() => {
                   setNeighborhoodResourceId((current) => current ? null : selectedResource.id);
+                  setTopologySelection(null);
                   setExpandAll(false);
                   setFocusedGroupId(null);
                   setFitVersion(String(Date.now()));
