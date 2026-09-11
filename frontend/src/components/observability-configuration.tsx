@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  CheckCircleOutlined,
   DeleteOutlined,
   EditOutlined,
   LinkOutlined,
@@ -14,7 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Form, Input, Modal, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -123,13 +122,13 @@ export function ObservabilityConfiguration() {
     }
   }, [editor, form]);
 
-  const invalidate = async () => {
+  const invalidate = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["observability", "config", "sources"] }),
       queryClient.invalidateQueries({ queryKey: ["observability", "config", "alerts"] }),
       queryClient.invalidateQueries({ queryKey: ["observability", "config", "notifications"] }),
     ]);
-  };
+  }, [queryClient]);
   const saveMutation = useMutation({
     mutationFn: async (values: Record<string, unknown>) => {
       if (!editor) throw new Error("编辑器未打开");
@@ -150,7 +149,7 @@ export function ObservabilityConfiguration() {
     onError: (error) => messageApi.error(error instanceof Error ? error.message : "保存失败"),
   });
 
-  const remove = async (type: EditorState["type"], id: string) => {
+  const remove = useCallback(async (type: EditorState["type"], id: string) => {
     if (!canWrite) {
       messageApi.warning("当前账号只有观测配置只读权限。");
       return;
@@ -164,21 +163,22 @@ export function ObservabilityConfiguration() {
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : "删除失败");
     }
-  };
-  const testSource = async (record: ObservabilityDataSource) => {
+  }, [accessToken, canWrite, invalidate, messageApi]);
+  const refetchSources = sourcesQuery.refetch;
+  const testSource = useCallback(async (record: ObservabilityDataSource) => {
     setTestingId(record.id);
     try {
       const result = record.id.startsWith("env-")
         ? await testObservabilityEndpoint(record.kind, record.endpoint, accessToken || undefined)
         : await testObservabilityDataSource(record.id, accessToken || undefined);
       messageApi[result.status === "healthy" ? "success" : "warning"](`${record.name}：${result.status}${result.latencyMs === null ? "" : ` · ${result.latencyMs} ms`}`);
-      await sourcesQuery.refetch();
+      await refetchSources();
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : "探针失败");
     } finally {
       setTestingId(null);
     }
-  };
+  }, [accessToken, messageApi, refetchSources]);
 
   const sourceColumns = useMemo<ColumnsType<ObservabilityDataSource>>(() => [
     { title: "名称", dataIndex: "name", key: "name", render: (value: string, record) => <Space><Typography.Text strong>{value}</Typography.Text>{record.clusterId ? <Tag color="blue">当前集群</Tag> : <Tag>全局默认</Tag>}</Space> },
@@ -186,19 +186,19 @@ export function ObservabilityConfiguration() {
     { title: "状态", dataIndex: "status", key: "status", width: 110, render: statusTag },
     { title: "Endpoint", dataIndex: "endpoint", key: "endpoint", ellipsis: true, render: (value: string) => <Typography.Text code copyable>{value}</Typography.Text> },
     { title: "操作", key: "actions", width: 210, render: (_, record) => <Space size={4}><OpsIconActionButton size="small" icon={<ThunderboltOutlined />} loading={testingId === record.id} onClick={() => void testSource(record)}>探针</OpsIconActionButton>{record.id.startsWith("env-") ? null : <><OpsIconActionButton size="small" disabled={!canWrite} disabledReason={!canWrite ? "当前账号无写入权限" : undefined} icon={<EditOutlined />} onClick={() => setEditor({ type: "source", record })}>编辑</OpsIconActionButton><OpsIconActionButton size="small" danger disabled={!canWrite} disabledReason={!canWrite ? "当前账号无写入权限" : undefined} icon={<DeleteOutlined />} onClick={() => void remove("source", record.id)}>删除</OpsIconActionButton></>}</Space> },
-  ], [canWrite, testingId]);
+  ], [canWrite, remove, testSource, testingId]);
   const alertColumns = useMemo<ColumnsType<AlertTemplate>>(() => [
     { title: "规则名称", dataIndex: "name", key: "name", render: (value: string, record) => <Space><Typography.Text strong>{value}</Typography.Text>{record.enabled ? <OpsStatusTag tone="success">启用</OpsStatusTag> : <OpsStatusTag tone="neutral">停用</OpsStatusTag>}</Space> },
     { title: "级别", dataIndex: "severity", key: "severity", width: 110, render: (value: string) => <Tag color={value === "critical" ? "red" : value === "warning" ? "orange" : "blue"}>{value}</Tag> },
     { title: "表达式", dataIndex: "expression", key: "expression", ellipsis: true, render: (value: string) => <Typography.Text code>{value}</Typography.Text> },
     { title: "操作", key: "actions", width: 160, render: (_, record) => <Space size={4}><OpsIconActionButton size="small" disabled={!canWrite} disabledReason={!canWrite ? "当前账号无写入权限" : undefined} icon={<EditOutlined />} onClick={() => setEditor({ type: "alert", record })}>编辑</OpsIconActionButton><OpsIconActionButton size="small" danger disabled={!canWrite} disabledReason={!canWrite ? "当前账号无写入权限" : undefined} icon={<DeleteOutlined />} onClick={() => void remove("alert", record.id)}>删除</OpsIconActionButton></Space> },
-  ], [canWrite]);
+  ], [canWrite, remove]);
   const notificationColumns = useMemo<ColumnsType<NotificationTemplate>>(() => [
     { title: "通知名称", dataIndex: "name", key: "name", render: (value: string, record) => <Space><Typography.Text strong>{value}</Typography.Text>{record.enabled ? <OpsStatusTag tone="success">启用</OpsStatusTag> : <OpsStatusTag tone="neutral">停用</OpsStatusTag>}</Space> },
     { title: "渠道", dataIndex: "channel", key: "channel", width: 120, render: (value: string) => channelLabels[value] ?? value },
     { title: "Endpoint", dataIndex: "endpoint", key: "endpoint", ellipsis: true, render: (value: string) => <Typography.Text code>{value}</Typography.Text> },
     { title: "操作", key: "actions", width: 160, render: (_, record) => <Space size={4}><OpsIconActionButton size="small" disabled={!canWrite} disabledReason={!canWrite ? "当前账号无写入权限" : undefined} icon={<EditOutlined />} onClick={() => setEditor({ type: "notification", record })}>编辑</OpsIconActionButton><OpsIconActionButton size="small" danger disabled={!canWrite} disabledReason={!canWrite ? "当前账号无写入权限" : undefined} icon={<DeleteOutlined />} onClick={() => void remove("notification", record.id)}>删除</OpsIconActionButton></Space> },
-  ], [canWrite]);
+  ], [canWrite, remove]);
 
   const editorTitle = editor?.type === "source" ? "数据源" : editor?.type === "alert" ? "告警规则" : "通知模板";
   return (
