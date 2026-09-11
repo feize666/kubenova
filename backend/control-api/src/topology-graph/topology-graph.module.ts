@@ -10,5 +10,6 @@ import { TopologyGraphService } from './topology-graph.service';
   imports: [AuthModule, ClustersModule, DatabaseModule],
   controllers: [TopologyGraphController],
   providers: [TopologyGraphCacheService, TopologyGraphService],
+  exports: [TopologyGraphService],
 })
 export class TopologyGraphModule {}

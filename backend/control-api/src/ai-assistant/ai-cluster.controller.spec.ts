@@ -1,3 +1,5 @@
+jest.mock('@kubernetes/client-node', () => ({}));
+
 import {
   BadRequestException,
   ForbiddenException,
@@ -39,11 +41,7 @@ describe('AiClusterController cluster access', () => {
     );
 
     await expect(
-      controller.chat(
-        'cluster-a',
-        { message: '检查状态' },
-        { headers: {} },
-      ),
+      controller.chat('cluster-a', { message: '检查状态' }, { headers: {} }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
     expect(clusterAccessService.assertCanRead).toHaveBeenCalledWith(
       undefined,
@@ -97,12 +95,16 @@ describe('AiClusterController cluster access', () => {
       { id: 'operator-a', role: 'operator' },
       'cluster-a',
     );
-    expect(providers.chat).toHaveBeenCalledWith(
-      'agent-1',
-      [expect.objectContaining({ content: expect.stringContaining('canonical-cluster') })],
-    );
+    expect(providers.chat).toHaveBeenCalledWith('agent-1', [
+      expect.objectContaining({
+        content: expect.stringContaining('canonical-cluster'),
+      }),
+    ]);
     expect(result).toEqual(
-      expect.objectContaining({ clusterId: 'canonical-cluster', evidence: { status: 'healthy' } }),
+      expect.objectContaining({
+        clusterId: 'canonical-cluster',
+        evidence: { status: 'healthy' },
+      }),
     );
   });
 
@@ -117,5 +119,41 @@ describe('AiClusterController cluster access', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(providers.chat).not.toHaveBeenCalled();
+  });
+
+  it('uses server-side aggregated context and returns only sanitized evidence', async () => {
+    const { providers, clusterAccessService } = build();
+    const contextAggregator = {
+      collect: jest.fn().mockResolvedValue({
+        schemaVersion: '1.0',
+        generatedAt: '2026-09-11T00:00:00.000Z',
+        cluster: { id: 'canonical-cluster', name: 'prod' },
+        supplementalEvidence: { symptom: 'slow', apiKey: '[REDACTED]' },
+        degradedSources: [],
+      }),
+    };
+    const controller = new AiClusterController(
+      providers as never,
+      clusterAccessService as never,
+      contextAggregator as never,
+    );
+
+    const result = await controller.analyze(
+      'cluster-a',
+      { evidence: { symptom: 'slow', apiKey: 'do-not-return' } },
+      { user: { user: { id: 'operator-a', role: 'operator' } } },
+    );
+
+    expect(contextAggregator.collect).toHaveBeenCalledWith(
+      'canonical-cluster',
+      { evidence: { symptom: 'slow', apiKey: '[REDACTED]' } },
+    );
+    expect(providers.chat).toHaveBeenCalledWith(undefined, [
+      expect.objectContaining({
+        content: expect.stringContaining('观测上下文'),
+      }),
+    ]);
+    expect(result.evidence).toEqual({ symptom: 'slow', apiKey: '[REDACTED]' });
+    expect(JSON.stringify(result)).not.toContain('do-not-return');
   });
 });
