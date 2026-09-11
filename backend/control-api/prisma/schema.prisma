@@ -8,20 +8,20 @@ datasource db {
 }
 
 model User {
-  id           String           @id @default(cuid())
-  email        String           @unique
-  name         String?
-  passwordHash String?
-  role         String           @default("user")
-  isActive     Boolean          @default(true)
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
-  sessions     Session[]
-  runtimeSessions RuntimeSession[]
+  id                     String                  @id @default(cuid())
+  email                  String                  @unique
+  name                   String?
+  passwordHash           String?
+  role                   String                  @default("user")
+  isActive               Boolean                 @default(true)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  sessions               Session[]
+  runtimeSessions        RuntimeSession[]
   aiConversationSessions AiConversationSession[]
-  auditLogs    AuditLog[]
-  preferences  UserPreference[]
-  clusterRoleBindings ClusterRoleBinding[]
+  auditLogs              AuditLog[]
+  preferences            UserPreference[]
+  clusterRoleBindings    ClusterRoleBinding[]
 }
 
 model UserPreference {
@@ -38,15 +38,15 @@ model UserPreference {
 }
 
 model Session {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   userId           String
   refreshTokenHash String
   expiresAt        DateTime
   refreshExpiresAt DateTime
   revokedAt        DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
@@ -54,28 +54,29 @@ model Session {
 }
 
 model ClusterRegistry {
-  id              String           @id @default(cuid())
-  name            String
-  apiServer       String
-  status          String           @default("unknown")
-  metadata        Json?
-  deletedAt       DateTime?        // 软删除时间戳，非null表示已删除
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  runtimeSessions  RuntimeSession[]
-  auditLogs        AuditLog[]
-  workloads        WorkloadRecord[]
-  networkResources NetworkResource[]
-  storageResources StorageResource[]
-  configResources  ConfigResource[]
-  namespaces       NamespaceRecord[]
-  alerts           MonitoringAlert[]
-  credential       ClusterCredential?
-  resourceCapabilities ApiResourceCapability[]
-  clusterProfile   ClusterProfile?
-  healthSnapshot   ClusterHealthSnapshot?
-  clusterRoleBindings ClusterRoleBinding[]
-  aiAnalysisRuns   AiAnalysisRun[]
+  id                    String                  @id @default(cuid())
+  name                  String
+  apiServer             String
+  status                String                  @default("unknown")
+  metadata              Json?
+  deletedAt             DateTime? // 软删除时间戳，非null表示已删除
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  runtimeSessions       RuntimeSession[]
+  auditLogs             AuditLog[]
+  workloads             WorkloadRecord[]
+  networkResources      NetworkResource[]
+  storageResources      StorageResource[]
+  configResources       ConfigResource[]
+  namespaces            NamespaceRecord[]
+  alerts                MonitoringAlert[]
+  credential            ClusterCredential?
+  resourceCapabilities  ApiResourceCapability[]
+  clusterProfile        ClusterProfile?
+  healthSnapshot        ClusterHealthSnapshot?
+  clusterRoleBindings   ClusterRoleBinding[]
+  aiAnalysisRuns        AiAnalysisRun[]
+  monitoringDataSources MonitoringDataSource[]
 
   // 仅对未删除集群强制名称唯一（deletedAt 为 null 时才参与唯一约束）
   @@index([name, deletedAt])
@@ -149,22 +150,76 @@ model AiActionApproval {
   @@index([actorUserId, createdAt])
 }
 
+// 可观测性数据源连接配置。凭据仅保存 secretRef，绝不保存明文 token/password。
+model MonitoringDataSource {
+  id            String    @id @default(cuid())
+  clusterId     String?
+  kind          String // prometheus|grafana|alertmanager|elasticsearch|kibana
+  name          String
+  endpoint      String
+  secretRef     String?
+  enabled       Boolean   @default(true)
+  status        String    @default("unknown") // unknown|healthy|degraded|unavailable|disabled
+  lastCheckedAt DateTime?
+  lastError     String?
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  cluster ClusterRegistry? @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, kind, name])
+  @@index([clusterId, kind])
+  @@index([status])
+}
+
+model MonitoringAlertTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  severity    String // critical|warning|info
+  expression  String
+  duration    String   @default("5m")
+  enabled     Boolean  @default(true)
+  labels      Json?
+  annotations Json?
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([severity, enabled])
+}
+
+model MonitoringNotificationTemplate {
+  id           String   @id @default(cuid())
+  name         String
+  channel      String // feishu|dingtalk|wecom|email|webhook|slack|pagerduty
+  endpoint     String
+  secretRef    String?
+  bodyTemplate String
+  enabled      Boolean  @default(true)
+  version      Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([channel, enabled])
+}
+
 model ClusterHealthSnapshot {
   id           String   @id @default(cuid())
   clusterId    String   @unique
   ok           Boolean
-  status       String   // running|offline|checking|disabled|offline-mode
+  status       String // running|offline|checking|disabled|offline-mode
   latencyMs    Int?
   checkedAt    DateTime @default(now())
   reason       String?
-  source       String   // auto|manual|event
+  source       String // auto|manual|event
   timeoutMs    Int
   failureCount Int      @default(0)
   detailJson   Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  cluster      ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@index([checkedAt])
@@ -181,8 +236,8 @@ model ClusterRoleBinding {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cluster   ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@unique([userId, clusterId])
   @@index([clusterId, state])
@@ -190,18 +245,18 @@ model ClusterRoleBinding {
 }
 
 model RuntimeSession {
-  id          String          @id @default(cuid())
-  clusterId   String
-  userId      String?
-  type        String
-  namespace   String
-  pod         String
-  container   String
-  expiresAt   DateTime
-  closedAt    DateTime?
-  createdAt   DateTime        @default(now())
-  cluster     ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
-  user        User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id        String          @id @default(cuid())
+  clusterId String
+  userId    String?
+  type      String
+  namespace String
+  pod       String
+  container String
+  expiresAt DateTime
+  closedAt  DateTime?
+  createdAt DateTime        @default(now())
+  cluster   ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  user      User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([clusterId])
   @@index([userId])
@@ -209,48 +264,48 @@ model RuntimeSession {
 }
 
 model AiConversationSession {
-  id                String                  @id @default(cuid())
-  ownerUserId       String
-  title             String
-  surface           String                  @default("shared")
+  id                 String                  @id @default(cuid())
+  ownerUserId        String
+  title              String
+  surface            String                  @default("shared")
   clusterContextJson Json?
-  deletedAt         DateTime?
-  createdAt         DateTime                @default(now())
-  updatedAt         DateTime                @updatedAt
-  ownerUser         User                    @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
-  messages          AiConversationMessage[]
+  deletedAt          DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  ownerUser          User                    @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  messages           AiConversationMessage[]
 
   @@index([ownerUserId, updatedAt])
   @@index([deletedAt])
 }
 
 model AiConversationMessage {
-  id                   String                @id @default(cuid())
-  sessionId            String
-  role                 String
-  content              String
-  attachmentsJson      Json?
-  voiceInputJson       Json?
-  structuredJson       Json?
+  id                    String                @id @default(cuid())
+  sessionId             String
+  role                  String
+  content               String
+  attachmentsJson       Json?
+  voiceInputJson        Json?
+  structuredJson        Json?
   actionDescriptorsJson Json?
-  createdAt            DateTime              @default(now())
-  session              AiConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt             DateTime              @default(now())
+  session               AiConversationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
 }
 
 model AuditLog {
-  id          String           @id @default(cuid())
-  actorUserId String?
-  action      String
+  id           String           @id @default(cuid())
+  actorUserId  String?
+  action       String
   resourceType String
-  resourceId  String?
-  message     String?
-  metadata    Json?
-  clusterId   String?
-  createdAt   DateTime         @default(now())
-  actorUser   User?            @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
-  cluster     ClusterRegistry? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  resourceId   String?
+  message      String?
+  metadata     Json?
+  clusterId    String?
+  createdAt    DateTime         @default(now())
+  actorUser    User?            @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  cluster      ClusterRegistry? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
 
   @@index([actorUserId])
   @@index([clusterId])
@@ -262,9 +317,9 @@ model WorkloadRecord {
   id            String   @id @default(cuid())
   clusterId     String
   namespace     String
-  kind          String   // Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob
+  kind          String // Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob
   name          String
-  state         String   @default("active")   // active|disabled|deleted
+  state         String   @default("active") // active|disabled|deleted
   replicas      Int?
   readyReplicas Int?
   spec          Json?
@@ -274,7 +329,7 @@ model WorkloadRecord {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  cluster       ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@unique([clusterId, namespace, kind, name])
   @@index([clusterId])
@@ -288,7 +343,7 @@ model NetworkResource {
   id         String   @id @default(cuid())
   clusterId  String
   namespace  String
-  kind       String   // Service|Ingress
+  kind       String // Service|Ingress
   name       String
   state      String   @default("active")
   spec       Json?
@@ -297,7 +352,7 @@ model NetworkResource {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  cluster    ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@unique([clusterId, namespace, kind, name])
   @@index([clusterId])
@@ -309,8 +364,8 @@ model NetworkResource {
 model StorageResource {
   id           String   @id @default(cuid())
   clusterId    String
-  namespace    String?  // PV is cluster-scoped, PVC is namespaced
-  kind         String   // PV|PVC
+  namespace    String? // PV is cluster-scoped, PVC is namespaced
+  kind         String // PV|PVC
   name         String
   state        String   @default("active")
   capacity     String?
@@ -322,7 +377,7 @@ model StorageResource {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  cluster      ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@unique([clusterId, kind, name])
   @@index([clusterId])
@@ -331,20 +386,20 @@ model StorageResource {
 
 // ── 配置资源（ConfigMap / Secret）────────────────────
 model ConfigResource {
-  id         String           @id @default(cuid())
+  id         String   @id @default(cuid())
   clusterId  String
   namespace  String
-  kind       String           // ConfigMap|Secret
+  kind       String // ConfigMap|Secret
   name       String
-  state      String           @default("active")
-  dataKeys   Json?            // list of key names (no values for secrets)
-  currentRev Int              @default(1)
+  state      String   @default("active")
+  dataKeys   Json? // list of key names (no values for secrets)
+  currentRev Int      @default(1)
   labels     Json?
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  cluster    ClusterRegistry  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
-  revisions  ConfigRevision[]
+  cluster   ClusterRegistry  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  revisions ConfigRevision[]
 
   @@unique([clusterId, namespace, kind, name])
   @@index([clusterId])
@@ -354,15 +409,15 @@ model ConfigResource {
 
 // ── 配置版本历史 ──────────────────────────────────────
 model ConfigRevision {
-  id         String         @id @default(cuid())
+  id         String   @id @default(cuid())
   configId   String
   revision   Int
-  data       Json?          // full data snapshot (secrets masked)
+  data       Json? // full data snapshot (secrets masked)
   changedBy  String?
   changeNote String?
-  createdAt  DateTime       @default(now())
+  createdAt  DateTime @default(now())
 
-  config     ConfigResource @relation(fields: [configId], references: [id], onDelete: Cascade)
+  config ConfigResource @relation(fields: [configId], references: [id], onDelete: Cascade)
 
   @@unique([configId, revision])
   @@index([configId])
@@ -379,7 +434,7 @@ model NamespaceRecord {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  cluster   ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@unique([clusterId, name])
   @@index([clusterId])
@@ -390,20 +445,20 @@ model MonitoringAlert {
   id           String    @id @default(cuid())
   clusterId    String?
   namespace    String?
-  severity     String    // critical|warning|info
+  severity     String // critical|warning|info
   title        String
   message      String
-  source       String?   // prometheus|custom
+  source       String? // prometheus|custom
   resourceType String?
   resourceName String?
-  status       String    @default("firing")  // firing|resolved|silenced
+  status       String    @default("firing") // firing|resolved|silenced
   firedAt      DateTime  @default(now())
   resolvedAt   DateTime?
   metadata     Json?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  cluster      ClusterRegistry? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  cluster ClusterRegistry? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
 
   @@index([clusterId])
   @@index([severity])
@@ -415,32 +470,32 @@ model MonitoringAlert {
 model ClusterCredential {
   id             String   @id @default(cuid())
   clusterId      String   @unique
-  credentialType String   // kubeconfig|serviceaccount|token
-  encryptedData  String   // AES-256-GCM encrypted kubeconfig or token
-  keyRef         String?  // reference to KMS key id
+  credentialType String // kubeconfig|serviceaccount|token
+  encryptedData  String // AES-256-GCM encrypted kubeconfig or token
+  keyRef         String? // reference to KMS key id
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  cluster        ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@index([clusterId])
 }
 
 model RegistryConnector {
-  id                String   @id @default(cuid())
+  id                String                 @id @default(cuid())
   name              String
-  type              String   // harbor|oci
+  type              String // harbor|oci
   endpoint          String
   projectScope      String?
-  authType          String   // basic|token
+  authType          String // basic|token
   username          String?
   passwordSecretRef String?
-  verifyTls         Boolean  @default(true)
-  state             String   @default("active")
+  verifyTls         Boolean                @default(true)
+  state             String                 @default("active")
   lastCheckedAt     DateTime?
   lastError         String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
   catalogCache      RegistryCatalogCache[]
 
   @@unique([name])
@@ -456,7 +511,7 @@ model RegistryCatalogCache {
   artifactType String?
   pulledAt     DateTime @default(now())
 
-  connector    RegistryConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  connector RegistryConnector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
 
   @@index([connectorId, repository])
   @@index([pulledAt])
@@ -473,7 +528,7 @@ model ApiResourceCapability {
   verbsJson        Json
   lastDiscoveredAt DateTime @default(now())
 
-  cluster          ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@unique([clusterId, group, version, resource])
   @@index([clusterId, namespaced])
@@ -482,14 +537,14 @@ model ApiResourceCapability {
 model ClusterProfile {
   id              String   @id @default(cuid())
   clusterId       String   @unique
-  environmentType String   // on-prem|private-cloud|public-cloud|edge
+  environmentType String // on-prem|private-cloud|public-cloud|edge
   provider        String
   region          String?
   labelsJson      Json?
   updatedAt       DateTime @updatedAt
   createdAt       DateTime @default(now())
 
-  cluster         ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@index([environmentType, provider])
 }
@@ -497,10 +552,10 @@ model ClusterProfile {
 model RbacBinding {
   id               String   @id @default(cuid())
   name             String
-  kind             String   // RoleBinding|ClusterRoleBinding
+  kind             String // RoleBinding|ClusterRoleBinding
   namespace        String   @default("")
   subject          String
-  subjectKind      String   // User|Group|ServiceAccount
+  subjectKind      String // User|Group|ServiceAccount
   subjectNamespace String   @default("")
   state            String   @default("active") // active|disabled
   version          Int      @default(1)

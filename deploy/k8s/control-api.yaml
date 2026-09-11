@@ -62,6 +62,36 @@ spec:
                 configMapKeyRef:
                   name: kubenova-platform-config
                   key: SWAGGER_ENABLED
+            - name: OBSERVABILITY_PROMETHEUS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: kubenova-platform-config
+                  key: OBSERVABILITY_PROMETHEUS_URL
+            - name: OBSERVABILITY_GRAFANA_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: kubenova-platform-config
+                  key: OBSERVABILITY_GRAFANA_URL
+            - name: OBSERVABILITY_ALERTMANAGER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: kubenova-platform-config
+                  key: OBSERVABILITY_ALERTMANAGER_URL
+            - name: OBSERVABILITY_ELASTICSEARCH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: kubenova-platform-config
+                  key: OBSERVABILITY_ELASTICSEARCH_URL
+            - name: OBSERVABILITY_KIBANA_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: kubenova-platform-config
+                  key: OBSERVABILITY_KIBANA_URL
+            - name: OBSERVABILITY_ALERT_OWNER
+              valueFrom:
+                configMapKeyRef:
+                  name: kubenova-platform-config
+                  key: OBSERVABILITY_ALERT_OWNER
             - name: RUNTIME_GATEWAY_BASE_URL
               valueFrom:
                 configMapKeyRef:

@@ -4,6 +4,14 @@ metadata:
   name: kubenova-platform-config
   namespace: kubenova
 data:
+  # Optional observability URLs. Secrets and credentials must be referenced by
+  # secretRef in the KubeNova data-source API, never placed in this ConfigMap.
+  OBSERVABILITY_PROMETHEUS_URL: ""
+  OBSERVABILITY_GRAFANA_URL: ""
+  OBSERVABILITY_ALERTMANAGER_URL: ""
+  OBSERVABILITY_ELASTICSEARCH_URL: ""
+  OBSERVABILITY_KIBANA_URL: ""
+  OBSERVABILITY_ALERT_OWNER: "platform-sre"
   POSTGRES_DB: kubenova
   POSTGRES_USER: kubenova
   CONTROL_API_PORT: "4000"

@@ -5,11 +5,13 @@ import { AuthGuard } from '../common/auth.guard';
 import { MetricsModule } from '../metrics/metrics.module';
 import { MonitoringController } from './monitoring.controller';
 import { MonitoringService } from './monitoring.service';
+import { ObservabilityController } from './observability.controller';
+import { ObservabilityService } from './observability.service';
 
 @Module({
   imports: [AuthModule, ClustersModule, MetricsModule],
-  controllers: [MonitoringController],
-  providers: [MonitoringService, AuthGuard],
-  exports: [MonitoringService],
+  controllers: [MonitoringController, ObservabilityController],
+  providers: [MonitoringService, ObservabilityService, AuthGuard],
+  exports: [MonitoringService, ObservabilityService],
 })
 export class MonitoringModule {}
