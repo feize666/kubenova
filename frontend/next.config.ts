@@ -22,10 +22,19 @@ const nextConfig: NextConfig = {
     webpackMemoryOptimizations: true,
   },
   async rewrites() {
-    const configuredBase = (process.env.NEXT_PUBLIC_CONTROL_API_BASE ?? "").trim().replace(/\/+$/, "");
+    // Rewrites run inside the frontend container. Keep this separate from
+    // NEXT_PUBLIC_CONTROL_API_BASE, which is intentionally browser-facing.
+    const configuredBase = (
+      process.env.CONTROL_API_INTERNAL_BASE_URL ?? process.env.NEXT_PUBLIC_CONTROL_API_BASE ?? ""
+    ).trim().replace(/\/+$/, "");
     const backendBase = /^https?:\/\//i.test(configuredBase) ? configuredBase : "http://127.0.0.1:4000";
     const configuredGatewayBase =
-      (process.env.NEXT_PUBLIC_RUNTIME_GATEWAY_BASE ?? process.env.RUNTIME_GATEWAY_BASE_URL ?? "").trim();
+      (
+        process.env.RUNTIME_GATEWAY_INTERNAL_BASE_URL ??
+        process.env.NEXT_PUBLIC_RUNTIME_GATEWAY_BASE ??
+        process.env.RUNTIME_GATEWAY_BASE_URL ??
+        ""
+      ).trim();
     const runtimeGatewayBase = normalizeHttpBase(configuredGatewayBase, "http://127.0.0.1:4100");
     return [
       {

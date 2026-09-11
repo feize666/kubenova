@@ -26,6 +26,8 @@ cp .env.example .env
 - `JWT_SECRET`: control-api JWT 密钥（生产必须强随机）
 - `RUNTIME_TOKEN_SECRET`: runtime-gateway token 密钥（生产必须强随机）
 - `RUNTIME_GATEWAY_INTERNAL_SECRET`: gateway 调 control-api 内部接口共享密钥
+- `CONTROL_API_INTERNAL_BASE_URL`: frontend 容器内访问 control-api 的地址（默认 `http://control-api:4000`）
+- `RUNTIME_GATEWAY_INTERNAL_BASE_URL`: frontend 容器内访问 runtime-gateway 的地址（默认 `http://runtime-gateway:4100`）
 - `RUNTIME_GATEWAY_PUBLIC_BASE_URL`: control-api 返回给浏览器的公网 WS 基址
 - `KUBENOVA_HELM_REPOSITORY_CONFIGS`: 容器内 Helm 仓库配置路径，多个路径用 `:` 分隔
 
@@ -55,6 +57,17 @@ docker volume ls | grep kubenova_
 cd deploy/docker
 docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
+
+使用 `frontend/Dockerfile` 构建镜像时，必须在构建阶段传入上述两个内部地址（Docker Compose 服务名可直接使用默认值）：
+
+```bash
+docker build \
+  --build-arg CONTROL_API_INTERNAL_BASE_URL=http://control-api:4000 \
+  --build-arg RUNTIME_GATEWAY_INTERNAL_BASE_URL=http://runtime-gateway:4100 \
+  -t kubenova-frontend:latest frontend
+```
+
+`NEXT_PUBLIC_CONTROL_API_BASE` 仅用于浏览器请求，不应被用作容器间 rewrite 地址。
 
 查看状态：
 
