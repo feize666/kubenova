@@ -113,7 +113,7 @@ kubectl rollout status deploy/frontend -n kubenova
 
 探针路径：
 
-- control-api readiness / liveness: `/api/capabilities`
+- control-api readiness / liveness: `/api/health/ready`
 - runtime-gateway readiness / liveness: `/healthz`
 - frontend readiness / liveness: `/`
 - postgres readiness / liveness: `pg_isready`
@@ -131,7 +131,7 @@ kubectl port-forward -n kubenova svc/runtime-gateway 4100:4100
 
 ```bash
 curl -fsS http://127.0.0.1:3000/ >/dev/null && echo frontend-ok
-curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null && echo control-api-ok
+curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null && echo control-api-ok
 curl -fsS http://127.0.0.1:4100/healthz && echo
 ```
 

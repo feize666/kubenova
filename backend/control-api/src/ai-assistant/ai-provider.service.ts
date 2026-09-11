@@ -69,9 +69,17 @@ export function resolveAiCredentialEncryptionKey(
   nodeEnv = process.env.NODE_ENV,
 ): string {
   const value = configured?.trim();
-  if (nodeEnv === 'production' && (!value || value.length < 32)) {
+  const looksLikePlaceholder =
+    !value ||
+    /(?:replace[-_ ]?with|change[-_ ]?me|development[-_ ]?key|example|placeholder)/i.test(
+      value,
+    );
+  if (
+    nodeEnv === 'production' &&
+    (looksLikePlaceholder || (value?.length ?? 0) < 32)
+  ) {
     throw new Error(
-      'AI_CREDENTIAL_ENCRYPTION_KEY must be configured with at least 32 characters in production',
+      'AI_CREDENTIAL_ENCRYPTION_KEY must be a non-placeholder value with at least 32 characters in production',
     );
   }
   return value || DEVELOPMENT_CREDENTIAL_ENCRYPTION_KEY;

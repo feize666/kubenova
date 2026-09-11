@@ -29,6 +29,10 @@ Commands:
   prod switch <version>        Switch /opt/kubenova/current to a release
   prod rollback <version>      Roll back /opt/kubenova/current to a release
 
+  compose-release preflight    Validate Compose release config and secrets
+  compose-release up [--tag]   Pull, start, and wait for all health checks
+  compose-release rollback <version>
+
   install-deps                 Install local dependencies
   db-init                      Initialize local database
   build frontend               Build frontend stable bundle
@@ -37,6 +41,7 @@ Commands:
   build all                    Build all production artifacts
   package release              Build and package Ubuntu binary release tarball
   test topology                Run topology verification
+  test release                 Run production release contract checks
   clean topology-artifacts     Clean topology artifacts
   clean dev-cache              Clean local frontend development build cache
   help                         Show this help
@@ -396,9 +401,13 @@ case "$cmd" in
     shift || true
     case "$sub" in
       topology) run_script topology-verify.sh "$@" ;;
+      release) run_script release-check.sh "$@" ;;
       help|-h|--help) usage ;;
       *) die "未知 test 命令: $sub" ;;
     esac
+    ;;
+  compose-release)
+    run_script compose-release.sh "$@"
     ;;
   clean)
     sub="${1:-help}"

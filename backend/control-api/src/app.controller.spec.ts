@@ -26,4 +26,15 @@ describe('AppController', () => {
       expect(appController.getHello()).toBe('Hello World!');
     });
   });
+
+  it('returns a secret-free readiness payload for release probes', () => {
+    const payload = appController.getReadiness();
+
+    expect(payload).toMatchObject({
+      status: 'ok',
+      service: 'control-api',
+    });
+    expect(payload.checkedAt).toEqual(expect.any(String));
+    expect(JSON.stringify(payload)).not.toMatch(/secret|password|apiKey|cipher/i);
+  });
 });

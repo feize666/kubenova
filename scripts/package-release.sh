@@ -7,6 +7,12 @@ kubenova_prefer_current_node_toolchain
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/tmp/release}"
 SKIP_BUILD="${SKIP_BUILD:-false}"
 PACKAGE_NAME="kubenova-ubuntu"
+VERSION="${VERSION:-unknown}"
+
+if [[ ! "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "[错误] VERSION 只能包含字母、数字、点、下划线和短横线" >&2
+  exit 2
+fi
 
 usage() {
   cat <<'USAGE'
@@ -21,6 +27,9 @@ Options:
 Outputs:
   <out-dir>/kubenova-ubuntu.tar.gz
   <out-dir>/metadata.json
+
+Environment:
+  VERSION=<release-version>    Optional release version written to metadata
 USAGE
 }
 
@@ -74,6 +83,8 @@ require_release_layout() {
   [[ -f "$base/frontend/.next/standalone/server.js" ]] || { echo "[错误] 缺少 frontend standalone server"; exit 1; }
   [[ -d "$base/frontend/.next/standalone/.next/static" ]] || { echo "[错误] 缺少 frontend static"; exit 1; }
   [[ -f "$base/control-api/dist/src/main.js" ]] || { echo "[错误] 缺少 control-api dist"; exit 1; }
+  [[ -f "$base/control-api/package.json" ]] || { echo "[错误] 缺少 control-api package.json（Prisma migration 需要）"; exit 1; }
+  [[ -x "$base/control-api/node_modules/.bin/prisma" ]] || { echo "[错误] 缺少 Prisma CLI（无法自动执行 migration）"; exit 1; }
   [[ -x "$base/runtime-gateway/runtime-gateway" ]] || { echo "[错误] 缺少 runtime-gateway executable"; exit 1; }
 }
 
@@ -110,6 +121,10 @@ fi
 copy_dir "$ROOT_DIR/backend/control-api/dist" "$STAGE_DIR/control-api/dist"
 copy_dir "$ROOT_DIR/backend/control-api/prisma" "$STAGE_DIR/control-api/prisma"
 copy_dir "$ROOT_DIR/backend/control-api/node_modules" "$STAGE_DIR/control-api/node_modules"
+cp "$ROOT_DIR/backend/control-api/package.json" "$STAGE_DIR/control-api/package.json"
+if [[ -f "$ROOT_DIR/backend/control-api/package-lock.json" ]]; then
+  cp "$ROOT_DIR/backend/control-api/package-lock.json" "$STAGE_DIR/control-api/package-lock.json"
+fi
 
 RUNTIME_BIN="$ROOT_DIR/tmp/runtime-gateway"
 if [[ "$SKIP_BUILD" == "true" ]]; then
@@ -127,6 +142,7 @@ cat > "$STAGE_DIR/metadata.json" <<EOF
   "name": "kubenova",
   "package": "$PACKAGE_NAME",
   "target": "ubuntu-systemd",
+  "version": "${VERSION:-unknown}",
   "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "gitCommit": "$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 }
@@ -137,6 +153,17 @@ tar -C "$OUT_DIR/stage" -czf "$OUT_DIR/kubenova-ubuntu.tar.gz" "$PACKAGE_NAME"
 
 cp "$STAGE_DIR/metadata.json" "$OUT_DIR/metadata.json"
 
+# Emit a digest alongside the archive so an operator can verify that the
+# artifact transferred to a host is the exact one that was built.
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "$OUT_DIR/kubenova-ubuntu.tar.gz" > "$OUT_DIR/kubenova-ubuntu.tar.gz.sha256"
+elif command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 "$OUT_DIR/kubenova-ubuntu.tar.gz" > "$OUT_DIR/kubenova-ubuntu.tar.gz.sha256"
+fi
+
 echo "✔ release packaged"
 echo "  tar: $OUT_DIR/kubenova-ubuntu.tar.gz"
 echo "  metadata: $OUT_DIR/metadata.json"
+if [[ -f "$OUT_DIR/kubenova-ubuntu.tar.gz.sha256" ]]; then
+  echo "  sha256: $OUT_DIR/kubenova-ubuntu.tar.gz.sha256"
+fi

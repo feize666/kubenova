@@ -16,7 +16,7 @@ FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 CONTROL_API_PORT="${CONTROL_API_PORT:-4000}"
 RUNTIME_GATEWAY_PORT="${RUNTIME_GATEWAY_PORT:-4100}"
 RUNTIME_GATEWAY_GOPROXY="${RUNTIME_GATEWAY_GOPROXY:-https://goproxy.cn,direct}"
-RUNTIME_TOKEN_SECRET="${RUNTIME_TOKEN_SECRET:-dev-runtime-token-secret}"
+RUNTIME_TOKEN_SECRET="${RUNTIME_TOKEN_SECRET:-}"
 FRONTEND_BOOT_MODE="stable"
 USE_TMUX="false"
 SERVICE_PID_SUFFIX=".prod"
@@ -48,6 +48,8 @@ require_release_layout() {
   [[ -d "$base" ]] || { echo "[错误] 发布目录不存在：$base" >&2; exit 1; }
   [[ -x "$base/runtime-gateway/runtime-gateway" ]] || { echo "[错误] 缺少 runtime-gateway 可执行文件：$base/runtime-gateway/runtime-gateway" >&2; exit 1; }
   [[ -f "$base/control-api/dist/src/main.js" ]] || { echo "[错误] 缺少 control-api 构建产物：$base/control-api/dist/src/main.js" >&2; exit 1; }
+  [[ -x "$base/control-api/node_modules/.bin/prisma" ]] || { echo "[错误] 缺少 Prisma CLI：$base/control-api/node_modules/.bin/prisma" >&2; exit 1; }
+  [[ -f "$base/control-api/package.json" ]] || { echo "[错误] 缺少 control-api package.json（Prisma migration 需要）" >&2; exit 1; }
   [[ -f "$base/frontend/.next/standalone/server.js" ]] || { echo "[错误] 缺少前端 standalone 包：$base/frontend/.next/standalone/server.js" >&2; exit 1; }
   [[ -d "$base/frontend/.next/standalone/.next/static" ]] || { echo "[错误] 缺少前端静态资源：$base/frontend/.next/standalone/.next/static" >&2; exit 1; }
 }
@@ -218,7 +220,6 @@ kubenova_require_node_runtime prod
 check_dep curl "curl"
 check_dep psql "PostgreSQL client"
 check_dep redis-cli "Redis client"
-check_dep go "Go"
 if ! command -v helm >/dev/null 2>&1; then
   echo "[警告] 未找到 helm，基础服务继续启动；Helm 应用/仓库能力会不可用。" >&2
 fi
@@ -233,6 +234,24 @@ require_release_layout "$RELEASE_ROOT"
 load_env_file "$SYSTEMD_ENV_DIR/control-api.env"
 load_env_file "$SYSTEMD_ENV_DIR/runtime-gateway.env"
 
+validate_production_env() {
+  local name="$1" minimum="$2" value lower
+  value="${!name:-}"
+  lower="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+  if [[ -z "$value" || "${#value}" -lt "$minimum" || "$lower" == *replace-with* || "$lower" == *change-me* || "$lower" == *development-key* || "$lower" == *placeholder* || "$lower" == *example* ]]; then
+    echo "[错误] 生产环境变量 $name 未配置为有效的随机值（至少 ${minimum} 个字符）" >&2
+    exit 1
+  fi
+}
+
+# Keep this gate close to startup so a release cannot silently use repository
+# examples. Values are validated without echoing their contents.
+export NODE_ENV=production
+validate_production_env AI_CREDENTIAL_ENCRYPTION_KEY 32
+validate_production_env JWT_SECRET 32
+validate_production_env RUNTIME_TOKEN_SECRET 32
+validate_production_env RUNTIME_GATEWAY_INTERNAL_SECRET 32
+
 if [[ -n "${DATABASE_URL:-}" ]]; then
   echo "[预检] 正在检查 PostgreSQL..."
   psql "$DATABASE_URL" -c "SELECT 1" >/dev/null
@@ -246,6 +265,10 @@ if [[ -n "${REDIS_URL:-}" ]]; then
   redis-cli -h "$redis_host" -p "$redis_port" ping >/dev/null
   echo "[预检] Redis 正常"
 fi
+
+echo "[数据库] 正在执行 Prisma migrations..."
+(cd "$CONTROL_API_DIR" && ./node_modules/.bin/prisma migrate deploy)
+echo "[数据库] Prisma migrations 完成"
 
 frontend_log="$(service_log_file frontend)"
 control_api_log="$(service_log_file control-api)"

@@ -37,12 +37,20 @@ const envSchema = z.object({
   AI_CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
 }).superRefine((value, ctx) => {
   const key = value.AI_CREDENTIAL_ENCRYPTION_KEY?.trim();
-  if (value.NODE_ENV === 'production' && (!key || key.length < 32)) {
+  const looksLikePlaceholder =
+    !key ||
+    /(?:replace[-_ ]?with|change[-_ ]?me|development[-_ ]?key|example|placeholder)/i.test(
+      key,
+    );
+  if (
+    value.NODE_ENV === 'production' &&
+    (looksLikePlaceholder || (key?.length ?? 0) < 32)
+  ) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['AI_CREDENTIAL_ENCRYPTION_KEY'],
       message:
-        'AI_CREDENTIAL_ENCRYPTION_KEY must be configured with at least 32 characters in production',
+        'AI_CREDENTIAL_ENCRYPTION_KEY must be a non-placeholder value with at least 32 characters in production',
     });
   }
 });

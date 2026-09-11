@@ -26,7 +26,7 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d
 docker compose -f deploy/docker/docker-compose.prod.yml --env-file deploy/docker/.env ps
 curl -fsS http://127.0.0.1:3000/ >/dev/null
 curl -fsS http://127.0.0.1:4100/healthz
-curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null
+curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null
 ```
 
 ## 回滚

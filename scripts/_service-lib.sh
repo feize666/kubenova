@@ -42,7 +42,7 @@ service_health_url() {
   [[ -n "$port" ]] || port="$(service_port "$name")"
   case "$name" in
     frontend) echo "http://127.0.0.1:${port}/" ;;
-    control-api) echo "http://127.0.0.1:${port}/api/capabilities" ;;
+    control-api) echo "http://127.0.0.1:${port}/api/health/ready" ;;
     runtime-gateway) echo "http://127.0.0.1:${port}/healthz" ;;
     *) echo "" ;;
   esac

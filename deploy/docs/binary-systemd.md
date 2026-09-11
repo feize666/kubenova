@@ -41,7 +41,7 @@ sudo systemctl restart kubenova-runtime-gateway.service kubenova-control-api.ser
 systemctl status kubenova-runtime-gateway.service --no-pager
 systemctl status kubenova-control-api.service --no-pager
 curl -fsS http://127.0.0.1:4100/healthz
-curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null
+curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null
 ```
 
 ## 回滚

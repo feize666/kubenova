@@ -87,7 +87,7 @@ Compose 内置健康检查：
 
 - `postgres`: `pg_isready`
 - `redis`: `redis-cli ping`
-- `control-api`: 容器内请求 `http://127.0.0.1:4000/api/capabilities`
+- `control-api`: 容器内请求 `http://127.0.0.1:4000/api/health/ready`
 - `runtime-gateway`: 容器内请求 `http://127.0.0.1:4100/healthz`
 - `frontend`: 容器内请求 `http://127.0.0.1:3000/`
 
@@ -96,7 +96,7 @@ Compose 内置健康检查：
 ```bash
 docker compose -f docker-compose.prod.yml ps
 curl -fsS http://127.0.0.1:${FRONTEND_PORT:-3000}/ >/dev/null && echo frontend-ok
-curl -fsS http://127.0.0.1:${CONTROL_API_PORT:-4000}/api/capabilities >/dev/null && echo control-api-ok
+curl -fsS http://127.0.0.1:${CONTROL_API_PORT:-4000}/api/health/ready >/dev/null && echo control-api-ok
 curl -fsS http://127.0.0.1:${RUNTIME_GATEWAY_PORT:-4100}/healthz && echo
 ```
 

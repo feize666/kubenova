@@ -46,7 +46,7 @@
 ## 5. 首次验证
 
 - [ ] `curl -fsS http://127.0.0.1:3000/ >/dev/null`
-- [ ] `curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null`
+- [ ] `curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null`
 - [ ] `curl -fsS http://127.0.0.1:4100/healthz`
 - [ ] 登录页可以打开
 - [ ] 一个功能页可以打开
@@ -56,4 +56,3 @@
 - [ ] 记录上一个可用版本号
 - [ ] 执行 `bash scripts/service.sh prod rollback <version>`
 - [ ] 执行 `bash scripts/service.sh prod status`
-

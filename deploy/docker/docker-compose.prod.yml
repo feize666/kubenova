@@ -31,7 +31,7 @@ services:
       retries: 10
 
   control-api:
-    image: ${CONTROL_API_IMAGE:-ghcr.io/feize1995/kubenova-control-api:latest}
+    image: ${CONTROL_API_IMAGE:-ghcr.io/feize1995/kubenova-control-api:${KUBENOVA_IMAGE_TAG:-latest}}
     container_name: kubenova-control-api
     restart: unless-stopped
     env_file:
@@ -44,11 +44,11 @@ services:
       REDIS_URL: redis://redis:6379
       RUNTIME_GATEWAY_BASE_URL: ${RUNTIME_GATEWAY_BASE_URL:-ws://localhost:4100}
       RUNTIME_GATEWAY_PUBLIC_BASE_URL: ${RUNTIME_GATEWAY_PUBLIC_BASE_URL:-}
-      JWT_SECRET: ${JWT_SECRET}
-      AI_CREDENTIAL_ENCRYPTION_KEY: ${AI_CREDENTIAL_ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in the production env file}
+      AI_CREDENTIAL_ENCRYPTION_KEY: ${AI_CREDENTIAL_ENCRYPTION_KEY:?AI_CREDENTIAL_ENCRYPTION_KEY must be set in the production env file}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
       REFRESH_TOKEN_EXPIRES_IN: ${REFRESH_TOKEN_EXPIRES_IN:-7d}
-      RUNTIME_GATEWAY_INTERNAL_SECRET: ${RUNTIME_GATEWAY_INTERNAL_SECRET}
+      RUNTIME_GATEWAY_INTERNAL_SECRET: ${RUNTIME_GATEWAY_INTERNAL_SECRET:?RUNTIME_GATEWAY_INTERNAL_SECRET must be set in the production env file}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@local.dev}
@@ -73,13 +73,13 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/api/capabilities',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/api/health/ready',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 10
 
   runtime-gateway:
-    image: ${RUNTIME_GATEWAY_IMAGE:-ghcr.io/feize1995/kubenova-runtime-gateway:latest}
+    image: ${RUNTIME_GATEWAY_IMAGE:-ghcr.io/feize1995/kubenova-runtime-gateway:${KUBENOVA_IMAGE_TAG:-latest}}
     container_name: kubenova-runtime-gateway
     restart: unless-stopped
     env_file:
@@ -88,8 +88,8 @@ services:
       PORT: ${RUNTIME_GATEWAY_PORT:-4100}
       NODE_ENV: production
       CONTROL_API_BASE_URL: ${CONTROL_API_INTERNAL_BASE_URL:-http://control-api:4000}
-      RUNTIME_TOKEN_SECRET: ${RUNTIME_TOKEN_SECRET}
-      RUNTIME_GATEWAY_INTERNAL_SECRET: ${RUNTIME_GATEWAY_INTERNAL_SECRET}
+      RUNTIME_TOKEN_SECRET: ${RUNTIME_TOKEN_SECRET:?RUNTIME_TOKEN_SECRET must be set in the production env file}
+      RUNTIME_GATEWAY_INTERNAL_SECRET: ${RUNTIME_GATEWAY_INTERNAL_SECRET:?RUNTIME_GATEWAY_INTERNAL_SECRET must be set in the production env file}
       ALLOWED_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     ports:
       - "${RUNTIME_GATEWAY_PORT:-4100}:4100"
@@ -103,7 +103,7 @@ services:
       retries: 10
 
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/feize1995/kubenova-frontend:latest}
+    image: ${FRONTEND_IMAGE:-ghcr.io/feize1995/kubenova-frontend:${KUBENOVA_IMAGE_TAG:-latest}}
     container_name: kubenova-frontend
     restart: unless-stopped
     env_file:

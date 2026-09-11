@@ -38,6 +38,21 @@ export class AppController {
     };
   }
 
+  /**
+   * Lightweight process-readiness endpoint used by release probes.
+   * Prisma migrations run before the process starts, so a 200 here also
+   * proves that the current schema gate completed successfully.
+   */
+  @Get(['api/health/ready', 'api/v1/health/ready'])
+  getReadiness() {
+    return {
+      status: 'ok',
+      service: 'control-api',
+      contractVersion: CONTRACT_VERSION,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
   @Get(['api/capability-baseline', 'api/v1/capability-baseline'])
   @Header('Contract-Version', CONTRACT_VERSION)
   getCapabilityBaseline(

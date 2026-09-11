@@ -84,4 +84,13 @@ describe('AiProviderService', () => {
       else process.env.AI_CREDENTIAL_ENCRYPTION_KEY = previousKey;
     }
   });
+
+  it('rejects a production placeholder even when it is long enough', () => {
+    expect(() =>
+      resolveAiCredentialEncryptionKey(
+        'replace-with-at-least-32-random-characters',
+        'production',
+      ),
+    ).toThrow(/non-placeholder/i);
+  });
 });

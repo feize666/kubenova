@@ -149,7 +149,7 @@ bash scripts/service.sh dev status
 
 ```bash
 curl -fsS http://127.0.0.1:3000/ >/dev/null && echo frontend-ok
-curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null && echo control-api-ok
+curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null && echo control-api-ok
 curl -fsS http://127.0.0.1:4100/healthz && echo
 ```
 
@@ -250,7 +250,7 @@ kubectl rollout undo deploy/frontend -n kubenova
 
 - `bash scripts/service.sh help`：查看真实命令面。
 - `bash scripts/service.sh dev status` / `prod status`：确认进程与端口。
-- `curl -fsS http://127.0.0.1:4000/api/capabilities`：确认 control-api。
+- `curl -fsS http://127.0.0.1:4000/api/health/ready`：确认 control-api 进程与启动 migration 已就绪。
 - `curl -fsS http://127.0.0.1:4100/healthz`：确认 runtime-gateway。
 - `psql "$DATABASE_URL" -c "SELECT 1"`：确认 PostgreSQL。
 - `redis-cli ping`：确认 Redis。

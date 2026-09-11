@@ -19,7 +19,7 @@
 
 ## 升级后核对清单
 
-- 控制面接口：`/api/capabilities` 可访问
+- 控制面就绪接口：`/api/health/ready` 可访问（该进程已在启动阶段执行 `prisma migrate deploy`）
 - 运行网关健康：`/healthz` 返回 2xx
 - 关键页面加载正常
 - 日志无连续 error
@@ -27,12 +27,27 @@
 
 ## 推荐命令
 
+### Docker Compose 原子 tag 发布/回滚
+
+```bash
+# 不启动服务，只校验必需密钥、Compose 插值和发布契约
+bash scripts/service.sh compose-release preflight --env-file deploy/docker/.env
+
+# 发布（或升级）统一版本 tag，等待全部服务 healthy
+bash scripts/service.sh compose-release up --tag v1.3 --env-file deploy/docker/.env
+
+# 出现回归时切回旧 tag；脚本不会改写 env 文件
+bash scripts/service.sh compose-release rollback v1.2 --env-file deploy/docker/.env
+```
+
+control-api 镜像入口点会先执行 `./node_modules/.bin/prisma migrate deploy`，迁移成功后才启动应用；二进制/systemd `prod up` 也执行同一 migration 门禁。
+
 ```bash
 # binary/systemd
 systemctl status kubenova-runtime-gateway.service --no-pager
 systemctl status kubenova-control-api.service --no-pager
 curl -fsS http://127.0.0.1:4100/healthz
-curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null
+curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null
 
 # docker compose
 docker compose -f deploy/docker/docker-compose.prod.yml --env-file deploy/docker/.env ps

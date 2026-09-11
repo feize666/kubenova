@@ -39,6 +39,7 @@ cp .env.example .env
 - `RUNTIME_GATEWAY_BASE_URL`
 - `RUNTIME_GATEWAY_PUBLIC_BASE_URL`
 - `NEXT_PUBLIC_CONTROL_API_BASE`
+- `AI_CREDENTIAL_ENCRYPTION_KEY`（至少 32 字符的随机值，不能使用示例占位符）
 
 如使用本地镜像，设置：
 
@@ -55,10 +56,24 @@ cd deploy/docker
 docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
 
+推荐使用发布脚本执行预检和启动。脚本不会输出密钥，也不会改写 `.env`：
+
+```bash
+bash scripts/service.sh test release
+bash scripts/service.sh compose-release preflight --env-file deploy/docker/.env
+bash scripts/service.sh compose-release up --tag v1.2 --env-file deploy/docker/.env
+```
+
 状态：
 
 ```bash
 docker compose -f docker-compose.prod.yml ps
+```
+
+`--tag` 会把同一个版本应用到三个应用镜像，并等待 PostgreSQL、Redis、control-api、网关和前端全部 healthy：
+
+```bash
+bash scripts/service.sh compose-release up --tag v1.3 --env-file deploy/docker/.env
 ```
 
 日志：
@@ -123,7 +138,7 @@ Compose 清单内置健康检查：
 
 - postgres: `pg_isready`
 - redis: `redis-cli ping`
-- control-api: `GET /api/capabilities`
+- control-api: `GET /api/health/ready`（进程已通过启动时 Prisma migration 门禁）
 - runtime-gateway: `GET /healthz`
 - frontend: `GET /`
 
@@ -132,7 +147,7 @@ Compose 清单内置健康检查：
 ```bash
 docker compose -f docker-compose.prod.yml ps
 curl -fsS http://127.0.0.1:${FRONTEND_PORT:-3000}/ >/dev/null && echo frontend-ok
-curl -fsS http://127.0.0.1:${CONTROL_API_PORT:-4000}/api/capabilities >/dev/null && echo control-api-ok
+curl -fsS http://127.0.0.1:${CONTROL_API_PORT:-4000}/api/health/ready >/dev/null && echo control-api-ok
 curl -fsS http://127.0.0.1:${RUNTIME_GATEWAY_PORT:-4100}/healthz && echo
 ```
 
@@ -147,6 +162,14 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d
 docker compose -f docker-compose.prod.yml ps
 ```
 
+也可以不修改配置文件直接回滚：
+
+```bash
+bash scripts/service.sh compose-release rollback v1.2 --env-file deploy/docker/.env
+```
+
+回滚前确认目标版本兼容当前数据库 schema；Prisma migration 只前进执行，数据破坏性变更必须先完成备份和回滚演练。
+
 使用本地新镜像：
 
 ```bash
@@ -157,7 +180,7 @@ cd deploy/docker
 docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
 
-control-api 镜像启动命令会执行 `npx prisma migrate deploy`，升级前需确认数据库备份策略。
+control-api 镜像启动命令会执行本地 `./node_modules/.bin/prisma migrate deploy`，升级前需确认数据库备份策略。
 
 ## 回滚
 

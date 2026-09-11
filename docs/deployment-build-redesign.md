@@ -102,7 +102,7 @@ sudo bash scripts/service.sh prod up
 ```bash
 sudo bash scripts/service.sh prod status
 curl -fsS http://127.0.0.1:3000/ >/dev/null
-curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null
+curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null
 curl -fsS http://127.0.0.1:4100/healthz
 ```
 

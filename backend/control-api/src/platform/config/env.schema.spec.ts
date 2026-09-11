@@ -50,6 +50,13 @@ describe('parseEnv', () => {
       parseEnv({
         ...base,
         AI_CREDENTIAL_ENCRYPTION_KEY:
+          'replace-with-at-least-32-random-characters',
+      }),
+    ).toThrow(/non-placeholder/i);
+    expect(() =>
+      parseEnv({
+        ...base,
+        AI_CREDENTIAL_ENCRYPTION_KEY:
           '0123456789abcdef0123456789abcdef',
       }),
     ).not.toThrow();

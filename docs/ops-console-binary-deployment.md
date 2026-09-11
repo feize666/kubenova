@@ -18,6 +18,13 @@ bash scripts/service.sh build runtime-gateway
 bash scripts/service.sh build all
 ```
 
+打包发布档案（包含 Prisma CLI、migration、元数据和 SHA-256 校验文件）：
+
+```bash
+VERSION=v1.3 bash scripts/service.sh package release
+sha256sum tmp/release/kubenova-ubuntu.tar.gz
+```
+
 当前脚本行为：
 
 - control-api：执行 `backend/control-api` 下 `npm run build`
@@ -85,7 +92,7 @@ sudo bash scripts/service.sh prod install
 - `deploy/systemd/env/control-api.env.example`
 - `deploy/systemd/env/runtime-gateway.env.example`
 
-生产前替换默认密钥、数据库地址、Redis 地址、CORS、AI 模型配置。
+生产前替换默认密钥、数据库地址、Redis 地址、CORS、AI 模型配置。`AI_CREDENTIAL_ENCRYPTION_KEY` 必须是至少 32 字符的稳定随机值，不能使用模板占位符；服务启动前会拒绝不安全值。
 
 ## 前台运行
 
@@ -132,7 +139,7 @@ journalctl -u kubenova-runtime-gateway.service -n 200 --no-pager
 
 ```bash
 curl -fsS http://127.0.0.1:3000/ >/dev/null && echo frontend-ok
-curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null && echo control-api-ok
+curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null && echo control-api-ok
 curl -fsS http://127.0.0.1:4100/healthz && echo
 ```
 
