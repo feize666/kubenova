@@ -20,10 +20,10 @@ export const metadata: Metadata = {
   description: "云原生智能运维控制台",
   icons: {
     icon: [
-      { url: "/kubenova-icon.svg", type: "image/svg+xml" },
+      { url: "/kubenova-icon.svg?v=1.2", type: "image/svg+xml" },
     ],
-    shortcut: ["/kubenova-icon.svg"],
-    apple: [{ url: "/kubenova-icon.svg", type: "image/svg+xml" }],
+    shortcut: ["/kubenova-icon.svg?v=1.2"],
+    apple: [{ url: "/kubenova-icon.svg?v=1.2", type: "image/svg+xml" }],
   },
 };
 
