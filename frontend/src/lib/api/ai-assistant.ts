@@ -478,6 +478,100 @@ export interface AiConfigPingResult {
   };
 }
 
+export interface AiProviderCatalogItem {
+  id: string;
+  label: string;
+  defaultBaseUrl: string;
+}
+
+export interface AiProvider {
+  id: string;
+  name: string;
+  vendor: string;
+  baseUrl: string;
+  modelName: string;
+  apiKeyConfigured: boolean;
+  apiKeyLast4: string;
+  enabled: boolean;
+  isDefault: boolean;
+  config?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiProviderInput {
+  name: string;
+  vendor: string;
+  baseUrl: string;
+  modelName: string;
+  apiKey?: string;
+  enabled?: boolean;
+  isDefault?: boolean;
+  config?: Record<string, unknown>;
+}
+
+export interface AiProviderTestResult {
+  ok: boolean;
+  latencyMs: number;
+  message: string;
+}
+
+export interface AiAgentProfile {
+  id: string;
+  name: string;
+  providerId: string;
+  providerName: string;
+  vendor: string;
+  systemPrompt?: string | null;
+  tools: string[];
+  enabled: boolean;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listAiProviderCatalog(token?: string): Promise<AiProviderCatalogItem[]> {
+  return apiRequest<AiProviderCatalogItem[]>('/api/ai-assistant/providers/catalog', { token });
+}
+
+export async function listAiProviders(token?: string): Promise<AiProvider[]> {
+  return apiRequest<AiProvider[]>('/api/ai-assistant/providers', { token });
+}
+
+export async function createAiProvider(input: AiProviderInput, token?: string): Promise<AiProvider> {
+  return apiRequest<AiProvider, AiProviderInput>('/api/ai-assistant/providers', {
+    method: 'POST',
+    token,
+    body: input,
+  });
+}
+
+export async function updateAiProvider(id: string, input: Partial<AiProviderInput>, token?: string): Promise<AiProvider> {
+  return apiRequest<AiProvider, Partial<AiProviderInput>>(`/api/ai-assistant/providers/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    token,
+    body: input,
+  });
+}
+
+export async function deleteAiProvider(id: string, token?: string): Promise<{ id: string; deleted: true }> {
+  return apiRequest<{ id: string; deleted: true }>(`/api/ai-assistant/providers/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    token,
+  });
+}
+
+export async function testAiProvider(id: string, token?: string): Promise<AiProviderTestResult> {
+  return apiRequest<AiProviderTestResult>(`/api/ai-assistant/providers/${encodeURIComponent(id)}/test`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export async function listAiAgents(token?: string): Promise<AiAgentProfile[]> {
+  return apiRequest<AiAgentProfile[]>('/api/ai-assistant/agents', { token });
+}
+
 /** GET /api/ai-assistant/config - 读取当前 AI 模型配置（apiKey 已脱敏） */
 export async function getAiConfig(token?: string): Promise<AiModelConfig> {
   return apiRequest<AiModelConfig>("/api/ai-assistant/config", {

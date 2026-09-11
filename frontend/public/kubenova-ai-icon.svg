@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">KubeNova AI</title>
+  <desc id="desc">Blue and white KubeNova AI assistant mark</desc>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="#0f6fff"/>
+  <path d="M20 27.5a12 12 0 0 1 24 0v11a12 12 0 0 1-24 0z" fill="#fff"/>
+  <path d="M15 31h5v9h-5a4.5 4.5 0 0 1 0-9Zm34 0h-5v9h5a4.5 4.5 0 0 0 0-9Z" fill="#cfe2ff"/>
+  <circle cx="28" cy="35" r="3" fill="#0f6fff"/>
+  <circle cx="36" cy="35" r="3" fill="#0f6fff"/>
+  <path d="M28 44h8M32 16v7M26 16h12" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+</svg>

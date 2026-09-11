@@ -257,11 +257,16 @@ export class AiProviderService {
       : await this.prisma.aiAgentProfile.findFirst({ where: { enabled: true, isDefault: true }, include: { provider: true } });
     const provider = agent?.provider ?? await this.prisma.aiProvider.findFirst({ where: { enabled: true, isDefault: true } });
     if (!provider) throw new BadRequestException('未配置可用的 AI Provider');
-    const content = await this.requestProvider(provider, messages, 30_000);
+    const config = provider.configJson && typeof provider.configJson === 'object' && !Array.isArray(provider.configJson)
+      ? provider.configJson as Record<string, unknown>
+      : {};
+    const timeoutMs = Number.isFinite(Number(config.timeoutMs)) ? Math.max(3_000, Number(config.timeoutMs)) : 30_000;
+    const maxTokens = Number.isFinite(Number(config.maxTokens)) ? Math.max(128, Number(config.maxTokens)) : 2_048;
+    const content = await this.requestProvider(provider, messages, timeoutMs, maxTokens);
     return { content, providerId: provider.id, agentId: agent?.id };
   }
 
-  private async requestProvider(provider: any, messages: Array<{ role: string; content: string }>, timeoutMs: number): Promise<string> {
+  private async requestProvider(provider: any, messages: Array<{ role: string; content: string }>, timeoutMs: number, maxTokens = 2_048): Promise<string> {
     const key = provider.apiKeyCiphertext ? this.decrypt(provider.apiKeyCiphertext) : '';
     const vendor = provider.vendor as string;
     const controller = new AbortController();
@@ -269,16 +274,16 @@ export class AiProviderService {
     try {
       let url = `${this.normalizeUrl(provider.baseUrl)}/chat/completions`;
       let headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      let body: unknown = { model: provider.modelName, messages, max_tokens: 2048, temperature: 0.2 };
+      let body: unknown = { model: provider.modelName, messages, max_tokens: maxTokens, temperature: 0.2 };
       if (key) headers.Authorization = `Bearer ${key}`;
       if (vendor === 'anthropic') {
         url = `${this.normalizeUrl(provider.baseUrl)}/messages`;
         headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' };
-        body = { model: provider.modelName, max_tokens: 2048, messages: messages.filter((item) => item.role !== 'system') };
+        body = { model: provider.modelName, max_tokens: maxTokens, messages: messages.filter((item) => item.role !== 'system') };
       } else if (vendor === 'gemini') {
         url = `${this.normalizeUrl(provider.baseUrl)}/models/${provider.modelName}:generateContent?key=${encodeURIComponent(key)}`;
         headers = { 'Content-Type': 'application/json' };
-        body = { contents: messages.filter((item) => item.role !== 'system').map((item) => ({ role: item.role === 'assistant' ? 'model' : 'user', parts: [{ text: item.content }] })) };
+        body = { contents: messages.filter((item) => item.role !== 'system').map((item) => ({ role: item.role === 'assistant' ? 'model' : 'user', parts: [{ text: item.content }] })), generationConfig: { maxOutputTokens: maxTokens } };
       }
       const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal });
       const raw = await response.text();

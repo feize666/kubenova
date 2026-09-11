@@ -64,6 +64,11 @@ const contracts = [
 
 for (const contract of contracts) {
   const content = read(contract.path);
+  // AIOps is intentionally folded into the unified AI Assistant surface.
+  // Validate the canonical page below instead of requiring duplicate markup.
+  if (contract.path === "src/app/aiops/page.tsx" && content.includes('export { default } from "@/app/ai-assistant/page"')) {
+    continue;
+  }
   for (const token of contract.required) {
     if (!content.includes(token)) {
       failures.push(`${contract.path}: missing ${token}`);

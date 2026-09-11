@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -29,6 +30,7 @@ import {
   PresetQuestion,
 } from './types';
 import { readAiConfigFromFile } from './ai-config.util';
+import { AiProviderService } from './ai-provider.service';
 
 @Injectable()
 export class AiAssistantService {
@@ -37,6 +39,7 @@ export class AiAssistantService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly helmService: HelmService,
+    @Optional() private readonly aiProviderService?: AiProviderService,
   ) {}
 
   private static readonly CLUSTER_CONTEXT_KEYS = [
@@ -388,6 +391,22 @@ export class AiAssistantService {
     history: AiConversationMessage[],
     opts?: { systemAppend?: string },
   ): Promise<string> {
+    // Prefer the encrypted, database-backed provider configured from 系统设置.
+    // Keep the legacy .env path as a compatibility fallback for existing installs.
+    if (this.aiProviderService) {
+      try {
+        const providerReply = await this.aiProviderService.chat(
+          undefined,
+          history.map((msg) => ({ role: msg.role, content: msg.content })),
+        );
+        if (providerReply.content?.trim()) return providerReply.content.trim();
+      } catch (error) {
+        this.logger.warn(
+          `database AI provider unavailable, falling back to environment config: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     // 每次调用重新从文件读取，确保配置热更新无需重启
     const config = readAiConfigFromFile();
     const { baseUrl, apiKey, modelName: model } = config;
@@ -728,6 +747,16 @@ export class AiAssistantService {
    * 如果调用失败，返回包含错误信息的字符串。
    */
   async testLlmConnection(): Promise<string> {
+    if (this.aiProviderService) {
+      try {
+        const providerReply = await this.aiProviderService.chat(undefined, [
+          { role: 'user', content: '请用一句话介绍你自己。' },
+        ]);
+        if (providerReply.content?.trim()) return providerReply.content.trim();
+      } catch {
+        // Fall through to the legacy environment-backed configuration.
+      }
+    }
     const { apiKey } = readAiConfigFromFile();
     if (!apiKey) {
       throw new Error('AI_MODEL_API_KEY 未配置，请先在配置页面填写 API Key。');

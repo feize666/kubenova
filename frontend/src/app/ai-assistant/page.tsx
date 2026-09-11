@@ -47,7 +47,8 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
 } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useQuery } from "@tanstack/react-query";
@@ -92,6 +93,7 @@ import {
   type SaveAiConfigInput,
   type SendMessageResponse,
 } from "@/lib/api/ai-assistant";
+import { getClusterIdFromPathname } from "@/lib/cluster-workspace";
 
 const { Sider, Content } = Layout;
 const { TextArea } = Input;
@@ -602,6 +604,7 @@ function ModelSettingsDrawer({
 
 export default function AiAssistantPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { accessToken, isInitializing, role } = useAuth();
   const isAdmin = role === "admin" || role === "platform-admin";
@@ -631,7 +634,7 @@ export default function AiAssistantPage() {
   const [deferredQueryReady, setDeferredQueryReady] = useState(false);
   const [cacheHydrated, setCacheHydrated] = useState(false);
 
-  const requestedClusterId = searchParams.get("clusterId")?.trim() ?? "";
+  const requestedClusterId = searchParams.get("clusterId")?.trim() || getClusterIdFromPathname(pathname) || "";
 
   const [alertForm, setAlertForm] = useState({
     title: "Pod 持续重启",
@@ -1768,7 +1771,10 @@ export default function AiAssistantPage() {
           className="resource-workbench__header ai-assistant-workbench__header"
           title={
             <span className="resource-workbench__title-row">
-              <span className="resource-workbench__title">AI Assistant</span>
+              <span className="resource-workbench__title-row">
+                <Image className="ai-assistant-title-icon" src="/kubenova-ai-icon.svg" alt="" aria-hidden="true" width={28} height={28} priority />
+                <span className="resource-workbench__title">AI 助手</span>
+              </span>
               <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
                 ChatOps
               </OpsFilterChip>
@@ -1796,11 +1802,25 @@ export default function AiAssistantPage() {
               </OpsIconActionButton>
               <OpsIconActionButton
                 opsTone="primary"
+                icon={<RobotOutlined />}
+                onClick={() => {
+                  if (!actionClusterId) {
+                    message.warning("请先选择一个集群");
+                    return;
+                  }
+                  void handleSend("请分析当前集群的健康状态，并基于实时告警、资源、事件和拓扑给出根因候选、影响范围与排障建议。");
+                }}
+                disabled={isInitializing || !accessToken || !actionClusterId || loading}
+              >
+                分析当前集群
+              </OpsIconActionButton>
+              <OpsIconActionButton
+                opsTone="primary"
                 icon={<SettingOutlined />}
-                onClick={() => setSettingsOpen(true)}
+                onClick={() => router.push("/settings")}
                 disabled={isInitializing || !accessToken}
               >
-                模型设置
+                AI 设置
               </OpsIconActionButton>
             </Space>
           }

@@ -15325,3 +15325,53 @@ body.topology-overview-active {
   .cluster-workspace-header__id { display: none; }
   .cluster-workspace-shell__header { padding-inline: 12px !important; }
 }
+ .ai-provider-settings__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ai-provider-settings__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ai-provider-settings__provider-icon,
+.portal-settings__shortcut-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid color-mix(in srgb, var(--kn-primary) 24%, transparent);
+  border-radius: 9px;
+  color: var(--kn-primary);
+  background: color-mix(in srgb, var(--kn-primary) 8%, var(--kn-surface));
+  flex: 0 0 auto;
+}
+
+.portal-settings__shortcut {
+  min-height: 116px;
+}
+
+.ai-assistant-title-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(15, 111, 255, 0.18);
+  vertical-align: middle;
+}
+
+@media (max-width: 720px) {
+  .ai-provider-settings__metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-provider-settings__toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
