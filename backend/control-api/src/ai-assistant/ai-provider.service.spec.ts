@@ -68,19 +68,20 @@ describe('AiProviderService', () => {
       /AI_CREDENTIAL_ENCRYPTION_KEY/i,
     );
     const previousNodeEnv = process.env.NODE_ENV;
+    const previousKey = process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
     process.env.NODE_ENV = 'production';
+    delete process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
     try {
       expect(() => new AiProviderService(prisma)).toThrow(
         /AI_CREDENTIAL_ENCRYPTION_KEY/i,
       );
-      expect(() =>
-        new AiProviderService(
-          prisma,
-          '0123456789abcdef0123456789abcdef',
-        ),
-      ).not.toThrow();
+      process.env.AI_CREDENTIAL_ENCRYPTION_KEY =
+        '0123456789abcdef0123456789abcdef';
+      expect(() => new AiProviderService(prisma)).not.toThrow();
     } finally {
       process.env.NODE_ENV = previousNodeEnv;
+      if (previousKey === undefined) delete process.env.AI_CREDENTIAL_ENCRYPTION_KEY;
+      else process.env.AI_CREDENTIAL_ENCRYPTION_KEY = previousKey;
     }
   });
 });

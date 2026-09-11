@@ -85,12 +85,9 @@ function actorId(actor?: AiActor): string | undefined {
 export class AiProviderService {
   private readonly key: Buffer;
 
-  constructor(
-    private readonly prisma: PrismaService,
-    encryptionKey = process.env.AI_CREDENTIAL_ENCRYPTION_KEY,
-  ) {
+  constructor(private readonly prisma: PrismaService) {
     this.key = createHash('sha256')
-      .update(resolveAiCredentialEncryptionKey(encryptionKey))
+      .update(resolveAiCredentialEncryptionKey())
       .digest();
   }
 
