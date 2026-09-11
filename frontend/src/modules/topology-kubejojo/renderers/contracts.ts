@@ -18,6 +18,7 @@ export interface TopologyRendererResource {
   warnings?: string[];
   aggregation?: {
     memberCount?: number;
+    representativeId?: string;
     membersByKind?: Record<string, number>;
     semanticKey?: Record<string, string>;
   };
@@ -44,6 +45,8 @@ export interface TopologyRendererGraphNode {
 export interface TopologyRendererNodeData extends Record<string, unknown> {
   graphNode: TopologyRendererGraphNode;
   viewState?: TopologyViewState;
+  /** Opens the represented resource's management page. */
+  onOpenResource?: (id: string) => void;
 }
 
 export interface TopologyElkPoint {

@@ -150,6 +150,9 @@ const RESOURCE_MANAGEMENT_ROUTES: Record<string, string> = {
   Endpoints: "/network/endpoints",
   EndpointSlice: "/network/endpointslices",
   NetworkPolicy: "/network/networkpolicy",
+  GatewayClass: "/network/gateway-api",
+  Gateway: "/network/gateway-api",
+  HTTPRoute: "/network/gateway-api",
   PersistentVolume: "/storage/pv",
   PersistentVolumeClaim: "/storage/pvc",
   StorageClass: "/storage/sc",
@@ -860,7 +863,7 @@ export default function NetworkTopologyPage() {
               onSelectResource={selectTopologyResource}
               onOpen={(id) => {
                 const resource = graphQuery.data?.resources.find((item) => item.id === id);
-                if (resource) setDetail(detailRequest(resource));
+                if (resource) navigateToResource(resource);
               }}
               fitVersion={fitVersion}
             />

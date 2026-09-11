@@ -245,6 +245,10 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
         : "资源集合";
   const groupClass = graphNode.groupKind ? `is-group-${graphNode.groupKind}` : undefined;
   const kindClass = `is-kind-${kindDomain(nodeKind)}`;
+  const openResource = () => {
+    const resourceId = resource?.aggregation?.representativeId ?? resource?.id;
+    if (resourceId) data.onOpenResource?.(resourceId);
+  };
 
   return (
     <div
@@ -296,7 +300,18 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
             <div className="topology-kubejojo__node-icon">{kindCode(nodeKind)}</div>
             <div className="topology-kubejojo__node-copy">
               <div className="topology-kubejojo__node-kind">{nodeKind}</div>
-              <strong className="topology-kubejojo__node-title" title={title}>{title}</strong>
+              <button
+                type="button"
+                className="topology-kubejojo__node-title topology-kubejojo__node-title-button"
+                title={`打开 ${nodeKind} 管理页`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openResource();
+                }}
+                onDoubleClick={(event) => event.stopPropagation()}
+              >
+                {title}
+              </button>
               <div className="topology-kubejojo__node-meta">
                 <span
                   className="topology-kubejojo__node-status"

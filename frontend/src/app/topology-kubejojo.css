@@ -139,6 +139,24 @@
 .topology-kubejojo__edge-path.is-focused.is-overlay { filter: drop-shadow(0 0 2px color-mix(in srgb, var(--tk-edge) 30%, transparent)); }
 @keyframes topology-edge-flow { to { stroke-dashoffset: -30; } }
 .topology-kubejojo__edge-path.is-overlay { stroke-linecap: butt; }
+.topology-kubejojo__node-title-button {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topology-kubejojo__node-title-button:hover,
+.topology-kubejojo__node-title-button:focus-visible { color: var(--tk-primary); text-decoration: underline; text-underline-offset: 3px; }
 .topology-kubejojo__edge-label {
   position: absolute;
   border-radius: 4px;
@@ -834,7 +852,7 @@
   font-size: 10px;
   letter-spacing: .02em;
 }
-.topology-kubejojo__node-title { letter-spacing: -.01em; }
+.topology-kubejojo__node-title { letter-spacing: 0; }
 .topology-kubejojo__node:hover .topology-kubejojo__node-card {
   border-color: var(--tk-kind-color, var(--tk-primary));
   box-shadow: 0 10px 22px color-mix(in srgb, var(--tk-kind-color, var(--tk-primary)) 16%, transparent), inset 0 1px 0 rgba(255,255,255,.9);

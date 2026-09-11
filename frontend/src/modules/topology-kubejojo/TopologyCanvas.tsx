@@ -288,6 +288,7 @@ function Canvas({
       selected: node.id === selectedNodeId,
       data: {
         ...node.data,
+        onOpenResource: onOpen,
         viewState: !selectedNodeId
           ? "default"
           : node.id === selectedNodeId
