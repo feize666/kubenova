@@ -84,19 +84,19 @@ model ClusterRegistry {
 
 // AI provider 配置。apiKeyCiphertext 只保存 AES-256-GCM 密文，永不通过 API 返回。
 model AiProvider {
-  id                String   @id @default(cuid())
-  name              String
-  vendor            String
-  baseUrl           String
-  modelName         String
-  apiKeyCiphertext  String?
-  apiKeyLast4       String?
-  enabled           Boolean  @default(true)
-  isDefault         Boolean  @default(false)
-  configJson        Json?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  agents            AiAgentProfile[]
+  id               String           @id @default(cuid())
+  name             String
+  vendor           String
+  baseUrl          String
+  modelName        String
+  apiKeyCiphertext String?
+  apiKeyLast4      String?
+  enabled          Boolean          @default(true)
+  isDefault        Boolean          @default(false)
+  configJson       Json?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  agents           AiAgentProfile[]
 
   @@index([vendor, enabled])
   @@index([isDefault])
@@ -135,16 +135,16 @@ model AiAnalysisRun {
 }
 
 model AiActionApproval {
-  id           String   @id @default(cuid())
-  clusterId    String?
-  actorUserId  String?
-  action       String
-  targetJson   Json
-  status       String   @default("pending") // pending|approved|rejected|executed|expired
-  previewJson  Json?
-  approvedAt   DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String    @id @default(cuid())
+  clusterId   String?
+  actorUserId String?
+  action      String
+  targetJson  Json
+  status      String    @default("pending") // pending|approved|rejected|executed|expired
+  previewJson Json?
+  approvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([clusterId, status])
   @@index([actorUserId, createdAt])
