@@ -27,6 +27,7 @@ import type {
   AiVoiceInputMeta,
   CreateSessionInput,
 } from './types';
+import { AiProviderService } from './ai-provider.service';
 import {
   readAiConfig,
   saveAiConfig,
@@ -245,6 +246,7 @@ export class AiAssistantController {
   constructor(
     private readonly aiAssistantService: AiAssistantService,
     private readonly aiActionExecutorService: AiActionExecutorService,
+    private readonly aiProviderService: AiProviderService,
   ) {}
 
   private isAutoQueryBridgeEnabled(): boolean {
@@ -359,6 +361,67 @@ export class AiAssistantController {
   getPresets(@Req() req: AiAssistantRequest) {
     requireAiAssistantAdmin(req);
     return this.aiAssistantService.getPresetQuestions();
+  }
+
+  @Get('providers/catalog')
+  getProviderCatalog(@Req() req: AiAssistantRequest) {
+    requireAiAssistantAdmin(req);
+    return this.aiProviderService.listVendors();
+  }
+
+  @Get('providers')
+  listProviders(@Req() req: AiAssistantRequest) {
+    requireAiAssistantAdmin(req);
+    return this.aiProviderService.listProviders();
+  }
+
+  @Post('providers')
+  createProvider(@Req() req: AiAssistantRequest, @Body() body: any) {
+    const actor = requireAiAssistantAdmin(req);
+    return this.aiProviderService.createProvider(body, actor);
+  }
+
+  @Put('providers/:providerId')
+  updateProvider(@Req() req: AiAssistantRequest, @Param('providerId') providerId: string, @Body() body: any) {
+    const actor = requireAiAssistantAdmin(req);
+    return this.aiProviderService.updateProvider(providerId, body, actor);
+  }
+
+  @Delete('providers/:providerId')
+  deleteProvider(@Req() req: AiAssistantRequest, @Param('providerId') providerId: string) {
+    const actor = requireAiAssistantAdmin(req);
+    return this.aiProviderService.deleteProvider(providerId, actor);
+  }
+
+  @Post('providers/:providerId/test')
+  testProvider(@Req() req: AiAssistantRequest, @Param('providerId') providerId: string) {
+    requireAiAssistantAdmin(req);
+    return this.aiProviderService.testProvider(providerId);
+  }
+
+  @Get('agents')
+  listAgents(@Req() req: AiAssistantRequest) {
+    requireAiAssistantAdmin(req);
+    return this.aiProviderService.listAgents();
+  }
+
+  @Post('agents')
+  createAgent(@Req() req: AiAssistantRequest, @Body() body: any) {
+    const actor = requireAiAssistantAdmin(req);
+    return this.aiProviderService.createAgent(body, actor);
+  }
+
+  @Put('agents/:agentId')
+  updateAgent(@Req() req: AiAssistantRequest, @Param('agentId') agentId: string, @Body() body: any) {
+    const actor = requireAiAssistantAdmin(req);
+    return this.aiProviderService.updateAgent(agentId, body, actor);
+  }
+
+  @Post('agents/chat')
+  agentChat(@Req() req: AiAssistantRequest, @Body() body: { agentId?: string; messages?: Array<{ role: string; content: string }> }) {
+    requireAiAssistantAdmin(req);
+    if (!Array.isArray(body?.messages) || body.messages.length === 0) throw new BadRequestException('messages is required');
+    return this.aiProviderService.chat(body.agentId, body.messages);
   }
 
   @Post('chat')

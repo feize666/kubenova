@@ -75,9 +75,78 @@ model ClusterRegistry {
   clusterProfile   ClusterProfile?
   healthSnapshot   ClusterHealthSnapshot?
   clusterRoleBindings ClusterRoleBinding[]
+  aiAnalysisRuns   AiAnalysisRun[]
 
   // 仅对未删除集群强制名称唯一（deletedAt 为 null 时才参与唯一约束）
   @@index([name, deletedAt])
+}
+
+// AI provider 配置。apiKeyCiphertext 只保存 AES-256-GCM 密文，永不通过 API 返回。
+model AiProvider {
+  id                String   @id @default(cuid())
+  name              String
+  vendor            String
+  baseUrl           String
+  modelName         String
+  apiKeyCiphertext  String?
+  apiKeyLast4       String?
+  enabled           Boolean  @default(true)
+  isDefault         Boolean  @default(false)
+  configJson        Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  agents            AiAgentProfile[]
+
+  @@index([vendor, enabled])
+  @@index([isDefault])
+}
+
+model AiAgentProfile {
+  id           String     @id @default(cuid())
+  name         String
+  providerId   String
+  systemPrompt String?
+  toolsJson    Json
+  enabled      Boolean    @default(true)
+  isDefault    Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  provider     AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId, enabled])
+  @@index([isDefault])
+}
+
+model AiAnalysisRun {
+  id           String          @id @default(cuid())
+  clusterId    String
+  actorUserId  String?
+  status       String          @default("completed") // pending|running|completed|failed
+  summaryJson  Json?
+  evidenceJson Json?
+  error        String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  cluster      ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([clusterId, createdAt])
+  @@index([status])
+}
+
+model AiActionApproval {
+  id           String   @id @default(cuid())
+  clusterId    String?
+  actorUserId  String?
+  action       String
+  targetJson   Json
+  status       String   @default("pending") // pending|approved|rejected|executed|expired
+  previewJson  Json?
+  approvedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([clusterId, status])
+  @@index([actorUserId, createdAt])
 }
 
 model ClusterHealthSnapshot {
