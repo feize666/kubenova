@@ -1,0 +1,10 @@
+import { ReloadOutlined, ClusterOutlined } from "@ant-design/icons";
+import Link from "next/link";
+import { Space } from "antd";
+import { OpsFilterChip, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { ResourcePageHeader } from "@/components/resource-page-header";
+
+export function OverviewCommandCenter({ scopeLabel, clusterId, clusterCount, alertCount, riskLevel, generatedAt, isFetching, onRefresh }: { scopeLabel: string; clusterId: string; clusterCount: number; alertCount: number; riskLevel: "critical" | "warning" | "success"; generatedAt?: string; isFetching?: boolean; onRefresh?: () => void }) {
+  const freshness = generatedAt ? new Date(generatedAt).toLocaleString("zh-CN") : "等待采集";
+  return <OpsSurface variant="panel" padding="sm"><ResourcePageHeader path="/" embedded className="resource-workbench__header dashboard-workbench__page-header" title={<span className="resource-workbench__title-row"><span className="resource-workbench__title">Overview</span><OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>总览</OpsFilterChip></span>} description={`${scopeLabel} 的风险态势、资源容量、服务影响与运维入口`} actions={<Space size={8} wrap className="ops-overview-header__chips"><OpsStatusTag tone={riskLevel}>{riskLevel === "critical" ? "高风险" : riskLevel === "warning" ? "需关注" : "稳定"}</OpsStatusTag><OpsFilterChip tone="info" icon={<ClusterOutlined />}>集群 {clusterCount}</OpsFilterChip><OpsFilterChip tone="warning">活跃告警 {alertCount}</OpsFilterChip><OpsFilterChip tone="neutral">{clusterId ? "单集群" : "全部集群"}</OpsFilterChip><button type="button" className="ops-icon-button" aria-label="刷新仪表盘" onClick={onRefresh} disabled={isFetching}><ReloadOutlined /></button></Space>} /><div className="ops-overview-command-meta" aria-label="数据新鲜度">最近采集 {freshness} · 数据范围 {scopeLabel}<Link href={clusterId ? `/clusters/${encodeURIComponent(clusterId)}` : "/clusters"} prefetch={false}>进入集群工作区</Link></div></OpsSurface>;
+}

@@ -1,0 +1,2 @@
+import type { ReactNode } from "react";
+export function OverviewTrendPanel({ title, source, capturedAt, freshness, children }: { title: string; source: string; capturedAt?: string | null; freshness: string; children: ReactNode }) { return <div className="ops-overview-trend-panel"><div className="ops-overview-trend-panel__header"><strong>{title}</strong><span>{freshness} · {source}</span></div>{children}<small className="ops-overview-trend-panel__provenance">采集时间: {capturedAt ? new Date(capturedAt).toLocaleString("zh-CN") : "不可用"}</small></div>; }
