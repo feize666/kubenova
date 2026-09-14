@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Col, Divider, Input, Row, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { OpsFilterChip, OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
@@ -33,6 +34,7 @@ function statusTag(status: string) {
 }
 
 export default function SystemUpdatePage() {
+  const pathname = usePathname();
   const { message } = App.useApp();
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
@@ -208,6 +210,7 @@ export default function SystemUpdatePage() {
   ];
 
   const status = statusQuery.data;
+  const updateRoute = pathname === "/settings/update" ? "/settings/update" : "/system/update";
   const historyRows = useMemo(() => {
     const operationFilter = typeof tableFilters.operationType === "string" ? tableFilters.operationType.toLowerCase() : "";
     const targetVersionFilter = typeof tableFilters.targetVersion === "string" ? tableFilters.targetVersion.toLowerCase() : "";
@@ -232,7 +235,7 @@ export default function SystemUpdatePage() {
     <Space className="resource-workbench system-update-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
-          path="/system/update"
+          path={updateRoute}
           embedded
           className="resource-workbench__header"
           title={
@@ -243,7 +246,7 @@ export default function SystemUpdatePage() {
               </OpsFilterChip>
             </span>
           }
-          description="系统管理 / 更新管理"
+          description="系统设置 / 更新管理"
           actions={(
             <>
               <OpsFilterChip tone="neutral">运行 {status?.runningVersion ?? "-"}</OpsFilterChip>

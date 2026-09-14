@@ -6,8 +6,10 @@ import {
   CloudServerOutlined,
   DatabaseOutlined,
   DeploymentUnitOutlined,
+  FileSearchOutlined,
   FileTextOutlined,
   HomeOutlined,
+  LineChartOutlined,
   MenuOutlined,
   NodeIndexOutlined,
   ReloadOutlined,
@@ -53,6 +55,8 @@ const sectionIcons: Record<string, React.ReactNode> = {
   storage: <DatabaseOutlined />,
   configs: <FileTextOutlined />,
   topology: <NodeIndexOutlined />,
+  monitoring: <LineChartOutlined />,
+  logs: <FileSearchOutlined />,
   operations: <ToolOutlined />,
 };
 

@@ -62,4 +62,70 @@ describe('ObservabilityService', () => {
     expect(result.status).toBe('unavailable');
     expect(result.error).toBeTruthy();
   });
+
+  it('validates Grafana panel metadata before persisting a source', async () => {
+    const { service, prisma } = createService();
+
+    await expect(
+      service.createDataSource({ username: 'admin', role: 'platform-admin' }, {
+        kind: 'grafana',
+        name: 'grafana',
+        endpoint: 'https://grafana.example',
+        metadata: { dashboardUid: 'not safe/uid', panelId: 0 },
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.monitoringDataSource.create).not.toHaveBeenCalled();
+  });
+
+  it('returns a cluster-scoped safe Grafana embed URL without secrets', async () => {
+    const { service, prisma } = createService();
+    prisma.monitoringDataSource.findMany.mockResolvedValue([
+      {
+        id: 'grafana-a',
+        clusterId: 'cluster-a',
+        kind: 'grafana',
+        name: 'grafana',
+        endpoint: 'https://grafana.example',
+        secretRef: 'monitoring/grafana-token',
+        enabled: true,
+        status: 'unknown',
+        lastCheckedAt: null,
+        lastError: null,
+        metadata: {
+          dashboardUid: 'kubenova',
+          panelId: 7,
+          defaultTimeRange: '24h',
+          theme: 'dark',
+          variableMapping: { cluster: '$clusterId' },
+        },
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    ]);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('{}', { status: 200 });
+    process.env.OBSERVABILITY_GRAFANA_ALLOWED_ORIGINS = 'https://grafana.example';
+
+    try {
+      const result = await service.getGrafanaPanelConfiguration('cluster-a', '24h');
+      expect(result.available).toBe(true);
+      expect(result.embedUrl).toContain('/d-solo/kubenova');
+      expect(result.embedUrl).toContain('panelId=7');
+      expect(result.embedUrl).toContain('var-cluster=cluster-a');
+      expect(result).not.toHaveProperty('secretRef');
+      expect(result).not.toHaveProperty('token');
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.OBSERVABILITY_GRAFANA_ALLOWED_ORIGINS;
+    }
+  });
+
+  it('returns an unavailable state when Grafana is not configured', async () => {
+    const { service } = createService();
+    const result = await service.getGrafanaPanelConfiguration('cluster-a', '1h');
+    expect(result.available).toBe(false);
+    expect(result.status).toBe('unavailable');
+    expect(result.reason).toMatch(/未配置/);
+    expect(result.embedUrl).toBeNull();
+  });
 });

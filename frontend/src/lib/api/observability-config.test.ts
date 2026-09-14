@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { analyzeCluster } from "./ai-cluster";
-import { listObservabilityDataSources } from "./observability-config";
+import { getGrafanaPanelConfiguration, listObservabilityDataSources } from "./observability-config";
 
 test("cluster analysis is scoped to the requested cluster", async (t) => {
   let requestedUrl = "";
@@ -41,4 +41,31 @@ test("data source list carries the optional cluster scope", async (t) => {
 
   await listObservabilityDataSources("cluster-a");
   assert.equal(requestedUrl, "/api/observability/data-sources?clusterId=cluster-a");
+});
+
+test("Grafana panel configuration request carries the fixed cluster and range", async (t) => {
+  let requestedUrl = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+    return new Response(JSON.stringify({
+      clusterId: "cluster-a",
+      available: false,
+      status: "unavailable",
+      reason: "Grafana 未配置",
+      embedUrl: null,
+      origin: null,
+      dashboardUid: null,
+      panelId: null,
+      defaultTimeRange: "24h",
+      theme: "auto",
+      variableMapping: {},
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  await getGrafanaPanelConfiguration("cluster-a", "1h");
+  assert.equal(requestedUrl, "/api/monitoring/grafana/panels?clusterId=cluster-a&range=1h");
 });

@@ -10,10 +10,12 @@ import {
   Query,
   Res,
   Req,
+  Optional,
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthGuard } from '../common/auth.guard';
+import { ClusterAccessService, type ClusterAccessSubject } from '../common/cluster-access.service';
 import type { PlatformRole } from '../common/governance';
 import { MonitoringService } from './monitoring.service';
 import type {
@@ -44,10 +46,17 @@ interface RequestActor {
   };
 }
 
+interface MonitoringPanelRequest {
+  user?: { user?: ClusterAccessSubject & { username?: string; role?: PlatformRole } };
+}
+
 @Controller('api/monitoring')
 @UseGuards(AuthGuard)
 export class MonitoringController {
-  constructor(private readonly monitoringService: MonitoringService) {}
+  constructor(
+    private readonly monitoringService: MonitoringService,
+    @Optional() private readonly clusterAccessService?: ClusterAccessService,
+  ) {}
 
   @Get('overview')
   async getOverview(
@@ -73,6 +82,38 @@ export class MonitoringController {
       ...this.parseTimeFilter(range, from, to, '24h'),
       clusterId: this.normalizeClusterId(clusterId),
     });
+  }
+
+  @Get('grafana/panels')
+  async getGrafanaPanels(
+    @Req() req: MonitoringPanelRequest,
+    @Query('clusterId') clusterId: string | undefined,
+    @Query('range') range: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const normalizedClusterId = this.normalizeClusterId(clusterId);
+    if (!normalizedClusterId) {
+      throw new BadRequestException('必须提供集群 ID');
+    }
+    if (!this.clusterAccessService) {
+      throw new BadRequestException('集群访问服务不可用');
+    }
+    await this.clusterAccessService.assertCanRead(
+      req.user?.user,
+      normalizedClusterId,
+    );
+    const result = await this.monitoringService.getGrafanaPanelConfiguration(
+      normalizedClusterId,
+      range?.trim() || undefined,
+    );
+    const frameSource = result.origin ? `'self' ${result.origin}` : "'self'";
+    response.setHeader(
+      'Content-Security-Policy',
+      `default-src 'self'; frame-src ${frameSource}; child-src ${frameSource}; frame-ancestors 'self'`,
+    );
+    response.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    return result;
   }
 
   @Get('events')
