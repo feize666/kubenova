@@ -25,11 +25,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useMemo } from "react";
 import { useAuth } from "@/components/auth-context";
-import { OpsFilterChip, OpsScopeSelector, OpsStatusTag, OpsSurface, type OpsScopeSelectorOption } from "@/components/ops";
-import { ResourcePageHeader } from "@/components/resource-page-header";
+import { OpsFilterChip, OpsScopeSelector, OpsStatusTag, type OpsScopeSelectorOption } from "@/components/ops";
 import { MetricUnitFormatter } from "@/components/visual-system";
 import { getClusters } from "@/lib/api/clusters";
 import { getDashboardStats, type DashboardStats } from "@/lib/api/dashboard";
+import { OverviewCommandCenter } from "@/components/overview/overview-command-center";
+import { OverviewRiskPanel } from "@/components/overview/overview-risk-panel";
+import { OverviewMetricStrip } from "@/components/overview/overview-metric-strip";
+import { OverviewTrendPanel } from "@/components/overview/overview-trend-panel";
 
 type DashboardStatsQueryResult = {
   stats: DashboardStats;
@@ -183,22 +186,7 @@ function OverviewCard({
   className?: string;
   state?: "ready" | "loading" | "empty" | "degraded";
 }) {
-  return (
-    <section
-      className={["ops-overview-card", "ops-surface", "ops-surface--panel", "ops-surface--pad-none", className].filter(Boolean).join(" ")}
-      data-ops-overview-card=""
-      data-state={state}
-    >
-      <div className="ops-overview-card__header">
-        <div className="ops-overview-card__heading">
-          <div className="ops-overview-card__title">{title}</div>
-          {scope ? <span className="ops-overview-card__scope">{scope}</span> : null}
-        </div>
-        {action}
-      </div>
-      <div className="ops-overview-card__body">{children}</div>
-    </section>
-  );
+  return <OverviewRiskPanel title={title} scope={scope} action={action}>{children}</OverviewRiskPanel>;
 }
 
 function SummaryMetric({ label, value }: { label: string; value: string | number }) {
@@ -486,30 +474,7 @@ export default function HomePage() {
   return (
     <div className={["ops-overview-shell", "dashboard-workbench", statsQuery.isFetching ? "ops-scoped-loading" : undefined].filter(Boolean).join(" ")}>
       <div className="resource-workbench dashboard-workbench__header-zone">
-        <OpsSurface variant="panel" padding="sm">
-          <ResourcePageHeader
-            path="/"
-            embedded
-            className="resource-workbench__header dashboard-workbench__page-header"
-            title={
-              <span className="resource-workbench__title-row">
-                <span className="resource-workbench__title">Overview</span>
-                <OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>
-                  总览
-                </OpsFilterChip>
-              </span>
-            }
-            description={`${scopeLabel} 的风险态势、资源容量、服务影响与运维入口`}
-            actions={(
-              <Space size={8} wrap className="ops-overview-header__chips">
-                <OpsStatusTag tone={riskSummary.riskLevel}>{riskSummary.riskLevel === "critical" ? "高风险" : riskSummary.riskLevel === "warning" ? "需关注" : "稳定"}</OpsStatusTag>
-                <OpsFilterChip tone="info" icon={<ClusterOutlined />}>集群 {stats?.clusters.total ?? 0}</OpsFilterChip>
-                <OpsFilterChip tone="warning">活跃告警 {stats?.alerts.total ?? 0}</OpsFilterChip>
-                {clusterId ? <OpsFilterChip tone="neutral">单集群</OpsFilterChip> : <OpsFilterChip tone="neutral">全部集群</OpsFilterChip>}
-              </Space>
-            )}
-          />
-        </OpsSurface>
+        <OverviewCommandCenter scopeLabel={scopeLabel} clusterId={clusterId} clusterCount={stats?.clusters.total ?? 0} alertCount={stats?.alerts.total ?? 0} riskLevel={riskSummary.riskLevel} generatedAt={stats?.scope?.generatedAt} isFetching={statsQuery.isFetching} onRefresh={() => void statsQuery.refetch()} />
       </div>
 
       {scopedFallback ? (
@@ -604,6 +569,8 @@ export default function HomePage() {
         </div>
       </section>
 
+      {stats?.resourceUsage ? <OverviewMetricStrip metrics={[{ label: "CPU 使用率", metric: stats.resourceUsage.cpu }, { label: "内存使用率", metric: stats.resourceUsage.memory }]} /> : null}
+
       <section className="ops-overview-grid" aria-label="风险卡片">
         <div className="ops-overview-span-3">
           <OverviewCard title="健康评分" scope={scopeLabel} action={<CheckCircleOutlined />}>
@@ -659,7 +626,7 @@ export default function HomePage() {
                 <strong>{liveSnapshot?.available ? formatLiveCpu(liveSnapshot.cpuUsage) : formatPercent(resourceUsageSummary.cpuUsagePercent)}</strong>
                 <span>{getUsageSubtitle({ dataSource: resourceUsageSummary.dataSource, degraded: resourceUsageSummary.degraded, note: resourceUsageSummary.note })}</span>
               </div>
-              <MiniTrendChart
+              <OverviewTrendPanel title="CPU 趋势" source={resourceUsageSummary.dataSource} capturedAt={stats?.resourceUsage?.cpu.capturedAt} freshness={stats?.resourceUsage?.cpu.freshness ?? "不可用"}><MiniTrendChart
                 tone="blue"
                 value={resourceUsageSummary.cpuUsagePercent}
                 height={136}
@@ -670,7 +637,7 @@ export default function HomePage() {
                   }
                   return `${Math.round(point * 10)}m`;
                 }}
-              />
+              /></OverviewTrendPanel>
             </div>
           </OverviewCard>
         </div>
@@ -681,7 +648,7 @@ export default function HomePage() {
                 <strong>{liveSnapshot?.available ? formatLiveMemory(liveSnapshot.memoryUsage) : formatPercent(resourceUsageSummary.memoryUsagePercent)}</strong>
                 <span>{getUsageSubtitle({ dataSource: resourceUsageSummary.dataSource, degraded: resourceUsageSummary.degraded, note: resourceUsageSummary.note })}</span>
               </div>
-              <MiniTrendChart
+              <OverviewTrendPanel title="内存趋势" source={resourceUsageSummary.dataSource} capturedAt={stats?.resourceUsage?.memory.capturedAt} freshness={stats?.resourceUsage?.memory.freshness ?? "不可用"}><MiniTrendChart
                 tone="green"
                 value={resourceUsageSummary.memoryUsagePercent}
                 height={136}
@@ -692,7 +659,7 @@ export default function HomePage() {
                   }
                   return `${(point / 10).toFixed(2)} Gi`;
                 }}
-              />
+              /></OverviewTrendPanel>
             </div>
           </OverviewCard>
         </div>
