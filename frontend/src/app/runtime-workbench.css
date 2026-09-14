@@ -42,6 +42,9 @@
 .runtime-status-strip--processing { border-color: color-mix(in srgb, #2563eb 35%, var(--kn-border, #d8e0ea)); }
 .runtime-status-strip--warning { border-color: color-mix(in srgb, #d97706 35%, var(--kn-border, #d8e0ea)); }
 .runtime-status-strip--danger { border-color: color-mix(in srgb, #dc2626 35%, var(--kn-border, #d8e0ea)); }
+.runtime-status-strip--critical { border-color: color-mix(in srgb, #dc2626 35%, var(--kn-border, #d8e0ea)); }
+.runtime-status-strip--info { border-color: color-mix(in srgb, #2563eb 35%, var(--kn-border, #d8e0ea)); }
+.runtime-status-strip--unknown { border-color: color-mix(in srgb, #64748b 35%, var(--kn-border, #d8e0ea)); }
 
 @media (max-width: 640px) {
   .runtime-workbench-frame { gap: 6px; }

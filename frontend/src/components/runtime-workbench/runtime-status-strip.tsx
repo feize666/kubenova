@@ -1,12 +1,7 @@
 import type { ReactNode } from "react";
+import type { OpsStatusTone } from "@/components/ops";
 
-export type RuntimeStatusTone =
-  | "neutral"
-  | "info"
-  | "processing"
-  | "success"
-  | "warning"
-  | "danger";
+export type RuntimeStatusTone = OpsStatusTone;
 
 export function RuntimeStatusStrip({
   children,

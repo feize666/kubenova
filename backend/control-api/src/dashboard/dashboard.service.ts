@@ -25,6 +25,14 @@ export interface DashboardStats {
   };
   namespaces: number;
   healthScore: number;
+  metrics: {
+    clusters: DashboardMetricMeta;
+    workloads: DashboardMetricMeta;
+    namespaces: DashboardMetricMeta;
+    pods: DashboardMetricMeta;
+    alerts: DashboardMetricMeta;
+    healthScore: DashboardMetricMeta;
+  };
   resourceUsage: {
     cpu: DashboardResourceMetric;
     memory: DashboardResourceMetric;
@@ -123,6 +131,13 @@ export interface DashboardResourceMetric {
   note?: string;
 }
 
+export interface DashboardMetricMeta {
+  capturedAt: string | null;
+  freshness: DashboardMetricFreshness;
+  source: string;
+  degradedReason?: string;
+}
+
 export interface DashboardStatsOptions {
   clusterId?: string;
   accessibleClusterIds?: string[] | null;
@@ -203,6 +218,7 @@ export class DashboardService {
     clusterId?: string;
     accessibleClusterIds?: string[];
   }): Promise<DashboardStats> {
+    const generatedAt = new Date().toISOString();
     const clusterId = options.clusterId;
     const clusterScope = Boolean(clusterId);
     const clusterSelector = clusterId
@@ -418,6 +434,17 @@ export class DashboardService {
     const scopeDegradedReason = scopeDegraded
       ? '当前选择的集群不存在或已删除。'
       : undefined;
+    const countMetric = (label: string): DashboardMetricMeta => ({
+      capturedAt: activeClusters.length > 0 ? generatedAt : null,
+      freshness: activeClusters.length > 0 ? 'fresh' : 'unavailable',
+      source: activeClusters.length > 0 ? 'control-plane-cache' : 'none',
+      ...(activeClusters.length === 0
+        ? {
+            degradedReason:
+              scopeDegradedReason ?? `未发现可用于${label}统计的集群。`,
+          }
+        : {}),
+    });
 
     return {
       clusters: {
@@ -437,6 +464,14 @@ export class DashboardService {
       },
       namespaces: namespaceCount,
       healthScore,
+      metrics: {
+        clusters: countMetric('集群'),
+        workloads: countMetric('工作负载'),
+        namespaces: countMetric('命名空间'),
+        pods: countMetric('Pod'),
+        alerts: countMetric('告警'),
+        healthScore: countMetric('健康评分'),
+      },
       resourceUsage: {
         cpu: cpuMetric,
         memory: memoryMetric,
@@ -476,7 +511,7 @@ export class DashboardService {
         ...(activeClusters[0]?.name
           ? { clusterName: activeClusters[0].name }
           : {}),
-        generatedAt: new Date().toISOString(),
+        generatedAt,
         ...(scopeDegraded ? { degraded: true } : {}),
         ...(scopeDegradedReason ? { degradedReason: scopeDegradedReason } : {}),
       },
@@ -886,6 +921,14 @@ export class DashboardService {
       alerts: { ...stats.alerts },
       namespaces: stats.namespaces,
       healthScore: stats.healthScore,
+      metrics: {
+        clusters: { ...stats.metrics.clusters },
+        workloads: { ...stats.metrics.workloads },
+        namespaces: { ...stats.metrics.namespaces },
+        pods: { ...stats.metrics.pods },
+        alerts: { ...stats.metrics.alerts },
+        healthScore: { ...stats.metrics.healthScore },
+      },
       resourceUsage: {
         ...stats.resourceUsage,
         cpu: { ...stats.resourceUsage.cpu },
@@ -946,6 +989,44 @@ export class DashboardService {
       alerts: { critical: 0, warning: 0, total: 0 },
       namespaces: 0,
       healthScore: 100,
+      metrics: {
+        clusters: {
+          capturedAt: null,
+          freshness: 'unavailable',
+          source: 'none',
+          degradedReason: '当前用户没有可访问的集群。',
+        },
+        workloads: {
+          capturedAt: null,
+          freshness: 'unavailable',
+          source: 'none',
+          degradedReason: '当前用户没有可访问的集群。',
+        },
+        namespaces: {
+          capturedAt: null,
+          freshness: 'unavailable',
+          source: 'none',
+          degradedReason: '当前用户没有可访问的集群。',
+        },
+        pods: {
+          capturedAt: null,
+          freshness: 'unavailable',
+          source: 'none',
+          degradedReason: '当前用户没有可访问的集群。',
+        },
+        alerts: {
+          capturedAt: null,
+          freshness: 'unavailable',
+          source: 'none',
+          degradedReason: '当前用户没有可访问的集群。',
+        },
+        healthScore: {
+          capturedAt: null,
+          freshness: 'unavailable',
+          source: 'none',
+          degradedReason: '当前用户没有可访问的集群。',
+        },
+      },
       resourceUsage: {
         cpu: unavailableMetric('cores'),
         memory: unavailableMetric('bytes'),

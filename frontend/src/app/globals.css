@@ -4670,6 +4670,111 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.ops-overview-summary-metric small,
+.ops-overview-metric-provenance {
+  color: var(--overview-card-subtle);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.ops-overview-command-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 2px 0;
+  color: var(--overview-card-subtle);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.ops-overview-command-meta a {
+  color: var(--overview-chart-blue);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ops-overview-command-meta a:hover,
+.ops-overview-command-meta a:focus-visible {
+  text-decoration: underline;
+}
+
+.ops-overview-metric-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ops-overview-metric {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--overview-panel-border);
+  border-radius: var(--ops-control-radius);
+  background: color-mix(in srgb, var(--overview-panel-bg) 88%, var(--overview-chart-blue) 12%);
+}
+
+.ops-overview-metric > span {
+  color: var(--overview-card-subtle);
+  font-size: 11px;
+}
+
+.ops-overview-metric > strong {
+  color: var(--overview-card-title);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ops-overview-metric > small {
+  color: var(--overview-card-subtle);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.ops-overview-metric > em {
+  color: var(--overview-risk-mid);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.ops-overview-trend-panel {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ops-overview-trend-panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ops-overview-trend-panel__header strong {
+  color: var(--overview-card-title);
+  font-size: 11px;
+}
+
+.ops-overview-trend-panel__header span,
+.ops-overview-trend-panel__provenance {
+  color: var(--overview-card-subtle);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.ops-overview-trend--empty {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  border: 1px dashed var(--overview-panel-border);
+  border-radius: var(--ops-control-radius);
+  color: var(--overview-card-subtle);
+  font-size: 11px;
+}
+
 .ops-overview-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -5518,6 +5623,10 @@ body {
   }
 
   .ops-overview-scope-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .ops-overview-metric-strip {
     grid-template-columns: 1fr;
   }
 

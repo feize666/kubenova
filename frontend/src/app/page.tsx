@@ -38,6 +38,8 @@ type DashboardStatsQueryResult = {
   stats: DashboardStats;
   scopedFallback: boolean;
 };
+type DashboardMetricMeta = NonNullable<DashboardStats["metrics"]>[keyof NonNullable<DashboardStats["metrics"]>];
+type DashboardHistory = NonNullable<NonNullable<DashboardStats["resourceUsage"]>["liveSnapshot"]>["history"];
 
 type ServiceImpact = NonNullable<DashboardStats["serviceImpact"]>;
 type RecentOperation = NonNullable<DashboardStats["recentOperations"]>[number];
@@ -84,52 +86,103 @@ function formatPercent(value?: number) {
   return `${Math.round(value)}%`;
 }
 
+function formatCount(value?: number) {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "--";
+}
+
+function formatMetricProvenance(metric?: DashboardMetricMeta) {
+  if (!metric) return "数据来源不可用";
+  const freshness = {
+    fresh: "刚刚采集",
+    cached: "已缓存",
+    stale: "已陈旧",
+    unavailable: "不可用",
+  }[metric.freshness];
+  return `${freshness} · ${metric.source}`;
+}
+
+function buildUsageTrendPoints(
+  history: DashboardHistory | undefined,
+  kind: "cpu" | "memory",
+  capacity: number | null | undefined,
+) {
+  if (!history || !Number.isFinite(capacity) || !capacity || capacity <= 0) return [];
+  return history.map((point) => {
+    const raw = kind === "cpu" ? point.cpuUsage : point.memoryUsage;
+    const value = typeof raw === "number" && Number.isFinite(raw) ? clampPercent((raw / capacity) * 100) : null;
+    return {
+      timestamp: point.timestamp,
+      value,
+      label: kind === "cpu" && typeof raw === "number" ? formatLiveCpu(raw) : kind === "memory" && typeof raw === "number" ? formatLiveMemory(raw) : "--",
+    };
+  });
+}
+
 function clampPercent(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, value));
 }
 
+type TrendPoint = {
+  timestamp: string;
+  value: number | null;
+  label: string;
+};
+
 function MiniTrendChart({
   tone,
-  value,
+  points,
   height = 92,
   valueLabel = "使用率",
-  formatPointValue,
 }: {
   tone: "blue" | "green";
-  value?: number;
+  points: TrendPoint[];
   height?: number;
   valueLabel?: string;
-  formatPointValue?: (value: number) => string;
 }) {
-  const base = typeof value === "number" && Number.isFinite(value) ? clampPercent(value) : 52;
-  const points = [base - 10, base - 4, base + 8, base + 5, base + 13, base - 2, base + 4, base].map(clampPercent);
+  const validPoints = points.filter(
+    (point): point is TrendPoint & { value: number } =>
+      typeof point.value === "number" && Number.isFinite(point.value),
+  );
+
+  if (validPoints.length === 0) {
+    return (
+      <div className={`ops-overview-trend ops-overview-trend--${tone} ops-overview-trend--empty`} role="status">
+        暂无可用趋势数据
+      </div>
+    );
+  }
+
   const width = 280;
-  const step = width / (points.length - 1);
-  const timeLabels = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "22:00", "24:00"];
-  const chartPoints = points.map((point, index) => ({
-    value: Math.round(point),
-    time: timeLabels[index] ?? `${index}:00`,
-    x: index * step,
-    y: height - (point / 100) * (height - 18) - 8,
-    label: formatPointValue ? formatPointValue(point) : `${Math.round(point)}%`,
-  }));
+  const step = validPoints.length > 1 ? width / (validPoints.length - 1) : width;
+  const chartPoints = validPoints.map((point, index) => {
+    const normalized = clampPercent(point.value);
+    return {
+      ...point,
+      x: validPoints.length > 1 ? index * step : width / 2,
+      y: height - (normalized / 100) * (height - 18) - 8,
+      time: new Date(point.timestamp).toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+  });
   const path = chartPoints.map((point) => `${point.x},${point.y}`).join(" ");
   const areaPath = `0,${height - 8} ${path} ${width},${height - 8}`;
 
   return (
-    <svg className={`ops-overview-trend ops-overview-trend--${tone}`} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="趋势图">
+    <svg className={`ops-overview-trend ops-overview-trend--${tone}`} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${valueLabel}趋势图`}>
       <line x1="0" y1="20" x2={width} y2="20" className="ops-overview-trend__limit" />
       <line x1="0" y1={height - 8} x2={width} y2={height - 8} className="ops-overview-trend__grid" />
       <line x1="0" y1={height / 2} x2={width} y2={height / 2} className="ops-overview-trend__grid" />
-      <polygon points={areaPath} className="ops-overview-trend__area" />
-      <polyline points={path} className="ops-overview-trend__line" />
+      {chartPoints.length > 1 ? <polygon points={areaPath} className="ops-overview-trend__area" /> : null}
+      {chartPoints.length > 1 ? <polyline points={path} className="ops-overview-trend__line" /> : null}
       {chartPoints.map((point, index) => {
         const tooltipX = Math.min(Math.max(point.x - 38, 4), width - 78);
         const tooltipY = Math.max(point.y - 42, 4);
         return (
           <g
-            key={`${point.time}-${index}`}
+            key={`${point.timestamp}-${index}`}
             className="ops-overview-trend__point"
             tabIndex={0}
             aria-label={`${point.time} ${valueLabel} ${point.label}`}
@@ -148,24 +201,26 @@ function MiniTrendChart({
   );
 }
 
-function HealthGauge({ score }: { score: number }) {
-  const percent = clampPercent(score);
+function HealthGauge({ score }: { score?: number }) {
+  const percent = typeof score === "number" && Number.isFinite(score) ? clampPercent(score) : null;
   return (
-    <div className="ops-overview-gauge" aria-label={`健康评分 ${percent}`}>
+    <div className="ops-overview-gauge" aria-label={`健康评分 ${percent === null ? "不可用" : percent}`}>
       <svg viewBox="0 0 120 120">
         <circle cx="60" cy="60" r="46" className="ops-overview-gauge__track" />
-        <circle
-          cx="60"
-          cy="60"
-          r="46"
-          className="ops-overview-gauge__value"
-          pathLength="100"
-          strokeDasharray={`${percent} 100`}
-        />
+        {percent !== null ? (
+          <circle
+            cx="60"
+            cy="60"
+            r="46"
+            className="ops-overview-gauge__value"
+            pathLength="100"
+            strokeDasharray={`${percent} 100`}
+          />
+        ) : null}
       </svg>
       <div className="ops-overview-gauge__text">
-        <strong>{percent}</strong>
-        <span>/100</span>
+        <strong>{percent === null ? "--" : percent}</strong>
+        {percent !== null ? <span>/100</span> : null}
       </div>
     </div>
   );
@@ -186,15 +241,26 @@ function OverviewCard({
   className?: string;
   state?: "ready" | "loading" | "empty" | "degraded";
 }) {
-  return <OverviewRiskPanel title={title} scope={scope} action={action}>{children}</OverviewRiskPanel>;
+  return <OverviewRiskPanel title={title} scope={scope} action={action} className={className} state={state}>{children}</OverviewRiskPanel>;
 }
 
-function SummaryMetric({ label, value }: { label: string; value: string | number }) {
+function SummaryMetric({ label, value, meta }: { label: string; value: string | number; meta?: DashboardMetricMeta }) {
   return (
     <div className="ops-overview-summary-metric">
       <span>{label}</span>
       <strong>{value}</strong>
+      {meta ? <small>{formatMetricProvenance(meta)}</small> : null}
     </div>
+  );
+}
+
+function MetricProvenance({ meta }: { meta?: DashboardMetricMeta }) {
+  if (!meta) return null;
+  return (
+    <small className="ops-overview-metric-provenance">
+      {formatMetricProvenance(meta)}
+      {meta.degradedReason ? ` · ${meta.degradedReason}` : ""}
+    </small>
   );
 }
 
@@ -379,7 +445,7 @@ export default function HomePage() {
     const critical = stats?.alerts.critical ?? 0;
     const unhealthy = stats?.workloads.unhealthy ?? 0;
     const clusterWarning = stats?.clusters.warning ?? 0;
-    const healthScore = stats?.healthScore ?? 0;
+    const healthScore = stats?.healthScore;
     const riskLevel =
       critical > 0 ? "critical" : unhealthy > 0 || clusterWarning > 0 ? "warning" : "success";
     return {
@@ -429,6 +495,14 @@ export default function HomePage() {
 
   const liveSnapshot = resourceUsageSummary.liveSnapshot;
   const showResourceUsageWarning = Boolean(stats?.resourceUsage?.degraded) && !isLoading;
+  const cpuTrendPoints = useMemo(
+    () => buildUsageTrendPoints(liveSnapshot?.history, "cpu", stats?.resourceUsage?.cpu.capacity),
+    [liveSnapshot?.history, stats?.resourceUsage?.cpu.capacity],
+  );
+  const memoryTrendPoints = useMemo(
+    () => buildUsageTrendPoints(liveSnapshot?.history, "memory", stats?.resourceUsage?.memory.capacity),
+    [liveSnapshot?.history, stats?.resourceUsage?.memory.capacity],
+  );
 
   const topology = stats?.topology;
   const serviceImpactRows = useMemo(
@@ -474,7 +548,7 @@ export default function HomePage() {
   return (
     <div className={["ops-overview-shell", "dashboard-workbench", statsQuery.isFetching ? "ops-scoped-loading" : undefined].filter(Boolean).join(" ")}>
       <div className="resource-workbench dashboard-workbench__header-zone">
-        <OverviewCommandCenter scopeLabel={scopeLabel} clusterId={clusterId} clusterCount={stats?.clusters.total ?? 0} alertCount={stats?.alerts.total ?? 0} riskLevel={riskSummary.riskLevel} generatedAt={stats?.scope?.generatedAt} isFetching={statsQuery.isFetching} onRefresh={() => void statsQuery.refetch()} />
+        <OverviewCommandCenter scopeLabel={scopeLabel} clusterId={clusterId} clusterCount={stats?.clusters.total} alertCount={stats?.alerts.total} riskLevel={riskSummary.riskLevel} generatedAt={stats?.scope?.generatedAt} isFetching={statsQuery.isFetching} onRefresh={() => void statsQuery.refetch()} />
       </div>
 
       {scopedFallback ? (
@@ -547,24 +621,24 @@ export default function HomePage() {
         <div className={`ops-overview-scope-cell ops-overview-scope-cell--risk ops-overview-scope-cell--${riskSummary.riskLevel}`}>
           <span>当前风险态势</span>
           <strong><FireOutlined /> {riskSummary.riskLevel === "critical" ? "高风险" : riskSummary.riskLevel === "warning" ? "需关注" : "稳定"}</strong>
-          <em>风险分 {100 - riskSummary.healthScore} / 100</em>
+          <em>风险分 {typeof riskSummary.healthScore === "number" ? `${100 - riskSummary.healthScore} / 100` : "--"}</em>
         </div>
         <div className="ops-overview-scope-cell ops-overview-scope-cell--status">
           <span>集群运行状态</span>
           <div className="ops-overview-status-inline">
-            <b className="is-ok">正常 {stats?.clusters.healthy ?? 0}</b>
-            <b className="is-warn">警告 {stats?.clusters.warning ?? 0}</b>
-            <b className="is-danger">严重 {riskSummary.critical}</b>
+            <b className="is-ok">正常 {formatCount(stats?.clusters.healthy)}</b>
+            <b className="is-warn">警告 {formatCount(stats?.clusters.warning)}</b>
+            <b className="is-danger">严重 {formatCount(stats?.alerts.critical)}</b>
           </div>
         </div>
         <div className="ops-overview-scope-cell ops-overview-scope-cell--summary">
           <span>概览摘要（{scopeLabel}）</span>
           <div className="ops-overview-summary-row">
-            <SummaryMetric label="集群数" value={stats?.clusters.total ?? 0} />
-            <SummaryMetric label="命名空间" value={stats?.namespaces ?? 0} />
-            <SummaryMetric label="工作负载" value={stats?.workloads.total ?? 0} />
-            <SummaryMetric label="Pod 数" value={topology?.pods ?? 0} />
-            <SummaryMetric label="告警数" value={stats?.alerts.total ?? 0} />
+            <SummaryMetric label="集群数" value={formatCount(stats?.clusters.total)} meta={stats?.metrics?.clusters} />
+            <SummaryMetric label="命名空间" value={formatCount(stats?.namespaces)} meta={stats?.metrics?.namespaces} />
+            <SummaryMetric label="工作负载" value={formatCount(stats?.workloads.total)} meta={stats?.metrics?.workloads} />
+            <SummaryMetric label="Pod 数" value={formatCount(topology?.pods)} meta={stats?.metrics?.pods} />
+            <SummaryMetric label="告警数" value={formatCount(stats?.alerts.total)} meta={stats?.metrics?.alerts} />
           </div>
         </div>
       </section>
@@ -576,43 +650,47 @@ export default function HomePage() {
           <OverviewCard title="健康评分" scope={scopeLabel} action={<CheckCircleOutlined />}>
             <div className="ops-overview-health">
               <HealthGauge score={riskSummary.healthScore} />
-              <MiniTrendChart tone="blue" value={riskSummary.healthScore} height={108} valueLabel="评分" formatPointValue={(point) => String(Math.round(point))} />
+              <div className="ops-overview-trend ops-overview-trend--empty" role="status">暂无健康评分趋势数据</div>
             </div>
-            <div className="ops-overview-delta">较昨日 <span className={riskSummary.healthScore >= 70 ? "is-up" : "is-down"}>{riskSummary.healthScore >= 70 ? "↑" : "↓"} {Math.abs(riskSummary.healthScore - 70)}</span></div>
+            <MetricProvenance meta={stats?.metrics?.healthScore} />
+            <div className="ops-overview-delta">较昨日 <span className={typeof riskSummary.healthScore === "number" && riskSummary.healthScore >= 70 ? "is-up" : "is-down"}>{typeof riskSummary.healthScore === "number" ? `${riskSummary.healthScore >= 70 ? "↑" : "↓"} ${Math.abs(riskSummary.healthScore - 70)}` : "--"}</span></div>
           </OverviewCard>
         </div>
         <div className="ops-overview-span-3">
           <OverviewCard title="严重告警" scope={scopeLabel} action={<AlertOutlined />}>
             <div className="ops-overview-big-number is-danger">
-              {riskSummary.critical}
+              {formatCount(stats?.alerts.critical)}
               <span className={riskSummary.critical > 0 ? "is-up" : "is-flat"}>{riskSummary.critical > 0 ? "↑" : "—"}</span>
             </div>
+            <MetricProvenance meta={stats?.metrics?.alerts} />
             <div className="ops-overview-list">
-              <BarRow label="严重" value={riskSummary.critical} percent={riskSummary.critical * 12} tone="red" />
-              <BarRow label="警告" value={stats?.alerts.warning ?? 0} percent={(stats?.alerts.warning ?? 0) * 8} tone="orange" />
-              <BarRow label="告警总数" value={stats?.alerts.total ?? 0} percent={(stats?.alerts.total ?? 0) * 5} tone="blue" />
+              <BarRow label="严重" value={formatCount(stats?.alerts.critical)} percent={riskSummary.critical * 12} tone="red" />
+              <BarRow label="警告" value={formatCount(stats?.alerts.warning)} percent={(stats?.alerts.warning ?? 0) * 8} tone="orange" />
+              <BarRow label="告警总数" value={formatCount(stats?.alerts.total)} percent={(stats?.alerts.total ?? 0) * 5} tone="blue" />
             </div>
           </OverviewCard>
         </div>
         <div className="ops-overview-span-3">
           <OverviewCard title="异常工作负载" scope={scopeLabel} action={<DeploymentUnitOutlined />}>
             <div className="ops-overview-big-number is-warning">
-              {riskSummary.unhealthy}
+              {formatCount(stats?.workloads.unhealthy)}
               <span className={riskSummary.unhealthy > 0 ? "is-up" : "is-flat"}>{riskSummary.unhealthy > 0 ? "↑" : "—"}</span>
             </div>
+            <MetricProvenance meta={stats?.metrics?.workloads} />
             <div className="ops-overview-list">
-              <BarRow label="异常负载" value={riskSummary.unhealthy} percent={riskSummary.unhealthy * 10} tone="orange" />
-              <BarRow label="健康负载" value={stats?.workloads.healthy ?? 0} percent={(stats?.workloads.healthy ?? 0) * 2} tone="green" />
-              <BarRow label="全部负载" value={stats?.workloads.total ?? 0} percent={(stats?.workloads.total ?? 0) * 2} tone="blue" />
+              <BarRow label="异常负载" value={formatCount(stats?.workloads.unhealthy)} percent={riskSummary.unhealthy * 10} tone="orange" />
+              <BarRow label="健康负载" value={formatCount(stats?.workloads.healthy)} percent={(stats?.workloads.healthy ?? 0) * 2} tone="green" />
+              <BarRow label="全部负载" value={formatCount(stats?.workloads.total)} percent={(stats?.workloads.total ?? 0) * 2} tone="blue" />
             </div>
           </OverviewCard>
         </div>
         <div className="ops-overview-span-3">
           <OverviewCard title="风险集群" scope="风险分排序" action={<ClusterOutlined />}>
+            <MetricProvenance meta={stats?.metrics?.clusters} />
             <div className="ops-overview-list ops-overview-list--bars">
-              <BarRow label="风险集群" value={riskSummary.clusterWarning} percent={riskSummary.clusterWarning * 20} tone="red" />
-              <BarRow label="健康集群" value={stats?.clusters.healthy ?? 0} percent={(stats?.clusters.healthy ?? 0) * 10} tone="green" />
-              <BarRow label="全部集群" value={stats?.clusters.total ?? 0} percent={(stats?.clusters.total ?? 0) * 8} tone="blue" />
+              <BarRow label="风险集群" value={formatCount(stats?.clusters.warning)} percent={riskSummary.clusterWarning * 20} tone="red" />
+              <BarRow label="健康集群" value={formatCount(stats?.clusters.healthy)} percent={(stats?.clusters.healthy ?? 0) * 10} tone="green" />
+              <BarRow label="全部集群" value={formatCount(stats?.clusters.total)} percent={(stats?.clusters.total ?? 0) * 8} tone="blue" />
             </div>
           </OverviewCard>
         </div>
@@ -628,15 +706,9 @@ export default function HomePage() {
               </div>
               <OverviewTrendPanel title="CPU 趋势" source={resourceUsageSummary.dataSource} capturedAt={stats?.resourceUsage?.cpu.capturedAt} freshness={stats?.resourceUsage?.cpu.freshness ?? "不可用"}><MiniTrendChart
                 tone="blue"
-                value={resourceUsageSummary.cpuUsagePercent}
+                points={cpuTrendPoints}
                 height={136}
                 valueLabel="CPU"
-                formatPointValue={(point) => {
-                  if (liveSnapshot?.available && typeof liveSnapshot.cpuUsage === "number") {
-                    return formatLiveCpu(liveSnapshot.cpuUsage * (point / Math.max(resourceUsageSummary.cpuUsagePercent ?? point, 1)));
-                  }
-                  return `${Math.round(point * 10)}m`;
-                }}
               /></OverviewTrendPanel>
             </div>
           </OverviewCard>
@@ -650,15 +722,9 @@ export default function HomePage() {
               </div>
               <OverviewTrendPanel title="内存趋势" source={resourceUsageSummary.dataSource} capturedAt={stats?.resourceUsage?.memory.capturedAt} freshness={stats?.resourceUsage?.memory.freshness ?? "不可用"}><MiniTrendChart
                 tone="green"
-                value={resourceUsageSummary.memoryUsagePercent}
+                points={memoryTrendPoints}
                 height={136}
                 valueLabel="内存"
-                formatPointValue={(point) => {
-                  if (liveSnapshot?.available && typeof liveSnapshot.memoryUsage === "number") {
-                    return formatLiveMemory(liveSnapshot.memoryUsage * (point / Math.max(resourceUsageSummary.memoryUsagePercent ?? point, 1)));
-                  }
-                  return `${(point / 10).toFixed(2)} Gi`;
-                }}
               /></OverviewTrendPanel>
             </div>
           </OverviewCard>

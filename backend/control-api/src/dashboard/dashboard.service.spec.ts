@@ -600,6 +600,25 @@ describe('DashboardService', () => {
     expect(stats.resourceUsage.memoryUsagePercent).toBeUndefined();
   });
 
+  it('attaches provenance metadata to aggregate dashboard metrics', async () => {
+    const { service } = createService(['cluster-a']);
+
+    const stats = await service.getStats({ clusterId: 'cluster-a' });
+
+    expect(stats.metrics).toEqual({
+      clusters: expect.objectContaining({
+        capturedAt: expect.any(String),
+        freshness: 'fresh',
+        source: 'control-plane-cache',
+      }),
+      workloads: expect.objectContaining({ source: 'control-plane-cache' }),
+      namespaces: expect.objectContaining({ source: 'control-plane-cache' }),
+      pods: expect.objectContaining({ source: 'control-plane-cache' }),
+      alerts: expect.objectContaining({ source: 'control-plane-cache' }),
+      healthScore: expect.objectContaining({ source: 'control-plane-cache' }),
+    });
+  });
+
   it('partitions metric values and snapshots by cluster cache key', async () => {
     const { service, prisma, liveMetricsService } = createService([
       'cluster-a',
