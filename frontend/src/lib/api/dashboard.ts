@@ -9,6 +9,13 @@ export type DashboardMetricSource =
 
 export type DashboardMetricFreshness = "fresh" | "cached" | "stale" | "unavailable";
 
+export interface DashboardMetricMeta {
+  capturedAt: string | null;
+  freshness: DashboardMetricFreshness;
+  source: string;
+  degradedReason?: string;
+}
+
 export interface DashboardResourceMetric {
   value: number | null;
   used: number | null;
@@ -98,6 +105,14 @@ export interface DashboardStats {
   };
   namespaces: number;
   healthScore?: number;
+  metrics?: {
+    clusters: DashboardMetricMeta;
+    workloads: DashboardMetricMeta;
+    namespaces: DashboardMetricMeta;
+    pods: DashboardMetricMeta;
+    alerts: DashboardMetricMeta;
+    healthScore: DashboardMetricMeta;
+  };
   resourceUsage?: {
     cpu: DashboardResourceMetric;
     memory: DashboardResourceMetric;
