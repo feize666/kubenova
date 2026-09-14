@@ -1,3 +1,4 @@
+import type { PlatformRole } from '../common/governance';
 import { ObservabilityController } from './observability.controller';
 
 describe('ObservabilityController access boundaries', () => {
@@ -5,13 +6,26 @@ describe('ObservabilityController access boundaries', () => {
     listDataSources: jest.fn().mockResolvedValue({ items: [], total: 0, timestamp: new Date().toISOString() }),
     createDataSource: jest.fn(),
     getDataSourceScope: jest.fn(),
+    getGrafanaPanelConfiguration: jest.fn().mockResolvedValue({
+      clusterId: 'cluster-a',
+      available: false,
+      status: 'unavailable',
+      reason: 'Grafana 未配置',
+      embedUrl: null,
+      origin: null,
+      dashboardUid: null,
+      panelId: null,
+      defaultTimeRange: '24h',
+      theme: 'auto',
+      variableMapping: {},
+    }),
   } as any;
   const access = {
     assertCanRead: jest.fn().mockResolvedValue({ clusterId: 'cluster-a' }),
     assertCanMutate: jest.fn().mockResolvedValue({ clusterId: 'cluster-a' }),
     assertPlatformAdmin: jest.fn(),
   } as any;
-  const req = (role = 'cluster-operator') => ({ user: { user: { id: 'u1', username: 'u1', role } } });
+  const req = (role: PlatformRole = 'cluster-operator') => ({ user: { user: { id: 'u1', username: 'u1', role } } });
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -34,5 +48,19 @@ describe('ObservabilityController access boundaries', () => {
     await controller.createDataSource(req(), body);
     expect(access.assertCanMutate).toHaveBeenCalledWith(req().user.user, 'cluster-a');
     expect(service.createDataSource).toHaveBeenCalledWith(req().user.user, body);
+  });
+
+  it('requires cluster read access before returning Grafana panel configuration', async () => {
+    const controller = new ObservabilityController(service, access);
+    const response = { setHeader: jest.fn() } as any;
+
+    await controller.getGrafanaPanels(req(), 'cluster-a', '1h', response);
+
+    expect(access.assertCanRead).toHaveBeenCalledWith(req().user.user, 'cluster-a');
+    expect(service.getGrafanaPanelConfiguration).toHaveBeenCalledWith('cluster-a', '1h');
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'Content-Security-Policy',
+      expect.stringContaining("frame-src 'self'"),
+    );
   });
 });

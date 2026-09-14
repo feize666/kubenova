@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as XLSX from 'xlsx';
@@ -16,6 +17,7 @@ import {
   type ClusterLiveUsageSnapshot,
 } from '../metrics/live-metrics.service';
 import { PrismaService } from '../platform/database/prisma.service';
+import { ObservabilityService, type GrafanaPanelConfiguration } from './observability.service';
 
 export type MonitoringRange = '15m' | '1h' | '6h' | '24h' | '7d';
 type ResourceState = 'active' | 'disabled';
@@ -317,7 +319,18 @@ export class MonitoringService {
     private readonly prisma: PrismaService,
     private readonly clustersService: ClustersService,
     private readonly liveMetricsService: LiveMetricsService,
+    @Optional() private readonly observabilityService?: ObservabilityService,
   ) {}
+
+  async getGrafanaPanelConfiguration(
+    clusterId: string,
+    range?: string,
+  ): Promise<GrafanaPanelConfiguration> {
+    // Keep this facade on the monitoring service so monitoring routes retain
+    // their existing ownership while the config service owns validation.
+    const service = this.observabilityService ?? new ObservabilityService(this.prisma);
+    return service.getGrafanaPanelConfiguration(clusterId, range);
+  }
 
   private activeClusterAlertWhere(
     base: Prisma.MonitoringAlertWhereInput = {},

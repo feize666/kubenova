@@ -9,8 +9,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthGuard } from '../common/auth.guard';
 import { ClusterAccessService, type ClusterAccessSubject } from '../common/cluster-access.service';
 import type { PlatformRole } from '../common/governance';
@@ -40,6 +42,24 @@ export class ObservabilityController {
     if (clusterId?.trim()) await this.clusterAccessService.assertCanRead(req.user?.user, clusterId);
     else this.clusterAccessService.assertPlatformAdmin(req.user?.user);
     return this.observabilityService.listDataSources(clusterId);
+  }
+
+  @Get('grafana/panels')
+  async getGrafanaPanels(
+    @Req() req: ActorRequest,
+    @Query('clusterId') clusterId: string | undefined,
+    @Query('range') range: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const normalizedClusterId = clusterId?.trim();
+    if (!normalizedClusterId) throw new BadRequestException('必须提供集群 ID');
+    await this.clusterAccessService.assertCanRead(req.user?.user, normalizedClusterId);
+    const result = await this.observabilityService.getGrafanaPanelConfiguration(
+      normalizedClusterId,
+      range?.trim() || undefined,
+    );
+    this.setGrafanaFramePolicy(response, result.origin);
+    return result;
   }
 
   @Post('data-sources')
@@ -156,5 +176,15 @@ export class ObservabilityController {
       return;
     }
     this.clusterAccessService.assertPlatformAdmin(req.user?.user);
+  }
+
+  private setGrafanaFramePolicy(response: Response, origin: string | null): void {
+    const frameSource = origin ? `'self' ${origin}` : "'self'";
+    response.setHeader(
+      'Content-Security-Policy',
+      `default-src 'self'; frame-src ${frameSource}; child-src ${frameSource}; frame-ancestors 'self'`,
+    );
+    response.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   }
 }

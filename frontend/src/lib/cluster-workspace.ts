@@ -3,7 +3,14 @@
  * helpers while the legacy global routes are migrated incrementally.
  */
 export type ClusterWorkspaceSection =
-  "overview" | "workloads" | "network" | "storage" | "configs" | "topology";
+  | "overview"
+  | "workloads"
+  | "network"
+  | "storage"
+  | "configs"
+  | "topology"
+  | "monitoring"
+  | "logs";
 
 export type ClusterWorkspaceNavigationItem = {
   key: string;
@@ -260,6 +267,16 @@ export function getClusterWorkspaceNavigation(
       items: [item("topology", "资源拓扑", "network/topology")],
     },
     {
+      key: "monitoring",
+      label: "Prometheus 监控",
+      items: [item("monitoring", "Prometheus 监控", "monitoring")],
+    },
+    {
+      key: "logs",
+      label: "日志",
+      items: [item("logs", "日志", "logs")],
+    },
+    {
       key: "base-resources",
       label: "基础资源",
       items: [
@@ -316,8 +333,6 @@ export function getClusterWorkspaceNavigation(
       key: "operations",
       label: "运维能力",
       items: [
-        item("monitoring", "监控告警", "monitoring"),
-        item("logs", "日志中心", "logs"),
         item("observability", "观测配置", "observability/configuration"),
         item("inspection", "资源巡检", "inspection"),
         item("aiops", "AI 助手", "aiops"),

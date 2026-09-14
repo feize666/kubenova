@@ -79,7 +79,12 @@ test("单集群工作区只保留当前集群资源菜单", () => {
   );
   assert.equal(labels.includes("Cluster"), false);
   assert.equal(labels.includes("系统设置"), false);
-  assert.equal(labels.includes("日志中心"), true);
+  assert.equal(labels.includes("日志"), true);
+  assert.equal(labels.includes("Prometheus 监控"), true);
+  assert.deepEqual(
+    sections.filter((section) => ["logs", "monitoring"].includes(section.key)).map((section) => section.items[0]?.href),
+    ["/clusters/ack-prod/monitoring", "/clusters/ack-prod/logs"],
+  );
   assert.ok(
     sections
       .flatMap((section) => section.items)

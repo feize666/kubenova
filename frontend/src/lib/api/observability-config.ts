@@ -9,6 +9,8 @@ export const OBSERVABILITY_KINDS = [
 ] as const;
 export type ObservabilityKind = (typeof OBSERVABILITY_KINDS)[number];
 export type ObservabilityStatus = "unknown" | "healthy" | "degraded" | "unavailable" | "disabled";
+export type GrafanaPanelTimeRange = "15m" | "1h" | "6h" | "24h" | "7d";
+export type GrafanaPanelTheme = "light" | "dark" | "auto";
 export type AlertSeverity = "critical" | "warning" | "info";
 export const NOTIFICATION_CHANNELS = ["feishu", "dingtalk", "wecom", "email", "webhook", "slack", "pagerduty"] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
@@ -24,9 +26,32 @@ export interface ObservabilityDataSource {
   status: ObservabilityStatus;
   lastCheckedAt: string | null;
   lastError: string | null;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> & Partial<GrafanaPanelMetadata>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface GrafanaPanelMetadata {
+  dashboardUid?: string;
+  panelId?: number;
+  defaultTimeRange?: GrafanaPanelTimeRange;
+  theme?: GrafanaPanelTheme;
+  variableMapping?: Record<string, string>;
+}
+
+export interface GrafanaPanelConfiguration {
+  clusterId: string;
+  available: boolean;
+  status: "available" | "unavailable";
+  state: "available" | "unavailable";
+  reason: string | null;
+  embedUrl: string | null;
+  origin: string | null;
+  dashboardUid: string | null;
+  panelId: number | null;
+  defaultTimeRange: GrafanaPanelTimeRange;
+  theme: GrafanaPanelTheme;
+  variableMapping: Record<string, string>;
 }
 
 export interface AlertTemplate {
@@ -75,7 +100,7 @@ export interface DataSourceInput {
   endpoint: string;
   secretRef?: string;
   enabled?: boolean;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> & Partial<GrafanaPanelMetadata>;
 }
 
 export interface AlertTemplateInput {
@@ -113,6 +138,17 @@ export function listObservabilityDataSources(clusterId?: string, token?: string)
   return apiRequest<Collection<ObservabilityDataSource>>("/api/observability/data-sources", {
     token,
     query: { clusterId },
+  });
+}
+
+export function getGrafanaPanelConfiguration(
+  clusterId: string,
+  range: GrafanaPanelTimeRange = "24h",
+  token?: string,
+) {
+  return apiRequest<GrafanaPanelConfiguration>("/api/monitoring/grafana/panels", {
+    token,
+    query: { clusterId, range },
   });
 }
 

@@ -13,6 +13,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { OpsDrawerShell, OpsFilterChip, OpsIconActionButton, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
+import { GrafanaPanel } from "@/components/monitoring/grafana-panel";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import {
@@ -22,6 +23,7 @@ import {
   type ObservabilitySignalPanel,
   type ObservabilitySourceStatus,
 } from "@/lib/api/observability";
+import { getGrafanaPanelConfiguration } from "@/lib/api/observability-config";
 import type { MonitoringTimePreset } from "@/lib/api/monitoring";
 import { getClusterIdFromPathname } from "@/lib/cluster-workspace";
 import { listQueryOptions } from "@/lib/query";
@@ -84,6 +86,14 @@ export default function ObservabilityCenterPage() {
     refetchOnWindowFocus: false,
     refetchOnMount: false,
   });
+  const grafanaQuery = useQuery({
+    queryKey: ["observability", "grafana", clusterId, range, accessToken],
+    queryFn: () => getGrafanaPanelConfiguration(clusterId!, range, accessToken || undefined),
+    enabled,
+    refetchInterval: enabled ? 30_000 : false,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+  });
   const summary = summaryQuery.data;
   const sourceStatus = summary?.sourceStatus ?? EMPTY_SOURCE_STATUS;
   const entities = summary?.entities ?? EMPTY_ENTITIES;
@@ -97,8 +107,8 @@ export default function ObservabilityCenterPage() {
     [entities, selectedScope],
   );
   const handleRefresh = useCallback(() => {
-    void summaryQuery.refetch();
-  }, [summaryQuery]);
+    void Promise.all([summaryQuery.refetch(), grafanaQuery.refetch()]);
+  }, [grafanaQuery, summaryQuery]);
   const closeEntityDrawer = useCallback(() => setSelectedScope(""), []);
 
   const entityColumns = useMemo<ColumnsType<ObservabilityEntityHealth>>(
@@ -237,7 +247,11 @@ export default function ObservabilityCenterPage() {
               >
                 观测配置
               </OpsIconActionButton>
-              <OpsIconActionButton icon={<ReloadOutlined />} loading={summaryQuery.isFetching} onClick={handleRefresh}>
+              <OpsIconActionButton
+                icon={<ReloadOutlined />}
+                loading={summaryQuery.isFetching || grafanaQuery.isFetching}
+                onClick={handleRefresh}
+              >
                 刷新
               </OpsIconActionButton>
             </Space>
@@ -349,6 +363,12 @@ export default function ObservabilityCenterPage() {
           </OpsSurface>
         </Col>
       </Row>
+
+      <GrafanaPanel
+        configuration={grafanaQuery.data}
+        loading={grafanaQuery.isLoading}
+        error={grafanaQuery.error}
+      />
 
       <OpsSurface className="ops-observability-panel ops-observability-panel--events" variant="panel" padding="sm" title="最近事件">
         <div className="resource-workbench__table-zone">
