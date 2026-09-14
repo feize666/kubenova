@@ -49,7 +49,7 @@ function mapConfigToRecord(item: ConfigResourceItem): ModuleRecord {
 export function ConfigResourcePage({ kind, title, description, keyCountTitle }: ConfigResourcePageProps) {
   const { accessToken, isAuthenticated, isInitializing } = useAuth();
   const [keyword, setKeyword] = useState("");
-  const [namespace, setNamespace] = useState("全部名称空间");
+  const [namespace, setNamespace] = useState("全部命名空间");
   const [onlyHealthy, setOnlyHealthy] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(6);
@@ -59,7 +59,7 @@ export function ConfigResourcePage({ kind, title, description, keyCountTitle }: 
       page,
       pageSize,
       keyword: keyword.trim() || undefined,
-      namespace: namespace === "全部名称空间" ? undefined : namespace,
+      namespace: namespace === "全部命名空间" ? undefined : namespace,
     }),
     [keyword, namespace, page, pageSize],
   );
@@ -95,7 +95,7 @@ export function ConfigResourcePage({ kind, title, description, keyCountTitle }: 
         key: "clusterId",
         render: (_: unknown, row: ModuleRecord) => getClusterDisplayName(clusterMap, String(row.clusterId)),
       },
-      { title: "名称空间", dataIndex: "namespace", key: "namespace" },
+      { title: "命名空间", dataIndex: "namespace", key: "namespace" },
       { title: keyCountTitle, dataIndex: "keyCount", key: "keyCount" },
       { title: "版本", dataIndex: "version", key: "version" },
       { title: "更新时间", dataIndex: "updatedAt", key: "updatedAt" },

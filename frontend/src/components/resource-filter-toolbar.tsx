@@ -49,6 +49,7 @@ export function ResourceFilterToolbar({ activeFilters, children, actions, classN
   return (
     <OpsFilterBar
       activeFilters={activeFilters}
+      aria-label="资源筛选与操作"
       className={[
         "resource-filter-toolbar",
         activeFilterCount > 0 ? "resource-filter-toolbar--has-active-filters" : undefined,
@@ -56,6 +57,7 @@ export function ResourceFilterToolbar({ activeFilters, children, actions, classN
       ].filter(Boolean).join(" ")}
       data-active-filter-count={activeFilterCount}
       data-resource-filter-toolbar=""
+      role="toolbar"
       actions={actions ? (
         <Space className="resource-filter-toolbar-actions" size={8} wrap>
           {actions}

@@ -63,10 +63,11 @@ export function ResourceClusterNamespaceFilters({
   showKeywordSearch = false,
 }: ResourceClusterNamespaceFiltersProps) {
   const workspace = useOptionalClusterWorkspace();
+  const showScopeControl = !workspace || namespaceVisible;
   const hasConcreteCluster = clusterId.trim().length > 0;
   const resolvedNamespaceDisabled = namespaceDisabled ?? !hasConcreteCluster;
   const resolvedNamespacePlaceholder =
-    namespacePlaceholder ?? (hasConcreteCluster ? "全部名称空间" : "请先选择具体集群");
+    namespacePlaceholder ?? (hasConcreteCluster ? "全部命名空间" : "请先选择具体集群");
   const clusterNameById = useClusterDisplayMap(clusterOptions, clusterId);
   const clusterLabel = clusterId
     ? getClusterDisplayName(Object.fromEntries(clusterNameById), clusterId)
@@ -92,7 +93,7 @@ export function ResourceClusterNamespaceFilters({
     namespaceVisible && namespace
       ? {
           key: "namespace",
-          label: "名称空间",
+          label: "命名空间",
           value: namespace,
           tone: "neutral",
           onClear: () => {
@@ -119,6 +120,8 @@ export function ResourceClusterNamespaceFilters({
       : null,
   ].filter(Boolean) as OpsActiveFilter[];
 
+  if (!showScopeControl && !showKeywordSearch && !extraFilters) return null;
+
   return (
     <div className="resource-cluster-namespace-filters" style={{ marginBottom }}>
       <ResourceFilterToolbar
@@ -131,36 +134,38 @@ export function ResourceClusterNamespaceFilters({
           ) : null
         }
       >
-        <ResourceFilterToolbarItem width="auto">
-          <ResourceScopeFilterButton
-            clusterId={clusterId}
-            namespace={namespace}
-            clusterOptions={clusterOptions}
-            clusterLoading={clusterLoading}
-            clusterUnavailable={clusterUnavailable}
-            knownNamespaces={knownNamespaces}
-            namespaceLoading={namespaceLoading}
-            namespaceDisabled={resolvedNamespaceDisabled}
-            namespacePlaceholder={resolvedNamespacePlaceholder}
-            namespaceVisible={namespaceVisible}
-            onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-              const nextClusterLabel = nextClusterId
-                ? getClusterDisplayName(Object.fromEntries(clusterNameById), nextClusterId)
-                : "";
-              emitResourceScopeChange({
-                clusterId: nextClusterId,
-                clusterName: nextClusterLabel,
-                namespace: nextNamespace,
-              });
-              if (onScopeChange) {
-                onScopeChange(nextClusterId, nextNamespace);
-              } else {
-                onClusterChange(nextClusterId);
-                onNamespaceChange?.(nextNamespace);
-              }
-            }}
-          />
-        </ResourceFilterToolbarItem>
+        {showScopeControl ? (
+          <ResourceFilterToolbarItem width="auto">
+            <ResourceScopeFilterButton
+              clusterId={clusterId}
+              namespace={namespace}
+              clusterOptions={clusterOptions}
+              clusterLoading={clusterLoading}
+              clusterUnavailable={clusterUnavailable}
+              knownNamespaces={knownNamespaces}
+              namespaceLoading={namespaceLoading}
+              namespaceDisabled={resolvedNamespaceDisabled}
+              namespacePlaceholder={resolvedNamespacePlaceholder}
+              namespaceVisible={namespaceVisible}
+              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+                const nextClusterLabel = nextClusterId
+                  ? getClusterDisplayName(Object.fromEntries(clusterNameById), nextClusterId)
+                  : "";
+                emitResourceScopeChange({
+                  clusterId: nextClusterId,
+                  clusterName: nextClusterLabel,
+                  namespace: nextNamespace,
+                });
+                if (onScopeChange) {
+                  onScopeChange(nextClusterId, nextNamespace);
+                } else {
+                  onClusterChange(nextClusterId);
+                  onNamespaceChange?.(nextNamespace);
+                }
+              }}
+            />
+          </ResourceFilterToolbarItem>
+        ) : null}
         {showKeywordSearch ? (
           <ResourceKeywordSearch
             placeholder={keywordPlaceholder}

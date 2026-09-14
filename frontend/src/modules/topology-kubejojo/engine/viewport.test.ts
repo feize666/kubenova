@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
-import { getCenteredTopologyViewport } from "./viewport.ts";
+import { getCenteredTopologyViewport, getTopologyViewportFrame } from "./viewport.ts";
 
 test("fit viewport centers a short graph horizontally and vertically", () => {
   const viewport = getCenteredTopologyViewport(
@@ -43,5 +43,12 @@ test("invalid empty bounds do not produce a viewport", () => {
       { width: 800, height: 600 },
     ),
     null,
+  );
+});
+
+test("focused topology keeps the entire canvas available for true centering", () => {
+  assert.deepEqual(
+    getTopologyViewportFrame(1600, 820),
+    { size: { width: 1600, height: 820 }, offsetY: 0 },
   );
 });

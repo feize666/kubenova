@@ -9,7 +9,85 @@ import { applyTopologyCapacity, projectTopologyNeighborhood, TOPOLOGY_CAPACITY_L
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
 import { getKubejojoRelationSemantics, makeKubejojoRelationId, makeKubejojoStableId } from "./relations.ts";
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
-import { collapseKubejojoGraph, getKubejojoAccessPathOrder, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, groupKubejojoGraph, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
+import { collapseKubejojoGraph, getKubejojoAccessPathOrder, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, groupKubejojoGraph, isTopologyRootKind, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, projectTopologyDisplayMode, projectTopologyRoot, resolveTopologyRoot, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
+
+test("only workload resources can start a topology scene", () => {
+  assert.equal(isTopologyRootKind("Deployment"), true);
+  assert.equal(isTopologyRootKind("StatefulSet"), true);
+  assert.equal(isTopologyRootKind("DaemonSet"), true);
+  assert.equal(isTopologyRootKind("Namespace"), false);
+  assert.equal(isTopologyRootKind("Service"), false);
+  assert.equal(isTopologyRootKind("Pod"), false);
+  assert.equal(isTopologyRootKind("ConfigMap"), false);
+});
+
+test("root resolution requires a workload kind and exact identity", () => {
+  const resources = [
+    { id: "deploy-api", kind: "Deployment", name: "api", namespace: "prod" },
+    { id: "service-api", kind: "Service", name: "api", namespace: "prod" },
+  ];
+  assert.equal(resolveTopologyRoot(resources, "Namespace", "prod", "prod"), null);
+  assert.equal(resolveTopologyRoot(resources, "Deployment", "api", "prod")?.id, "deploy-api");
+  assert.equal(resolveTopologyRoot(resources, "Deployment", "api", "staging"), null);
+});
+
+test("workload root projection keeps the full connected chain without making a namespace root", () => {
+  const resources = [
+    { id: "deploy-api", kind: "Deployment", name: "api" },
+    { id: "rs-api", kind: "ReplicaSet", name: "api-rs" },
+    { id: "pod-api", kind: "Pod", name: "api-0" },
+    { id: "svc-api", kind: "Service", name: "api" },
+    { id: "endpoint-api", kind: "EndpointSlice", name: "api-1" },
+    { id: "other-deploy", kind: "Deployment", name: "other" },
+  ];
+  const relations = [
+    { id: "deploy-rs", source: "deploy-api", target: "rs-api", type: "OWNS" as const },
+    { id: "rs-pod", source: "rs-api", target: "pod-api", type: "OWNS" as const },
+    { id: "svc-pod", source: "svc-api", target: "pod-api", type: "SELECTS" as const },
+    { id: "svc-endpoint", source: "svc-api", target: "endpoint-api", type: "BACKENDS" as const },
+    { id: "unrelated", source: "other-deploy", target: "other-deploy", type: "OWNS" as const },
+  ];
+  const projection = projectTopologyRoot(resources, relations, "deploy-api");
+  assert.deepEqual(
+    projection.resources.map((resource) => resource.id).sort(),
+    ["deploy-api", "rs-api", "pod-api", "svc-api", "endpoint-api"].sort(),
+  );
+  assert.deepEqual(
+    projection.relations.map((relation) => relation.id).sort(),
+    ["deploy-rs", "rs-pod", "svc-pod", "svc-endpoint"].sort(),
+  );
+  assert.equal(projectTopologyRoot(resources, relations, "missing").resources.length, 0);
+});
+
+test("workload root projection does not cross shared resources into another workload", () => {
+  const resources = [
+    { id: "deploy-a", kind: "Deployment", name: "api-a", namespace: "prod" },
+    { id: "rs-a", kind: "ReplicaSet", name: "api-a-rs", namespace: "prod" },
+    { id: "pod-a", kind: "Pod", name: "api-a-0", namespace: "prod" },
+    { id: "deploy-b", kind: "Deployment", name: "api-b", namespace: "prod" },
+    { id: "rs-b", kind: "ReplicaSet", name: "api-b-rs", namespace: "prod" },
+    { id: "pod-b", kind: "Pod", name: "api-b-0", namespace: "prod" },
+    { id: "shared-service", kind: "Service", name: "api", namespace: "prod" },
+    { id: "shared-config", kind: "ConfigMap", name: "shared", namespace: "prod" },
+  ];
+  const relations = [
+    { id: "owns-a-rs", source: "deploy-a", target: "rs-a", type: "OWNS" as const },
+    { id: "owns-a-pod", source: "rs-a", target: "pod-a", type: "OWNS" as const },
+    { id: "owns-b-rs", source: "deploy-b", target: "rs-b", type: "OWNS" as const },
+    { id: "owns-b-pod", source: "rs-b", target: "pod-b", type: "OWNS" as const },
+    { id: "selects-a", source: "shared-service", target: "pod-a", type: "SELECTS" as const },
+    { id: "selects-b", source: "shared-service", target: "pod-b", type: "SELECTS" as const },
+    { id: "config-a", source: "pod-a", target: "shared-config", type: "USES_CONFIG" as const },
+    { id: "config-b", source: "pod-b", target: "shared-config", type: "USES_CONFIG" as const },
+  ];
+
+  const projection = projectTopologyRoot(resources, relations, "deploy-a");
+  assert.deepEqual(
+    projection.resources.map((resource) => resource.id).sort(),
+    ["deploy-a", "rs-a", "pod-a", "shared-service", "shared-config"].sort(),
+  );
+  assert.equal(projection.relations.some((relation) => relation.id.endsWith("-b")), false);
+});
 
 const progressiveDisclosureResources: KubejojoResource[] = [
   { id: "deployment", kind: "Deployment", name: "checkout", namespace: "demo", instanceName: "checkout" },
@@ -119,20 +197,22 @@ test("canonical access path has stable visual ordering", () => {
     id: kind,
     resource: { id: kind, kind, name: kind },
   });
-  assert.ok(order("Ingress") < order("Service"));
-  assert.ok(order("Gateway") < order("GRPCRoute"));
-  assert.ok(order("GRPCRoute") < order("Service"));
+  assert.ok(order("Deployment") < order("ReplicaSet"));
+  assert.ok(order("ReplicaSet") < order("Pod"));
+  assert.ok(order("Pod") < order("Service"));
+  assert.ok(order("Service") < order("EndpointSlice"));
+  assert.ok(order("EndpointSlice") < order("Ingress"));
+  assert.equal(order("Gateway"), order("HTTPRoute"));
+  assert.ok(order("HTTPRoute") === order("Ingress"));
   assert.equal(order("TCPRoute"), order("HTTPRoute"));
   assert.equal(order("TLSRoute"), order("HTTPRoute"));
   assert.equal(order("UDPRoute"), order("HTTPRoute"));
-  assert.ok(order("Service") < order("EndpointSlice"));
-  assert.ok(order("EndpointSlice") < order("Pod"));
+  assert.equal(order("EndpointSlice"), order("Endpoints"));
   assert.ok(order("Pod") < order("PersistentVolumeClaim"));
-  assert.ok(order("PersistentVolumeClaim") < order("PersistentVolume"));
-  assert.equal(order("EndpointSlice") < order("Endpoints"), true);
+  assert.ok(order("Ingress") < order("PersistentVolumeClaim"));
 });
 
-test("progressive disclosure folds scope, then component, then reveals resources", () => {
+test("progressive disclosure folds scope, then opens the complete resource scene", () => {
   const grouped = groupKubejojoGraph(
     progressiveDisclosureResources,
     progressiveDisclosureRelations,
@@ -149,25 +229,24 @@ test("progressive disclosure folds scope, then component, then reveals resources
   ]);
 
   const focusedScope = collapseKubejojoGraph(grouped, scopeId);
-  assert.deepEqual(focusedScope.nodes?.map((node) => node.id), [scopeId]);
-  assert.equal(focusedScope.nodes?.[0].collapsed, false);
-  assert.equal(findGraphNode(focusedScope, componentId)?.collapsed, true);
-  assert.equal(findGraphNode(focusedScope, isolatedId)?.collapsed, true);
+  assert.deepEqual(focusedScope.nodes?.map((node) => node.id), [componentId, isolatedId]);
+  assert.equal(findGraphNode(focusedScope, componentId)?.collapsed, false);
+  assert.equal(findGraphNode(focusedScope, isolatedId)?.collapsed, false);
   assert.equal(findGraphNode(focusedScope, "config")?.collapsed, false);
-  assert.deepEqual(focusedScope.nodes?.[0].overlayEdges?.map((edge) => edge.id), ["uses-config"]);
 
   const focusedComponent = collapseKubejojoGraph(grouped, componentId);
-  assert.deepEqual(focusedComponent.nodes?.map((node) => node.id), [componentId]);
-  assert.equal(focusedComponent.nodes?.[0].collapsed, false);
   assert.deepEqual(
-    focusedComponent.nodes?.[0].nodes?.map((node) => [node.id, node.collapsed]),
+    focusedComponent.nodes?.map((node) => [node.id, node.collapsed]),
     [["deployment", false], ["service", false], ["pod", false]],
+  );
+  assert.equal(
+    focusedComponent.nodes?.some((node) => node.id === componentId),
+    false,
+    "a focused component is a viewport scene, not another framed graph node",
   );
 
   const focusedIsolated = collapseKubejojoGraph(grouped, isolatedId);
-  assert.deepEqual(focusedIsolated.nodes?.map((node) => node.id), [isolatedId]);
-  assert.equal(focusedIsolated.nodes?.[0].collapsed, false);
-  assert.deepEqual(focusedIsolated.nodes?.[0].nodes?.map((node) => node.id), ["config"]);
+  assert.deepEqual(focusedIsolated.nodes?.map((node) => node.id), ["config"]);
 
   const expanded = collapseKubejojoGraph(grouped, null, true);
   assert.equal(findGraphNode(expanded, scopeId)?.collapsed, false);
@@ -178,7 +257,7 @@ test("progressive disclosure folds scope, then component, then reveals resources
   assert.equal(findGraphNode(globalFromRootSelection, scopeId)?.collapsed, true);
 });
 
-test("scope focus reveals component summaries before resource graphs", async () => {
+test("scope focus opens component resources and relationship edges", async () => {
   const connectedResources: KubejojoResource[] = Array.from({ length: 130 }, (_, index) => ({
     id: `connected-${String(index).padStart(3, "0")}`,
     kind: index === 0 ? "Deployment" : "Pod",
@@ -218,24 +297,23 @@ test("scope focus reveals component summaries before resource graphs", async () 
   ]);
 
   const focusedScope = collapseKubejojoGraph(grouped, scopeId);
-  const scope = focusedScope.nodes?.[0];
-  const connectedComponent = scope?.nodes?.find((node) => node.groupKind === "component");
-  const isolatedGroups = scope?.nodes?.filter((node) => node.groupKind === "isolated") ?? [];
+  const connectedComponent = focusedScope.nodes?.find((node) => node.groupKind === "component");
+  const isolatedGroups = focusedScope.nodes?.filter((node) => node.groupKind === "isolated") ?? [];
 
   assert.equal(connectedComponent?.nodes?.length, 130);
-  assert.equal(connectedComponent?.collapsed, true);
+  assert.equal(connectedComponent?.collapsed, false);
   assert.deepEqual(
     isolatedGroups.map((node) => [node.label, node.nodes?.length, node.collapsed]),
     [
-      ["ReplicaSet（无关联）", 122, true],
-      ["ConfigMap（无关联）", 35, true],
+      ["ReplicaSet（无关联）", 122, false],
+      ["ConfigMap（无关联）", 35, false],
     ],
   );
 
   const layout = await layoutKubejojoGraph(focusedScope, 1.6);
-  assert.equal(layout.edges.length, 0, "scope focus must not expand component edges prematurely");
+  assert.ok(layout.edges.length > 0, "scope focus should render the resource relationship graph");
   assert.ok(layout.nodes.some((node) => node.id === `isolated:${scopeId}:ReplicaSet`));
-  assert.ok(!layout.nodes.some((node) => node.id === isolatedReplicaSets[0].id));
+  assert.ok(layout.nodes.some((node) => node.id === isolatedReplicaSets[0].id));
 
   const focusedComponent = collapseKubejojoGraph(grouped, connectedComponent!.id);
   const componentLayout = await layoutKubejojoGraph(focusedComponent, 1.6);
@@ -290,6 +368,30 @@ test("configuration relations stay as overlays and do not merge backbone compone
   );
 });
 
+test("full association mode renders overlay relations while core mode keeps the access backbone", async () => {
+  const resources: KubejojoResource[] = [
+    { id: "deploy", kind: "Deployment", name: "api", namespace: "prod" },
+    { id: "pod", kind: "Pod", name: "api-0", namespace: "prod" },
+    { id: "config", kind: "ConfigMap", name: "api-config", namespace: "prod" },
+  ];
+  const relations: KubejojoRelation[] = [
+    { id: "owns", source: "deploy", target: "pod", type: "OWNS" },
+    { id: "uses-config", source: "pod", target: "config", type: "USES_CONFIG" },
+  ];
+
+  const coreProjection = projectTopologyDisplayMode(resources, relations, "core");
+  const fullProjection = projectTopologyDisplayMode(resources, relations, "full");
+  const coreGraph = collapseKubejojoGraph(groupKubejojoGraph(coreProjection.resources, coreProjection.relations, "namespace", false), undefined, true);
+  const fullGraph = collapseKubejojoGraph(groupKubejojoGraph(fullProjection.resources, fullProjection.relations, "namespace", true), undefined, true);
+  const coreLayout = await layoutKubejojoGraph(coreGraph, 1.6);
+  const fullLayout = await layoutKubejojoGraph(fullGraph, 1.6);
+
+  assert.deepEqual(coreLayout.edges.map((edge) => edge.id), ["owns"]);
+  assert.deepEqual(fullLayout.edges.map((edge) => edge.id).sort(), ["owns", "uses-config"]);
+  assert.equal(coreLayout.nodes.some((node) => node.id === "config"), false);
+  assert.equal(fullLayout.nodes.some((node) => node.id === "config"), true);
+});
+
 test("selection paths and grouped identities remain deterministic", () => {
   const forward = groupKubejojoGraph(
     progressiveDisclosureResources,
@@ -326,18 +428,18 @@ test("selection paths and grouped identities remain deterministic", () => {
 
 test("layout policy uses real aspect ratio, edge presence, semantic stages, and stable compact metrics", () => {
   assert.deepEqual(getKubejojoLayoutPolicy(true, 1.8), {
-    algorithm: "layered",
+    algorithm: "dagre",
     direction: "RIGHT",
     aspectRatio: 1.8,
   });
   assert.deepEqual(getKubejojoLayoutPolicy(true, 0.72), {
-    algorithm: "layered",
-    direction: "DOWN",
+    algorithm: "dagre",
+    direction: "RIGHT",
     aspectRatio: 0.72,
   });
   assert.deepEqual(getKubejojoLayoutPolicy(false, 0.72), {
     algorithm: "rectpacking",
-    direction: "DOWN",
+    direction: "RIGHT",
     aspectRatio: 0.72,
   });
   assert.deepEqual(getKubejojoLayoutPolicy(false, 0), {
@@ -345,18 +447,20 @@ test("layout policy uses real aspect ratio, edge presence, semantic stages, and 
     direction: "RIGHT",
     aspectRatio: 1.6,
   });
-  assert.equal(getKubejojoPartition({ id: "weighted", weight: 73 }), 45);
-  assert.equal(getKubejojoPartition({ id: "deployment", resource: progressiveDisclosureResources[0] }), 60);
-  assert.equal(getKubejojoPartition({ id: "pod-a", resource: { id: "pod-a", kind: "Pod", name: "a" } }), 40);
-  assert.equal(getKubejojoPartition({ id: "pod-b", resource: { id: "pod-b", kind: "Pod", name: "b" } }), 40);
+  assert.equal(getKubejojoPartition({ id: "weighted", weight: 73 }), 70);
+  assert.equal(getKubejojoPartition({ id: "deployment", resource: progressiveDisclosureResources[0] }), 10);
+  assert.equal(getKubejojoPartition({ id: "pod-a", resource: { id: "pod-a", kind: "Pod", name: "a" } }), 30);
+  assert.equal(getKubejojoPartition({ id: "pod-b", resource: { id: "pod-b", kind: "Pod", name: "b" } }), 30);
   assert.deepEqual(KUBEJOJO_LAYOUT_METRICS, {
-    nodeWidth: 220,
-    nodeHeight: 88,
-    groupWidth: 260,
-    groupHeight: 132,
-    layeredNodeSpacing: 32,
-    layeredLayerSpacing: 44,
-    packedNodeSpacing: 14,
+    nodeWidth: 350,
+    nodeHeight: 110,
+    groupWidth: 390,
+    groupHeight: 154,
+    layeredNodeSpacing: 78,
+    layeredLayerSpacing: 96,
+    layeredEdgeNodeSpacing: 56,
+    layeredEdgeSpacing: 28,
+    packedNodeSpacing: 28,
   });
 });
 
@@ -372,9 +476,9 @@ test("workload access paths stay ordered and stable across input order", async (
   ];
   const relations: KubejojoRelation[] = [
     { id: "ingress-service", source: "ingress", target: "service", type: "ROUTES_TO" },
-    { id: "service-endpoints", source: "service", target: "endpoints", type: "ROUTES_TO" },
-    { id: "endpoints-pod-a", source: "endpoints", target: "pod-a", type: "ROUTES_TO" },
-    { id: "endpoints-pod-b", source: "endpoints", target: "pod-b", type: "ROUTES_TO" },
+    { id: "service-endpoints", source: "service", target: "endpoints", type: "PUBLISHES" },
+    { id: "endpoints-pod-a", source: "endpoints", target: "pod-a", type: "RESOLVES" },
+    { id: "endpoints-pod-b", source: "endpoints", target: "pod-b", type: "RESOLVES" },
     { id: "replica-set-pod-a", source: "replica-set", target: "pod-a", type: "OWNS" },
     { id: "replica-set-pod-b", source: "replica-set", target: "pod-b", type: "OWNS" },
     { id: "deployment-replica-set", source: "deployment", target: "replica-set", type: "OWNS" },
@@ -399,17 +503,29 @@ test("workload access paths stay ordered and stable across input order", async (
   const reversed = await positions([...resources].reverse(), [...relations].reverse());
   const x = (id: string) => forward.get(id)?.x ?? Number.NaN;
 
-  assert.ok(x("ingress") < x("service"));
-  assert.ok(x("service") < x("endpoints"));
-  assert.ok(x("endpoints") < x("pod-a"));
+  assert.ok(x("deployment") < x("replica-set"));
+  assert.ok(x("replica-set") < x("pod-a"));
   assert.equal(x("pod-a"), x("pod-b"), "fan-out Pods must share one semantic stage");
-  assert.ok(x("pod-a") < x("replica-set"));
-  assert.ok(x("replica-set") < x("deployment"));
+  assert.ok(x("pod-a") < x("service"));
+  assert.ok(x("service") < x("endpoints"));
+  assert.ok(x("endpoints") < x("ingress"));
+  const serviceEdge = (await layoutKubejojoGraph(graph(resources, relations), 1.6)).edges
+    .find((edge) => edge.id === "ingress-service");
+  assert.equal(serviceEdge?.source, "service");
+  assert.equal(serviceEdge?.target, "ingress");
+  const endpointEdge = (await layoutKubejojoGraph(graph(resources, relations), 1.6)).edges
+    .find((edge) => edge.id === "endpoints-pod-a");
+  assert.equal(endpointEdge?.source, "pod-a");
+  assert.equal(endpointEdge?.target, "endpoints");
+  const publishEdge = (await layoutKubejojoGraph(graph(resources, relations), 1.6)).edges
+    .find((edge) => edge.id === "service-endpoints");
+  assert.equal(publishEdge?.source, "service");
+  assert.equal(publishEdge?.target, "endpoints");
   const ownershipEdge = (await layoutKubejojoGraph(graph(resources, relations), 1.6)).edges
     .find((edge) => edge.id === "deployment-replica-set");
-  assert.equal(ownershipEdge?.source, "replica-set");
-  assert.equal(ownershipEdge?.target, "deployment");
-  assert.equal(ownershipEdge?.data?.label, "受控于");
+  assert.equal(ownershipEdge?.source, "deployment");
+  assert.equal(ownershipEdge?.target, "replica-set");
+  assert.equal(ownershipEdge?.data?.label, "拥有");
   assert.ok(ownershipEdge?.data?.labelPosition, "ELK must provide a collision-aware label position");
   assert.deepEqual(reversed, forward, "API result order must not change the rendered layout");
 });
@@ -437,11 +553,11 @@ test("storage and configuration dependencies continue after workload controllers
   }, 1.6);
   const x = new Map(layout.nodes.map((node) => [node.id, node.position.x]));
 
-  assert.ok(x.get("pod")! < x.get("replica-set")!);
-  assert.ok(x.get("replica-set")! < x.get("deployment")!);
-  assert.ok(x.get("deployment")! < x.get("pvc")!);
-  assert.ok(x.get("deployment")! < x.get("config")!);
-  assert.ok(x.get("deployment")! < x.get("secret")!);
+  assert.ok(x.get("deployment")! < x.get("replica-set")!);
+  assert.ok(x.get("replica-set")! < x.get("pod")!);
+  assert.ok(x.get("pod")! < x.get("pvc")!);
+  assert.ok(x.get("pod")! < x.get("config")!);
+  assert.ok(x.get("pod")! < x.get("secret")!);
 });
 
 test("capacity aggregates preserve the dominant resource stage", async () => {
@@ -471,15 +587,15 @@ test("capacity aggregates preserve the dominant resource stage", async () => {
 
   assert.ok(serviceAggregate?.aggregation);
   assert.ok(podAggregate?.aggregation);
-  assert.equal(getKubejojoAccessPathOrder({ id: serviceAggregate!.id, resource: serviceAggregate! }), 20);
-  assert.equal(getKubejojoAccessPathOrder({ id: podAggregate!.id, resource: podAggregate! }), 40);
+  assert.equal(getKubejojoAccessPathOrder({ id: serviceAggregate!.id, resource: serviceAggregate! }), 40);
+  assert.equal(getKubejojoAccessPathOrder({ id: podAggregate!.id, resource: podAggregate! }), 30);
   const layout = await layoutKubejojoGraph({
     id: "root",
     nodes: projectedResources.map((resource) => ({ id: resource.id, resource })),
     edges: projectedRelations,
   }, 1.6);
   const x = new Map(layout.nodes.map((node) => [node.id, node.position.x]));
-  assert.ok(x.get(serviceAggregate!.id)! < x.get(podAggregate!.id)!);
+  assert.ok(x.get(podAggregate!.id)! < x.get(serviceAggregate!.id)!);
 });
 
 test("capacity limits are exact and over-limit graphs use semantic aggregation", () => {

@@ -2037,10 +2037,18 @@ export class ResourcesService {
     const [context, events] = await Promise.all([
       this.loadDetailContext(base.clusterId, base.namespace),
       ['Cluster', 'Namespace'].includes(base.kind)
-        ? Promise.resolve({ items: [] })
+        ? Promise.resolve({
+            items: [],
+            status: 'unavailable' as const,
+            message: '集群级资源不支持 Kubernetes Event 查询',
+          })
         : this.withDetailTimeout(
             this.buildEventsSummary(base),
-            { items: [] },
+            {
+              items: [],
+              status: 'unavailable' as const,
+              message: '事件查询超时，稍后可重试',
+            },
             2_500,
           ),
     ]);
@@ -2317,6 +2325,8 @@ export class ResourcesService {
       },
       events: {
         items: [],
+        status: 'unavailable',
+        message: 'Helm 资源暂不提供 Kubernetes Event 查询',
       },
       metadata: {
         labels: {},
@@ -2397,6 +2407,8 @@ export class ResourcesService {
       },
       events: {
         items: [],
+        status: 'unavailable',
+        message: 'Helm 仓库暂不提供 Kubernetes Event 查询',
       },
       metadata: {
         labels: {},
@@ -4984,7 +4996,11 @@ export class ResourcesService {
         base.clusterId,
       );
       if (!kubeconfig) {
-        return { items: [] };
+        return {
+          items: [],
+          status: 'unavailable',
+          message: '集群 kubeconfig 不可用，无法读取事件',
+        };
       }
       const coreApi = this.k8sClientService.getCoreApi(
         kubeconfig,
@@ -5005,34 +5021,57 @@ export class ResourcesService {
         base.namespace ? `involvedObject.namespace=${base.namespace}` : null,
       ].filter((item): item is string => Boolean(item));
       const fieldSelector = selectors.join(',');
-      const response = base.namespace
-        ? await coreApi.listNamespacedEvent?.({
-            namespace: base.namespace,
-            fieldSelector,
-            limit: 30,
-          })
-        : await coreApi.listEventForAllNamespaces?.({
-            fieldSelector,
-            limit: 30,
-          });
+      let response: { items?: unknown[] } | undefined;
+      if (base.namespace) {
+        if (!coreApi.listNamespacedEvent) {
+          return {
+            items: [],
+            status: 'unavailable',
+            message: '当前 Kubernetes 客户端不支持 Event 查询',
+          };
+        }
+        response = await coreApi.listNamespacedEvent({
+          namespace: base.namespace,
+          fieldSelector,
+          limit: 30,
+        });
+      } else {
+        if (!coreApi.listEventForAllNamespaces) {
+          return {
+            items: [],
+            status: 'unavailable',
+            message: '当前 Kubernetes 客户端不支持 Event 查询',
+          };
+        }
+        response = await coreApi.listEventForAllNamespaces({
+          fieldSelector,
+          limit: 30,
+        });
+      }
       const items = Array.isArray(response?.items) ? response.items : [];
+      const normalizedItems = items
+        .map((event) => this.normalizeDetailEvent(event))
+        .filter(
+          (event): event is Record<string, unknown> =>
+            Object.keys(event).length > 0,
+        )
+        .sort(
+          (left, right) =>
+            this.eventTimestampMs(right) - this.eventTimestampMs(left),
+        );
       return {
-        items: items
-          .map((event) => this.normalizeDetailEvent(event))
-          .filter(
-            (event): event is Record<string, unknown> =>
-              Object.keys(event).length > 0,
-          )
-          .sort(
-            (left, right) =>
-              this.eventTimestampMs(right) - this.eventTimestampMs(left),
-          ),
+        items: normalizedItems,
+        status: normalizedItems.length > 0 ? 'available' : 'empty',
       };
     } catch (error) {
       this.logger.warn(
         `detail events degraded: ${base.kind}/${base.name}: ${(error as Error).message}`,
       );
-      return { items: [] };
+      return {
+        items: [],
+        status: 'unavailable',
+        message: '事件读取失败，当前详情不包含实时事件',
+      };
     }
   }
 

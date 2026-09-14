@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Col, Input, Row, Select, Space, Switch, Typography } from "antd";
+import { Alert, Space, Switch, Typography } from "antd";
 import type { TableProps } from "antd";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
@@ -10,6 +10,12 @@ import { ResourceTable } from "@/components/resource-table";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth, getTableScrollX } from "@/lib/table-column-widths";
 import { buildCompactTablePagination } from "@/lib/table/pagination";
+import { NamespaceFilterSelect } from "@/components/namespace-select";
+import {
+  ResourceFilterToolbar,
+  ResourceFilterToolbarItem,
+  ResourceKeywordSearch,
+} from "@/components/resource-filter-toolbar";
 
 export type ModuleRecord = {
   key: string;
@@ -114,7 +120,7 @@ export function ModulePage({
 }: ModulePageProps) {
   const { accessToken } = useAuth();
   const [localKeyword, setLocalKeyword] = useState("");
-  const [localNamespace, setLocalNamespace] = useState<string>("全部名称空间");
+  const [localNamespace, setLocalNamespace] = useState<string>("全部命名空间");
   const [localOnlyHealthy, setLocalOnlyHealthy] = useState(false);
   const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
   const keyword = filterState?.keyword ?? localKeyword;
@@ -130,7 +136,7 @@ export function ModulePage({
       const text = Object.values(item).join(" ").toLowerCase();
       const matchKeyword = text.includes(keyword.trim().toLowerCase());
       const matchNamespace =
-        namespace === "全部名称空间" || !item.namespace || item.namespace === namespace;
+        namespace === "全部命名空间" || !item.namespace || item.namespace === namespace;
       const matchHealthy =
         !onlyHealthy || !item.status || item.status.includes("运行") || item.status.includes("就绪") || item.status.includes("正常");
       return matchKeyword && matchNamespace && matchHealthy;
@@ -180,30 +186,29 @@ export function ModulePage({
         <OpsPageHeader className="resource-page-header" title={title} subtitle={description} style={{ marginBottom: 12 }} />
 
         <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-          <Row gutter={[12, 12]} align="middle">
-            <Col xs={24} sm={12} md={8} lg={8}>
-              <Input
-                allowClear
-                placeholder="请输入关键字筛选"
-                value={keyword}
-                onChange={(e) => handleKeywordChange(e.target.value)}
-              />
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6}>
-              <Select
+          <ResourceFilterToolbar>
+            <ResourceKeywordSearch
+              value={keyword}
+              onChange={handleKeywordChange}
+              onSearch={() => undefined}
+              placeholder="按名称/标签搜索"
+              width="lg"
+            />
+            <ResourceFilterToolbarItem width="md">
+              <NamespaceFilterSelect
+                value={namespace === "全部命名空间" ? "" : namespace}
+                namespaces={namespaceOptions}
+                onChange={(value) => handleNamespaceChange(value || "全部命名空间")}
                 style={{ width: "100%" }}
-                value={namespace}
-                options={["全部名称空间", ...namespaceOptions].map((item) => ({ label: item, value: item }))}
-                onChange={handleNamespaceChange}
               />
-            </Col>
-            <Col xs={24} sm={24} md={8} lg={10}>
-              <Space>
+            </ResourceFilterToolbarItem>
+            <ResourceFilterToolbarItem width="auto">
+              <Space className="resource-filter-health-toggle" align="center">
                 <Switch checked={onlyHealthy} onChange={handleOnlyHealthyChange} />
                 <Typography.Text>仅显示健康资源</Typography.Text>
               </Space>
-            </Col>
-          </Row>
+            </ResourceFilterToolbarItem>
+          </ResourceFilterToolbar>
 
           {error ? <Alert className="module-resource-state-alert" type="error" showIcon title="数据加载失败" description={error} /> : null}
 

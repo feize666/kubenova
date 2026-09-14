@@ -6571,6 +6571,311 @@ body {
   width: min(340px, calc(100vw - 48px));
 }
 
+.namespace-option-list {
+  display: grid;
+  gap: 8px;
+  min-width: 248px;
+}
+
+.namespace-option-list__options {
+  display: grid;
+  max-height: 260px;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.namespace-option-list__options button {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ops-control-text);
+  cursor: pointer;
+  font: inherit;
+  padding: 5px 9px;
+  text-align: left;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.namespace-option-list__options button:hover,
+.namespace-option-list__options button:focus-visible,
+.namespace-option-list__options button.is-selected {
+  border-color: color-mix(in srgb, var(--kn-primary) 34%, var(--ops-control-border));
+  background: color-mix(in srgb, var(--kn-primary) 10%, var(--ops-control-bg));
+  color: var(--ops-control-text-strong);
+  outline: none;
+}
+
+.namespace-option-list__state {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+}
+
+.namespace-filter-select {
+  width: min(280px, 100%);
+  min-width: 220px;
+  height: 32px;
+}
+
+.namespace-filter-select .ant-select-selector {
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 30px 0 10px !important;
+  border: 1px solid var(--ops-control-border) !important;
+  border-radius: var(--ops-control-radius) !important;
+  background: var(--ops-control-highlight), var(--ops-control-bg) !important;
+  box-shadow: var(--ops-control-shadow) !important;
+}
+
+/* Ant Design 6 renders the selected value inside .ant-select-content. Keep
+ * this inner surface tokenized as well as the legacy selector element. */
+.namespace-filter-select .ant-select-content,
+.resource-filter-select .ant-select-content {
+  display: flex !important;
+  align-items: center !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  line-height: 21px;
+  background: var(--ops-control-bg);
+  color: var(--ops-control-text-strong);
+}
+
+/* Ant Design 6 puts the prefix and selected value on separate flex items.
+ * Give both items the same 30px alignment box so the label and value share
+ * a baseline instead of drifting vertically. */
+.namespace-filter-select .ant-select-prefix,
+.resource-filter-select .ant-select-prefix {
+  display: flex;
+  align-items: center;
+  height: 30px;
+}
+
+.namespace-filter-select__label {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  line-height: 21px;
+}
+
+.namespace-filter-select:hover .ant-select-selector,
+.namespace-filter-select.ant-select-focused .ant-select-selector,
+.namespace-filter-select.ant-select-open .ant-select-selector {
+  border-color: var(--ops-control-border-hover) !important;
+  background: var(--ops-control-highlight), var(--ops-control-bg-hover) !important;
+}
+
+.namespace-filter-select.ant-select-focused .ant-select-selector,
+.namespace-filter-select.ant-select-open .ant-select-selector {
+  box-shadow: var(--ops-focus-ring) !important;
+}
+
+.namespace-filter-select .ant-select-prefix {
+  flex: 0 0 auto;
+  margin-inline-end: 6px;
+}
+
+.namespace-filter-select__label {
+  color: var(--ops-control-text-muted, var(--kn-text-secondary));
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.namespace-filter-select .ant-select-selection-item,
+.namespace-filter-select .ant-select-selection-placeholder,
+.namespace-filter-select .ant-select-selection-search-input {
+  color: var(--ops-control-text-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.namespace-filter-select .ant-select-arrow {
+  color: var(--ops-control-text-muted, var(--kn-text-secondary));
+  transition: color 140ms ease, transform 160ms ease;
+}
+
+.namespace-filter-select.ant-select-open .ant-select-arrow {
+  color: var(--kn-primary);
+  transform: rotate(180deg);
+}
+
+.namespace-filter-select-dropdown {
+  padding: 6px !important;
+  border: 1px solid var(--ops-floating-border) !important;
+  border-radius: var(--kn-radius-md) !important;
+  background: var(--ops-floating-bg) !important;
+  box-shadow: var(--ops-floating-shadow) !important;
+}
+
+.namespace-filter-select-dropdown .ant-select-item {
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  color: var(--ops-control-text);
+  font-size: 12px;
+}
+
+.namespace-filter-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+  background: var(--ops-control-bg-hover);
+}
+
+.namespace-filter-select-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  background: color-mix(in srgb, var(--kn-primary) 11%, var(--ops-floating-bg));
+  color: var(--kn-primary-hover);
+  font-weight: 650;
+}
+
+[data-theme="dark"] .namespace-filter-select-dropdown,
+[data-theme="dark"] .namespace-filter-select-dropdown .ant-select-item,
+[data-theme="dark"] .namespace-filter-select-dropdown .ant-select-item-option-content {
+  color: var(--kn-text) !important;
+}
+
+[data-theme="dark"] .namespace-filter-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+  background: color-mix(in srgb, var(--kn-primary) 15%, var(--ops-floating-bg)) !important;
+}
+
+[data-theme="dark"] .namespace-filter-select-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  background: color-mix(in srgb, var(--kn-primary) 24%, var(--ops-floating-bg)) !important;
+  color: var(--kn-primary-hover) !important;
+}
+
+.resource-scope-namespace-filter {
+  width: min(300px, calc(100vw - 48px));
+}
+
+.topology-source-filter-trigger.ant-btn {
+  min-height: 32px;
+  height: 32px;
+  padding-inline: 10px;
+  border-color: var(--ops-control-border);
+  border-radius: var(--ops-control-radius);
+  background: var(--ops-control-highlight), var(--ops-control-bg);
+  color: var(--ops-control-text);
+  box-shadow: var(--ops-control-shadow);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.topology-source-filter-trigger.ant-btn:hover,
+.topology-source-filter-trigger.ant-btn:focus-visible {
+  border-color: var(--ops-control-border-hover);
+  background: var(--ops-control-highlight), var(--ops-control-bg-hover);
+  color: var(--ops-control-text-strong);
+  box-shadow: var(--ops-control-shadow-hover);
+}
+
+.topology-source-filter-trigger__summary {
+  color: var(--ops-control-text-muted, var(--kn-text-secondary));
+  font-weight: 500;
+}
+
+.topology-source-filter-popover .ant-popover-inner {
+  width: min(330px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--ops-floating-border);
+  border-radius: var(--kn-radius-md);
+  background: var(--ops-floating-bg);
+  box-shadow: var(--ops-shadow-overlay);
+}
+
+.topology-source-filter-menu {
+  padding: 10px;
+  color: var(--ops-control-text);
+}
+
+.topology-source-filter-menu__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px 8px;
+  border-bottom: 1px solid var(--ops-floating-border);
+  color: var(--ops-control-text-strong);
+  font-size: 12px;
+}
+
+.topology-source-filter-menu__header span {
+  color: var(--ops-control-text-muted, var(--kn-text-secondary));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.topology-source-filter-menu__items {
+  display: grid;
+  gap: 2px;
+  padding-top: 6px;
+}
+
+.topology-source-filter-menu__item {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.topology-source-filter-menu__item:hover,
+.topology-source-filter-menu__item:focus-within {
+  border-color: color-mix(in srgb, var(--source-color, var(--kn-primary)) 32%, var(--ops-control-border));
+  background: color-mix(in srgb, var(--source-color, var(--kn-primary)) 8%, var(--ops-control-bg));
+}
+
+.topology-source-filter-menu__icon {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--source-color, var(--kn-primary)) 14%, var(--ops-control-bg));
+  color: var(--source-color, var(--kn-primary));
+}
+
+.topology-source-filter-menu__label {
+  flex: 1 1 auto;
+  font-weight: 600;
+}
+
+.topology-source-filter-menu__count {
+  min-width: 28px;
+  color: var(--source-color, var(--kn-primary));
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.topology-source-filter-menu__warning {
+  display: inline-grid;
+  min-width: 17px;
+  height: 17px;
+  place-items: center;
+  padding-inline: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kn-danger) 14%, var(--ops-control-bg));
+  color: var(--kn-danger);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+[data-theme="dark"] .topology-source-filter-menu__item:hover,
+[data-theme="dark"] .topology-source-filter-menu__item:focus-within {
+  background: color-mix(in srgb, var(--source-color, var(--kn-primary)) 16%, var(--ops-control-bg));
+}
+
+[data-theme="dark"] .namespace-option-list__options button:hover,
+[data-theme="dark"] .namespace-option-list__options button:focus-visible,
+[data-theme="dark"] .namespace-option-list__options button.is-selected {
+  background: color-mix(in srgb, var(--kn-primary) 18%, var(--ops-control-bg));
+}
+
 .resource-facet-filter-panel {
   width: min(280px, calc(100vw - 48px));
 }
@@ -7689,6 +7994,62 @@ body.kubenova-route-transitioning .resource-table * {
 .resource-filter-select--namespace .ant-select-selection-placeholder {
   font-weight: 600;
   color: rgba(75, 85, 99, 0.78);
+}
+
+/* The generic legacy selector rules above predate the theme token system.
+ * Keep namespace controls readable when a workspace switches to dark mode. */
+[data-theme="dark"] .resource-filter-select .ant-select-selector,
+[data-theme="dark"] .resource-filter-select--namespace .ant-select-selector,
+[data-theme="dark"] .namespace-filter-select .ant-select-selector {
+  background: var(--ops-control-highlight), var(--ops-control-bg) !important;
+  border-color: var(--ops-control-border) !important;
+  color: var(--ops-control-text-strong) !important;
+  box-shadow: var(--ops-control-shadow) !important;
+}
+
+[data-theme="dark"] .namespace-filter-select .ant-select-content,
+[data-theme="dark"] .resource-filter-select .ant-select-content,
+[data-theme="dark"] .resource-filter-select--namespace .ant-select-content {
+  background: var(--ops-control-bg) !important;
+  color: var(--ops-control-text-strong) !important;
+}
+
+[data-theme="dark"] .namespace-filter-select,
+[data-theme="dark"] .resource-filter-select,
+[data-theme="dark"] .resource-filter-select--namespace,
+[data-theme="dark"] .resource-filter-select.ant-select-disabled,
+[data-theme="dark"] .resource-filter-select.ant-select-loading {
+  background: var(--ops-control-bg) !important;
+  background-color: var(--ops-control-bg) !important;
+  background-image: none !important;
+  color: var(--ops-control-text-strong) !important;
+  border-color: var(--ops-control-border) !important;
+}
+
+[data-theme="dark"] .namespace-filter-select .ant-select-prefix,
+[data-theme="dark"] .namespace-filter-select .ant-select-suffix,
+[data-theme="dark"] .resource-filter-select .ant-select-prefix,
+[data-theme="dark"] .resource-filter-select .ant-select-suffix {
+  color: var(--ops-control-text-muted, var(--kn-text-secondary)) !important;
+}
+
+[data-theme="dark"] .resource-filter-select .ant-select-selection-item,
+[data-theme="dark"] .resource-filter-select--namespace .ant-select-selection-item,
+[data-theme="dark"] .resource-filter-select .ant-select-selection-placeholder,
+[data-theme="dark"] .resource-filter-select--namespace .ant-select-selection-placeholder,
+[data-theme="dark"] .namespace-filter-select .ant-select-selection-item,
+[data-theme="dark"] .namespace-filter-select .ant-select-selection-placeholder {
+  color: var(--ops-control-text-strong) !important;
+}
+
+[data-theme="dark"] .resource-filter-select:hover .ant-select-selector,
+[data-theme="dark"] .resource-filter-select--namespace:hover .ant-select-selector,
+[data-theme="dark"] .namespace-filter-select:hover .ant-select-selector,
+[data-theme="dark"] .resource-filter-select.ant-select-focused .ant-select-selector,
+[data-theme="dark"] .resource-filter-select--namespace.ant-select-focused .ant-select-selector,
+[data-theme="dark"] .namespace-filter-select.ant-select-focused .ant-select-selector {
+  background: var(--ops-control-highlight), var(--ops-control-bg-hover) !important;
+  border-color: var(--ops-control-border-hover) !important;
 }
 
 .topology-toolbar-stack .ant-select .ant-select-arrow {
@@ -14834,10 +15195,10 @@ body.topology-overview-active {
    Enterprise layout sizing pass
    ============================================================ */
 .app-sidebar.ant-layout-sider {
-  flex: 0 0 280px !important;
-  width: 280px !important;
-  min-width: 280px !important;
-  max-width: 280px !important;
+  flex: 0 0 248px !important;
+  width: 248px !important;
+  min-width: 248px !important;
+  max-width: 248px !important;
 }
 
 .logo-wrap {
@@ -15325,6 +15686,134 @@ body.topology-overview-active {
   .cluster-workspace-header__id { display: none; }
   .cluster-workspace-shell__header { padding-inline: 12px !important; }
 }
+
+/* Keep the single-cluster workspace on the same dark surface system as the
+ * portal. The workspace used to force Ant Design's light Sider and these
+ * blue-white surfaces, leaving a bright strip after switching themes. */
+[data-theme="dark"] .cluster-workspace-shell__sidebar,
+[data-theme="dark"] .cluster-workspace-shell__sidebar .ant-layout-sider-children,
+[data-theme="dark"] .cluster-workspace-menu,
+[data-theme="dark"] .cluster-workspace-shell__header,
+[data-theme="dark"] .cluster-workspace-shell__content {
+  background: var(--kn-bg) !important;
+  background-image: none !important;
+  border-color: var(--kn-border) !important;
+}
+
+[data-theme="dark"] .cluster-workspace-shell__sidebar,
+[data-theme="dark"] .cluster-workspace-shell__header {
+  background: var(--kn-sider) !important;
+}
+
+[data-theme="dark"] .cluster-workspace-brand {
+  border-bottom-color: var(--kn-border) !important;
+  background: var(--kn-surface) !important;
+}
+
+[data-theme="dark"] .cluster-workspace-brand__back {
+  color: var(--kn-text-secondary);
+}
+
+[data-theme="dark"] .cluster-workspace-brand__back:hover,
+[data-theme="dark"] .cluster-workspace-brand__back:focus-visible {
+  color: var(--kn-primary-hover);
+}
+
+[data-theme="dark"] .cluster-workspace-brand__identity > .anticon {
+  color: var(--kn-primary-hover);
+  background: var(--kn-primary-subtle);
+  border-color: var(--kn-border-strong);
+}
+
+[data-theme="dark"] .cluster-workspace-brand__identity strong {
+  color: var(--kn-text);
+}
+
+[data-theme="dark"] .cluster-workspace-brand__identity span,
+[data-theme="dark"] .cluster-workspace-header__id {
+  color: var(--kn-text-muted) !important;
+}
+
+[data-theme="dark"] .workspace-status {
+  color: var(--kn-text-secondary);
+  background: var(--kn-surface-raised);
+  border-color: var(--kn-border-strong);
+}
+
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark,
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark .ant-menu-sub,
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark .ant-menu-item,
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark .ant-menu-submenu-title {
+  background: transparent !important;
+}
+
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark .ant-menu-item,
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark .ant-menu-submenu-title {
+  color: var(--kn-text-secondary);
+}
+
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark .ant-menu-item:hover,
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark .ant-menu-submenu-title:hover {
+  color: var(--kn-text);
+  background: var(--kn-primary-subtle) !important;
+}
+
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark .ant-menu-item-selected {
+  color: var(--kn-primary-hover);
+  background: var(--kn-primary-subtle) !important;
+}
+
+[data-theme="dark"] .cluster-workspace-menu.ant-menu-dark .ant-menu-item-selected::after {
+  border-inline-end-color: var(--kn-primary-hover);
+}
+
+/* Legacy topology panels can still be reached from saved links. Keep their
+ * compact chips and resource links legible when the global theme is dark. */
+[data-theme="dark"] .topology-mode-card__chip {
+  border-color: var(--kn-border-strong);
+  background: var(--kn-surface-raised);
+  color: var(--kn-primary-hover);
+}
+
+[data-theme="dark"] .topology-name-trigger,
+[data-theme="dark"] button.topology-source-matrix__name,
+[data-theme="dark"] .topology-source-matrix__name[role="button"] {
+  border-color: var(--kn-border);
+  background: var(--kn-surface-raised);
+  color: var(--kn-text);
+}
+
+[data-theme="dark"] .topology-name-trigger:hover,
+[data-theme="dark"] button.topology-source-matrix__name:hover,
+[data-theme="dark"] .topology-source-matrix__name[role="button"]:hover {
+  border-color: var(--kn-border-hover);
+  background: var(--kn-primary-subtle);
+  color: var(--kn-primary-hover);
+}
+
+[data-theme="dark"] .topology-risk-chip--high {
+  background: color-mix(in srgb, var(--kn-danger) 18%, var(--kn-surface));
+  border-color: color-mix(in srgb, var(--kn-danger) 42%, var(--kn-border));
+  color: #ff9b9b;
+}
+
+[data-theme="dark"] .topology-risk-chip--medium {
+  background: color-mix(in srgb, var(--kn-warning) 18%, var(--kn-surface));
+  border-color: color-mix(in srgb, var(--kn-warning) 42%, var(--kn-border));
+  color: #ffd27a;
+}
+
+[data-theme="dark"] .topology-risk-chip--low {
+  background: color-mix(in srgb, var(--kn-success) 18%, var(--kn-surface));
+  border-color: color-mix(in srgb, var(--kn-success) 42%, var(--kn-border));
+  color: #85e6ae;
+}
+
+[data-theme="dark"] .topology-risk-chip--unready {
+  background: color-mix(in srgb, var(--kn-info) 18%, var(--kn-surface));
+  border-color: color-mix(in srgb, var(--kn-info) 42%, var(--kn-border));
+  color: #a9c8ff;
+}
  .ai-provider-settings__metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -15374,4 +15863,242 @@ body.topology-overview-active {
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+/* Resource table reading rail ------------------------------------------------
+ * Ant Design writes a per-column `text-align` style for every table cell.
+ * Keep resource lists predictable across modules: values share a left rail,
+ * remain vertically centered, and only the overflow action column is centered.
+ */
+.resource-table .ant-table-thead > tr > th,
+.resource-table .ant-table-tbody > tr > td,
+.resource-table-shell .ant-table-thead > tr > th,
+.resource-table-shell .ant-table-tbody > tr > td,
+.pod-table .ant-table-thead > tr > th,
+.pod-table .ant-table-tbody > tr > td {
+  text-align: left !important;
+  vertical-align: middle !important;
+}
+
+.resource-table .ant-table-thead > tr > th.resource-table-actions-cell,
+.resource-table .ant-table-tbody > tr > td.resource-table-actions-cell,
+.resource-table-shell .ant-table-thead > tr > th.resource-table-actions-cell,
+.resource-table-shell .ant-table-tbody > tr > td.resource-table-actions-cell,
+.pod-table .ant-table-thead > tr > th.resource-table-actions-cell,
+.pod-table .ant-table-tbody > tr > td.resource-table-actions-cell {
+  text-align: center !important;
+}
+
+.resource-table-actions-cell > .ant-table-cell-content,
+.resource-table-actions-cell > span.ant-table-cell-content {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.resource-table-actions-cell [data-resource-table-stop-navigation="true"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* VKE-style row actions: a quiet floating menu, consistent icon rail, and a
+ * clear destructive boundary. The same treatment is shared by native Ant
+ * Dropdown actions and ResourceActionDropdown. */
+.ops-action-dropdown .ant-dropdown-menu,
+.resource-action-menu .ant-dropdown-menu,
+.pod-actions-dropdown .ant-dropdown-menu {
+  min-width: 188px;
+  padding: 6px;
+  border: 1px solid var(--ops-floating-border);
+  border-radius: var(--kn-radius-md);
+  background: var(--ops-floating-bg);
+  box-shadow: var(--ops-shadow-overlay);
+}
+
+.ops-action-dropdown .ant-dropdown-menu-item,
+.resource-action-menu .ant-dropdown-menu-item,
+.pod-actions-dropdown .ant-dropdown-menu-item {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  margin: 2px 0;
+  padding: 8px 10px;
+  border-radius: var(--kn-radius-sm);
+  color: var(--ops-control-text);
+  font-size: 13px;
+  line-height: 20px;
+  transition: background-color var(--ops-motion-fast) var(--ops-motion-ease),
+    color var(--ops-motion-fast) var(--ops-motion-ease);
+}
+
+.ops-action-dropdown .ant-dropdown-menu-item .ant-dropdown-menu-item-icon,
+.resource-action-menu .ant-dropdown-menu-item .ant-dropdown-menu-item-icon,
+.pod-actions-dropdown .ant-dropdown-menu-item .ant-dropdown-menu-item-icon {
+  width: 16px;
+  margin-inline-end: 9px;
+  color: var(--ops-control-text-muted, var(--kn-text-secondary));
+  font-size: 14px;
+}
+
+.ops-action-dropdown .ant-dropdown-menu-item:hover,
+.ops-action-dropdown .ant-dropdown-menu-item-active,
+.resource-action-menu .ant-dropdown-menu-item:hover,
+.pod-actions-dropdown .ant-dropdown-menu-item:hover {
+  background: var(--ops-control-bg-hover);
+  color: var(--ops-control-text-strong);
+}
+
+.ops-action-dropdown .ant-dropdown-menu-item-danger,
+.resource-action-menu .ant-dropdown-menu-item-danger,
+.pod-actions-dropdown .ant-dropdown-menu-item-danger {
+  color: var(--ops-status-danger-text);
+}
+
+.ops-action-dropdown .ant-dropdown-menu-item-danger .ant-dropdown-menu-item-icon,
+.resource-action-menu .ant-dropdown-menu-item-danger .ant-dropdown-menu-item-icon,
+.pod-actions-dropdown .ant-dropdown-menu-item-danger .ant-dropdown-menu-item-icon {
+  color: var(--ops-status-danger-text);
+}
+
+.ops-action-dropdown .ant-dropdown-menu-item-danger:hover,
+.ops-action-dropdown .ant-dropdown-menu-item-danger.ant-dropdown-menu-item-active,
+.resource-action-menu .ant-dropdown-menu-item-danger:hover,
+.pod-actions-dropdown .ant-dropdown-menu-item-danger:hover {
+  background: var(--ops-status-danger-bg);
+  color: var(--ops-status-danger-text);
+}
+
+.ops-action-dropdown .ant-dropdown-menu-item-divider,
+.resource-action-menu .ant-dropdown-menu-item-divider,
+.pod-actions-dropdown .ant-dropdown-menu-item-divider {
+  margin: 6px 4px;
+  border-color: var(--ops-floating-border);
+}
+
+/* Resource list sizing and column resize rail --------------------------------
+ * Every list shares one stable row rhythm. Column widths are still data-driven
+ * and can be adjusted from the narrow rail at the right edge of each leaf
+ * header without changing the table's fixed-layout geometry.
+ */
+:root {
+  --resource-table-row-height: 52px;
+  --resource-table-header-height: 42px;
+  --resource-table-resize-rail: color-mix(in srgb, var(--kn-primary) 48%, transparent);
+}
+
+.resource-table .ant-table-thead > tr > th,
+.resource-table-shell .ant-table-thead > tr > th,
+.pod-table .ant-table-thead > tr > th {
+  position: relative;
+}
+
+.resource-table .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row),
+.resource-table-shell .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row),
+.pod-table .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) {
+  height: var(--resource-table-row-height);
+}
+
+.resource-table .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) > td,
+.resource-table-shell .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) > td,
+.pod-table .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) > td {
+  height: var(--resource-table-row-height) !important;
+  min-height: var(--resource-table-row-height) !important;
+  padding-block: 0 !important;
+  line-height: 20px;
+  vertical-align: middle !important;
+}
+
+.resource-table .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) > td > .ant-table-cell-content,
+.resource-table-shell .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) > td > .ant-table-cell-content,
+.pod-table .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) > td > .ant-table-cell-content {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--resource-table-row-height);
+  align-items: center;
+  overflow: hidden;
+}
+
+.resource-table .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) > td > .ant-table-cell-content > *,
+.resource-table-shell .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) > td > .ant-table-cell-content > *,
+.pod-table .ant-table-tbody > tr:not(.ant-table-expanded-row):not(.ant-table-measure-row) > td > .ant-table-cell-content > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Ant Design keeps a zero-height measuring row in the body. It must never
+ * participate in the visible row rhythm or push the first resource down. */
+.resource-table .ant-table-tbody > tr.ant-table-measure-row,
+.resource-table-shell .ant-table-tbody > tr.ant-table-measure-row,
+.pod-table .ant-table-tbody > tr.ant-table-measure-row {
+  height: 0 !important;
+  min-height: 0 !important;
+  visibility: hidden;
+}
+
+.resource-table .ant-table-tbody > tr.ant-table-measure-row > td,
+.resource-table-shell .ant-table-tbody > tr.ant-table-measure-row > td,
+.pod-table .ant-table-tbody > tr.ant-table-measure-row > td {
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  line-height: 0 !important;
+}
+
+.resource-table .ant-table-tbody > tr.ant-table-measure-row .ant-table-cell-content,
+.resource-table-shell .ant-table-tbody > tr.ant-table-measure-row .ant-table-cell-content,
+.pod-table .ant-table-tbody > tr.ant-table-measure-row .ant-table-cell-content {
+  display: none !important;
+}
+
+.resource-table-resizable-header-cell {
+  overflow: visible !important;
+}
+
+.resource-table-resize-handle {
+  position: absolute;
+  z-index: 3;
+  top: 5px;
+  right: -4px;
+  bottom: 5px;
+  width: 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+}
+
+.resource-table-resize-handle::after {
+  position: absolute;
+  inset: 5px 3px;
+  border-radius: 2px;
+  background: var(--resource-table-resize-rail);
+  content: "";
+  opacity: 0;
+  transition: opacity 140ms ease, background-color 140ms ease;
+}
+
+.resource-table-resize-handle:hover::after,
+.resource-table-resize-handle:focus-visible::after,
+body.resource-table-is-resizing .resource-table-resize-handle::after {
+  opacity: 1;
+}
+
+.resource-table-resize-handle:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--kn-primary) 24%, transparent);
+}
+
+body.resource-table-is-resizing,
+body.resource-table-is-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+[data-theme="dark"] {
+  --resource-table-resize-rail: color-mix(in srgb, var(--kn-primary-hover) 72%, transparent);
 }

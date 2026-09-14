@@ -1,9 +1,20 @@
 "use client";
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { memo, type KeyboardEvent } from "react";
+import {
+  ApiOutlined,
+  AppstoreOutlined,
+  ApartmentOutlined,
+  BlockOutlined,
+  CloudServerOutlined,
+  DeploymentUnitOutlined,
+  NodeIndexOutlined,
+  ShareAltOutlined,
+} from "@ant-design/icons";
+import { memo, type KeyboardEvent, type ReactNode } from "react";
 
 import type { TopologyRendererGraphNode, TopologyRendererNodeData } from "./contracts";
+import { normalizeTopologyKind } from "../kind";
 
 function hiddenHandle(position: Position) {
   return (
@@ -115,10 +126,13 @@ function kindSummary(node: TopologyRendererGraphNode) {
   const counts = getLeafNodes(node).reduce<Record<string, number>>((result, leaf) => {
     const aggregatedKinds = leaf.resource?.aggregation?.membersByKind;
     if (aggregatedKinds && Object.keys(aggregatedKinds).length) {
-      Object.entries(aggregatedKinds).forEach(([kind, count]) => { result[kind] = (result[kind] ?? 0) + count; });
+      Object.entries(aggregatedKinds).forEach(([kind, count]) => {
+        const normalizedKind = normalizeTopologyKind(kind);
+        result[normalizedKind] = (result[normalizedKind] ?? 0) + count;
+      });
       return result;
     }
-    const kind = leaf.resource?.kind ?? "Unknown";
+    const kind = normalizeTopologyKind(leaf.resource?.kind);
     result[kind] = (result[kind] ?? 0) + 1;
     return result;
   }, {});
@@ -149,7 +163,7 @@ function Glance({ graphNode, grouped = false }: { graphNode: TopologyRendererGra
         <span>{statusSummary(graphNode)}</span>
       </div>
       <dl>
-        <div><dt>名称空间</dt><dd>{sharedResourceValue(graphNode, (item) => item.namespace, "集群级")}</dd></div>
+        <div><dt>命名空间</dt><dd>{sharedResourceValue(graphNode, (item) => item.namespace, "集群级")}</dd></div>
         <div><dt>来源</dt><dd>{sharedResourceValue(graphNode, (item) => sourceLabel(item.source), "Kubernetes")}</dd></div>
         {summary ? <div><dt>摘要</dt><dd>{summary}</dd></div> : null}
       </dl>
@@ -198,31 +212,63 @@ const KIND_CODE: Record<string, string> = {
 };
 
 export function kindCode(kind?: string) {
-  const value = kind?.trim() ?? "";
+  const value = normalizeTopologyKind(kind);
   const fallback = value.replace(/[^a-z0-9]/gi, "").slice(0, 3).toUpperCase();
   return KIND_CODE[value] ?? (fallback || "RS");
 }
 
 function kindDomain(kind?: string) {
+  const normalizedKind = normalizeTopologyKind(kind);
   if ([
     "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Pod", "Job", "CronJob",
     "HorizontalPodAutoscaler", "VerticalPodAutoscaler",
-  ].includes(kind ?? "")) return "workload";
+  ].includes(normalizedKind)) return "workload";
   if ([
     "Service", "Ingress", "IngressRoute", "Endpoints", "EndpointSlice", "NetworkPolicy",
     "GatewayClass", "Gateway", "HTTPRoute",
-  ].includes(kind ?? "")) return "network";
-  if (["PersistentVolume", "PersistentVolumeClaim", "StorageClass"].includes(kind ?? "")) return "storage";
-  if (["ConfigMap", "Secret", "ServiceAccount"].includes(kind ?? "")) return "configuration";
-  if (["Cluster", "Namespace"].includes(kind ?? "")) return "scope";
+  ].includes(normalizedKind)) return "network";
+  if (["PersistentVolume", "PersistentVolumeClaim", "StorageClass"].includes(normalizedKind)) return "storage";
+  if (["ConfigMap", "Secret", "ServiceAccount"].includes(normalizedKind)) return "configuration";
+  if (["Cluster", "Namespace"].includes(normalizedKind)) return "scope";
   return "other";
 }
 
 function resourceKindClass(kind?: string, membersByKind?: Record<string, number>) {
   const dominantKind = Object.entries(membersByKind ?? {})
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "en"))[0]?.[0];
-  const normalized = (dominantKind ?? kind)?.trim().replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+  const normalized = normalizeTopologyKind(dominantKind ?? kind)
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[^a-z0-9-]+/gi, "-")
+    .toLowerCase();
   return normalized ? `is-resource-${normalized}` : "is-resource-unknown";
+}
+
+function kindIcon(kind?: string): ReactNode {
+  switch (normalizeTopologyKind(kind)) {
+    case "ReplicaSet":
+      return <AppstoreOutlined aria-hidden="true" />;
+    case "Pod":
+      return <BlockOutlined aria-hidden="true" />;
+    case "Service":
+      return <ShareAltOutlined aria-hidden="true" />;
+    case "Ingress":
+    case "IngressRoute":
+    case "Gateway":
+    case "HTTPRoute":
+      return <DeploymentUnitOutlined aria-hidden="true" />;
+    case "Endpoints":
+    case "EndpointSlice":
+      return <NodeIndexOutlined aria-hidden="true" />;
+    case "Deployment":
+    case "StatefulSet":
+    case "DaemonSet":
+      return <CloudServerOutlined aria-hidden="true" />;
+    case "ConfigMap":
+    case "Secret":
+      return <ApiOutlined aria-hidden="true" />;
+    default:
+      return <ApartmentOutlined aria-hidden="true" />;
+  }
 }
 
 function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>>) {
@@ -233,13 +279,13 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
   const status = statusOf(graphNode);
   const resourceCount = representedCount(graphNode);
   const isScopePreview = graphNode.groupKind === "scope";
-  const nodeKind = resource?.kind ?? (isScopePreview
+  const nodeKind = normalizeTopologyKind(resource?.kind ?? (isScopePreview
     ? "Namespace"
     : graphNode.groupKind === "component"
       ? "Component"
       : graphNode.groupKind === "isolated"
         ? "Isolated"
-        : graphNode.label);
+      : graphNode.label));
   const title = graphNode.label ?? resource?.name ?? "Unknown resource";
   const viewState = data.viewState ?? "default";
   const relationshipCount = representedRelationshipCount(graphNode);
@@ -306,7 +352,7 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
           </div>
         ) : (
           <>
-            <div className="topology-kubejojo__node-icon">{kindCode(nodeKind)}</div>
+            <div className="topology-kubejojo__node-icon" aria-hidden="true">{kindIcon(nodeKind)}</div>
             <div className="topology-kubejojo__node-copy">
               <div className="topology-kubejojo__node-kind">{nodeKind}</div>
               <button

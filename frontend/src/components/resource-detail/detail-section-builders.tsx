@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type { ResourceDetailEvent } from "@/lib/api/resources";
 import { StatusTag } from "@/components/status-tag";
 import { DetailDescriptions, DetailSection, DetailTag, DetailChipList } from "./section-primitives";
+import { ResourceLink } from "./resource-link";
 import type { ResourceDetailRendererProps } from "./types";
 import {
   buildOverviewFieldMap,
@@ -204,7 +205,31 @@ export function buildStatusSection({ detail, statusSnapshot }: DetailSectionBuil
   );
 }
 
-export function buildEventsSection({ detail }: DetailSectionBuilderContext): ReactNode {
+export function buildEventsSection({ detail, clusterMap, onNavigateRequest }: DetailSectionBuilderContext): ReactNode {
+  const renderEventRef = (ref: ResourceDetailEvent["involvedObject"] | undefined, label: string) => {
+    if (!ref || (!ref.kind && !ref.name)) return null;
+    const identity = `${ref.kind ? `${ref.kind}/` : ""}${ref.namespace ? `${ref.namespace}/` : ""}${ref.name ?? "-"}`;
+    return (
+      <Space wrap size={4}>
+        <DetailTag color="blue">{label}</DetailTag>
+        {ref.kind && ref.name && onNavigateRequest ? (
+          <ResourceLink
+            kind={ref.kind}
+            name={ref.name}
+            namespace={ref.namespace}
+            clusterId={detail.overview.clusterId}
+            clusterMap={clusterMap}
+            onNavigateRequest={onNavigateRequest}
+          >
+            {identity}
+          </ResourceLink>
+        ) : (
+          <Typography.Text type="secondary">{identity}</Typography.Text>
+        )}
+        {ref.fieldPath ? <Typography.Text type="secondary">· {ref.fieldPath}</Typography.Text> : null}
+      </Space>
+    );
+  };
   return (
     <DetailSection
       title="Events"
@@ -215,8 +240,12 @@ export function buildEventsSection({ detail }: DetailSectionBuilderContext): Rea
         ) : undefined
       }
     >
-      {detail.events.items.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事件" />
+      {detail.events.status === "unavailable" ? (
+        <Typography.Text type="warning">
+          {detail.events.message ?? "事件暂不可用，无法完成 Kubernetes Event 查询。"}
+        </Typography.Text>
+      ) : detail.events.items.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事件（已完成查询）" />
       ) : (
         <Space orientation="vertical" size={10} style={{ width: "100%" }}>
           {detail.events.items.map((item, index) => (
@@ -228,14 +257,23 @@ export function buildEventsSection({ detail }: DetailSectionBuilderContext): Rea
                 <Typography.Text strong>{eventText(item, ["reason", "name"]) ?? `事件 ${index + 1}`}</Typography.Text>
                 {eventText(item, ["count"]) ? <DetailTag>Count {eventText(item, ["count"])}</DetailTag> : null}
                 <Typography.Text type="secondary">
-                  {formatDateTime(eventText(item, ["lastTimestamp", "eventTime", "firstTimestamp"]))}
+                  最近 {formatDateTime(eventText(item, ["lastTimestamp", "eventTime", "firstTimestamp"]))}
                 </Typography.Text>
+                {eventText(item, ["firstTimestamp", "firstSeen"]) ? (
+                  <Typography.Text type="secondary">
+                    首次 {formatDateTime(eventText(item, ["firstTimestamp", "firstSeen"]))}
+                  </Typography.Text>
+                ) : null}
               </Space>
               <Typography.Paragraph type="secondary" style={{ marginTop: 4, marginBottom: 0 }}>
                 {[eventText(item, ["message"]), eventText(item, ["source", "reportingComponent"])]
                   .filter(Boolean)
                   .join(" · ")}
               </Typography.Paragraph>
+              <Space wrap size={[8, 6]} style={{ marginTop: 6 }}>
+                {renderEventRef(item.involvedObject, "对象")}
+                {renderEventRef(item.related, "关联")}
+              </Space>
             </div>
           ))}
         </Space>

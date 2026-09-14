@@ -33,6 +33,7 @@ import { useAuth } from "@/components/auth-context";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
 import { ClusterWorkspaceProvider } from "@/components/cluster-workspace-context";
 import { OpsIconActionButton } from "@/components/ops";
+import { useThemeMode } from "@/components/theme-context";
 import { getClusterDetail } from "@/lib/api/clusters";
 import {
   getClusterIdFromPathname,
@@ -51,6 +52,7 @@ const sectionIcons: Record<string, React.ReactNode> = {
   network: <ShareAltOutlined />,
   storage: <DatabaseOutlined />,
   configs: <FileTextOutlined />,
+  topology: <NodeIndexOutlined />,
   operations: <ToolOutlined />,
 };
 
@@ -63,6 +65,7 @@ export function ClusterWorkspaceShell({
   const router = useRouter();
   const { accessToken, isAuthenticated, isInitializing, username, logout } =
     useAuth();
+  const { mode } = useThemeMode();
   const clusterId = getClusterIdFromPathname(pathname);
   const clusterQuery = useQuery({
     queryKey: [...queryKeys.clusters.detail(clusterId ?? ""), accessToken],
@@ -193,7 +196,7 @@ export function ClusterWorkspaceShell({
         <Sider
           width={248}
           className="app-sidebar cluster-workspace-shell__sidebar"
-          theme="light"
+          theme={mode}
         >
           <div className="cluster-workspace-brand">
             <Link
@@ -215,6 +218,7 @@ export function ClusterWorkspaceShell({
           <Menu
             className="app-sidebar-menu cluster-workspace-menu"
             mode="inline"
+            theme={mode}
             items={menuItems}
             selectedKeys={selectedKeys}
             openKeys={openKeys}

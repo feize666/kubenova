@@ -10,11 +10,11 @@ import {
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
+  BackgroundVariant,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
   type Edge,
-  type EdgeMarker,
   type Node,
 } from "@xyflow/react";
 
@@ -23,9 +23,12 @@ import {
   collapseKubejojoGraph,
   findKubejojoNode,
   getCenteredTopologyViewport,
+  getTopologyViewportFrame,
   getKubejojoSelectionPath,
   groupKubejojoGraph,
   layoutKubejojoGraph,
+  isTopologyRootKind,
+  projectTopologyDisplayMode,
   TOPOLOGY_CAPACITY_LIMITS,
   type KubejojoGraphNode,
   type KubejojoGroupBy,
@@ -48,10 +51,14 @@ type Props = {
   focusedId: string | null;
   selectedNodeId: string | null;
   expandAll: boolean;
-  includeOverlays?: boolean;
+  displayMode?: "core" | "full";
   onFocus: (id: string | null) => void;
   onSelectResource: (selection: KubejojoTopologySelection | null) => void;
   onOpen: (id: string) => void;
+  onOpenTopologyRoot?: (id: string) => void;
+  topologyRootLabel?: string;
+  topologyRootKind?: string;
+  onExitTopology?: () => void;
   fitVersion: string;
 };
 
@@ -82,21 +89,6 @@ function layoutBounds(nodes: Node<TopologyRendererNodeData>[]) {
   const bottom = Math.max(...boxes.map((box) => box.y + box.height));
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
-
-function viewportFrame(width: number, height: number, compact: boolean, hasFocusPath: boolean) {
-  const offsetY = compact ? (hasFocusPath ? 128 : 64) : 0;
-  return {
-    size: { width, height: Math.max(1, height - offsetY) },
-    offsetY,
-  };
-}
-
-const EDGE_MARKER_COLOR: Record<TopologyNodeStatus, string> = {
-  healthy: "var(--tk-success)",
-  warning: "var(--tk-warning)",
-  critical: "var(--tk-danger)",
-  unknown: "var(--tk-edge)",
-};
 
 function relationHealth(
   relation: KubejojoRelation | undefined,
@@ -129,14 +121,16 @@ function projectCanvasCapacity(
   groupBy: KubejojoGroupBy,
   focusedId: string | null,
   expandAll: boolean,
-  includeOverlays: boolean,
+  displayMode: "core" | "full",
 ) {
+  const includeOverlays = displayMode === "full";
   const mode = expandAll || Boolean(focusedId) ? "expanded" : "defaultCanvas";
   const renderedNodeLimit = TOPOLOGY_CAPACITY_LIMITS[mode].nodes;
+  const visible = projectTopologyDisplayMode(resources, relations, displayMode);
   let resourceNodeBudget: number = renderedNodeLimit;
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const projected = applyTopologyCapacity(resources, relations, mode, {
+    const projected = applyTopologyCapacity(visible.resources, visible.relations, mode, {
       maxVisibleNodes: resourceNodeBudget,
     });
     const groupedGraph = groupKubejojoGraph(
@@ -178,10 +172,14 @@ function Canvas({
   focusedId,
   selectedNodeId,
   expandAll,
-  includeOverlays = false,
+  displayMode = "core",
   onFocus,
   onSelectResource,
   onOpen,
+  onOpenTopologyRoot,
+  topologyRootLabel,
+  topologyRootKind,
+  onExitTopology,
   fitVersion,
 }: Props) {
   const flow = useReactFlow();
@@ -197,8 +195,8 @@ function Canvas({
   const [layoutRetry, setLayoutRetry] = useState(0);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const capacityProjection = useMemo(
-    () => projectCanvasCapacity(resources, relations, groupBy, focusedId, expandAll, includeOverlays),
-    [expandAll, focusedId, groupBy, includeOverlays, relations, resources],
+    () => projectCanvasCapacity(resources, relations, groupBy, focusedId, expandAll, displayMode),
+    [displayMode, expandAll, focusedId, groupBy, relations, resources],
   );
   const { projected, groupedGraph, focusedGroup, graph, renderedNodeCount } = capacityProjection;
   const selectionPath = useMemo(
@@ -246,14 +244,14 @@ function Canvas({
     const canvas = canvasRef.current;
     const bounds = layoutBounds(layout.nodes);
     if (!canvas || !bounds) return;
-    const frame = viewportFrame(canvas.clientWidth, canvas.clientHeight, aspectRatio < 0.9, selectionPath.length > 1);
+    const frame = getTopologyViewportFrame(canvas.clientWidth, canvas.clientHeight);
     const viewport = getCenteredTopologyViewport(
       bounds,
       frame.size,
       { zoom: 1, minZoom: 1, maxZoom: 1 },
     );
     if (viewport) void flow.setViewport({ ...viewport, y: viewport.y + frame.offsetY }, { duration });
-  }, [aspectRatio, flow, layout.nodes, selectionPath.length]);
+  }, [flow, layout.nodes]);
 
   const fitGraph = useCallback(async (duration = 180) => {
     setViewMode("fit");
@@ -273,14 +271,14 @@ function Canvas({
     const height = canvas.clientHeight;
     const compact = aspectRatio < 0.9;
     const inset = compact ? 48 : 28;
-    const frame = viewportFrame(width, height, compact, selectionPath.length > 1);
+    const frame = getTopologyViewportFrame(width, height);
     const viewport = getCenteredTopologyViewport(
       bounds,
       frame.size,
       { minZoom: 0.2, maxZoom: 1, padding: inset },
     );
     if (viewport) await flow.setViewport({ ...viewport, y: viewport.y + frame.offsetY }, { duration });
-  }, [aspectRatio, flow, layout.nodes, selectionPath.length]);
+  }, [aspectRatio, flow, layout.nodes]);
 
   useEffect(() => {
     if (!layout.nodes.length || appliedLayoutRevision.current === layoutRevision) return;
@@ -338,18 +336,10 @@ function Canvas({
     const resourceStatusById = new Map(projected.resources.map((resource) => [resource.id, resource.status ?? "unknown"]));
     return layout.edges.map((edge) => ({
       ...edge,
-      markerEnd: typeof edge.markerEnd === "object"
-        ? {
-          ...(edge.markerEnd as EdgeMarker),
-          color: EDGE_MARKER_COLOR[aggregateEdgeHealth(
-            (edge.data?.relationIds ?? []).map((id) => relationHealth(relationById.get(id), resourceStatusById)),
-          )],
-        }
-        : edge.markerEnd,
       data: {
         ...edge.data,
         labelVisible: layout.edges.length <= 18,
-        route: "elk" as const,
+        route: "bezier" as const,
         status: aggregateEdgeHealth(
           (edge.data?.relationIds ?? []).map((id) => relationHealth(relationById.get(id), resourceStatusById)),
         ),
@@ -363,6 +353,10 @@ function Canvas({
     setSelectedEdgeId(null);
     const graphNode = node.data.graphNode;
     if (graphNode.nodes?.length) {
+      if (graphNode.groupKind === "scope" || graphNode.groupKind === "isolated") {
+        onSelectResource(null);
+        return;
+      }
       setViewMode("fit");
       onFocus(graphNode.id);
       onSelectResource(null);
@@ -370,6 +364,9 @@ function Canvas({
     }
     const resource = projected.resources.find((item) => item.id === node.id);
     if (!resource) return;
+    if (onOpenTopologyRoot && isTopologyRootKind(resource.kind)) {
+      onOpenTopologyRoot(resource.aggregation?.representativeId ?? resource.id);
+    }
     onSelectResource({
       canvasId: node.id,
       resourceId: resource.aggregation?.representativeId ?? resource.id,
@@ -377,7 +374,7 @@ function Canvas({
     });
   };
   return (
-    <div className="topology-kubejojo">
+    <div className={`topology-kubejojo${selectionPath.length > 1 ? " is-focused-scene" : ""}`}>
       <div ref={canvasRef} className="topology-kubejojo__canvas">
         {!projected.capacity.complete ? (
           <div
@@ -436,13 +433,55 @@ function Canvas({
             <span>适配全图</span>
           </button>
         </div>
-        {selectionPath.length > 1 ? (
+        {topologyRootLabel ? (
+          <nav className="topology-kubejojo__focus topology-kubejojo__resource-path" aria-label="资源拓扑路径">
+            <button
+              type="button"
+              className="topology-kubejojo__resource-path-back"
+              onClick={() => {
+                setViewMode("fit");
+                onExitTopology?.();
+              }}
+            >
+              资源拓扑
+            </button>
+            <span aria-hidden="true">/</span>
+            <span className="topology-kubejojo__focus-label" aria-current={!selectionPath.some((item) => item.id !== "root") ? "page" : undefined}>
+              <span className="topology-kubejojo__resource-path-kind">{topologyRootKind ?? "工作负载"}</span>
+              <strong>{topologyRootLabel}</strong>
+            </span>
+            {selectionPath.filter((item) => item.id !== "root").map((item, index, path) => (
+              <Fragment key={item.id}>
+                <span aria-hidden="true">/</span>
+                {index === path.length - 1 || item.kind === "scope" ? (
+                  <span className="topology-kubejojo__focus-label" aria-current={index === path.length - 1 ? "page" : undefined}>
+                    <strong>{item.label}</strong>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewMode("fit");
+                      onFocus(item.id);
+                      onSelectResource(null);
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                )}
+              </Fragment>
+            ))}
+            <span className="topology-kubejojo__focus-count">
+              {selectionPath.at(-1)?.resourceCount ?? 0} 个资源
+            </span>
+          </nav>
+        ) : selectionPath.length > 1 ? (
           <nav className="topology-kubejojo__focus" aria-label="拓扑层级">
             {selectionPath.map((item, index) => (
               <Fragment key={item.id}>
                 {index > 0 ? <span aria-hidden="true">/</span> : null}
-                {index === selectionPath.length - 1 ? (
-                  <span className="topology-kubejojo__focus-label" aria-current="page">
+                {index === selectionPath.length - 1 || item.kind === "scope" ? (
+                  <span className="topology-kubejojo__focus-label" aria-current={index === selectionPath.length - 1 ? "page" : undefined}>
                     <strong>{item.label}</strong>
                   </span>
                 ) : (
@@ -499,7 +538,7 @@ function Canvas({
           }}
           proOptions={{ hideAttribution: true }}
         >
-          <Background color="var(--tk-grid)" gap={18} size={1} />
+          <Background variant={BackgroundVariant.Dots} color="var(--tk-grid)" gap={22} size={1.2} />
         </ReactFlow>
       </div>
     </div>

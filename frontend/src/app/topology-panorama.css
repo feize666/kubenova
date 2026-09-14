@@ -631,3 +631,307 @@
   .resource-map-shell.resource-map-shell--workbench .resource-map-source-chips { overflow-x: auto; }
   .resource-map-shell.resource-map-shell--workbench .resource-map-legend { overflow-x: auto; }
 }
+
+/* Unified topology toolbar: same density and interaction language as resource lists. */
+.resource-map-shell.resource-map-shell--workbench .topology-control-toolbar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--panorama-primary) 18%, var(--panorama-border));
+  background: var(--panorama-surface);
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__primary,
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__secondary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  padding: 6px 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__primary {
+  justify-content: space-between;
+  min-height: 44px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__secondary {
+  min-height: 42px;
+  justify-content: flex-start;
+  border-top: 1px solid color-mix(in srgb, var(--panorama-primary) 10%, var(--panorama-border));
+  background: color-mix(in srgb, var(--panorama-primary) 2.5%, var(--panorama-surface-raised));
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__scope,
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions,
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__grouping {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__scope {
+  flex: 1 1 auto;
+  grid-column: auto;
+  grid-row: auto;
+  overflow: visible;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-context-field {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 0 0 10px;
+  border: 1px solid var(--ops-control-border, var(--panorama-border));
+  border-radius: var(--ops-control-radius, 6px);
+  background: var(--ops-control-bg, var(--panorama-surface-raised));
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-context-field__label {
+  color: var(--panorama-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-context-field .ant-select {
+  min-width: 148px;
+  height: 30px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-context-field .ant-select-selector {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-namespace-filter {
+  flex: 0 1 260px;
+  width: min(260px, 100%);
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions {
+  flex: 0 1 auto;
+  grid-column: auto;
+  grid-row: auto;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions .ant-btn,
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions .ops-icon-action-button.ant-btn {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--ops-control-radius, 6px);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions .ops-icon-action-button.ant-btn {
+  width: 32px;
+  padding: 0;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions .ant-input-affix-wrapper {
+  width: clamp(190px, 20vw, 280px);
+  min-height: 32px;
+  height: 32px;
+  border-radius: var(--ops-control-radius, 6px);
+  padding-block: 2px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-view-mode,
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__grouping > .ant-segmented {
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--ops-control-border, var(--panorama-border));
+  border-radius: var(--ops-control-radius, 6px);
+  background: var(--ops-control-bg, var(--panorama-surface-raised));
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-view-mode .ant-segmented-item,
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__grouping .ant-segmented-item {
+  min-height: 26px;
+  line-height: 26px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chips {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chips > button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 94px;
+  min-height: 30px;
+  height: 30px;
+  gap: 6px;
+  padding: 0 8px 0 5px;
+  border: 1px solid var(--ops-control-border, var(--panorama-border));
+  border-radius: var(--ops-control-radius, 6px);
+  background: var(--ops-control-bg, var(--panorama-surface));
+  color: var(--panorama-text);
+  box-shadow: none;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chips > button:hover,
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chips > button:focus-visible,
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chips > button.is-active {
+  border-color: color-mix(in srgb, var(--source-color) 52%, var(--panorama-border));
+  background: color-mix(in srgb, var(--source-color) 9%, var(--panorama-surface));
+  color: var(--panorama-text);
+  outline: none;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chips > button:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--source-color) 18%, transparent);
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chips > button:not(.is-active) {
+  color: var(--panorama-muted);
+  opacity: .72;
+}
+
+/* Source filters render in an Ant Design portal, so theme the semantic source
+ * token at the document root rather than relying on the toolbar ancestor. */
+.topology-source-filter-menu__item {
+  --source-color: var(--source-color-light, var(--panorama-primary));
+}
+
+[data-theme="dark"] .topology-source-filter-menu__item {
+  --source-color: var(--source-color-dark, var(--source-color-light, var(--panorama-primary)));
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chip__icon {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--source-color) 13%, var(--panorama-surface));
+  color: var(--source-color);
+  font-size: 12px;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chip__label {
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chip__count {
+  margin-left: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--source-color);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-source-chip__warning {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panorama-danger) 13%, var(--panorama-surface));
+  color: var(--panorama-danger);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__section-label {
+  flex: 0 0 auto;
+  color: var(--panorama-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__grouping {
+  flex: 0 0 auto;
+  padding-left: 8px;
+  border-left: 1px solid var(--panorama-border);
+}
+
+@media (max-width: 900px) {
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__primary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions {
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+}
+
+@media (max-width: 560px) {
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__primary {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__scope {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+    flex: 0 0 auto;
+  }
+
+  .resource-map-shell.resource-map-shell--workbench .resource-map-context-field,
+  .resource-map-shell.resource-map-shell--workbench .resource-map-namespace-filter {
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .resource-map-shell.resource-map-shell--workbench .resource-map-context-field .ant-select {
+    min-width: 0;
+    width: 1px;
+    flex: 1 1 auto;
+  }
+
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__secondary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .resource-map-shell.resource-map-shell--workbench .resource-map-source-chips {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__grouping {
+    margin-left: auto;
+    padding-left: 0;
+    border-left: 0;
+  }
+}

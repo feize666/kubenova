@@ -376,6 +376,11 @@ export function normalizeResourceTableColumns<T>(
     if (typeof normalizedWidth === "number") {
       return {
         ...column,
+        // Resource lists use one predictable reading axis: labels and values
+        // start from the same left rail, while the overflow action column is
+        // centered independently below. This also replaces per-page inline
+        // `align` values that previously made otherwise identical tables drift.
+        align: isActionColumn ? "center" : "left",
         width: normalizedWidth,
         ellipsis: (column as { ellipsis?: boolean }).ellipsis ?? true,
         className: [isActionColumn ? "resource-table-actions-cell" : undefined, (column as { className?: string }).className]
@@ -386,6 +391,7 @@ export function normalizeResourceTableColumns<T>(
     if (isActionColumn) {
       return {
         ...column,
+        align: "center",
         className: ["resource-table-actions-cell", (column as { className?: string }).className]
           .filter(Boolean)
           .join(" "),

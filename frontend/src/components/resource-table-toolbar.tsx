@@ -25,10 +25,11 @@ export type ResourceTableToolbarProps<T extends object> = {
     | "activeFilterCount"
     | "resetColumnVisibility"
   >;
+  resetColumnWidths?: () => void;
   extra?: ReactNode;
 };
 
-export function ResourceTableToolbar<T extends object>({ table, extra }: ResourceTableToolbarProps<T>) {
+export function ResourceTableToolbar<T extends object>({ table, resetColumnWidths, extra }: ResourceTableToolbarProps<T>) {
   const activeFilterCount = table.activeFilterCount + (table.globalSearch?.value ? 1 : 0);
   const searchPanel = table.globalSearch ? (
     <OpsPopoverPanel title="搜索" subtitle="按关键字过滤当前表格" className="resource-table-search-panel">
@@ -45,7 +46,15 @@ export function ResourceTableToolbar<T extends object>({ table, extra }: Resourc
   ) : null;
 
   const columnPanel = (
-    <OpsPopoverPanel title="显示列" onReset={table.resetColumnVisibility} resetText="重置" className="resource-table-column-panel">
+    <OpsPopoverPanel
+      title="显示列"
+      onReset={() => {
+        table.resetColumnVisibility();
+        resetColumnWidths?.();
+      }}
+      resetText="重置"
+      className="resource-table-column-panel"
+    >
       <div className="resource-table-column-panel-header">
       </div>
       <div className="resource-table-column-list">

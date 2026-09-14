@@ -60,6 +60,11 @@ test("空集群标识不能生成工作区地址", () => {
 
 test("单集群工作区只保留当前集群资源菜单", () => {
   const sections = getClusterWorkspaceNavigation("ack-prod");
+  assert.deepEqual(
+    sections.slice(0, 2).map((section) => section.key),
+    ["overview", "topology"],
+  );
+  assert.equal(sections[1]?.items[0]?.href, "/clusters/ack-prod/network/topology");
   const baseResources = sections.find(
     (section) => section.key === "base-resources",
   );
@@ -74,7 +79,7 @@ test("单集群工作区只保留当前集群资源菜单", () => {
   );
   assert.equal(labels.includes("Cluster"), false);
   assert.equal(labels.includes("系统设置"), false);
-  assert.equal(labels.includes("日志"), true);
+  assert.equal(labels.includes("日志中心"), true);
   assert.ok(
     sections
       .flatMap((section) => section.items)

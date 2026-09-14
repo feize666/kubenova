@@ -1,6 +1,6 @@
 "use client";
 
-import { Empty, Space, Tooltip, Typography } from "antd";
+import { Alert, Empty, Space, Tooltip, Typography } from "antd";
 import { Fragment, useMemo } from "react";
 import type { ReactNode } from "react";
 import type {
@@ -3338,7 +3338,7 @@ function HttpRouteHighlightsSection({ detail }: ResourceDetailRendererProps) {
   );
 }
 
-function EventsSection({ detail }: ResourceDetailRendererProps) {
+function EventsSection({ detail, clusterMap, onNavigateRequest }: ResourceDetailRendererProps) {
   const toEventText = (item: ResourceDetailEvent, keys: string[]) => {
     for (const key of keys) {
       const value = getEventValue(item, key);
@@ -3368,13 +3368,28 @@ function EventsSection({ detail }: ResourceDetailRendererProps) {
     if (!ref || (!ref.kind && !ref.name)) {
       return null;
     }
+    const hasIdentity = Boolean(ref.kind && ref.name && onNavigateRequest);
+    const identityLabel = `${ref.kind ? `${ref.kind}/` : ""}${ref.namespace ? `${ref.namespace}/` : ""}${ref.name ?? "-"}`;
     return (
-      <DetailTag color="blue">
-        {prefix} {ref.kind ? `${ref.kind}/` : ""}
-        {ref.namespace ? `${ref.namespace}/` : ""}
-        {ref.name ?? "-"}
-        {ref.fieldPath ? ` · ${ref.fieldPath}` : ""}
-      </DetailTag>
+      <Space wrap size={4}>
+        <DetailTag color="blue">{prefix}</DetailTag>
+        {hasIdentity ? (
+          <ResourceLink
+            kind={ref.kind!}
+            name={ref.name}
+            namespace={ref.namespace}
+            clusterId={detail.overview.clusterId}
+            clusterMap={clusterMap}
+            onNavigateRequest={onNavigateRequest}
+            title={`打开 ${identityLabel}`}
+          >
+            {identityLabel}
+          </ResourceLink>
+        ) : (
+          <Typography.Text type="secondary">{identityLabel}</Typography.Text>
+        )}
+        {ref.fieldPath ? <Typography.Text type="secondary">· {ref.fieldPath}</Typography.Text> : null}
+      </Space>
     );
   };
 
@@ -3390,8 +3405,15 @@ function EventsSection({ detail }: ResourceDetailRendererProps) {
         ) : undefined
       }
     >
-      {detail.events.items.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事件" />
+      {detail.events.status === "unavailable" ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="事件暂不可用"
+          description={detail.events.message ?? "当前无法读取 Kubernetes Events，请稍后重试。"}
+        />
+      ) : detail.events.items.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事件（已完成查询）" />
       ) : (
         <SimpleList
           items={detail.events.items}
@@ -3414,14 +3436,17 @@ function EventsSection({ detail }: ResourceDetailRendererProps) {
                     "metadata.creationTimestamp",
                   ]) ? (
                     <Typography.Text type="secondary">
-                      {formatDateTime(
-                        toEventText(item, [
-                          "lastTimestamp",
-                          "eventTime",
-                          "lastSeen",
-                          "metadata.creationTimestamp",
-                        ]),
-                      )}
+                      最近 {formatDateTime(toEventText(item, [
+                        "lastTimestamp",
+                        "eventTime",
+                        "lastSeen",
+                        "metadata.creationTimestamp",
+                      ]))}
+                    </Typography.Text>
+                  ) : null}
+                  {toEventText(item, ["firstTimestamp", "firstSeen"]) ? (
+                    <Typography.Text type="secondary">
+                      首次 {formatDateTime(toEventText(item, ["firstTimestamp", "firstSeen"]))}
                     </Typography.Text>
                   ) : null}
                   {renderObjectRef(item.involvedObject)}
@@ -3607,7 +3632,7 @@ export function ResourceDetailContent({
           />
         ) : null}
         {detail.descriptor.sections.includes("events") ? (
-          <EventsSection detail={detail} />
+          <EventsSection detail={detail} clusterMap={clusterMap} onNavigateRequest={onNavigateRequest} />
         ) : null}
         {renderSpecSections({
           detail,
@@ -3643,7 +3668,7 @@ export function ResourceDetailContent({
           onNavigateRequest={onNavigateRequest}
         />
         {detail.descriptor.sections.includes("events") ? (
-          <EventsSection detail={detail} />
+          <EventsSection detail={detail} clusterMap={clusterMap} onNavigateRequest={onNavigateRequest} />
         ) : null}
         {renderSpecSections({
           detail,
@@ -3679,7 +3704,7 @@ export function ResourceDetailContent({
           onNavigateRequest={onNavigateRequest}
         />
         {detail.descriptor.sections.includes("events") ? (
-          <EventsSection detail={detail} />
+          <EventsSection detail={detail} clusterMap={clusterMap} onNavigateRequest={onNavigateRequest} />
         ) : null}
         {renderSpecSections({
           detail,
@@ -3715,7 +3740,7 @@ export function ResourceDetailContent({
           onNavigateRequest={onNavigateRequest}
         />
         {detail.descriptor.sections.includes("events") ? (
-          <EventsSection detail={detail} />
+          <EventsSection detail={detail} clusterMap={clusterMap} onNavigateRequest={onNavigateRequest} />
         ) : null}
         {renderSpecSections({
           detail,

@@ -608,6 +608,7 @@ describe('ResourcesService detail aggregation', () => {
         reason: 'NodeReady',
       }),
     );
+    expect(detail.events.status).toBe('available');
   });
 
   it('keeps storage detail schema isolated from network section', async () => {
@@ -1119,6 +1120,7 @@ describe('ResourcesService detail aggregation', () => {
         },
       }),
     );
+    expect(detail.events.status).toBe('available');
     expect(detail.events.items[1]).toEqual(
       expect.objectContaining({
         id: 'event-older',

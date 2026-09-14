@@ -23,6 +23,19 @@ export type TopologyViewportOptions = {
   padding?: number;
 };
 
+export type TopologyViewportFrame = {
+  size: TopologyViewportSize;
+  offsetY: number;
+};
+
+/** The canvas chrome overlays the graph, so the full surface remains available for centering. */
+export function getTopologyViewportFrame(width: number, height: number): TopologyViewportFrame {
+  return {
+    size: { width: Math.max(1, width), height: Math.max(1, height) },
+    offsetY: 0,
+  };
+}
+
 /** Centers the rendered node bounds in the available canvas at a bounded zoom. */
 export function getCenteredTopologyViewport(
   bounds: TopologyBounds,

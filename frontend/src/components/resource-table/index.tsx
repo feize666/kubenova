@@ -43,6 +43,10 @@ import {
 import { useAuth } from "@/components/auth-context";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { filterClusterScopedColumns } from "@/lib/cluster-workspace";
+import {
+  useResizableResourceTableColumns,
+  withResizableHeaderCell,
+} from "@/components/resource-table/resizable-header-cell";
 
 export const RESOURCE_TABLE_CLASS_NAME = "resource-table";
 const RESOURCE_TABLE_VIEWPORT_SCROLL_Y = "clamp(240px, calc(100dvh - 420px), 560px)";
@@ -523,6 +527,7 @@ export function ResourceTable<T extends object>({
       stateAction={stateAction}
       stateDescription={stateDescription}
       stateTitle={stateTitle}
+      tableKey={tableKey}
       viewportScroll={viewportScroll}
     />
   );
@@ -684,6 +689,7 @@ function StandardResourceTable<T extends object>({
   bordered,
   className,
   columns,
+  components,
   emptyDescription,
   layoutOptions,
   loading,
@@ -697,6 +703,7 @@ function StandardResourceTable<T extends object>({
   stateAction,
   stateDescription,
   stateTitle,
+  tableKey,
   viewportScroll,
   ...restProps
 }: ResourceTableProps<T>) {
@@ -714,13 +721,19 @@ function StandardResourceTable<T extends object>({
     () => normalizeResourceTableColumns(enhanceResourceNavigationColumns(columns, onResourceNavigate), normalizedLayoutOptions),
     [columns, normalizedLayoutOptions, onResourceNavigate],
   );
+  const resizableTable = useResizableResourceTableColumns(normalizedColumns, tableKey);
+  const resizableColumns = resizableTable.columns;
+  const tableComponents = useMemo(
+    () => withResizableHeaderCell(components),
+    [components],
+  );
   const nextScroll = useMemo(
     () => ({
-      x: getStandardResourceTableScrollX(normalizedColumns),
+      x: getStandardResourceTableScrollX(resizableColumns),
       ...scroll,
       ...(viewportScroll ? { y: scroll?.y ?? RESOURCE_TABLE_VIEWPORT_SCROLL_Y } : {}),
     }),
-    [normalizedColumns, scroll, viewportScroll],
+    [resizableColumns, scroll, viewportScroll],
   );
   const nextLoading = useMemo(
     () => loading ?? buildResourceTableLoading(loadingOptions),
@@ -761,7 +774,8 @@ function StandardResourceTable<T extends object>({
         {...restProps}
         bordered={bordered}
         className={nextClassName}
-        columns={normalizedColumns}
+        columns={resizableColumns}
+        components={tableComponents}
         loading={nextLoading}
         locale={nextLocale}
         pagination={pagination}
@@ -779,6 +793,7 @@ function HeadlampResourceTable<T extends object>({
   className,
   columnSettings,
   columns,
+  components,
   emptyDescription,
   filters,
   globalSearch,
@@ -838,13 +853,19 @@ function HeadlampResourceTable<T extends object>({
     () => normalizeResourceTableColumns(enhanceResourceNavigationColumns(table.columns, onResourceNavigate), normalizedLayoutOptions),
     [normalizedLayoutOptions, onResourceNavigate, table.columns],
   );
+  const resizableTable = useResizableResourceTableColumns(normalizedColumns, tableKey);
+  const resizableColumns = resizableTable.columns;
+  const tableComponents = useMemo(
+    () => withResizableHeaderCell(components),
+    [components],
+  );
   const nextScroll = useMemo(
     () => ({
-      x: getStandardResourceTableScrollX(normalizedColumns),
+      x: getStandardResourceTableScrollX(resizableColumns),
       ...scroll,
       ...(viewportScroll ? { y: scroll?.y ?? RESOURCE_TABLE_VIEWPORT_SCROLL_Y } : {}),
     }),
-    [normalizedColumns, scroll, viewportScroll],
+    [resizableColumns, scroll, viewportScroll],
   );
   const nextLoading = useMemo(
     () => loading ?? buildResourceTableLoading(loadingOptions),
@@ -901,13 +922,20 @@ function HeadlampResourceTable<T extends object>({
       "resource-table-shell",
       viewportScroll ? "resource-table-shell--viewport-scroll" : undefined,
     )}>
-      {showToolbar ? <ResourceTableToolbar<T> table={table} extra={toolbarExtra} /> : null}
+      {showToolbar ? (
+        <ResourceTableToolbar<T>
+          table={table}
+          resetColumnWidths={resizableTable.resetColumnWidths}
+          extra={toolbarExtra}
+        />
+      ) : null}
       {mobileCards}
       <Table<T>
         {...restProps}
         bordered={bordered}
         className={nextClassName}
-        columns={normalizedColumns}
+        columns={resizableColumns}
+        components={tableComponents}
         loading={nextLoading}
         locale={nextLocale}
         onChange={handleChange}

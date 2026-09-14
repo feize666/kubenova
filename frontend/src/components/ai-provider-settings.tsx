@@ -165,6 +165,7 @@ export function AiProviderSettings() {
     {
       title: "操作",
       key: "actions",
+      className: "resource-table-actions-cell",
       width: 210,
       render: (_, provider) => (
         <Space size={4}>
@@ -195,7 +196,7 @@ export function AiProviderSettings() {
           <Typography.Text type="secondary">对话、集群分析和故障诊断统一使用默认 Provider。</Typography.Text>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>添加 Provider</Button>
         </div>
-        <Table<AiProvider> rowKey="id" columns={columns} dataSource={providers} loading={providersQuery.isLoading} pagination={false} locale={{ emptyText: "尚未配置 AI Provider，请先添加一个模型服务" }} />
+        <Table<AiProvider> className="resource-table" rowKey="id" columns={columns} dataSource={providers} loading={providersQuery.isLoading} pagination={false} locale={{ emptyText: "尚未配置 AI Provider，请先添加一个模型服务" }} />
       </OpsSurface>
       <Drawer
         title={editing ? "编辑 AI Provider" : "添加 AI Provider"}

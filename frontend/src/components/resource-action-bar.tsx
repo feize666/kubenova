@@ -157,7 +157,9 @@ export function buildResourceActionMenuItems(actions: ResourceMenuItem[]): NonNu
     return {
       key: action.key,
       icon: action.icon ?? getResourceActionIcon(action.key) ?? undefined,
-      label: action.label,
+      // Match the platform-console vocabulary used by VKE while preserving
+      // the existing `describe` action key and callback contract.
+      label: action.key === "describe" ? "查看详情" : action.label,
       danger: action.danger,
       disabled: action.disabled,
     };
@@ -433,12 +435,22 @@ function renderActionButton(
 ) {
   const unavailable = action.availability === "unavailable";
   const opsTone = action.danger ? "danger" : action.type === "primary" || fallbackType === "primary" ? "primary" : "default";
+  const opsVariant = action.danger
+    ? "danger"
+    : action.ghost || action.type === "link" || action.type === "text"
+      ? "ghost"
+      : action.type === "primary" || fallbackType === "primary"
+        ? "primary"
+        : "secondary";
   const button = (
     <OpsIconActionButton
       className="resource-action-bar-button"
       size={action.size ?? "middle"}
       opsTone={opsTone}
+      opsVariant={opsVariant}
       ghost={action.ghost}
+      data-action-key={action.key}
+      aria-busy={action.loading || undefined}
       disabled={action.disabled || unavailable}
       disabledReason={action.disabledReason}
       loading={action.loading}

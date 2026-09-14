@@ -1,10 +1,12 @@
-import ELK, { type ElkExtendedEdge, type ElkNode } from "elkjs/lib/elk.bundled.js";
-import { MarkerType, type Edge, type Node } from "@xyflow/react";
+import dagre from "@dagrejs/dagre";
+import type { Edge, Node } from "@xyflow/react";
 
 import type {
   TopologyRendererEdgeData,
   TopologyRendererGraphNode,
   TopologyRendererNodeData,
+  TopologyElkPoint,
+  TopologyElkSection,
 } from "../renderers";
 import type { CapacityResourceAggregation, TopologyCapacityMetadata } from "./capacity";
 import {
@@ -13,9 +15,11 @@ import {
   type KubejojoRelationType,
   type KubejojoStableIdentity,
 } from "./relations";
+import { bezierPathMidpoint } from "../renderers/path-geometry";
 
 export * from "./capacity";
 export * from "./relations";
+export * from "./topology-entry";
 export * from "./viewport";
 
 export type KubejojoResource = TopologyRendererGraphNode["resource"] & {
@@ -55,7 +59,6 @@ export type KubejojoGraphNode = Omit<TopologyRendererGraphNode, "resource" | "no
   capacity?: TopologyCapacityMetadata;
 };
 
-const elk = new ELK();
 const WEIGHTS: Record<string, number> = {
   Ingress: 1040,
   Gateway: 1030,
@@ -76,55 +79,63 @@ const WEIGHTS: Record<string, number> = {
   Secret: 760,
 };
 /**
- * Stable visual order for the canonical request path.  ELK still computes
- * the actual coordinates, however preserving this order in the model keeps
- * siblings deterministic and prevents the endpoint compatibility branch from
- * jumping ahead of EndpointSlice between renders.
+ * Stable visual order for the operator-facing access path. ELK still computes
+ * the actual coordinates, however these stages keep the main chain readable:
+ * workload controller -> runtime -> Service -> Endpoint(s) -> ingress/gateway.
+ * Storage, configuration and policy resources intentionally live on side
+ * stages so they cannot interrupt the request path.
  */
 const ACCESS_PATH_ORDER: Record<string, number> = {
-  GatewayClass: 0,
-  Gateway: 5,
-  HTTPRoute: 8,
-  GRPCRoute: 8,
-  TCPRoute: 8,
-  TLSRoute: 8,
-  UDPRoute: 8,
-  Ingress: 10,
-  IngressRoute: 10,
-  Service: 20,
-  EndpointSlice: 30,
-  Endpoints: 31,
-  NetworkPolicy: 35,
-  Pod: 40,
-  ReplicaSet: 50,
-  Job: 50,
-  HorizontalPodAutoscaler: 55,
-  VerticalPodAutoscaler: 55,
-  Deployment: 60,
-  StatefulSet: 60,
-  DaemonSet: 60,
-  CronJob: 70,
-  PersistentVolumeClaim: 72,
-  ConfigMap: 74,
-  Secret: 76,
-  ServiceAccount: 78,
+  Deployment: 10,
+  StatefulSet: 10,
+  DaemonSet: 10,
+  Job: 10,
+  CronJob: 10,
+  ReplicationController: 10,
+  ReplicaSet: 20,
+  Pod: 30,
+  Service: 40,
+  EndpointSlice: 50,
+  Endpoints: 50,
+  GatewayClass: 58,
+  Ingress: 60,
+  IngressRoute: 60,
+  Gateway: 60,
+  HTTPRoute: 60,
+  GRPCRoute: 60,
+  TCPRoute: 60,
+  TLSRoute: 60,
+  UDPRoute: 60,
+  NetworkPolicy: 70,
+  HorizontalPodAutoscaler: 72,
+  VerticalPodAutoscaler: 72,
+  PersistentVolumeClaim: 80,
   PersistentVolume: 82,
-  StorageClass: 90,
+  StorageClass: 84,
+  ConfigMap: 90,
+  Secret: 92,
+  ServiceAccount: 94,
 };
+// Unknown/extension resources are side branches by default. Keeping them out
+// of the 10-60 access stages prevents an unrecognised policy or CRD from
+// splitting the canonical workload-to-ingress chain.
+const UNKNOWN_ACCESS_PATH_ORDER = 70;
 const DEFAULT_ASPECT_RATIO = 1.6;
 
 export const KUBEJOJO_LAYOUT_METRICS = Object.freeze({
-  nodeWidth: 220,
-  nodeHeight: 88,
-  groupWidth: 260,
-  groupHeight: 132,
-  layeredNodeSpacing: 32,
-  layeredLayerSpacing: 44,
-  packedNodeSpacing: 14,
+  nodeWidth: 350,
+  nodeHeight: 110,
+  groupWidth: 390,
+  groupHeight: 154,
+  layeredNodeSpacing: 78,
+  layeredLayerSpacing: 96,
+  layeredEdgeNodeSpacing: 56,
+  layeredEdgeSpacing: 28,
+  packedNodeSpacing: 28,
 });
 
 export type KubejojoLayoutPolicy = {
-  algorithm: "layered" | "rectpacking";
+  algorithm: "dagre" | "rectpacking";
   direction: "RIGHT" | "DOWN";
   aspectRatio: number;
 };
@@ -148,15 +159,15 @@ const compareNodes = (left: KubejojoGraphNode, right: KubejojoGraphNode) => weig
 export function getKubejojoAccessPathOrder(node: KubejojoGraphNode): number {
   const resource = node.resource;
   const explicitKind = resource?.aggregation?.semanticKey.kind;
-  if (explicitKind && explicitKind !== "Aggregate") return ACCESS_PATH_ORDER[explicitKind] ?? 45;
+  if (explicitKind && explicitKind !== "Aggregate") return ACCESS_PATH_ORDER[explicitKind] ?? UNKNOWN_ACCESS_PATH_ORDER;
   const members = Object.entries(resource?.aggregation?.membersByKind ?? {});
   if (members.length > 0) {
     const total = members.reduce((sum, [, count]) => sum + count, 0);
     if (total > 0) {
-      return Math.round(members.reduce((sum, [kind, count]) => sum + (ACCESS_PATH_ORDER[kind] ?? 45) * count, 0) / total);
+      return Math.round(members.reduce((sum, [kind, count]) => sum + (ACCESS_PATH_ORDER[kind] ?? UNKNOWN_ACCESS_PATH_ORDER) * count, 0) / total);
     }
   }
-  return ACCESS_PATH_ORDER[resource?.kind ?? ""] ?? 45;
+  return ACCESS_PATH_ORDER[resource?.kind ?? ""] ?? UNKNOWN_ACCESS_PATH_ORDER;
 }
 
 const compareLayoutNodes = (left: KubejojoGraphNode, right: KubejojoGraphNode) =>
@@ -164,18 +175,28 @@ const compareLayoutNodes = (left: KubejojoGraphNode, right: KubejojoGraphNode) =
   || left.resource?.name?.localeCompare(right.resource?.name ?? "", "en")
   || left.id.localeCompare(right.id, "en");
 
-function visualEdgeEndpoints(edge: KubejojoRelation): { source: string; target: string } {
-  // The canvas follows the operator's request path: runtime workload first,
-  // then its controller. Keep the API relation's ownership semantics intact.
-  return edge.type === "OWNS" || edge.role === "owner"
-    ? { source: edge.target, target: edge.source }
-    : { source: edge.source, target: edge.target };
+function visualEdgeEndpoints(
+  edge: KubejojoRelation,
+  resourcesById: ReadonlyMap<string, KubejojoResource>,
+): { source: string; target: string } {
+  // API relations keep their Kubernetes semantics (for example Service
+  // publishes EndpointSlice and EndpointSlice resolves Pod). The canvas uses
+  // the operator-facing left-to-right access path, so reverse an edge only
+  // when its API direction points from a later stage to an earlier stage.
+  // This gives every visible arrow a consistent direction without mutating
+  // the relation payload used for evidence and navigation.
+  const source = resourcesById.get(edge.source);
+  const target = resourcesById.get(edge.target);
+  if (source && target) {
+    const sourceStage = getKubejojoAccessPathOrder({ id: source.id, resource: source });
+    const targetStage = getKubejojoAccessPathOrder({ id: target.id, resource: target });
+    if (sourceStage > targetStage) return { source: edge.target, target: edge.source };
+  }
+  return { source: edge.source, target: edge.target };
 }
 
 function visualEdgeLabel(edge: KubejojoRelation): string {
-  return edge.type === "OWNS" || edge.role === "owner"
-    ? "受控于"
-    : getKubejojoRelationSemantics(edge.type, edge.role, edge.label).label;
+  return getKubejojoRelationSemantics(edge.type, edge.role, edge.label).label;
 }
 
 function normalizeAspectRatio(aspectRatio: number) {
@@ -185,8 +206,8 @@ function normalizeAspectRatio(aspectRatio: number) {
 export function getKubejojoLayoutPolicy(hasEdges: boolean, aspectRatio: number): KubejojoLayoutPolicy {
   const normalizedAspectRatio = normalizeAspectRatio(aspectRatio);
   return {
-    algorithm: hasEdges ? "layered" : "rectpacking",
-    direction: normalizedAspectRatio >= 1 ? "RIGHT" : "DOWN",
+    algorithm: hasEdges ? "dagre" : "rectpacking",
+    direction: "RIGHT",
     aspectRatio: normalizedAspectRatio,
   };
 }
@@ -294,7 +315,7 @@ function componentScope(
 }
 
 function scopeSubtitle(groupBy: KubejojoGroupBy) {
-  if (groupBy === "namespace") return "名称空间";
+  if (groupBy === "namespace") return "命名空间";
   if (groupBy === "node") return "节点";
   return "实例";
 }
@@ -434,9 +455,10 @@ export function collapseKubejojoGraph(root: KubejojoGraphNode, focusedId?: strin
       if (!selected) {
         collapsed = node.collapsedPreferred ?? false;
       } else if (selected.groupKind === "scope") {
-        // Scope focus reveals the next level only. Components remain summaries
-        // until the operator explicitly enters one, avoiding a resource-name matrix.
-        collapsed = node.id !== selected.id && (node.collapsedPreferred ?? false);
+        // A scope is a real canvas scene, not a second summary level. Reveal
+        // every component and isolated bucket so its resource cards and
+        // relationship edges are immediately visible after entering it.
+        collapsed = false;
       }
     }
     return {
@@ -445,89 +467,223 @@ export function collapseKubejojoGraph(root: KubejojoGraphNode, focusedId?: strin
       collapsed,
     };
   };
-  const visible = selected && selected.id !== "root"
+  const selectedScene = selected?.groupKind === "scope" || selected?.groupKind === "component" || selected?.groupKind === "isolated"
+    ? { ...root, nodes: selected.nodes, edges: selected.edges, overlayEdges: selected.overlayEdges }
+    : null;
+  const visible = selectedScene ?? (selected && selected.id !== "root"
     ? { ...root, nodes: [selected], edges: root.edges }
-    : root;
+    : root);
   return clone(visible);
 }
 
-type ElkNodeData = ElkNode & {
-  id: string;
-  type?: string;
-  data?: TopologyRendererNodeData;
-  children?: ElkNodeData[];
-  edges?: Array<ElkExtendedEdge & { data?: KubejojoRelation }>;
+type DagreNodeLayout = {
+  node: KubejojoGraphNode;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  children?: DagreNodeLayout[];
 };
 
-function toElk(node: KubejojoGraphNode, aspect: number): ElkNodeData {
-  const children = node.collapsed
-    ? undefined
-    : node.nodes?.slice().sort(compareLayoutNodes).map((child) => toElk(child, aspect));
-  const containedIds = new Set(leaves(node).map((child) => child.id));
-  // A collapsed node is represented as one visible card. Its child nodes do
-  // not exist in this ELK pass, so their internal edges stay inside the
-  // component until the operator focuses that component.
-  const edges: Array<ElkExtendedEdge & { data?: KubejojoRelation }> = (node.collapsed ? [] : node.edges ?? [])
-    .filter((edge) => containedIds.has(edge.source) && containedIds.has(edge.target))
-    .map((edge) => {
-      const endpoints = visualEdgeEndpoints(edge);
-      return {
-      id: edge.id,
-      type: "topologyEdge",
-      sources: [endpoints.source],
-      targets: [endpoints.target],
-      labels: [{ text: visualEdgeLabel(edge), width: 76, height: 18 }],
-      data: edge,
-      };
-    });
+type DagreContainerLayout = {
+  children: DagreNodeLayout[];
+  width: number;
+  height: number;
+  edges: KubejojoRelation[];
+};
+
+const DAGRE_PADDING = { top: 72, right: 28, bottom: 28, left: 28 };
+
+function nodeSize(node: KubejojoGraphNode) {
   const isGroup = Boolean(node.nodes?.length && !node.collapsed);
-  const policy = getKubejojoLayoutPolicy(edges.length > 0, aspect);
-  const groupOptions: Record<string, string> = edges.length
-    ? {
-      "partitioning.activate": "true",
-      "elk.algorithm": "layered",
-      "elk.direction": policy.direction,
-      "elk.edgeRouting": "SPLINES",
-      "elk.layered.cycleBreaking.strategy": "DEPTH_FIRST",
-      "elk.layered.layering.strategy": "NETWORK_SIMPLEX",
-      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
-      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
-      // Respect the deterministic child order above when several valid
-      // layouts exist (notably Service -> EndpointSlice/Endpoints branches).
-      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
-      "elk.layered.considerModelOrder.components": "true",
-      "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
-      "elk.nodeSize.minimum": `(${KUBEJOJO_LAYOUT_METRICS.nodeWidth}.0,${KUBEJOJO_LAYOUT_METRICS.nodeHeight}.0)`,
-      "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
-      "elk.spacing.nodeNode": String(KUBEJOJO_LAYOUT_METRICS.layeredNodeSpacing),
-      "elk.spacing.edgeEdge": "16",
-      "elk.spacing.edgeNode": "20",
-      "elk.layered.spacing.edgeEdgeBetweenLayers": "14",
-      "elk.layered.spacing.edgeNodeBetweenLayers": "18",
-      "elk.layered.spacing.nodeNodeBetweenLayers": String(KUBEJOJO_LAYOUT_METRICS.layeredLayerSpacing),
-      "elk.padding": "[left=16, top=60, right=16, bottom=18]",
-    }
-    : {
-      "elk.algorithm": "rectpacking",
-      "elk.aspectRatio": String(policy.aspectRatio),
-      "elk.rectpacking.widthApproximation.optimizationGoal": "ASPECT_RATIO_DRIVEN",
-      "elk.rectpacking.packing.compaction.rowHeightReevaluation": "true",
-      "elk.edgeRouting": "SPLINES",
-      "elk.spacing.nodeNode": String(KUBEJOJO_LAYOUT_METRICS.packedNodeSpacing),
-      "elk.padding": "[left=16, top=64, right=16, bottom=18]",
-    };
   return {
-    id: node.id,
-    type: isGroup ? "topologyGroup" : "topologyObject",
-    data: { graphNode: node },
     width: isGroup ? KUBEJOJO_LAYOUT_METRICS.groupWidth : KUBEJOJO_LAYOUT_METRICS.nodeWidth,
     height: isGroup ? KUBEJOJO_LAYOUT_METRICS.groupHeight : KUBEJOJO_LAYOUT_METRICS.nodeHeight,
-    children,
-    edges,
-    layoutOptions: isGroup
-      ? { ...groupOptions, "partitioning.partition": String(getKubejojoPartition(node)) }
-      : { "partitioning.partition": String(getKubejojoPartition(node)) },
   };
+}
+
+function directChildForId(children: DagreNodeLayout[], id: string): DagreNodeLayout | undefined {
+  return children.find((child) => child.node.id === id || leaves(child.node).some((leaf) => leaf.id === id));
+}
+
+function orthogonalSection(source: DagreNodeLayout, target: DagreNodeLayout): TopologyElkSection {
+  const startPoint: TopologyElkPoint = {
+    x: source.x + source.width,
+    y: source.y + source.height / 2,
+  };
+  const endPoint: TopologyElkPoint = {
+    x: target.x,
+    y: target.y + target.height / 2,
+  };
+  if (Math.abs(startPoint.y - endPoint.y) < 0.5) {
+    return { startPoint, endPoint, bendPoints: [] };
+  }
+  const midpoint = startPoint.x + Math.max(32, (endPoint.x - startPoint.x) / 2);
+  const safeMidpoint = Math.min(endPoint.x - 32, midpoint);
+  return {
+    startPoint,
+    bendPoints: [
+      { x: safeMidpoint, y: startPoint.y },
+      { x: safeMidpoint, y: endPoint.y },
+    ],
+    endPoint,
+  };
+}
+
+function layoutDagreContainer(node: KubejojoGraphNode, aspectRatio: number): DagreContainerLayout {
+  const rawChildren = node.collapsed ? [] : (node.nodes ?? []).slice().sort(compareLayoutNodes);
+  const childLayouts = rawChildren.map((child) => layoutDagreNode(child, aspectRatio));
+  const containedIds = new Set(leaves(node).map((child) => child.id));
+  const resourcesById = new Map(
+    leaves(node)
+      .filter((child) => child.resource)
+      .map((child) => [child.id, child.resource!] as const),
+  );
+  const relations = (node.edges ?? [])
+    .filter((edge) => containedIds.has(edge.source) && containedIds.has(edge.target))
+    .map((edge) => {
+      const endpoints = visualEdgeEndpoints(edge, resourcesById);
+      return { ...edge, source: endpoints.source, target: endpoints.target };
+    })
+    .sort((left, right) => left.id.localeCompare(right.id, "en"));
+  if (!childLayouts.length) return { children: [], width: 0, height: 0, edges: relations };
+
+  const graph = new dagre.graphlib.Graph({ multigraph: true });
+  graph.setGraph({
+    rankdir: "LR",
+    ranker: "network-simplex",
+    nodesep: KUBEJOJO_LAYOUT_METRICS.layeredNodeSpacing,
+    ranksep: KUBEJOJO_LAYOUT_METRICS.layeredLayerSpacing,
+    edgesep: KUBEJOJO_LAYOUT_METRICS.layeredEdgeSpacing,
+    marginx: DAGRE_PADDING.left,
+    marginy: DAGRE_PADDING.top,
+  });
+  graph.setDefaultEdgeLabel(() => ({}));
+  childLayouts.forEach((child) => {
+    graph.setNode(child.node.id, {
+      width: child.width,
+      height: child.height,
+      // Dagre accepts explicit ranks and still optimizes the vertical order.
+      // The rank is the canonical workload-to-network stage, so a Service
+      // cannot drift underneath the Pod column when an edge crosses stages.
+      rank: getKubejojoAccessPathOrder(child.node),
+    });
+  });
+  relations.forEach((edge) => {
+    const source = directChildForId(childLayouts, edge.source);
+    const target = directChildForId(childLayouts, edge.target);
+    if (source && target && source.node.id !== target.node.id) {
+      graph.setEdge(source.node.id, target.node.id, {
+        minlen: Math.max(1, Math.round((getKubejojoAccessPathOrder(target.node) - getKubejojoAccessPathOrder(source.node)) / 10)),
+      }, edge.id);
+    }
+  });
+  dagre.layout(graph);
+  const graphLabel = graph.graph() as { width?: number; height?: number };
+  const positionedChildren = childLayouts.map((child) => {
+    const position = graph.node(child.node.id) as { x: number; y: number };
+    return {
+      ...child,
+      x: position.x - child.width / 2,
+      y: position.y - child.height / 2,
+    };
+  });
+  const rankBuckets = new Map<number, DagreNodeLayout[]>();
+  positionedChildren.forEach((child) => {
+    const rank = getKubejojoAccessPathOrder(child.node);
+    rankBuckets.set(rank, [...(rankBuckets.get(rank) ?? []), child]);
+  });
+  const spineBucket = [...rankBuckets.values()]
+    .filter((bucket) => bucket.length > 1)
+    .sort((left, right) => right.length - left.length)[0];
+  if (spineBucket?.length) {
+    const spineCenter = spineBucket.reduce((total, child) => total + child.y + child.height / 2, 0) / spineBucket.length;
+    rankBuckets.forEach((bucket, rank) => {
+      // Keep the canonical access path on one horizontal spine. Fan-out
+      // stages (normally Pods) retain their Dagre-computed vertical stack.
+      if (bucket.length !== 1 || rank > ACCESS_PATH_ORDER.Ingress) return;
+      bucket[0].y = spineCenter - bucket[0].height / 2;
+    });
+  }
+  return {
+    children: positionedChildren,
+    width: Math.max(graphLabel.width ?? 0, DAGRE_PADDING.left + DAGRE_PADDING.right + KUBEJOJO_LAYOUT_METRICS.nodeWidth),
+    height: Math.max(graphLabel.height ?? 0, DAGRE_PADDING.top + DAGRE_PADDING.bottom + KUBEJOJO_LAYOUT_METRICS.nodeHeight),
+    edges: relations,
+  };
+}
+
+function layoutDagreNode(node: KubejojoGraphNode, aspectRatio: number): DagreNodeLayout {
+  const size = nodeSize(node);
+  if (node.collapsed || !node.nodes?.length) return { node, ...size, x: 0, y: 0 };
+  const container = layoutDagreContainer(node, aspectRatio);
+  const children = container.children.map((child) => ({
+    ...child,
+    x: child.x + DAGRE_PADDING.left,
+    y: child.y + DAGRE_PADDING.top,
+  }));
+  return {
+    node,
+    width: Math.max(size.width, container.width + DAGRE_PADDING.left + DAGRE_PADDING.right),
+    height: Math.max(size.height, container.height + DAGRE_PADDING.top + DAGRE_PADDING.bottom),
+    x: 0,
+    y: 0,
+    children,
+  };
+}
+
+function collectDagreNodes(
+  layout: DagreNodeLayout,
+  parent: DagreNodeLayout | undefined,
+  origin: TopologyElkPoint,
+  nodes: Node<TopologyRendererNodeData>[],
+  edges: Edge<TopologyRendererEdgeData>[],
+  aspectRatio: number,
+) {
+  if (layout.node.id !== "root") {
+    nodes.push({
+      id: layout.node.id,
+      type: layout.node.nodes?.length && !layout.node.collapsed ? "topologyGroup" : "topologyObject",
+      position: { x: layout.x, y: layout.y },
+      parentId: parent?.node.id === "root" ? undefined : parent?.node.id,
+      extent: parent && parent.node.id !== "root" ? "parent" : undefined,
+      draggable: false,
+      selectable: true,
+      style: { width: layout.width, height: layout.height },
+      data: { graphNode: layout.node },
+    });
+  }
+  const container = layoutDagreContainer(layout.node, aspectRatio);
+  const directLayouts = layout.children ?? [];
+  (container.edges ?? []).forEach((relation) => {
+    const source = directChildForId(directLayouts, relation.source);
+    const target = directChildForId(directLayouts, relation.target);
+    if (!source || !target || source.node.id === target.node.id) return;
+    const semantics = getKubejojoRelationSemantics(relation.type, relation.role, relation.label);
+    const section = orthogonalSection(source, target);
+    edges.push({
+      id: relation.id,
+      source: relation.source,
+      target: relation.target,
+      type: "topologyEdge",
+      data: {
+        sections: [section],
+        parentOffset: origin,
+        relationIds: [relation.id],
+        role: relation.role,
+        relationType: semantics.type,
+        relationDomain: semantics.domain,
+        label: visualEdgeLabel(relation),
+        labelPosition: bezierPathMidpoint([section], origin),
+        stroke: semantics.stroke,
+        dashed: semantics.dashed,
+        ports: relation.ports,
+        evidence: relation.evidence,
+        confidence: relation.confidence,
+      },
+    });
+  });
+  directLayouts.forEach((child) => collectDagreNodes(child, layout, { x: origin.x + child.x, y: origin.y + child.y }, nodes, edges, aspectRatio));
 }
 
 export async function layoutKubejojoGraph(root: KubejojoGraphNode, aspectRatio: number): Promise<{
@@ -535,61 +691,9 @@ export async function layoutKubejojoGraph(root: KubejojoGraphNode, aspectRatio: 
   edges: Edge<TopologyRendererEdgeData>[];
 }> {
   const resolvedAspectRatio = normalizeAspectRatio(aspectRatio);
-  const graph = await elk.layout(toElk(root, resolvedAspectRatio), {
-    layoutOptions: { "elk.aspectRatio": String(resolvedAspectRatio) },
-  }) as ElkNodeData;
+  const layout = layoutDagreNode(root, resolvedAspectRatio);
   const nodes: Node<TopologyRendererNodeData>[] = [];
   const edges: Edge<TopologyRendererEdgeData>[] = [];
-  const visit = (node: ElkNodeData, parent?: ElkNodeData, parentOffset = { x: 0, y: 0 }) => {
-    const absolutePosition = { x: parentOffset.x + (node.x ?? 0), y: parentOffset.y + (node.y ?? 0) };
-    (node.edges ?? []).forEach((edge) => {
-      if (!edge.sections?.length) return;
-      const relation = (edge as ElkExtendedEdge & { data?: KubejojoRelation }).data;
-      const semantics = getKubejojoRelationSemantics(relation?.type, relation?.role, relation?.label);
-      const label = edge.labels?.[0];
-      edges.push({
-        id: edge.id,
-        source: edge.sources?.[0] ?? "",
-        target: edge.targets?.[0] ?? "",
-        type: "topologyEdge",
-        markerEnd: { type: MarkerType.ArrowClosed },
-        data: {
-          sections: edge.sections,
-          parentOffset: absolutePosition,
-          relationIds: relation ? [relation.id] : [],
-          role: relation?.role,
-          relationType: semantics.type,
-          relationDomain: semantics.domain,
-          label: relation ? visualEdgeLabel(relation) : semantics.label,
-          labelPosition: label && Number.isFinite(label.x) && Number.isFinite(label.y)
-            ? {
-              x: absolutePosition.x + (label.x ?? 0) + (label.width ?? 0) / 2,
-              y: absolutePosition.y + (label.y ?? 0) + (label.height ?? 0) / 2,
-            }
-            : undefined,
-          stroke: semantics.stroke,
-          dashed: semantics.dashed,
-          ports: relation?.ports,
-          evidence: relation?.evidence,
-          confidence: relation?.confidence,
-        },
-      });
-    });
-    if (node.id !== "root") {
-      nodes.push({
-        id: node.id,
-        type: node.type,
-        position: { x: node.x ?? 0, y: node.y ?? 0 },
-        parentId: parent?.id === "root" ? undefined : parent?.id,
-        extent: parent && parent.id !== "root" ? "parent" : undefined,
-        draggable: false,
-        selectable: true,
-        style: { width: node.width, height: node.height },
-        data: node.data!,
-      });
-    }
-    node.children?.forEach((child) => visit(child, node, absolutePosition));
-  };
-  visit(graph);
+  collectDagreNodes(layout, undefined, { x: 0, y: 0 }, nodes, edges, resolvedAspectRatio);
   return { nodes, edges };
 }

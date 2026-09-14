@@ -346,6 +346,8 @@ export interface ResourceDetailResponse {
   storage: ResourceDetailStorageSummary;
   events: {
     items: Array<Record<string, unknown>>;
+    status: 'available' | 'empty' | 'unavailable';
+    message?: string;
   };
   metadata: ResourceDetailMetadata;
   relationships: ResourceDetailRelationshipGroup[];

@@ -661,7 +661,7 @@ export default function ServicesPage() {
         clusterUnavailable={clusterUnavailable}
         knownNamespaces={knownNamespaces}
         namespaceDisabled={namespaceDisabled}
-        namespacePlaceholder={namespaceDisabled ? "请先选择集群" : "全部名称空间"}
+        namespacePlaceholder={namespaceDisabled ? "请先选择集群" : "全部命名空间"}
         onClusterChange={handleClusterChange}
         onNamespaceChange={handleNamespaceChange}
         onKeywordInputChange={setKeywordInput}

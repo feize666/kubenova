@@ -404,6 +404,8 @@ export interface ResourceDetailEvent {
   };
 }
 
+export type ResourceDetailEventsStatus = "available" | "empty" | "unavailable";
+
 export interface ResourceDetailResponse {
   descriptor: ResourceDetailDescriptor;
   overview: ResourceDetailOverview;
@@ -415,6 +417,8 @@ export interface ResourceDetailResponse {
   storage: ResourceDetailStorageSummary;
   events: {
     items: ResourceDetailEvent[];
+    status: ResourceDetailEventsStatus;
+    message?: string;
   };
   metadata: ResourceDetailMetadata;
   relationships: ResourceDetailRelationshipGroup[];
@@ -1291,6 +1295,15 @@ export async function getResourceDetail(
       items: Array.isArray(eventsRaw.items)
         ? eventsRaw.items.filter((item): item is Record<string, unknown> => isObject(item))
         : [],
+      status:
+        eventsRaw.status === "available" ||
+        eventsRaw.status === "unavailable" ||
+        eventsRaw.status === "empty"
+          ? eventsRaw.status
+          : Array.isArray(eventsRaw.items) && eventsRaw.items.length > 0
+            ? "available"
+            : "empty",
+      message: typeof eventsRaw.message === "string" ? eventsRaw.message : undefined,
     },
     metadata: {
       labels: isObject(metadataRaw.labels)

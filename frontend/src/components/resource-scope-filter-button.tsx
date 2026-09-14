@@ -4,7 +4,7 @@ import { AppstoreOutlined } from "@ant-design/icons";
 import { Badge, Popover, Space, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { ClusterSelect, type ClusterOption } from "@/components/cluster-select";
-import { NamespaceSelect } from "@/components/namespace-select";
+import { NamespaceOptionList, NamespaceSelect } from "@/components/namespace-select";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { OpsFilterTriggerButton, OpsPopoverPanel } from "@/components/ops";
 import { useClusterDisplayMap } from "@/hooks/use-cluster-display-map";
@@ -59,12 +59,10 @@ export function ResourceScopeFilterButton({
   const hasConcreteDraftCluster = draftClusterId.trim().length > 0;
   const parentKeepsDraftDisabled = Boolean(namespaceDisabled && draftClusterId === clusterId);
   const resolvedNamespaceDisabled = !hasConcreteDraftCluster || parentKeepsDraftDisabled;
-  const resolvedNamespacePlaceholder =
-    namespacePlaceholder ?? (hasConcreteDraftCluster ? "全部名称空间" : "请先选择具体集群");
   const activeCount = Number(!isWorkspaceLocked && Boolean(clusterId)) + Number(Boolean(namespace));
 
   const summary = useMemo(() => {
-    if (isWorkspaceLocked) return namespaceVisible && namespace ? namespace : "全部名称空间";
+    if (isWorkspaceLocked) return namespaceVisible && namespace ? namespace : "全部命名空间";
     if (!clusterId && !namespace) return "全部资源";
     const clusterLabel = clusterId
       ? getClusterDisplayName(Object.fromEntries(clusterNameById), clusterId)
@@ -91,6 +89,27 @@ export function ResourceScopeFilterButton({
     onApply({ clusterId: isWorkspaceLocked ? clusterId : "", namespace: "" });
     setOpen(false);
   };
+
+  if (isWorkspaceLocked && !namespaceVisible) return null;
+
+  if (isWorkspaceLocked) {
+    return (
+      <NamespaceSelect
+        className="resource-scope-namespace-filter"
+        value={namespace}
+        clusterId={clusterId}
+        knownNamespaces={knownNamespaces}
+        loading={namespaceLoading}
+        disabled={namespaceDisabled}
+        placeholder={namespacePlaceholder}
+        label="命名空间"
+        onChange={(value) => {
+          emitResourceScopeChange({ clusterId, namespace: value });
+          onApply({ clusterId, namespace: value });
+        }}
+      />
+    );
+  }
 
   const content = (
     <OpsPopoverPanel
@@ -119,23 +138,27 @@ export function ResourceScopeFilterButton({
         ) : null}
         {namespaceVisible ? (
           <div>
-            <Typography.Text className="resource-scope-filter-label">名称空间</Typography.Text>
-            <NamespaceSelect
+            <Typography.Text className="resource-scope-filter-label">命名空间</Typography.Text>
+            <NamespaceOptionList
               value={draftNamespace}
               onChange={setDraftNamespace}
+              onSelect={(value) => {
+                setDraftNamespace(value);
+                if (isWorkspaceLocked) {
+                  onApply({ clusterId: draftClusterId, namespace: value });
+                  setOpen(false);
+                }
+              }}
               knownNamespaces={knownNamespaces}
               clusterId={draftClusterId}
               loading={namespaceLoading}
               disabled={resolvedNamespaceDisabled}
-              placeholder={resolvedNamespacePlaceholder}
             />
           </div>
         ) : null}
       </Space>
     </OpsPopoverPanel>
   );
-
-  if (isWorkspaceLocked && !namespaceVisible) return null;
 
   return (
     <Popover

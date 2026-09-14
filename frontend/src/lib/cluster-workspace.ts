@@ -255,6 +255,11 @@ export function getClusterWorkspaceNavigation(
       items: [item("overview", "集群信息", "overview")],
     },
     {
+      key: "topology",
+      label: "资源拓扑",
+      items: [item("topology", "资源拓扑", "network/topology")],
+    },
+    {
       key: "base-resources",
       label: "基础资源",
       items: [
@@ -311,7 +316,6 @@ export function getClusterWorkspaceNavigation(
       key: "operations",
       label: "运维能力",
       items: [
-        item("topology", "资源拓扑", "network/topology"),
         item("monitoring", "监控告警", "monitoring"),
         item("logs", "日志中心", "logs"),
         item("observability", "观测配置", "observability/configuration"),
