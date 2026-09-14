@@ -29,6 +29,8 @@ import { SearchAddon } from "@xterm/addon-search";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { useAuth } from "@/components/auth-context";
+import { RuntimeContextBar } from "@/components/runtime-workbench/runtime-context-bar";
+import { RuntimeStatusStrip } from "@/components/runtime-workbench/runtime-status-strip";
 import {
   OpsFilterChip,
   OpsFrameShell,
@@ -1595,6 +1597,14 @@ export default function LogsPage() {
         ) : undefined
       }
     >
+      <RuntimeContextBar>
+        <span>{scopeSubtitle}</span>
+        <span aria-label="日志输出状态">{connectionMeta.text}</span>
+      </RuntimeContextBar>
+      <RuntimeStatusStrip tone={connectionMeta.tone}>
+        <span>{streamModeLabel}</span>
+        <span>{filteredLineCount} 条可见日志</span>
+      </RuntimeStatusStrip>
       <Space
         orientation="vertical"
         size={12}

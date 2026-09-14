@@ -35,6 +35,8 @@ import {
   type TerminalParsedMessage,
 } from "@/lib/ws/terminal";
 import { useAuth } from "@/components/auth-context";
+import { RuntimeContextBar } from "@/components/runtime-workbench/runtime-context-bar";
+import { RuntimeStatusStrip } from "@/components/runtime-workbench/runtime-status-strip";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import {
   OpsFilterChip,
@@ -1202,6 +1204,15 @@ export default function TerminalPage() {
           lastWarning ? <Typography.Text>{lastWarning}</Typography.Text> : null
         }
       >
+        <RuntimeContextBar>
+          <span>{clusterDisplayName}</span>
+          <span>{targetBase.namespace || "-"}/{targetBase.pod || "-"}</span>
+          <span>{effectiveContainer || "未选择容器"}</span>
+        </RuntimeContextBar>
+        <RuntimeStatusStrip tone={visualTone}>
+          <span>{VISUAL_STATUS_LABEL[visualState]}</span>
+          <span>{gatewayLabel} · TTL {formatExpiry(sessionInfo?.expiresAtMs)}</span>
+        </RuntimeStatusStrip>
         <div
           className={`terminal-workbench-stage terminal-workbench-stage--${visualState}`}
         >
