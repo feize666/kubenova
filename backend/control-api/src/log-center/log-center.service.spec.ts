@@ -27,7 +27,7 @@ describe('bounded log queries', () => {
     kind: 'elasticsearch',
     enabled: true,
     endpoint: 'https://logs.example.test',
-    secretRef: 'env:LOG_QUERY_TEST_KEY',
+    secretRef: 'env:KUBENOVA_ES_API_KEY_TEST',
     metadata: { logQuery: { indexPattern: 'logs-*' } },
   };
   let service: LogCenterService;
@@ -39,7 +39,7 @@ describe('bounded log queries', () => {
   const response = (hits: unknown[] = []) =>
     new Response(JSON.stringify({ hits: { hits } }));
   beforeEach(() => {
-    process.env.LOG_QUERY_TEST_KEY = 'test-api-key';
+    process.env.KUBENOVA_ES_API_KEY_TEST = 'test-api-key';
     db = {
       monitoringDataSource: { findFirst: jest.fn().mockResolvedValue(source) },
       clusterRegistry: {
@@ -52,7 +52,7 @@ describe('bounded log queries', () => {
   });
   afterEach(() => {
     jest.restoreAllMocks();
-    delete process.env.LOG_QUERY_TEST_KEY;
+    delete process.env.KUBENOVA_ES_API_KEY_TEST;
   });
 
   it('rejects missing identity and non-admin cluster viewers', async () => {
@@ -156,6 +156,19 @@ describe('bounded log queries', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
+  it('never forwards an unrelated environment secret to a log endpoint', async () => {
+    process.env.LOG_QUERY_UNRELATED_SECRET = 'unrelated-secret';
+    try {
+      db.monitoringDataSource.findFirst.mockResolvedValue({
+        ...source,
+        secretRef: 'env:LOG_QUERY_UNRELATED_SECRET',
+      });
+      await expect(service.query(actor, input)).rejects.toBeInstanceOf(ServiceUnavailableException);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.LOG_QUERY_UNRELATED_SECRET;
+    }
+  });
   it.each([
     { indexPattern: '*' },
     { indexPattern: '../_all' },

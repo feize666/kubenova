@@ -33,12 +33,14 @@ be mapped for exact Elasticsearch term matching. Every query includes the
 explicit cluster ID term filter. Pod/container output uses the fixed fields
 `kubernetes.pod_name` and `kubernetes.container_name`.
 
-Set `secretRef` to `env:ELASTICSEARCH_LOG_API_KEY` and provide that environment
+Set `secretRef` to `env:KUBENOVA_ES_API_KEY_PRIMARY` and provide that environment
 variable to the API process. Its value is the encoded Elasticsearch API key,
 sent as `Authorization: ApiKey ...`. No literal secrets, anonymous access,
 other reference schemes, URL credentials, redirects, query strings, or URL
 fragments are accepted. HTTP(S) endpoints are trusted administrator settings;
 use HTTPS and an Elasticsearch key restricted to the intended indices.
+Only environment names beginning with `KUBENOVA_ES_API_KEY_` are accepted;
+unrelated process secrets cannot be forwarded by this endpoint.
 
 Queries have a 5-second transport deadline, a 4-second Elasticsearch query
 timeout, and a 2 MiB response body cap. Partial results (timeout or shard

@@ -56,3 +56,5 @@ Integrate only after scoped review and checks, then remove clean owned worktrees
 - [ ] Stage 7 local acceptance
 
 Initial stage 2 fixes are implemented and tested; stage 2 is not complete. Remaining gates are recorded in console-stage1-results.md.
+
+Second increment: persistent shell collapse, simplified full-screen workbenches and admin-only log query foundation are integrated. See console-stage2-batch.md for ownership/contracts and console-stage2-results.md for actual verification and unresolved gates. Stage 2 and stage 4 remain incomplete.

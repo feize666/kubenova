@@ -130,7 +130,7 @@ export class LogCenterService {
     const metadata = metadataSchema.safeParse(
       record(source.metadata) ? source.metadata.logQuery : undefined,
     );
-    const envName = /^env:([A-Z_][A-Z0-9_]*)$/.exec(
+    const envName = /^env:(KUBENOVA_ES_API_KEY_[A-Z0-9_]+)$/.exec(
       source.secretRef ?? '',
     )?.[1];
     const apiKey = envName ? process.env[envName] : undefined;
