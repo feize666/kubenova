@@ -43,8 +43,20 @@ export function assertWritePermission(
   actor: { username?: string; role?: PlatformRole } | undefined,
 ): void {
   const role = actor?.role;
-  if (!role || role === 'read-only') {
+  if (
+    !['platform-admin', 'admin', 'cluster-operator', 'operator'].includes(
+      role ?? '',
+    )
+  ) {
     throw new ForbiddenException('当前角色无写权限');
+  }
+}
+
+export function assertAdministrationPermission(
+  actor: { role?: string } | undefined,
+): void {
+  if (actor?.role !== 'platform-admin' && actor?.role !== 'admin') {
+    throw new ForbiddenException('当前操作需要平台管理员权限');
   }
 }
 

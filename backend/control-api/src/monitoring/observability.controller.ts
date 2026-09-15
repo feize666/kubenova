@@ -72,7 +72,10 @@ export class ObservabilityController {
   async updateDataSource(@Req() req: ActorRequest, @Param('id') id: string, @Body() body: Partial<DataSourceInput>) {
     const scope = await this.observabilityService.getDataSourceScope(id);
     if (!scope) throw new BadRequestException('可观测性数据源不存在');
-    await this.assertClusterMutation(req, body.clusterId === undefined ? scope.clusterId : body.clusterId);
+    await this.assertClusterMutation(req, scope.clusterId);
+    if (body.clusterId !== undefined && body.clusterId !== scope.clusterId) {
+      await this.assertClusterMutation(req, body.clusterId);
+    }
     return this.observabilityService.updateDataSource(req.user?.user, id, body);
   }
 

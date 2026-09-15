@@ -7,7 +7,7 @@ import { randomBytes, scrypt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 import {
   appendAudit,
-  assertWritePermission,
+  assertAdministrationPermission,
   type PlatformRole,
 } from '../common/governance';
 import { PrismaService } from '../platform/database/prisma.service';
@@ -260,12 +260,12 @@ export class UsersService {
     actor: Actor | undefined,
     body: CreateUserRequest,
   ): Promise<UserListItem> {
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
 
     const username = body?.username?.trim();
     const name = username;
     const password = body?.password;
-    const role = body?.role?.trim() || 'user';
+    const role = body?.role === undefined ? 'user' : this.validUserRole(body.role);
 
     if (!username) throw new BadRequestException('username 不能为空');
     if (!password) throw new BadRequestException('password 不能为空');
@@ -302,7 +302,7 @@ export class UsersService {
     id: string,
     body: UpdateUserRequest,
   ): Promise<UserListItem> {
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
 
     await this.mustFindUser(id);
 
@@ -330,7 +330,7 @@ export class UsersService {
       data.name = this.requiredTrim(body.name, 'name');
     }
     if (body.role !== undefined) {
-      data.role = this.requiredTrim(body.role, 'role');
+      data.role = this.validUserRole(body.role);
     }
     if (body.password !== undefined) {
       if (!body.password) throw new BadRequestException('password 不能为空');
@@ -364,7 +364,7 @@ export class UsersService {
     actor: Actor | undefined,
     id: string,
   ): Promise<{ id: string; deleted: true; state: 'deleted' }> {
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     await this.mustFindUser(id);
 
     await this.prisma.user.delete({ where: { id } });
@@ -381,7 +381,7 @@ export class UsersService {
     id: string,
     isActive: boolean,
   ): Promise<UserListItem> {
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     await this.mustFindUser(id);
 
     const row = await this.prisma.user.update({
@@ -615,7 +615,7 @@ export class UsersService {
     actor: Actor | undefined,
     body: CreateRbacRequest,
   ): Promise<RbacListItem> {
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     const name = this.requiredTrim(body?.name, 'name');
     const namespace = body?.namespace?.trim() ?? '';
     const kind = body?.kind;
@@ -661,7 +661,7 @@ export class UsersService {
     id: string,
     body: UpdateRbacRequest,
   ): Promise<RbacListItem> {
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     const item = await this.findRbac(id);
     const itemDto = this.toRbacListItem(item);
 
@@ -730,7 +730,7 @@ export class UsersService {
     actor: Actor | undefined,
     id: string,
   ): Promise<{ id: string; deleted: true; state: 'deleted'; version: number }> {
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     const removed = await this.findRbac(id);
     await this.rbacRepo().delete({ where: { id } });
     this.audit(actor, 'delete', 'rbac', removed.id);
@@ -748,7 +748,7 @@ export class UsersService {
     id: string,
     nextState: ResourceState,
   ): Promise<RbacListItem> {
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     const updated = await this.rbacRepo().update({
       where: { id },
       data: {
@@ -768,6 +768,13 @@ export class UsersService {
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
+
+  private validUserRole(value: unknown): string {
+    if (typeof value !== 'string' || !['platform-admin', 'admin', 'cluster-operator', 'operator', 'read-only', 'user'].includes(value.trim())) {
+      throw new BadRequestException('role 不受支持');
+    }
+    return value.trim();
+  }
 
   private async mustFindUser(id: string): Promise<void> {
     const exists = await this.prisma.user.findUnique({ where: { id } });

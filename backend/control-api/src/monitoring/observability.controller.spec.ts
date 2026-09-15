@@ -1,9 +1,17 @@
 import type { PlatformRole } from '../common/governance';
 import { ObservabilityController } from './observability.controller';
+import { NotFoundException } from '@nestjs/common';
+import { ClusterAccessService } from '../common/cluster-access.service';
 
 describe('ObservabilityController access boundaries', () => {
   const service = {
-    listDataSources: jest.fn().mockResolvedValue({ items: [], total: 0, timestamp: new Date().toISOString() }),
+    listDataSources: jest
+      .fn()
+      .mockResolvedValue({
+        items: [],
+        total: 0,
+        timestamp: new Date().toISOString(),
+      }),
     createDataSource: jest.fn(),
     getDataSourceScope: jest.fn(),
     getGrafanaPanelConfiguration: jest.fn().mockResolvedValue({
@@ -25,29 +33,47 @@ describe('ObservabilityController access boundaries', () => {
     assertCanMutate: jest.fn().mockResolvedValue({ clusterId: 'cluster-a' }),
     assertPlatformAdmin: jest.fn(),
   } as any;
-  const req = (role: PlatformRole = 'cluster-operator') => ({ user: { user: { id: 'u1', username: 'u1', role } } });
+  const req = (role: PlatformRole = 'cluster-operator') => ({
+    user: { user: { id: 'u1', username: 'u1', role } },
+  });
 
   beforeEach(() => jest.clearAllMocks());
 
   it('requires read access for a scoped data-source list', async () => {
     const controller = new ObservabilityController(service, access);
     await controller.listDataSources(req(), 'cluster-a');
-    expect(access.assertCanRead).toHaveBeenCalledWith(req().user.user, 'cluster-a');
+    expect(access.assertCanRead).toHaveBeenCalledWith(
+      req().user.user,
+      'cluster-a',
+    );
     expect(service.listDataSources).toHaveBeenCalledWith('cluster-a');
   });
 
   it('requires platform admin for an unscoped data-source list', async () => {
     const controller = new ObservabilityController(service, access);
     await controller.listDataSources(req('read-only'));
-    expect(access.assertPlatformAdmin).toHaveBeenCalledWith(req('read-only').user.user);
+    expect(access.assertPlatformAdmin).toHaveBeenCalledWith(
+      req('read-only').user.user,
+    );
   });
 
   it('requires cluster mutation access when creating a scoped source', async () => {
     const controller = new ObservabilityController(service, access);
-    const body = { clusterId: 'cluster-a', kind: 'prometheus', name: 'p', endpoint: 'https://prom.example' } as any;
+    const body = {
+      clusterId: 'cluster-a',
+      kind: 'prometheus',
+      name: 'p',
+      endpoint: 'https://prom.example',
+    } as any;
     await controller.createDataSource(req(), body);
-    expect(access.assertCanMutate).toHaveBeenCalledWith(req().user.user, 'cluster-a');
-    expect(service.createDataSource).toHaveBeenCalledWith(req().user.user, body);
+    expect(access.assertCanMutate).toHaveBeenCalledWith(
+      req().user.user,
+      'cluster-a',
+    );
+    expect(service.createDataSource).toHaveBeenCalledWith(
+      req().user.user,
+      body,
+    );
   });
 
   it('requires cluster read access before returning Grafana panel configuration', async () => {
@@ -56,11 +82,78 @@ describe('ObservabilityController access boundaries', () => {
 
     await controller.getGrafanaPanels(req(), 'cluster-a', '1h', response);
 
-    expect(access.assertCanRead).toHaveBeenCalledWith(req().user.user, 'cluster-a');
-    expect(service.getGrafanaPanelConfiguration).toHaveBeenCalledWith('cluster-a', '1h');
+    expect(access.assertCanRead).toHaveBeenCalledWith(
+      req().user.user,
+      'cluster-a',
+    );
+    expect(service.getGrafanaPanelConfiguration).toHaveBeenCalledWith(
+      'cluster-a',
+      '1h',
+    );
     expect(response.setHeader).toHaveBeenCalledWith(
       'Content-Security-Policy',
       expect.stringContaining("frame-src 'self'"),
     );
+  });
+});
+
+describe('data-source relocation authority', () => {
+  it.each(['foreign', null])(
+    'cannot claim a source from inaccessible scope %s',
+    async (clusterId) => {
+      const changes: unknown[] = [];
+      const db = {
+        clusterRoleBinding: {
+          findFirst: async ({ where }: { where: { clusterId: string } }) =>
+            where.clusterId === 'owned'
+              ? { clusterId: 'owned', role: 'operator' }
+              : null,
+        },
+      };
+      const service = {
+        getDataSourceScope: async () => ({ clusterId }),
+        updateDataSource: async (...args: unknown[]) => {
+          changes.push(args);
+        },
+      };
+      const controller = new ObservabilityController(
+        service as never,
+        new ClusterAccessService(db as never),
+      );
+      await expect(
+        controller.updateDataSource(
+          { user: { user: { id: 'u', role: 'cluster-operator' } } },
+          'source',
+          { clusterId: 'owned' },
+        ),
+      ).rejects.toThrow();
+      expect(changes).toEqual([]);
+    },
+  );
+  it('also denies moving an owned source into a foreign cluster', async () => {
+    const db = {
+      clusterRoleBinding: {
+        findFirst: async ({ where }: { where: { clusterId: string } }) =>
+          where.clusterId === 'owned'
+            ? { clusterId: 'owned', role: 'operator' }
+            : null,
+      },
+    };
+    const service = {
+      getDataSourceScope: async () => ({ clusterId: 'owned' }),
+      updateDataSource: jest.fn(),
+    };
+    const controller = new ObservabilityController(
+      service as never,
+      new ClusterAccessService(db as never),
+    );
+    await expect(
+      controller.updateDataSource(
+        { user: { user: { id: 'u', role: 'cluster-operator' } } },
+        'source',
+        { clusterId: 'foreign' },
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(service.updateDataSource).not.toHaveBeenCalled();
   });
 });
