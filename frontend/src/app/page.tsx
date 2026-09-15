@@ -103,6 +103,12 @@ function formatCount(value?: number) {
     : "--";
 }
 
+function countShare(value: number | undefined, total: number | undefined) {
+  return typeof value === "number" && typeof total === "number" && total > 0
+    ? clampPercent((value / total) * 100)
+    : 0;
+}
+
 function formatMetricProvenance(metric?: DashboardMetricMeta) {
   if (!metric) return "数据来源不可用";
   const freshness = {
@@ -593,12 +599,19 @@ export default function HomePage() {
     const unhealthy = stats?.workloads.unhealthy ?? 0;
     const clusterWarning = stats?.clusters.warning ?? 0;
     const healthScore = stats?.healthScore;
+    const unavailable = !stats || [stats.metrics?.clusters, stats.metrics?.workloads, stats.metrics?.alerts].some(
+      (metric) => metric?.freshness === "unavailable" || metric?.freshness === "stale",
+    );
     const riskLevel =
       critical > 0
         ? "critical"
         : unhealthy > 0 || clusterWarning > 0
           ? "warning"
-          : "success";
+          : unavailable
+            ? "unknown"
+            : stats.scope?.degraded
+              ? "warning"
+              : "success";
     return {
       critical,
       unhealthy,
@@ -827,7 +840,7 @@ export default function HomePage() {
               ? "高风险"
               : riskSummary.riskLevel === "warning"
                 ? "需关注"
-                : "稳定"}
+                : riskSummary.riskLevel === "unknown" ? "数据不足" : "稳定"}
           </strong>
           <em>
             风险分{" "}
@@ -919,28 +932,25 @@ export default function HomePage() {
           >
             <div className="ops-overview-big-number is-danger">
               {formatCount(stats?.alerts.critical)}
-              <span className={riskSummary.critical > 0 ? "is-up" : "is-flat"}>
-                {riskSummary.critical > 0 ? "↑" : "—"}
-              </span>
             </div>
             <MetricProvenance meta={stats?.metrics?.alerts} />
             <div className="ops-overview-list">
               <BarRow
                 label="严重"
                 value={formatCount(stats?.alerts.critical)}
-                percent={riskSummary.critical * 12}
+                percent={countShare(stats?.alerts.critical, stats?.alerts.total)}
                 tone="red"
               />
               <BarRow
                 label="警告"
                 value={formatCount(stats?.alerts.warning)}
-                percent={(stats?.alerts.warning ?? 0) * 8}
+                percent={countShare(stats?.alerts.warning, stats?.alerts.total)}
                 tone="orange"
               />
               <BarRow
                 label="告警总数"
                 value={formatCount(stats?.alerts.total)}
-                percent={(stats?.alerts.total ?? 0) * 5}
+                percent={countShare(stats?.alerts.total, stats?.alerts.total)}
                 tone="blue"
               />
             </div>
@@ -954,28 +964,25 @@ export default function HomePage() {
           >
             <div className="ops-overview-big-number is-warning">
               {formatCount(stats?.workloads.unhealthy)}
-              <span className={riskSummary.unhealthy > 0 ? "is-up" : "is-flat"}>
-                {riskSummary.unhealthy > 0 ? "↑" : "—"}
-              </span>
             </div>
             <MetricProvenance meta={stats?.metrics?.workloads} />
             <div className="ops-overview-list">
               <BarRow
                 label="异常负载"
                 value={formatCount(stats?.workloads.unhealthy)}
-                percent={riskSummary.unhealthy * 10}
+                percent={countShare(stats?.workloads.unhealthy, stats?.workloads.total)}
                 tone="orange"
               />
               <BarRow
                 label="健康负载"
                 value={formatCount(stats?.workloads.healthy)}
-                percent={(stats?.workloads.healthy ?? 0) * 2}
+                percent={countShare(stats?.workloads.healthy, stats?.workloads.total)}
                 tone="green"
               />
               <BarRow
                 label="全部负载"
                 value={formatCount(stats?.workloads.total)}
-                percent={(stats?.workloads.total ?? 0) * 2}
+                percent={countShare(stats?.workloads.total, stats?.workloads.total)}
                 tone="blue"
               />
             </div>
@@ -992,19 +999,19 @@ export default function HomePage() {
               <BarRow
                 label="风险集群"
                 value={formatCount(stats?.clusters.warning)}
-                percent={riskSummary.clusterWarning * 20}
+                percent={countShare(stats?.clusters.warning, stats?.clusters.total)}
                 tone="red"
               />
               <BarRow
                 label="健康集群"
                 value={formatCount(stats?.clusters.healthy)}
-                percent={(stats?.clusters.healthy ?? 0) * 10}
+                percent={countShare(stats?.clusters.healthy, stats?.clusters.total)}
                 tone="green"
               />
               <BarRow
                 label="全部集群"
                 value={formatCount(stats?.clusters.total)}
-                percent={(stats?.clusters.total ?? 0) * 8}
+                percent={countShare(stats?.clusters.total, stats?.clusters.total)}
                 tone="blue"
               />
             </div>

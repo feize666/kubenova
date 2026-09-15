@@ -1,3 +1,10 @@
+.cluster-runtime-fullscreen {
+  min-height: 100dvh;
+  padding: 16px;
+  background: var(--kn-bg, var(--kn-surface, #fff));
+  color: var(--kn-text-primary, #182230);
+}
+
 .runtime-workbench-frame {
   display: flex;
   flex: 1 1 auto;

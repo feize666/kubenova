@@ -1,6 +1,7 @@
 import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard } from '../common/auth.guard';
+import { ClusterAccessService } from '../common/cluster-access.service';
 import { RuntimeService } from './runtime.service';
 import type {
   CreateRuntimeSessionRequest,
@@ -11,13 +12,17 @@ type RuntimeRequestUser = {
   user?: {
     id?: string;
     username?: string;
+    role?: string;
   };
 };
 
 @Controller(['api/runtime', 'api/v1/runtime'])
 @UseGuards(AuthGuard)
 export class RuntimeController {
-  constructor(private readonly runtimeService: RuntimeService) {}
+  constructor(
+    private readonly runtimeService: RuntimeService,
+    private readonly clusterAccess: ClusterAccessService,
+  ) {}
 
   @Post('sessions')
   async createSession(
@@ -25,6 +30,11 @@ export class RuntimeController {
     @Req() req: Request & { user?: RuntimeRequestUser },
   ): Promise<RuntimeSessionBootstrapResponse> {
     const fallbackUserId = req.user?.user?.id;
+    if (body.type === 'logs') {
+      await this.clusterAccess.assertCanRead(req.user?.user, body.clusterId);
+    } else {
+      await this.clusterAccess.assertCanMutate(req.user?.user, body.clusterId);
+    }
     const forwardedHost = req.headers['x-forwarded-host'];
     const forwardedProto = req.headers['x-forwarded-proto'];
     const origin = req.headers.origin;
@@ -47,7 +57,7 @@ export class RuntimeController {
     return this.runtimeService.createSession(
       {
         ...body,
-        userId: body.userId ?? fallbackUserId,
+        userId: fallbackUserId,
       },
       {
         requestHost: normalizedRequestHost,

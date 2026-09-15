@@ -191,6 +191,14 @@ export function ClusterWorkspaceShell({
       .flatMap((section) => section.items)
       .find((item) => selectedKeys.includes(item.href))?.label ?? "集群信息";
 
+  if (/^\/clusters\/[^/]+\/(logs|terminal)\/?$/.test(pathname)) {
+    return (
+      <ClusterWorkspaceProvider clusterId={clusterId}>
+        <main className="cluster-runtime-fullscreen">{children}</main>
+      </ClusterWorkspaceProvider>
+    );
+  }
+
   return (
     <ClusterWorkspaceProvider clusterId={clusterId}>
       <Layout

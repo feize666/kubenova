@@ -4602,6 +4602,10 @@ body {
   color: var(--overview-risk-mid);
 }
 
+.ops-overview-scope-cell--unknown > strong {
+  color: var(--overview-card-subtle);
+}
+
 .ops-overview-scope-cell--selector .ops-scope-selector {
   width: 100%;
   min-width: 0;

@@ -116,8 +116,8 @@ requireTokens("scripts/ui-tech-smoke.mjs", [
 
 requireTokens("src/app/page.tsx", [
   'data-node-status={internet.status ?? "unknown"}',
-  'className={riskSummary.critical > 0 ? "is-up" : "is-flat"}',
-  'className={riskSummary.unhealthy > 0 ? "is-up" : "is-flat"}',
+  'countShare(stats?.alerts.critical, stats?.alerts.total)',
+  'countShare(stats?.workloads.unhealthy, stats?.workloads.total)',
 ]);
 
 requireTokens("src/components/overview/overview-risk-panel.tsx", [

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard } from '../common/auth.guard';
+import { ClusterAccessService, type ClusterAccessSubject } from '../common/cluster-access.service';
 import {
   LogsService,
   type LogsQueryRequest,
@@ -18,18 +19,26 @@ import {
 @Controller('api/logs')
 @UseGuards(AuthGuard)
 export class LogsController {
-  constructor(private readonly logsService: LogsService) {}
+  constructor(
+    private readonly logsService: LogsService,
+    private readonly clusterAccess: ClusterAccessService,
+  ) {}
 
   @Get()
-  async query(@Query() query: LogsQueryRequest) {
+  async query(
+    @Query() query: LogsQueryRequest & { cluster?: string },
+    @Req() req: Request & { user?: { user?: ClusterAccessSubject } },
+  ) {
+    await this.clusterAccess.assertCanRead(req.user?.user, query.clusterId?.trim() || query.cluster || '');
     return this.logsService.query(query);
   }
 
   @Post('stream')
   async createStreamSession(
     @Body() body: LogsStreamBootstrapRequest,
-    @Req() req: Request,
+    @Req() req: Request & { user?: { user?: ClusterAccessSubject } },
   ) {
+    await this.clusterAccess.assertCanRead(req.user?.user, body.clusterId);
     const forwardedHost = req.headers['x-forwarded-host'];
     const forwardedProto = req.headers['x-forwarded-proto'];
     const origin = req.headers.origin;
@@ -51,6 +60,7 @@ export class LogsController {
         : undefined;
 
     return this.logsService.createStreamSession(body, {
+      userId: req.user?.user?.id,
       requestHost: normalizedRequestHost,
       requestProtocol:
         normalizedRequestProtocol === 'https' ||

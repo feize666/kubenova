@@ -10,6 +10,7 @@ import {
 } from "./use-persistent-table-sort-state";
 
 export interface TableSortPaginationOptions extends PersistentTableSortStateOptions {
+  defaultPage?: number;
   defaultPageSize?: number;
   defaultKeyword?: string;
   initialVisibility?: VisibilityState;
@@ -24,7 +25,7 @@ export function useTableSortPaginationState(options: TableSortPaginationOptions 
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(options.initialVisibility ?? {});
   const [pagination, setPagination] = useState<PaginationState>({
-    pageIndex: 0,
+    pageIndex: Number.isFinite(options.defaultPage) ? Math.max(0, Math.floor(options.defaultPage!) - 1) : 0,
     pageSize: options.defaultPageSize ?? 20,
   });
 

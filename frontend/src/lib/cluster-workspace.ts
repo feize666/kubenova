@@ -272,11 +272,6 @@ export function getClusterWorkspaceNavigation(
       items: [item("monitoring", "Prometheus 监控", "monitoring")],
     },
     {
-      key: "logs",
-      label: "日志",
-      items: [item("logs", "日志", "logs")],
-    },
-    {
       key: "base-resources",
       label: "基础资源",
       items: [
@@ -336,7 +331,6 @@ export function getClusterWorkspaceNavigation(
         item("observability", "观测配置", "observability/configuration"),
         item("inspection", "资源巡检", "inspection"),
         item("aiops", "AI 助手", "aiops"),
-        item("terminal", "终端", "terminal"),
       ],
     },
   ];

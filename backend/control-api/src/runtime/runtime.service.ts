@@ -36,6 +36,7 @@ export interface CreateRuntimeSessionRequest {
 }
 
 export interface RuntimeGatewayAccessContext {
+  userId?: string;
   requestHost?: string;
   requestProtocol?: 'http' | 'https';
   requestOrigin?: string;

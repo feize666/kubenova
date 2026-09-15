@@ -510,9 +510,9 @@ export default function PodsPage() {
 
   // 筛选状态
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
-  const [keyword, setKeyword] = useState(initialKeyword);
-  const [mergedFilters, setMergedFilters] = useState<string[]>([]);
-  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
+  const [keyword, setKeyword] = useState(() => parseSearchInput(initialKeyword).keyword);
+  const [mergedFilters, setMergedFilters] = useState<string[]>(() => parseSearchInput(initialKeyword).labels);
+  const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>(() => ({ phase: searchParams.get("phase") || "" }));
   const phaseFilter =
     typeof tableFilters.phase === "string" ? tableFilters.phase : "";
   const {
@@ -525,7 +525,8 @@ export default function PodsPage() {
     handleTableChange,
   } = useAntdTableSortPagination<PodRow>({
     storageKey: "workloads/pods/table-sort",
-    defaultPageSize: 10,
+    defaultPageSize: [10, 20, 50, 100].includes(Number(searchParams.get("pageSize"))) ? Number(searchParams.get("pageSize")) : 10,
+    defaultPage: Math.min(100000, Number(searchParams.get("page")) || 1),
     defaultSortBy: "createdAt",
     defaultSortOrder: "desc",
     allowedSortBy: [
@@ -752,6 +753,17 @@ export default function PodsPage() {
   );
   useSyncResourceFilterUrlState({ clusterId, namespace, keyword });
 
+  const runtimeReturnHref = useMemo(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("clusterId", workspace?.clusterId || clusterId);
+    params.set("namespace", namespace);
+    params.set("keyword", keywordInput);
+    params.set("page", String(page));
+    params.set("pageSize", String(pageSize));
+    params.set("phase", phaseFilter);
+    return `${podsReturnHref}?${params.toString()}`;
+  }, [searchParams, workspace?.clusterId, clusterId, namespace, keywordInput, page, pageSize, phaseFilter, podsReturnHref]);
+
   const handleDelete = useCallback(
     async (row: PodRow) => {
       try {
@@ -776,19 +788,19 @@ export default function PodsPage() {
         pod: row.name,
         containerNames: row.containerNames,
         from: "pods",
-        returnTo: podsReturnHref,
+        returnTo: runtimeReturnHref,
         returnClusterId: workspace?.clusterId || clusterId || row.clusterId,
         returnClusterName: getClusterDisplayName(
           clusterMap,
           workspace?.clusterId || clusterId || row.clusterId,
         ),
-        returnNamespace: namespace || row.namespace,
-        returnKeyword: keyword || row.name,
+        returnNamespace: namespace,
+        returnKeyword: keyword,
         returnPhase: phaseFilter || undefined,
         returnPage: page,
       }).replace(/^\/terminal\?/, "");
     },
-    [clusterId, clusterMap, keyword, namespace, page, phaseFilter, podsReturnHref, workspace?.clusterId],
+    [clusterId, clusterMap, keyword, namespace, page, phaseFilter, runtimeReturnHref, workspace?.clusterId],
   );
 
   const buildLogsParams = useCallback(
@@ -803,21 +815,21 @@ export default function PodsPage() {
         resourceName: row.name,
         resourceId: row.id,
         from: "pods",
-        returnTo: podsReturnHref,
+        returnTo: runtimeReturnHref,
         returnClusterId: workspace?.clusterId || clusterId || row.clusterId,
         returnClusterName: getClusterDisplayName(
           clusterMap,
           workspace?.clusterId || clusterId || row.clusterId,
         ),
-        returnNamespace: namespace || row.namespace,
-        returnKeyword: keyword || row.name,
+        returnNamespace: namespace,
+        returnKeyword: keyword,
         returnPhase: phaseFilter || undefined,
         returnPage: page,
         tailLines: 200,
         sinceSeconds: 24 * 60 * 60,
       }).replace(/^\/logs\?/, "");
     },
-    [clusterId, clusterMap, keyword, namespace, page, phaseFilter, podsReturnHref, workspace?.clusterId],
+    [clusterId, clusterMap, keyword, namespace, page, phaseFilter, runtimeReturnHref, workspace?.clusterId],
   );
 
   const columns: Array<HeadlampResourceTableColumn<PodRow>> = useMemo(
