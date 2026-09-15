@@ -21,6 +21,8 @@ import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useAuth } from "@/components/auth-context";
 import { useThemeMode } from "@/components/theme-context";
+import { SidebarCollapseButton, useSidebarCollapse } from "@/components/sidebar-collapse";
+import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from "@/lib/sidebar-preference";
 import { listCapabilities } from "@/lib/api/capabilities";
 import { getSystemUpdateStatus, type SystemUpdateStatusPayload } from "@/lib/api/system-update";
 import { buildLoginRoute, buildInternalReturnTo } from "@/lib/login-return";
@@ -168,6 +170,7 @@ const AppSider = memo(function AppSider({
   disabledPaths?: Set<string> | null;
   updateAvailable: boolean;
 }) {
+  const { collapsed, toggle } = useSidebarCollapse();
   const visibleNavigation = useMemo(
     () => getPlatformNavigation(userRole, disabledPaths),
     [disabledPaths, userRole],
@@ -201,6 +204,7 @@ const AppSider = memo(function AppSider({
     () =>
       visibleNavigation.map((item) => ({
           key: item.path,
+          title: item.label,
           className: `app-sidebar-menu__section app-sidebar-menu__section--${item.key}`,
           icon: item.key === "platform-settings" ? (
             <Badge dot={updateAvailable} offset={[-2, 2]}>
@@ -224,7 +228,10 @@ const AppSider = memo(function AppSider({
 
   return (
     <Sider
-      width={280}
+      width={SIDEBAR_WIDTH}
+      collapsedWidth={SIDEBAR_COLLAPSED_WIDTH}
+      collapsed={collapsed}
+      trigger={null}
       className="app-sidebar"
       data-shell-region="sidebar"
       theme={mode as "dark" | "light"}
@@ -265,7 +272,7 @@ const AppSider = memo(function AppSider({
             </defs>
           </svg>
         </div>
-        <div>
+        <div className="shell-brand-copy">
           <div
             className="logo-wordmark"
             style={{
@@ -284,12 +291,14 @@ const AppSider = memo(function AppSider({
         </div>
       </div>
       <Menu
+        id="platform-sidebar-menu"
         className="app-sidebar-menu"
         mode="inline"
         theme={mode as "dark" | "light"}
         selectedKeys={visibleNavigation.filter((item) => matchesPath(pathname, item.path)).map((item) => item.path)}
         items={items}
         onClick={({ key }) => {
+          if (collapsed) router.push(key);
           markRouteTransitionQuietWindow();
           logNavigationMetric("sidebar-click", { key, pathname });
         }}
@@ -297,6 +306,7 @@ const AppSider = memo(function AppSider({
           borderInlineEnd: "none",
         }}
       />
+      <SidebarCollapseButton collapsed={collapsed} onClick={toggle} controls="platform-sidebar-menu" />
     </Sider>
   );
 });

@@ -15308,10 +15308,72 @@ body.topology-overview-active {
    Enterprise layout sizing pass
    ============================================================ */
 .app-sidebar.ant-layout-sider {
-  flex: 0 0 248px !important;
-  width: 248px !important;
-  min-width: 248px !important;
-  max-width: 248px !important;
+  transition: width 180ms ease, min-width 180ms ease, max-width 180ms ease, flex-basis 180ms ease;
+}
+
+.app-sidebar .shell-sidebar-toggle {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid var(--kn-border);
+}
+
+.app-sidebar .shell-brand-copy {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.app-sidebar.ant-layout-sider-collapsed .shell-brand-copy,
+.app-sidebar.ant-layout-sider-collapsed .cluster-workspace-brand__back > span:not(.anticon) {
+  display: none;
+}
+
+.app-sidebar.ant-layout-sider-collapsed .logo-wrap.kn-halo-focus {
+  justify-content: center;
+  margin-inline: 8px;
+  padding-inline: 8px !important;
+}
+
+.app-sidebar.ant-layout-sider-collapsed .cluster-workspace-brand {
+  padding-inline: 12px;
+}
+
+.app-sidebar.ant-layout-sider-collapsed .cluster-workspace-brand__back,
+.app-sidebar.ant-layout-sider-collapsed .cluster-workspace-brand__identity,
+.app-sidebar.ant-layout-sider-collapsed .shell-sidebar-toggle {
+  justify-content: center;
+}
+
+.app-sidebar.ant-layout-sider-collapsed .app-sidebar-menu.ant-menu {
+  width: 72px;
+  padding-inline: 4px;
+}
+
+.app-sidebar.ant-layout-sider-collapsed .app-sidebar-menu.ant-menu > .ant-menu-item,
+.app-sidebar.ant-layout-sider-collapsed .app-sidebar-menu.ant-menu > .ant-menu-submenu > .ant-menu-submenu-title {
+  width: 56px;
+  margin-inline: 4px;
+  padding-inline: 18px !important;
+}
+
+@media (max-width: 640px) {
+  .app-header .shell-mobile-nav-trigger.ops-icon-action-button.ant-btn {
+    display: inline-flex;
+    flex: 0 0 32px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar.ant-layout-sider,
+  .app-sidebar .ant-menu,
+  .app-sidebar .ant-menu-item,
+  .app-sidebar .ant-menu-submenu-title,
+  .app-sidebar .ant-menu-sub {
+    transition: none !important;
+    animation: none !important;
+  }
 }
 
 .logo-wrap {
@@ -15418,13 +15480,6 @@ body.topology-overview-active {
 }
 
 @media (max-width: 720px) {
-  .app-sidebar.ant-layout-sider {
-    flex-basis: 252px !important;
-    width: 252px !important;
-    min-width: 252px !important;
-    max-width: 252px !important;
-  }
-
   .app-sidebar-menu.ant-menu .ant-menu-item,
   .app-sidebar-menu.ant-menu .ant-menu-submenu-title {
     height: 42px;

@@ -36,6 +36,8 @@ import { BootstrapScreen } from "@/components/bootstrap-screen";
 import { ClusterWorkspaceProvider } from "@/components/cluster-workspace-context";
 import { OpsIconActionButton } from "@/components/ops";
 import { useThemeMode } from "@/components/theme-context";
+import { SidebarCollapseButton, useSidebarCollapse } from "@/components/sidebar-collapse";
+import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from "@/lib/sidebar-preference";
 import { getClusterDetail } from "@/lib/api/clusters";
 import {
   getClusterIdFromPathname,
@@ -70,6 +72,7 @@ export function ClusterWorkspaceShell({
   const { accessToken, isAuthenticated, isInitializing, username, logout } =
     useAuth();
   const { mode } = useThemeMode();
+  const { collapsed, toggle } = useSidebarCollapse();
   const clusterId = getClusterIdFromPathname(pathname);
   const clusterQuery = useQuery({
     queryKey: [...queryKeys.clusters.detail(clusterId ?? ""), accessToken],
@@ -86,7 +89,8 @@ export function ClusterWorkspaceShell({
   const menuItems = useMemo<MenuProps["items"]>(
     () =>
       navigation.map((section) => ({
-        key: section.key,
+        key: section.items.length === 1 ? section.items[0].href : section.key,
+        title: section.label,
         icon: sectionIcons[section.key] ?? <SettingOutlined />,
         label:
           section.items.length === 1 ? (
@@ -139,17 +143,23 @@ export function ClusterWorkspaceShell({
         .map((section) => section.key),
     [navigation, selectedKeys],
   );
-  const [openKeys, setOpenKeys] = useState<string[]>([]);
-
-  useEffect(() => {
-    setOpenKeys(routeOpenKeys);
-  }, [routeOpenKeys]);
+  const [menuExpansion, setMenuExpansion] = useState<{
+    pathname: string;
+    collapsed: boolean;
+    keys: string[];
+  } | null>(null);
+  const openKeys = menuExpansion?.pathname === pathname && menuExpansion.collapsed === collapsed
+    ? menuExpansion.keys
+    : collapsed ? [] : routeOpenKeys;
   const mobileItems = useMemo<MenuProps["items"]>(
     () =>
       navigation.map((section) => ({
         key: section.items[0]?.href ?? section.key,
         icon: sectionIcons[section.key] ?? <SettingOutlined />,
         label: section.label,
+        children: section.items.length > 1
+          ? section.items.map((item) => ({ key: item.href, label: item.label }))
+          : undefined,
       })),
     [navigation],
   );
@@ -206,7 +216,10 @@ export function ClusterWorkspaceShell({
         style={{ minHeight: "100dvh" }}
       >
         <Sider
-          width={248}
+          width={SIDEBAR_WIDTH}
+          collapsedWidth={SIDEBAR_COLLAPSED_WIDTH}
+          collapsed={collapsed}
+          trigger={null}
           className="app-sidebar cluster-workspace-shell__sidebar"
           theme={mode}
         >
@@ -215,19 +228,21 @@ export function ClusterWorkspaceShell({
               href="/clusters"
               className="cluster-workspace-brand__back"
               aria-label="返回集群列表"
+              title="返回集群列表"
             >
               <ArrowLeftOutlined />
               <span>返回集群列表</span>
             </Link>
             <div className="cluster-workspace-brand__identity">
               <NodeIndexOutlined />
-              <div>
+              <div className="shell-brand-copy">
                 <strong>{clusterName}</strong>
                 <span>单集群工作区</span>
               </div>
             </div>
           </div>
           <Menu
+            id="cluster-sidebar-menu"
             className="app-sidebar-menu cluster-workspace-menu"
             mode="inline"
             theme={mode}
@@ -235,9 +250,13 @@ export function ClusterWorkspaceShell({
             selectedKeys={selectedKeys}
             openKeys={openKeys}
             onOpenChange={(nextKeys) =>
-              setOpenKeys(resolveAccordionOpenKeys(nextKeys, openKeys))
+              setMenuExpansion({ pathname, collapsed, keys: resolveAccordionOpenKeys(nextKeys, openKeys) })
             }
+            onClick={({ key }) => {
+              if (collapsed && key.startsWith("/")) router.push(key);
+            }}
           />
+          <SidebarCollapseButton collapsed={collapsed} onClick={toggle} controls="cluster-sidebar-menu" />
         </Sider>
         <Layout>
           <Header className="app-header cluster-workspace-shell__header">
