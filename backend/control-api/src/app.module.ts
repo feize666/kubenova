@@ -11,6 +11,7 @@ import { ClustersModule } from './clusters/clusters.module';
 import { ConfigsModule } from './configs/configs.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { LogsModule } from './logs/logs.module';
+import { LogCenterModule } from './log-center/log-center.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { MultiClusterModule } from './multicluster/multicluster.module';
 import { NetworkModule } from './network/network.module';
@@ -49,6 +50,7 @@ import { DatabaseModule } from './platform/database/database.module';
     ResourcesModule,
     NamespacesModule,
     LogsModule,
+    LogCenterModule,
     NetworkModule,
     WorkloadsModule,
     StorageModule,
