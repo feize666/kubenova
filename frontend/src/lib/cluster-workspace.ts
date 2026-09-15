@@ -10,6 +10,7 @@ export type ClusterWorkspaceSection =
   | "configs"
   | "topology"
   | "monitoring"
+  | "log-center"
   | "logs";
 
 export type ClusterWorkspaceNavigationItem = {
@@ -56,6 +57,7 @@ export const CLUSTER_WORKSPACE_RESOURCE_PATHS = [
   "observability",
   "observability/configuration",
   "monitoring",
+  "log-center",
   "inspection",
   "aiops",
   "logs",
@@ -270,6 +272,11 @@ export function getClusterWorkspaceNavigation(
       key: "monitoring",
       label: "Prometheus 监控",
       items: [item("monitoring", "Prometheus 监控", "monitoring")],
+    },
+    {
+      key: "log-center",
+      label: "日志中心",
+      items: [item("log-center", "日志中心", "log-center")],
     },
     {
       key: "base-resources",

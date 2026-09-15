@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+test("日志中心为独立一级入口，保留 Pod 日志和终端上下文路由", () => {
+  const section = getClusterWorkspaceNavigation("cluster-a").find((item) => item.key === "log-center");
+  assert.deepEqual(section?.items, [{ key: "log-center", label: "日志中心", href: "/clusters/cluster-a/log-center" }]);
+  assert.equal(isSupportedClusterWorkspaceResource("log-center"), true);
+  assert.equal(isSupportedClusterWorkspaceResource("logs"), true);
+  assert.equal(isSupportedClusterWorkspaceResource("terminal"), true);
+});
+
 // @ts-expect-error -- Node 24 native TypeScript tests require an explicit extension.
 import {
   buildClusterResourceHref,

@@ -59,6 +59,7 @@ const sectionIcons: Record<string, React.ReactNode> = {
   topology: <NodeIndexOutlined />,
   monitoring: <LineChartOutlined />,
   logs: <FileSearchOutlined />,
+  "log-center": <FileSearchOutlined />,
   operations: <ToolOutlined />,
 };
 

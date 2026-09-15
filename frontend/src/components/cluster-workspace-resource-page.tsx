@@ -42,6 +42,7 @@ const resourcePages: Record<ClusterWorkspaceResourcePath, React.ComponentType> =
   observability: dynamic(() => import("@/app/observability/page"), { loading }),
   "observability/configuration": dynamic(() => import("@/app/observability/configuration/page"), { loading }),
   monitoring: dynamic(() => import("@/app/observability/page"), { loading }),
+  "log-center": dynamic(() => import("@/components/log-center-page"), { loading }),
   inspection: dynamic(() => import("@/app/inspection/page"), { loading }),
   aiops: dynamic(() => import("@/app/aiops/page"), { loading }),
   logs: dynamic(() => import("@/app/logs/page"), { loading }),
