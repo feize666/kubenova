@@ -29,7 +29,6 @@ import { SearchAddon } from "@xterm/addon-search";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { useAuth } from "@/components/auth-context";
-import { RuntimeContextBar } from "@/components/runtime-workbench/runtime-context-bar";
 import { RuntimeStatusStrip } from "@/components/runtime-workbench/runtime-status-strip";
 import {
   OpsFilterChip,
@@ -1547,33 +1546,15 @@ export default function LogsPage() {
           </Tooltip>
           <OpsIconActionButton
             icon={<ArrowLeftOutlined />}
-            opsTone="danger"
-            opsVariant="danger"
+            opsVariant="command"
             onClick={exitBack}
           >
-            退出
+            返回资源
           </OpsIconActionButton>
         </Space>
       }
       chips={
-        <Space wrap size={8} className="logs-workbench-chips">
-          <OpsFilterChip tone={effectivePrevious ? "neutral" : "info"}>
-            {effectivePrevious
-              ? "上一个实例"
-              : follow
-                ? "实时跟随"
-                : "跟随已暂停"}
-          </OpsFilterChip>
-          <OpsFilterChip tone={isFollowingNow ? "success" : "warning"}>
-            {isFollowingNow ? "结束时间=现在，跟随当前时间" : "固定结束时间"}
-          </OpsFilterChip>
-          <OpsFilterChip tone="neutral">{selectedTimeLabel}</OpsFilterChip>
-          <OpsFilterChip tone="info">
-            {tailLines === -1 ? "全部行" : `${tailLines} 行`}
-          </OpsFilterChip>
-          {severity.length > 0 ? (
-            <OpsFilterChip tone="warning">{severity.join(" / ")}</OpsFilterChip>
-          ) : null}
+        previousUnavailable || reconnectState ? <Space wrap size={8} className="logs-workbench-chips">
           {previousUnavailable ? (
             <OpsFilterChip tone="warning">
               上一个实例不存在，已回退到当前实例
@@ -1584,7 +1565,7 @@ export default function LogsPage() {
               重连 {reconnectState.attempt}/{reconnectState.maxAttempts}
             </OpsFilterChip>
           ) : null}
-        </Space>
+        </Space> : undefined
       }
       error={
         streamError ? (
@@ -1597,47 +1578,12 @@ export default function LogsPage() {
         ) : undefined
       }
     >
-      <RuntimeContextBar>
-        <span>{scopeSubtitle}</span>
-        <span aria-label="日志输出状态">{connectionMeta.text}</span>
-      </RuntimeContextBar>
-      <RuntimeStatusStrip tone={connectionMeta.tone}>
-        <span>{streamModeLabel}</span>
-        <span>{filteredLineCount} 条可见日志</span>
-      </RuntimeStatusStrip>
       <Space
         orientation="vertical"
         size={12}
         className="logs-workbench-stack"
         style={{ width: "100%" }}
       >
-        <div className="logs-signal-row" aria-label="日志流状态">
-          <div
-            className={`logs-signal-card logs-signal-card--${connectionMeta.tone}`}
-          >
-            <span>Stream</span>
-            <strong>{connectionMeta.text}</strong>
-          </div>
-          <div className="logs-signal-card">
-            <span>Mode</span>
-            <strong>{streamModeLabel}</strong>
-          </div>
-          <div className="logs-signal-card">
-            <span>Lines</span>
-            <strong>
-              {filteredLineCount}/{rawLines.length}
-            </strong>
-          </div>
-          <div className="logs-signal-card">
-            <span>Last</span>
-            <strong>{lastLogLabel}</strong>
-          </div>
-          <div className="logs-signal-card">
-            <span>Refresh</span>
-            <strong>{refreshLabel}</strong>
-          </div>
-        </div>
-
         <OpsSurface
           variant="toolbar"
           padding="sm"
@@ -1649,6 +1595,7 @@ export default function LogsPage() {
                 <div className="headlamp-log-control">
                   <span>容器</span>
                   <Select
+                    aria-label="容器"
                     value={container || undefined}
                     onChange={(value) => {
                       setContainer(value);
@@ -1818,13 +1765,6 @@ export default function LogsPage() {
                             </>
                           ) : null}
                         </div>
-                        <Typography.Text
-                          type="secondary"
-                          className="headlamp-time-help"
-                        >
-                          地址栏使用 timeMode/from/to/refreshIntervalSeconds；旧
-                          sinceSeconds/sinceTime/untilTime 仍可读取。
-                        </Typography.Text>
                       </div>
                     }
                   >
@@ -1905,6 +1845,7 @@ export default function LogsPage() {
                   <span>级别</span>
                   <Select
                     mode="multiple"
+                    aria-label="日志级别"
                     maxTagCount={2}
                     allowClear
                     placeholder="全部"
@@ -2041,43 +1982,6 @@ export default function LogsPage() {
           <div
             className={`logs-terminal-frame logs-terminal-frame--${logsFrameState}`}
           >
-            <div className="logs-terminal-titlebar">
-              <div className="logs-terminal-dots">
-                <span />
-                <span />
-                <span />
-              </div>
-              <div className="logs-terminal-title">
-                {clusterDisplayName} · {pod || "pod"}.{namespace || "default"}
-              </div>
-              <div
-                className={`logs-terminal-state logs-terminal-state--${connectionMeta.tone}`}
-              >
-                {connectionMeta.text}
-              </div>
-            </div>
-            <div className="logs-terminal-telemetry" aria-label="日志终端状态">
-              <div
-                className={`logs-terminal-telemetry__item logs-terminal-telemetry__item--${connectionMeta.tone}`}
-              >
-                <span>Stream</span>
-                <strong>{connectionMeta.text}</strong>
-              </div>
-              <div className="logs-terminal-telemetry__item">
-                <span>Mode</span>
-                <strong>{streamModeLabel}</strong>
-              </div>
-              <div className="logs-terminal-telemetry__item">
-                <span>Lines</span>
-                <strong>
-                  {filteredLineCount}/{rawLines.length}
-                </strong>
-              </div>
-              <div className="logs-terminal-telemetry__item">
-                <span>Container</span>
-                <strong>{container || "-"}</strong>
-              </div>
-            </div>
             <div className="logs-terminal-host" ref={terminalHostRef} />
             {emptyStateHint.visible ? (
               <div className="logs-empty-hint">
@@ -2100,6 +2004,10 @@ export default function LogsPage() {
           ) : null}
         </OpsSurface>
       </Space>
+      <RuntimeStatusStrip tone={connectionMeta.tone}>
+        <span>{streamModeLabel} · {filteredLineCount}/{rawLines.length} 条日志</span>
+        <span>最近输出 {lastLogLabel} · 刷新 {refreshLabel}</span>
+      </RuntimeStatusStrip>
 
       <style jsx>{`
         :global(html[data-theme="light"]) {

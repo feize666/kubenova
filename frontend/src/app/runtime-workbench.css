@@ -41,8 +41,19 @@
 
 .runtime-status-strip {
   justify-content: space-between;
+  flex-wrap: wrap;
+  min-width: 0;
+  border: 0;
+  border-top: 1px solid var(--kn-border, #d8e0ea);
+  border-radius: 0;
+  background: transparent;
   color: var(--kn-text-secondary, #526176);
   font-size: 12px;
+}
+
+.runtime-status-strip > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .runtime-status-strip--success { border-color: color-mix(in srgb, #16a34a 35%, var(--kn-border, #d8e0ea)); }

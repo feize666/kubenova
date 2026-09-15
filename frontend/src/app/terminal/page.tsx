@@ -4,12 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
-  CheckCircleOutlined,
   CloseCircleOutlined,
   ArrowLeftOutlined,
-  ColumnWidthOutlined,
+  ClearOutlined,
   CopyOutlined,
-  LoadingOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { App, Select, Space, Tooltip, Typography, theme } from "antd";
@@ -35,11 +33,9 @@ import {
   type TerminalParsedMessage,
 } from "@/lib/ws/terminal";
 import { useAuth } from "@/components/auth-context";
-import { RuntimeContextBar } from "@/components/runtime-workbench/runtime-context-bar";
 import { RuntimeStatusStrip } from "@/components/runtime-workbench/runtime-status-strip";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import {
-  OpsFilterChip,
   OpsFrameShell,
   OpsIconActionButton,
   OpsStatusTag,
@@ -283,7 +279,7 @@ function mapCloseError(input: {
 export default function TerminalPage() {
   const router = useRouter();
   const { token } = theme.useToken();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const { accessToken, isInitializing } = useAuth();
   const workspace = useOptionalClusterWorkspace();
   const searchParams = useSearchParams();
@@ -583,10 +579,18 @@ export default function TerminalPage() {
   };
 
   const handleDisconnectAndReturn = () => {
-    disconnectTerminal(true);
-    if (fallbackReturnTo) {
-      router.replace(fallbackReturnTo);
-    }
+    const leave = () => {
+      disconnectTerminal(true);
+      if (fallbackReturnTo) router.replace(fallbackReturnTo);
+    };
+    if (status !== "connected" && status !== "connecting") return leave();
+    modal.confirm({
+      title: "断开终端并返回？",
+      content: "当前终端连接将关闭。容器内进程是否继续运行取决于命令本身。",
+      okText: "断开并返回",
+      cancelText: "继续操作",
+      onOk: leave,
+    });
   };
 
   const explainCreateError = (error: unknown): RuntimeConnectError => {
@@ -945,6 +949,16 @@ export default function TerminalPage() {
   }, [searchParams]);
 
   useEffect(() => {
+    if (status !== "connected" && status !== "connecting") return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [status]);
+
+  useEffect(() => {
     clearReconnectTimer();
     clearConnectTimeout();
     generationRef.current += 1;
@@ -1029,16 +1043,6 @@ export default function TerminalPage() {
         ? "non-reconnectable"
         : status;
   const visualTone = VISUAL_STATUS_TONE[visualState];
-  const visualToneClass =
-    visualTone === "success"
-      ? "success"
-      : visualTone === "warning"
-        ? "warning"
-        : visualTone === "danger"
-          ? "danger"
-          : visualTone === "processing"
-            ? "processing"
-            : "neutral";
   const gatewayLabel = sessionInfo?.gatewayWsUrl ? "已绑定" : "未创建";
   const reconnectLocked =
     blockReconnectRef.current || isNonReconnectableVisual || isExpiredVisual;
@@ -1060,6 +1064,7 @@ export default function TerminalPage() {
           <Space wrap size={8} className="terminal-workbench-toolbar">
             <span className="terminal-workbench-toolbar__select">
               <Select
+                aria-label="容器"
                 value={effectiveContainer || undefined}
                 className="terminal-workbench-container-select ops-control-select"
                 placeholder="选择容器"
@@ -1105,12 +1110,11 @@ export default function TerminalPage() {
               </Tooltip>
               <Tooltip title="退出终端">
                 <OpsIconActionButton
-                  opsTone="danger"
                   opsVariant="command"
                   icon={<ArrowLeftOutlined />}
                   onClick={() => handleDisconnectAndReturn()}
                 >
-                  退出
+                  返回资源
                 </OpsIconActionButton>
               </Tooltip>
             </span>
@@ -1118,7 +1122,7 @@ export default function TerminalPage() {
               <Tooltip title="清屏">
                 <OpsIconActionButton
                   opsVariant="icon"
-                  icon={<ColumnWidthOutlined />}
+                  icon={<ClearOutlined />}
                   aria-label="清屏"
                   onClick={clearTerminal}
                 />
@@ -1134,67 +1138,6 @@ export default function TerminalPage() {
             </span>
           </Space>
         }
-        chips={
-          <>
-            <OpsFilterChip
-              tone={
-                visualTone === "danger"
-                  ? "danger"
-                  : visualTone === "warning"
-                    ? "warning"
-                    : visualTone === "success"
-                      ? "success"
-                      : "info"
-              }
-            >
-              连接 {VISUAL_STATUS_LABEL[visualState]}
-            </OpsFilterChip>
-            <OpsFilterChip tone="neutral">
-              Cluster {clusterDisplayName}
-            </OpsFilterChip>
-            <OpsFilterChip tone="neutral">
-              Namespace {targetBase.namespace || "-"}
-            </OpsFilterChip>
-            <OpsFilterChip tone="neutral">
-              Pod {targetBase.pod || "-"}
-            </OpsFilterChip>
-            <OpsFilterChip tone="neutral">
-              Container {effectiveContainer || "-"}
-            </OpsFilterChip>
-            <Tooltip
-              title={
-                sessionInfo?.gatewayWsUrl
-                  ? sanitizeWsUrlForDisplay(sessionInfo.gatewayWsUrl)
-                  : "未创建"
-              }
-            >
-              <OpsFilterChip
-                tone={sessionInfo?.gatewayWsUrl ? "success" : "info"}
-              >
-                Gateway {gatewayLabel}
-              </OpsFilterChip>
-            </Tooltip>
-            <OpsFilterChip tone={isExpiredVisual ? "danger" : "neutral"}>
-              TTL {formatExpiry(sessionInfo?.expiresAtMs)}
-            </OpsFilterChip>
-            <OpsFilterChip tone={sessionInfo?.sessionId ? "neutral" : "info"}>
-              Session{" "}
-              {sessionInfo?.sessionId
-                ? sessionInfo.sessionId.slice(0, 8)
-                : "未创建"}
-            </OpsFilterChip>
-            {reconnectLocked ? (
-              <OpsFilterChip tone="warning">不可重连</OpsFilterChip>
-            ) : null}
-            {podPhase ? (
-              <OpsFilterChip
-                tone={podPhase === "Running" ? "success" : "warning"}
-              >
-                Pod {podPhase}
-              </OpsFilterChip>
-            ) : null}
-          </>
-        }
         warning={
           missingParams.length > 0 ? (
             <Typography.Text>{missingText}</Typography.Text>
@@ -1204,74 +1147,19 @@ export default function TerminalPage() {
           lastWarning ? <Typography.Text>{lastWarning}</Typography.Text> : null
         }
       >
-        <RuntimeContextBar>
-          <span>{clusterDisplayName}</span>
-          <span>{targetBase.namespace || "-"}/{targetBase.pod || "-"}</span>
-          <span>{effectiveContainer || "未选择容器"}</span>
-        </RuntimeContextBar>
-        <RuntimeStatusStrip tone={visualTone}>
-          <span>{VISUAL_STATUS_LABEL[visualState]}</span>
-          <span>{gatewayLabel} · TTL {formatExpiry(sessionInfo?.expiresAtMs)}</span>
-        </RuntimeStatusStrip>
         <div
           className={`terminal-workbench-stage terminal-workbench-stage--${visualState}`}
         >
-          <div className="terminal-workbench-titlebar">
-            <div className="terminal-workbench-title-group">
-              <span className="terminal-workbench-dot terminal-workbench-dot--warn" />
-              <span className="terminal-workbench-dot terminal-workbench-dot--success" />
-              <span className="terminal-workbench-dot terminal-workbench-dot--info" />
-              <Typography.Text className="terminal-workbench-title">
-                {clusterDisplayName} · {targetBase.pod || "terminal"}.
-                {targetBase.namespace || "default"}
-              </Typography.Text>
-            </div>
-            <div className="terminal-workbench-live-state">
-              {visualState === "connecting" ? (
-                <LoadingOutlined className="terminal-workbench-status-icon terminal-workbench-status-icon--processing" />
-              ) : null}
-              {visualState === "connected" ? (
-                <CheckCircleOutlined className="terminal-workbench-status-icon terminal-workbench-status-icon--success" />
-              ) : null}
-              {visualState !== "connecting" && visualState !== "connected" ? (
-                <CloseCircleOutlined
-                  className={`terminal-workbench-status-icon terminal-workbench-status-icon--${visualToneClass}`}
-                />
-              ) : null}
-              <OpsStatusTag tone={visualTone}>
-                {VISUAL_STATUS_LABEL[visualState]}
-              </OpsStatusTag>
-            </div>
-          </div>
-
-          <div
-            className="terminal-workbench-telemetry"
-            aria-label="终端会话状态"
-          >
-            <div
-              className={`terminal-workbench-telemetry__item terminal-workbench-telemetry__item--${visualToneClass}`}
-            >
-              <span>Link</span>
-              <strong>{VISUAL_STATUS_LABEL[visualState]}</strong>
-            </div>
-            <div className="terminal-workbench-telemetry__item">
-              <span>Gateway</span>
-              <strong>{gatewayLabel}</strong>
-            </div>
-            <div className="terminal-workbench-telemetry__item">
-              <span>TTL</span>
-              <strong>{formatExpiry(sessionInfo?.expiresAtMs)}</strong>
-            </div>
-            <div className="terminal-workbench-telemetry__item">
-              <span>Target</span>
-              <strong>{effectiveContainer || "-"}</strong>
-            </div>
-          </div>
-
           <div className="terminal-workbench-terminal-area">
             <div ref={terminalHostRef} className="terminal-xterm-host" />
           </div>
         </div>
+        <RuntimeStatusStrip tone={visualTone}>
+          <span>{effectiveContainer || "未选择容器"}{podPhase ? ` · ${podPhase}` : ""}</span>
+          <Tooltip title={sessionInfo?.gatewayWsUrl ? sanitizeWsUrlForDisplay(sessionInfo.gatewayWsUrl) : "未创建会话"}>
+            <span>网关 {gatewayLabel} · 有效期 {formatExpiry(sessionInfo?.expiresAtMs)} · 会话 {sessionInfo?.sessionId?.slice(0, 8) || "未创建"}{reconnectLocked ? " · 不可重连" : ""}</span>
+          </Tooltip>
+        </RuntimeStatusStrip>
       </OpsFrameShell>
       <style jsx global>{`
         .terminal-workbench-shell.ops-frame-shell {
@@ -1461,7 +1349,7 @@ export default function TerminalPage() {
         .terminal-workbench-stage {
           position: relative;
           display: grid;
-          grid-template-rows: auto auto minmax(0, 1fr);
+          grid-template-rows: minmax(0, 1fr);
           min-height: 70vh;
           overflow: hidden;
           border: 1px solid var(--terminal-workbench-stage-border);
