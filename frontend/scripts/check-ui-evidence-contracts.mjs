@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const evidenceRoot = "/case/temp/kubenova-ui-ux-pro-max";
 const failures = [];
-const requireGeneratedEvidence = process.env.CHECK_UI_EVIDENCE_REQUIRE_IMAGES === "1";
+const requireGeneratedEvidence =
+  process.env.CHECK_UI_EVIDENCE_REQUIRE_IMAGES === "1";
 
 function read(path) {
   return readFileSync(join(root, path), "utf8");
@@ -39,7 +40,9 @@ for (const filename of expectedImages) {
   }
   const size = statSync(path).size;
   if (size < 100_000) {
-    failures.push(`${path}: generated UI image unexpectedly small (${size} bytes)`);
+    failures.push(
+      `${path}: generated UI image unexpectedly small (${size} bytes)`,
+    );
   }
 }
 
@@ -62,20 +65,34 @@ if (!existsSync(evidenceReport)) {
   }
 }
 
-requireTokens("../.codex/specs/full-site-ui-refresh/design.md", [
-  "gpt-image2_20260608_093011_1.png",
-  "gpt-image2_20260608_093410_1.png",
-  "gpt-image2_20260608_094034_1.png",
-  "gpt-image2_20260608_094404_1.png",
-  "/case/temp/kubenova-ui-ux-pro-max/evidence.md",
-]);
+// Design evidence is generated outside the repository. It is useful when
+// present, but a clean checkout must not fail because a local design scratch
+// directory was intentionally excluded from version control.
+const legacyDesignSpec = join(
+  root,
+  "../.codex/specs/full-site-ui-refresh/design.md",
+);
+if (existsSync(legacyDesignSpec)) {
+  const design = readFileSync(legacyDesignSpec, "utf8");
+  for (const token of [
+    "gpt-image2_20260608_093011_1.png",
+    "gpt-image2_20260608_093410_1.png",
+    "gpt-image2_20260608_094034_1.png",
+    "gpt-image2_20260608_094404_1.png",
+    "/case/temp/kubenova-ui-ux-pro-max/evidence.md",
+  ]) {
+    if (!design.includes(token)) {
+      failures.push(`${legacyDesignSpec}: missing ${token}`);
+    }
+  }
+}
 
 requireTokens("scripts/ui-tech-smoke.mjs", [
   "UI_TECH_SAVE_ARTIFACTS",
   "UI_TECH_ARTIFACT_DIR",
   "UI_TECH_THEMES",
   "--themes black,white",
-  "name: \"tablet\", width: 820, height: 1180",
+  'name: "tablet", width: 820, height: 1180',
   "screenshotFilename",
   "<route>__<theme>__<viewport>__<state>",
   "/case/temp/kubenova/ui-tech-smoke",
@@ -85,25 +102,28 @@ requireTokens("scripts/ui-tech-smoke.mjs", [
   "create-modal",
   "ai-settings-drawer",
   "ai-alert-drawer",
-  "id: \"topology\"",
+  'id: "topology"',
   "/network/topology?clusterId=local&namespace=default",
   ".resource-map-canvas-state",
-  "id: \"aiops\"",
-  "path: \"/aiops\"",
+  'id: "aiops"',
+  'path: "/aiops"',
   "事故队列",
-  "id: \"helm-releases\"",
+  'id: "helm-releases"',
   "/workloads/helm?clusterId=local&namespace=default",
-  "id: \"helm-repositories\"",
+  'id: "helm-repositories"',
   "/workloads/helm/repositories?clusterId=local",
 ]);
 
 requireTokens("src/app/page.tsx", [
+  'data-node-status={internet.status ?? "unknown"}',
+  'className={riskSummary.critical > 0 ? "is-up" : "is-flat"}',
+  'className={riskSummary.unhealthy > 0 ? "is-up" : "is-flat"}',
+]);
+
+requireTokens("src/components/overview/overview-risk-panel.tsx", [
   "data-ops-overview-card",
   "data-state={state}",
   "ops-surface--panel",
-  "data-node-status={internet.status ?? \"unknown\"}",
-  "className={riskSummary.critical > 0 ? \"is-up\" : \"is-flat\"}",
-  "className={riskSummary.unhealthy > 0 ? \"is-up\" : \"is-flat\"}",
 ]);
 
 requireTokens("src/app/globals.css", [
@@ -123,7 +143,7 @@ requireTokens("src/app/globals.css", [
   ".ops-overview-header",
   ".ops-overview-scope-strip",
   ".ops-overview-grid",
-  ".ops-overview-card[data-state=\"degraded\"]",
+  '.ops-overview-card[data-state="degraded"]',
   ".ops-overview-scope-cell--critical",
   ".ops-overview-scope-cell--warning",
   ".ops-overview-trend__point:focus-visible",
@@ -148,4 +168,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("[check-ui-evidence-contracts] PASS: generated images, evidence report, retry prompts, and smoke artifact contracts verified.");
+console.log(
+  "[check-ui-evidence-contracts] PASS: generated images, evidence report, retry prompts, and smoke artifact contracts verified.",
+);

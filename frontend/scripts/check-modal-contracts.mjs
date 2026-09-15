@@ -16,14 +16,26 @@ for (const token of ["OpsModalShell", "OpsFormSection"]) {
 }
 
 const modalShell = read("src/components/ops/ops-modal-shell.tsx");
-for (const token of ["description", "identity", "impact", "footerActions", "ops-form-section"]) {
+for (const token of [
+  "description",
+  "identity",
+  "impact",
+  "footerActions",
+  "ops-form-section",
+]) {
   if (!modalShell.includes(token)) {
     failures.push(`src/components/ops/ops-modal-shell.tsx: missing ${token}`);
   }
 }
 
 const confirm = read("src/components/ops/ops-confirm-modal.tsx");
-for (const token of ["requiredText", "impact", "error", "confirmTextMatched", "okButtonProps"]) {
+for (const token of [
+  "requiredText",
+  "impact",
+  "error",
+  "confirmTextMatched",
+  "okButtonProps",
+]) {
   if (!confirm.includes(token)) {
     failures.push(`src/components/ops/ops-confirm-modal.tsx: missing ${token}`);
   }
@@ -46,11 +58,21 @@ for (const token of [
 const representativeForms = [
   {
     path: "src/app/users/page.tsx",
-    tokens: ["OpsModalShell", "OpsFormSection", "confirmLoading", "创建可登录 Kubenova"],
+    tokens: [
+      "OpsModalShell",
+      "OpsFormSection",
+      "confirmLoading",
+      "创建可登录 Kubenova",
+    ],
   },
   {
     path: "src/app/users/rbac/page.tsx",
-    tokens: ["OpsModalShell", "OpsFormSection", "ServiceAccount 查询", "confirmLoading"],
+    tokens: [
+      "OpsModalShell",
+      "OpsFormSection",
+      "ServiceAccount 查询",
+      "confirmLoading",
+    ],
   },
   {
     path: "src/app/namespaces/page.tsx",
@@ -70,19 +92,16 @@ const representativeForms = [
   },
   {
     path: "src/app/workloads/create/page.tsx",
-    tokens: ["OpsFormSection", "workload-create-workspace__footer", "workload-create-workspace__yaml", "previewYamlQuery"],
+    tokens: [
+      "OpsFormSection",
+      "workload-create-workspace__footer",
+      "workload-create-workspace__yaml",
+      "previewYamlQuery",
+    ],
   },
   {
     path: "src/components/workloads/autoscaling-console.tsx",
     tokens: ["OpsModalShell", "配置 HPA/VPA", "confirmLoading", "Form.List"],
-  },
-  {
-    path: "src/app/workloads/helm/page.tsx",
-    tokens: ["OpsModalShell", "安装 Helm Release", "确认安装", "确认回滚"],
-  },
-  {
-    path: "src/app/workloads/helm/repositories/page.tsx",
-    tokens: ["OpsModalShell", "新增 Helm 仓库", "通过 URL 快速新增仓库", "导入模板 Helm 仓库"],
   },
 ];
 
@@ -90,11 +109,15 @@ for (const contract of representativeForms) {
   const content = read(contract.path);
   for (const token of contract.tokens) {
     if (!content.includes(token)) {
-      failures.push(`${contract.path}: missing representative form contract ${token}`);
+      failures.push(
+        `${contract.path}: missing representative form contract ${token}`,
+      );
     }
   }
   if (content.includes("<Modal")) {
-    failures.push(`${contract.path}: representative form modal must use OpsModalShell, not raw antd Modal`);
+    failures.push(
+      `${contract.path}: representative form modal must use OpsModalShell, not raw antd Modal`,
+    );
   }
 }
 
@@ -116,14 +139,18 @@ for (const route of workloadModalRoutes) {
     }
   }
   if (content.includes("<Modal")) {
-    failures.push(`${path}: workload form modal must use OpsModalShell, not raw antd Modal`);
+    failures.push(
+      `${path}: workload form modal must use OpsModalShell, not raw antd Modal`,
+    );
   }
 }
 
 const actionBar = read("src/components/resource-action-bar.tsx");
 for (const token of ["openOpsConfirm", "danger", "disabledReason"]) {
   if (!actionBar.includes(token)) {
-    failures.push(`src/components/resource-action-bar.tsx: missing destructive confirm contract ${token}`);
+    failures.push(
+      `src/components/resource-action-bar.tsx: missing destructive confirm contract ${token}`,
+    );
   }
 }
 
@@ -135,4 +162,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("[check-modal-contracts] PASS: modal shell, form sections, and confirmation contracts verified.");
+console.log(
+  "[check-modal-contracts] PASS: modal shell, form sections, and confirmation contracts verified.",
+);

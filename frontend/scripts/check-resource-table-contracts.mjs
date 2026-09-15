@@ -35,10 +35,19 @@ for (const token of [
   }
 }
 
-for (const route of ["src/app/aiops/page.tsx", "src/app/observability/page.tsx"]) {
+for (const route of [
+  "src/app/aiops/page.tsx",
+  "src/app/observability/page.tsx",
+]) {
   const source = read(route);
-  if (!source.includes("ResourceTable")) {
-    failures.push(`${route}: route-local tables were not normalized to ResourceTable`);
+  // Some routes are intentionally thin aliases (for example the legacy AIOps
+  // path delegates to the AI assistant workbench). Only enforce ResourceTable
+  // when a route actually renders a local Ant Design table.
+  const rendersLocalTable = /<Table(?:\s|<|>)/.test(source);
+  if (rendersLocalTable && !source.includes("ResourceTable")) {
+    failures.push(
+      `${route}: route-local tables were not normalized to ResourceTable`,
+    );
   }
   if (/import\s*\{[^}]*\bTable\b[^}]*\}\s*from\s*"antd"/s.test(source)) {
     failures.push(`${route}: still imports antd Table`);
@@ -73,4 +82,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("[check-resource-table-contracts] PASS: ResourceTable states, route normalization, and table CSS contracts verified.");
+console.log(
+  "[check-resource-table-contracts] PASS: ResourceTable states, route normalization, and table CSS contracts verified.",
+);

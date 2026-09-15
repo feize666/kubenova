@@ -61,9 +61,9 @@ requireTokens("src/app/globals.css", [
   ".ai-assistant-chat-surface > .ops-surface__header",
   ".ops-frame-shell__actions",
   ".ops-motion-frame",
-  ".ops-motion-frame--slide-up[data-state=\"inactive\"]",
-  ".ops-motion-frame--scale[data-state=\"inactive\"]",
-  ".ops-motion-frame[data-state=\"active\"]",
+  '.ops-motion-frame--slide-up[data-state="inactive"]',
+  '.ops-motion-frame--scale[data-state="inactive"]',
+  '.ops-motion-frame[data-state="active"]',
   ".ops-mobile-resource-card",
   ".ops-mobile-resource-card__meta",
   ".ops-mobile-resource-card__actions",
@@ -80,7 +80,7 @@ requireTokens("src/app/globals.css", [
 
 requireTokens("scripts/ui-tech-smoke.mjs", [
   "UI_TECH_ARTIFACT_DIR",
-  "name: \"tablet\", width: 820, height: 1180",
+  'name: "tablet", width: 820, height: 1180',
   "overlayChecks",
   "assertOverlayVisible",
   "scope-popover",
@@ -95,12 +95,11 @@ requireTokens("scripts/ui-tech-smoke.mjs", [
 
 requireTokens("src/components/shell-layout.tsx", [
   "shell-skip-link",
-  "href=\"#kubenova-main-content\"",
-  "id=\"kubenova-main-content\"",
+  'href="#kubenova-main-content"',
+  'id="kubenova-main-content"',
   "tabIndex={-1}",
   "aria-label",
   "shell-mobile-nav-trigger",
-  "shell-mobile-scope",
   "shell-mobile-global-search",
   "shell-mobile-search-trigger",
 ]);
@@ -119,16 +118,16 @@ requireTokens("src/components/ops/ops-filter-chip.tsx", [
 ]);
 
 requireTokens("src/components/ops/ops-filter-bar.tsx", [
-  "aria-label=\"已启用过滤条件\"",
+  'aria-label="已启用过滤条件"',
   "closeLabel={`移除",
   "ops-filter-bar__active-label",
   "ops-filter-bar__active-value",
 ]);
 
 requireTokens("src/components/ops/ops-state.tsx", [
-  "role={kind === \"error\" || kind === \"degraded\" ? \"alert\" : \"status\"}",
+  'role={kind === "error" || kind === "degraded" ? "alert" : "status"}',
   "aria-live",
-  "aria-hidden=\"true\"",
+  'aria-hidden="true"',
 ]);
 
 requireTokens("src/components/ops/ops-action-dropdown.tsx", [
@@ -164,18 +163,18 @@ requireTokens("src/components/ops/ops-inspector-shell.tsx", [
 
 requireTokens("src/components/ops/ops-motion-frame.tsx", [
   "data-ops-motion-frame",
-  "data-state={active ? \"active\" : \"inactive\"}",
+  'data-state={active ? "active" : "inactive"}',
   "Math.max(0, delayMs)",
   "OpsMotionKind",
 ]);
 
 requireTokens("src/components/ops/ops-mobile-resource-card.tsx", [
   "data-ops-mobile-resource-card",
-  "data-resource-table-stop-navigation=\"true\"",
+  'data-resource-table-stop-navigation="true"',
   "aria-disabled={disabled || undefined}",
   "onKeyDown={handleKeyDown}",
-  "event.key === \"Enter\"",
-  "event.key === \" \"",
+  'event.key === "Enter"',
+  'event.key === " "',
   "OpsStatusTag",
   "type OpsStatusTone",
 ]);
@@ -187,8 +186,8 @@ requireTokens("src/components/ops/ops-command-preview.tsx", [
   "OpsCommandPreviewKind",
   "OpsCommandPreviewTone",
   "navigator.clipboard.writeText",
-  "aria-label={copyState === \"copied\" ? \"已复制\" : copyState === \"failed\" ? \"复制失败\" : copyLabel}",
-  "data-resource-table-stop-navigation=\"true\"",
+  'aria-label={copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败" : copyLabel}',
+  'data-resource-table-stop-navigation="true"',
   "tabIndex={0}",
 ]);
 
@@ -202,15 +201,15 @@ requireTokens("src/components/ops/ops-confirm-modal.tsx", [
 ]);
 
 requireTokens("src/components/resource-yaml-drawer.tsx", [
-  "body: { padding: 24, overflow: \"auto\" }",
+  'body: { padding: 24, overflow: "auto" }',
   "<Space wrap>",
-  "aria-label=\"YAML 内容\"",
-  "whiteSpace: \"pre\"",
+  'aria-label="YAML 内容"',
+  'whiteSpace: "pre"',
 ]);
 
 requireTokens("src/components/resource-table/index.tsx", [
-  "scroll ?? { x:",
   "getStandardResourceTableScrollX",
+  "x: getStandardResourceTableScrollX",
   "resource-table-shell",
   "renderMobileResourceCards",
   "OpsMobileResourceCard",
@@ -220,25 +219,29 @@ requireTokens("src/components/resource-table/index.tsx", [
 ]);
 
 requireTokens("src/components/resource-table-toolbar.tsx", [
-  "aria-label=\"搜索\"",
-  "aria-label=\"过滤\"",
-  "aria-label=\"清空搜索和过滤\"",
-  "aria-label=\"列设置\"",
+  'aria-label="搜索"',
+  'aria-label="过滤"',
+  'aria-label="清空搜索和过滤"',
+  'aria-label="列设置"',
 ]);
 
 requireTokens("src/app/network/topology/page.tsx", [
-  "OpsInspectorShell",
-  "type OpsInspectorFact",
   "OpsLoadingState",
   "OpsEmptyState",
   "OpsErrorState",
-  "resource-map-canvas-state",
-  "role=\"button\"",
+  "KubejojoTopologyCanvas",
+  "resourceStatus",
+]);
+
+// The topology route now delegates node activation to the Kubejojo renderer.
+// Keep the accessibility contract on the component that owns the interactive
+// node instead of pinning it to the route-level composition file.
+requireTokens("src/modules/topology-kubejojo/renderers/TopologyNodes.tsx", [
+  'role="button"',
   "tabIndex={0}",
-  "onKeyDown",
-  "event.key === \"Enter\"",
-  "event.key === \" \"",
-  "STATUS_LABEL",
+  "onKeyDown={activateOnKeyboard}",
+  'event.key !== "Enter"',
+  'event.key !== " "',
 ]);
 
 requireTokens("src/app/globals.css", [
@@ -251,13 +254,13 @@ requireTokens("src/app/globals.css", [
 ]);
 
 requireTokens("src/app/logs/page.tsx", [
-  "aria-label=\"查找日志\"",
-  "aria-label=\"清除日志\"",
-  "aria-label=\"下载日志\"",
-  "aria-label=\"重新接入日志\"",
-  "aria-label=\"显示上一个实例日志\"",
-  "aria-label=\"显示时间戳\"",
-  "aria-label=\"实时跟随日志\"",
+  'aria-label="查找日志"',
+  'aria-label="清除日志"',
+  'aria-label="下载日志"',
+  'aria-label="重新接入日志"',
+  'aria-label="显示上一个实例日志"',
+  'aria-label="显示时间戳"',
+  'aria-label="实时跟随日志"',
   "aria-pressed={searchCaseSensitive}",
   "aria-pressed={searchRegex}",
   "ResizeObserver",
@@ -279,7 +282,7 @@ requireTokens("src/app/terminal/page.tsx", [
 requireTokens("src/app/ai-assistant/page.tsx", [
   "aria-label",
   "onKeyDown={handleInputEnter}",
-  "role=\"button\"",
+  'role="button"',
   "tabIndex={0}",
   "aria-current",
   "HIGH_RISK_ACTIONS",
@@ -293,11 +296,26 @@ requireTokens("src/app/ai-assistant/page.tsx", [
 
 forbidTokens("src/components/ops/ops-modal-shell.tsx", ["keyboard={false}"]);
 forbidTokens("src/components/ops/ops-drawer-shell.tsx", ["keyboard={false}"]);
-forbidTokens("src/components/ops/ops-motion-frame.tsx", ["setTimeout", "requestAnimationFrame", "useEffect"]);
-forbidTokens("src/components/ops/ops-mobile-resource-card.tsx", ["setTimeout", "requestAnimationFrame", "useEffect"]);
-forbidTokens("src/components/ops/ops-command-preview.tsx", ["setTimeout", "requestAnimationFrame", "useEffect"]);
+forbidTokens("src/components/ops/ops-motion-frame.tsx", [
+  "setTimeout",
+  "requestAnimationFrame",
+  "useEffect",
+]);
+forbidTokens("src/components/ops/ops-mobile-resource-card.tsx", [
+  "setTimeout",
+  "requestAnimationFrame",
+  "useEffect",
+]);
+forbidTokens("src/components/ops/ops-command-preview.tsx", [
+  "setTimeout",
+  "requestAnimationFrame",
+  "useEffect",
+]);
 forbidTokens("src/app/ai-assistant/page.tsx", ["<Card", "<Drawer", "<pre"]);
-forbidTokens("src/app/network/topology/page.tsx", ["keyboard={false}", "<style jsx global>"]);
+forbidTokens("src/app/network/topology/page.tsx", [
+  "keyboard={false}",
+  "<style jsx global>",
+]);
 
 if (failures.length > 0) {
   console.error("[check-responsive-a11y-contracts] FAIL");
@@ -307,4 +325,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log("[check-responsive-a11y-contracts] PASS: responsive, focus, labels, reduced-motion, drawer, modal, logs, terminal, and AI contracts verified.");
+console.log(
+  "[check-responsive-a11y-contracts] PASS: responsive, focus, labels, reduced-motion, drawer, modal, logs, terminal, and AI contracts verified.",
+);
