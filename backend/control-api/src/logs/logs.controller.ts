@@ -6,10 +6,13 @@ import {
   Query,
   Req,
   UseGuards,
+  ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard } from '../common/auth.guard';
 import { ClusterAccessService, type ClusterAccessSubject } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
 import {
   LogsService,
   type LogsQueryRequest,
@@ -22,14 +25,25 @@ export class LogsController {
   constructor(
     private readonly logsService: LogsService,
     private readonly clusterAccess: ClusterAccessService,
+    @Optional() private readonly authorization?: AuthorizationService,
   ) {}
+
+  private async assertCapability(subject: ClusterAccessSubject | undefined, clusterId: string) {
+    if (!this.authorization || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
+    const decision = await this.authorization.authorize({
+      userId: subject?.id ?? '', clusterId, capability: 'logs', mutation: false,
+    });
+    if (!decision.allowed) throw new ForbiddenException({ code: 'AUTHZ_DENIED', reason: decision.reasonCode });
+  }
 
   @Get()
   async query(
     @Query() query: LogsQueryRequest & { cluster?: string },
     @Req() req: Request & { user?: { user?: ClusterAccessSubject } },
   ) {
-    await this.clusterAccess.assertCanRead(req.user?.user, query.clusterId?.trim() || query.cluster || '');
+    const clusterId = query.clusterId?.trim() || query.cluster || '';
+    await this.clusterAccess.assertCanRead(req.user?.user, clusterId);
+    await this.assertCapability(req.user?.user, clusterId);
     return this.logsService.query(query);
   }
 
@@ -39,6 +53,7 @@ export class LogsController {
     @Req() req: Request & { user?: { user?: ClusterAccessSubject } },
   ) {
     await this.clusterAccess.assertCanRead(req.user?.user, body.clusterId);
+    await this.assertCapability(req.user?.user, body.clusterId);
     const forwardedHost = req.headers['x-forwarded-host'];
     const forwardedProto = req.headers['x-forwarded-proto'];
     const origin = req.headers.origin;

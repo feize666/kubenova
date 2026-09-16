@@ -8,9 +8,10 @@ import { RuntimeGateway } from './runtime.gateway';
 import { RuntimeRepository } from './runtime.repository';
 import { RuntimeSessionService } from './runtime-session.service';
 import { RuntimeService } from './runtime.service';
+import { AuthorizationModule } from '../common/authorization.module';
 
 @Module({
-  imports: [AuthModule, ClustersModule],
+  imports: [AuthModule, ClustersModule, AuthorizationModule],
   controllers: [RuntimeController, RuntimeInternalController],
   providers: [
     RuntimeService,

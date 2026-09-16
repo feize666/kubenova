@@ -30,6 +30,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { parseEnv } from './platform/config/env.schema';
 import { DatabaseModule } from './platform/database/database.module';
+import { AuthorizationModule } from './common/authorization.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { DatabaseModule } from './platform/database/database.module';
       validate: (env) => parseEnv(env),
     }),
     DatabaseModule,
+    AuthorizationModule,
     AiAssistantModule,
     AiopsModule,
     AutoscalingModule,
