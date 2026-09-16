@@ -35,6 +35,10 @@ const envSchema = z.object({
     .optional()
     .default(30000),
   AI_CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
+  OIDC_ENABLED: z.coerce.boolean().default(false),
+  OIDC_ISSUER: z.string().url().optional(),
+  OIDC_CLIENT_ID: z.string().min(1).optional(),
+  OIDC_REDIRECT_URI: z.string().url().optional(),
 }).superRefine((value, ctx) => {
   const key = value.AI_CREDENTIAL_ENCRYPTION_KEY?.trim();
   const looksLikePlaceholder =
@@ -74,6 +78,10 @@ export type AppConfig = {
   aiModelMaxTokens: number;
   aiModelTimeoutMs: number;
   aiCredentialEncryptionKey?: string;
+  oidcEnabled: boolean;
+  oidcIssuer?: string;
+  oidcClientId?: string;
+  oidcRedirectUri?: string;
 };
 
 export function parseEnv(env: Record<string, unknown>): AppConfig {
@@ -105,5 +113,9 @@ export function parseEnv(env: Record<string, unknown>): AppConfig {
     aiModelMaxTokens: parsed.data.AI_MODEL_MAX_TOKENS,
     aiModelTimeoutMs: parsed.data.AI_MODEL_TIMEOUT_MS,
     aiCredentialEncryptionKey: parsed.data.AI_CREDENTIAL_ENCRYPTION_KEY,
+    oidcEnabled: parsed.data.OIDC_ENABLED,
+    oidcIssuer: parsed.data.OIDC_ISSUER,
+    oidcClientId: parsed.data.OIDC_CLIENT_ID,
+    oidcRedirectUri: parsed.data.OIDC_REDIRECT_URI,
   };
 }
