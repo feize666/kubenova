@@ -1828,6 +1828,7 @@ export class ResourcesService {
 
   async applyYaml(
     input: ResourceYamlApplyRequest,
+    authorize?: (manifest: k8s.KubernetesObject) => Promise<void>,
   ): Promise<ResourceYamlApplyResponse> {
     const clusterId = input.clusterId?.trim();
     const yaml = input.yaml?.trim();
@@ -1843,12 +1844,14 @@ export class ResourcesService {
       throw new BadRequestException('YAML 未包含可应用资源');
     }
 
-    const client = await this.makeObjectClient(clusterId);
     const defaultNamespace = input.namespace?.trim();
+    const preparedManifests = manifests.map(manifest => this.prepareApplyManifest(manifest, defaultNamespace));
+    // Check every document before any write to avoid partial unauthorized batches.
+    for (const prepared of preparedManifests) await authorize?.(prepared);
+    const client = await this.makeObjectClient(clusterId);
     const items: ResourceYamlApplyItem[] = [];
 
-    for (const manifest of manifests) {
-      const prepared = this.prepareApplyManifest(manifest, defaultNamespace);
+    for (const prepared of preparedManifests) {
       let applied: any;
       try {
         applied = await client.patch(

@@ -382,7 +382,9 @@ export class ResourcesController {
       httpRequest.user?.user,
       req.clusterId,
     );
-    const result = await this.resourcesService.applyYaml(req);
+    const result = await this.resourcesService.applyYaml(req, manifest =>
+      this.assertSecretMutation(httpRequest, req.clusterId, manifest.kind, manifest.metadata?.namespace),
+    );
     if (!req.dryRun) {
       this.triggerClusterSync(req.clusterId);
     }
