@@ -437,13 +437,21 @@ export class ObservabilityService {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(template.endpoint, {
+      let response: Response | undefined;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          response = await fetch(template.endpoint, {
         method: template.channel === 'email' ? 'GET' : 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: template.channel === 'email' ? undefined : payload,
         signal: controller.signal,
-      });
+          });
+          if (response.ok || attempt === 1) break;
+        } catch (error) { lastError = error; if (attempt === 1) throw error; }
+      }
       clearTimeout(timeout);
+      if (!response) throw lastError ?? new Error('通知发送失败');
       return { id, success: response.ok, statusCode: response.status, latencyMs: Date.now() - started, error: response.ok ? null : `HTTP ${response.status}` };
     } catch (error) {
       return { id, success: false, statusCode: null, latencyMs: Date.now() - started, error: error instanceof Error ? error.message.slice(0, 240) : '连接失败' };
