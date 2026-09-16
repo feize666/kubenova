@@ -150,6 +150,12 @@ export class ObservabilityController {
     return this.observabilityService.deleteNotificationTemplate(req.user?.user, id);
   }
 
+  @Post('notification-templates/:id/test')
+  testNotificationTemplate(@Req() req: ActorRequest, @Param('id') id: string) {
+    this.clusterAccessService.assertPlatformAdmin(req.user?.user);
+    return this.observabilityService.testNotificationTemplate(id);
+  }
+
   @Get('catalog')
   catalog() {
     return {

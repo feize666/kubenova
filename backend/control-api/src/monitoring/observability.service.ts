@@ -429,6 +429,27 @@ export class ObservabilityService {
     return { id, deleted: true };
   }
 
+  async testNotificationTemplate(id: string): Promise<{ id: string; success: boolean; statusCode: number | null; latencyMs: number; error: string | null }> {
+    const template = await this.prisma.monitoringNotificationTemplate.findUnique({ where: { id } });
+    if (!template) throw new NotFoundException('通知模板不存在');
+    const started = Date.now();
+    const payload = template.bodyTemplate.replace(/\{\{\s*message\s*\}\}/g, 'KubeNova 通知渠道测试').replace(/\{\{\s*title\s*\}\}/g, 'KubeNova 测试通知');
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(template.endpoint, {
+        method: template.channel === 'email' ? 'GET' : 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: template.channel === 'email' ? undefined : payload,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      return { id, success: response.ok, statusCode: response.status, latencyMs: Date.now() - started, error: response.ok ? null : `HTTP ${response.status}` };
+    } catch (error) {
+      return { id, success: false, statusCode: null, latencyMs: Date.now() - started, error: error instanceof Error ? error.message.slice(0, 240) : '连接失败' };
+    }
+  }
+
   private async probeAndPersist(record: any): Promise<SourceHealthResult> {
     const checkedAt = new Date();
     const result = await this.probe(this.validKind(record.kind), record.endpoint);
