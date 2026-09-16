@@ -43,6 +43,10 @@ export interface UserStateChangeInput {
   id: string;
   nextState: UserState;
 }
+export interface AccessGrantListResponse { items: Array<{ id: string; principal: { type: string; username?: string; name?: string } | null; cluster: { id: string; name: string }; role: string; state: string; validFrom: string; expiresAt: string | null; namespaces: Array<{ name: string; uid: string }>; capabilities: string[]; version: number; updatedAt: string }>; total: number; timestamp: string }
+export function getAccessGrants(clusterId: string | undefined, token: string) {
+  return apiRequest<AccessGrantListResponse>("/api/users/access-grants", { method: "GET", query: clusterId ? { clusterId } : undefined, token });
+}
 
 export function getUsers(params: ExtendedListQueryParams = {}, token: string) {
   return apiRequest<UsersListResponse>("/api/users", {
