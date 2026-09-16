@@ -23,7 +23,8 @@ async function ready() {
 }
 try {
   await mkdir(out, { recursive: true });
-  await page.goto(base);
+  await page.goto(base, { waitUntil: 'networkidle' });
+  await page.locator('input').nth(0).waitFor({ timeout: 15000 });
   await page.locator('input').nth(0).fill(process.env.BASELINE_USER || 'admin@local.dev');
   await page.locator('input[type=password]').fill(process.env.BASELINE_PASSWORD || 'admin123456');
   await page.getByRole('button', { name: /登录控制台/ }).click();
