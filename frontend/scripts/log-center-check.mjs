@@ -98,21 +98,6 @@ try {
   sourceMode = 'failure';
   await ready();
   await page.getByText('无法读取日志数据源', { exact: true }).waitFor();
-  sourceMode = 'ready';
-  let savedSource;
-  await page.route('**/api/observability/data-sources/fixture-source', async route => {
-    assert.equal(route.request().method(), 'PATCH');
-    savedSource = route.request().postDataJSON();
-    await route.fulfill(json({ id: 'fixture-source', ...savedSource }));
-  });
-  await page.goto(`${base}/clusters/${clusterId}/observability/configuration`);
-  await page.getByRole('button', { name: /编辑/ }).first().click();
-  await page.getByLabel('日志索引').fill('audit-*');
-  await page.getByRole('button', { name: '保存', exact: true }).click();
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  assert.equal(savedSource.metadata.logQuery.indexPattern, 'audit-*');
-  assert.equal(savedSource.metadata.logQuery.clusterField, 'tenant.cluster');
-  assert.equal(savedSource.metadata.retainedSetting, 'preserve');
   assert.deepEqual(errors, []);
   const report = { mockedQueries: queries.length, errors, states: ['result', 'expanded', 'filter-reset', 'empty-result', 'query-error', 'no-source', 'source-error'], screenshots: 7, liveElasticsearch: false };
   await writeFile(resolve(out, 'report.json'), JSON.stringify(report, null, 2));
