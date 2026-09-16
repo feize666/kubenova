@@ -46,7 +46,7 @@ export class ResourcesController {
   ) {}
 
   private async assertSecretCapability(req: ResourcesRequest, clusterId: string, kind?: string, namespace?: string) {
-    if (kind?.toLowerCase() !== 'secret' || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
+    if (!['secret', 'secrets'].includes(kind?.trim().toLowerCase() ?? '') || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
     const decision = await this.authorizationService.authorize({
       userId: req.user?.user?.id ?? '', clusterId, namespaceUid: namespace?.trim() || undefined, capability: 'secrets',
     });

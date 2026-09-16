@@ -58,6 +58,7 @@ describe('ResourcesController explicit cluster authorization', () => {
       clustersService,
       clusterSyncService,
       clusterAccessService,
+      { authorize: async () => ({ allowed: false, reasonCode: 'GRANT_NOT_FOUND' }) },
     ) as unknown as CallableController;
 
     return {
@@ -68,6 +69,19 @@ describe('ResourcesController explicit cluster authorization', () => {
       clusterAccessService,
     };
   }
+
+  it('rejects plural secrets dynamic detail before disclosing data', async () => {
+    const previous = process.env.KUBENOVA_AUTHZ_ENFORCE;
+    process.env.KUBENOVA_AUTHZ_ENFORCE = 'true';
+    try {
+      const harness = createHarness();
+      await expect(harness.controller.getDynamicDetail(request, 'cluster-a', '', 'v1', 'secrets', 'default', 'credentials')).rejects.toThrow(ForbiddenException);
+      expect(harness.resourcesService.getDynamicResourceDetail).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env.KUBENOVA_AUTHZ_ENFORCE;
+      else process.env.KUBENOVA_AUTHZ_ENFORCE = previous;
+    }
+  });
 
   function expectNoDownstreamCalls(
     harness: ReturnType<typeof createHarness>,
