@@ -27,6 +27,7 @@ import {
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
 import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 
 interface ResourcesRequest {
   user?: {
@@ -43,19 +44,24 @@ export class ResourcesController {
     private readonly clusterSyncService: ClusterSyncService,
     private readonly clusterAccessService: ClusterAccessService,
     private readonly authorizationService: AuthorizationService,
+    private readonly namespaceIdentity: NamespaceIdentityService,
   ) {}
 
   private async assertSecretCapability(req: ResourcesRequest, clusterId: string, kind?: string, namespace?: string) {
     if (!['secret', 'secrets'].includes(kind?.trim().toLowerCase() ?? '') || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
+    if (!this.namespaceIdentity) throw new ForbiddenException({ code: 'AUTHZ_UNAVAILABLE' });
+    const namespaceUid = await this.namespaceIdentity.resolve(clusterId, namespace ?? '');
     const decision = await this.authorizationService.authorize({
-      userId: req.user?.user?.id ?? '', clusterId, namespaceUid: namespace?.trim() || undefined, capability: 'secrets',
+      userId: req.user?.user?.id ?? '', clusterId, namespaceUid, capability: 'secrets',
     });
     if (!decision.allowed) throw new ForbiddenException({ code: 'AUTHZ_DENIED', reason: decision.reasonCode });
   }
 
   private async assertSecretMutation(req: ResourcesRequest, clusterId: string, kind?: string, namespace?: string) {
     if (kind?.toLowerCase() !== 'secret' || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
-    const decision = await this.authorizationService.authorize({ userId: req.user?.user?.id ?? '', clusterId, namespaceUid: namespace?.trim() || undefined, capability: 'secrets', mutation: true });
+    if (!this.namespaceIdentity) throw new ForbiddenException({ code: 'AUTHZ_UNAVAILABLE' });
+    const namespaceUid = await this.namespaceIdentity.resolve(clusterId, namespace ?? '');
+    const decision = await this.authorizationService.authorize({ userId: req.user?.user?.id ?? '', clusterId, namespaceUid, capability: 'secrets', mutation: true });
     if (!decision.allowed) throw new ForbiddenException({ code: 'AUTHZ_DENIED', reason: decision.reasonCode });
   }
 
