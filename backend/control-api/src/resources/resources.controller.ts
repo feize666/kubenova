@@ -53,6 +53,12 @@ export class ResourcesController {
     if (!decision.allowed) throw new ForbiddenException({ code: 'AUTHZ_DENIED', reason: decision.reasonCode });
   }
 
+  private async assertSecretMutation(req: ResourcesRequest, clusterId: string, kind?: string, namespace?: string) {
+    if (kind?.toLowerCase() !== 'secret' || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
+    const decision = await this.authorizationService.authorize({ userId: req.user?.user?.id ?? '', clusterId, namespaceUid: namespace?.trim() || undefined, capability: 'secrets', mutation: true });
+    if (!decision.allowed) throw new ForbiddenException({ code: 'AUTHZ_DENIED', reason: decision.reasonCode });
+  }
+
   private triggerClusterSync(clusterId?: string): void {
     const normalizedClusterId = clusterId?.trim();
     if (!normalizedClusterId) {
@@ -338,6 +344,7 @@ export class ResourcesController {
       httpRequest.user?.user,
       req.clusterId,
     );
+    await this.assertSecretMutation(httpRequest, req.clusterId, req.kind, req.namespace);
     const result = await this.resourcesService.updateYaml(req);
     if (!req.dryRun) {
       this.triggerClusterSync(req.clusterId);
