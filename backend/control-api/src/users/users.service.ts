@@ -174,6 +174,15 @@ export interface RbacListQuery {
 
 @Injectable()
 export class UsersService {
+  async listAccessGrants(clusterId?: string): Promise<{ items: unknown[]; total: number; timestamp: string }> {
+    const rows = await (this.prisma as any).accessGrant.findMany({
+      where: clusterId?.trim() ? { clusterId: clusterId.trim() } : {},
+      include: { user: { select: { id: true, username: true, name: true } }, group: { select: { id: true, name: true } }, cluster: { select: { id: true, name: true } }, namespaces: true, capabilities: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const items = rows.map((row: any) => ({ id: row.id, principal: row.user ? { type: 'user', ...row.user } : row.group ? { type: 'group', ...row.group } : null, cluster: row.cluster, role: row.role, state: row.state, validFrom: row.validFrom.toISOString(), expiresAt: row.expiresAt?.toISOString() ?? null, namespaces: row.namespaces.map((item: any) => ({ name: item.namespaceName, uid: item.namespaceUid })), capabilities: row.capabilities.map((item: any) => item.capability), version: row.version, updatedAt: row.updatedAt.toISOString() }));
+    return { items, total: items.length, timestamp: new Date().toISOString() };
+  }
   constructor(private readonly prisma: PrismaService) {}
 
   // -------------------------------------------------------------------------

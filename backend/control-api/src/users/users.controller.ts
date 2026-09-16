@@ -58,6 +58,11 @@ export class UsersController {
     return this.usersService.listRbac(query);
   }
 
+  @Get('access-grants')
+  listAccessGrants(@Query('clusterId') clusterId?: string) {
+    return this.usersService.listAccessGrants(clusterId);
+  }
+
   /** POST /users/rbac — 创建 RBAC 绑定 */
   @Post('rbac')
   createRbac(
