@@ -87,18 +87,21 @@ export class ConfigsController {
 
   // GET /api/configs/:id/revisions — 获取版本历史列表
   @Get(':id/revisions')
-  getRevisions(@Param('id') id: string): Promise<{
+  async getRevisions(@Req() req: ActorRequest, @Param('id') id: string): Promise<{
     configId: string;
     items: ConfigRevisionRecord[];
     total: number;
     timestamp: string;
   }> {
+    const item = await this.configsService.getById(id);
+    await this.clusterAccess.assertCanRead(req.user?.user, item.clusterId);
     return this.configsService.getRevisions(id);
   }
 
   // GET /api/configs/:id/diff?from=1&to=2 — 对比两个版本差异
   @Get(':id/diff')
-  getRevisionDiff(
+  async getRevisionDiff(
+    @Req() req: ActorRequest,
     @Param('id') id: string,
     @Query('from') from: string,
     @Query('to') to: string,
@@ -108,17 +111,20 @@ export class ConfigsController {
     if (Number.isNaN(fromRev) || Number.isNaN(toRev)) {
       throw new Error('from 和 to 参数必须为合法整数');
     }
+    const item = await this.configsService.getById(id);
+    await this.clusterAccess.assertCanRead(req.user?.user, item.clusterId);
     return this.configsService.getRevisionDiff(id, fromRev, toRev);
   }
 
   // POST /api/configs — 创建
   @Post()
-  create(
+  async create(
     @Req() req: ActorRequest,
     @Body() body: CreateConfigResourceRequest,
   ): Promise<ConfigMutationResponse> {
     const actor = req.user?.user;
     assertWritePermission(actor);
+    await this.clusterAccess.assertCanMutate(actor, body.clusterId);
     return this.configsService.create(body, actor).then((result) => {
       this.triggerClusterSync(result.item.clusterId);
       return result;
@@ -127,13 +133,15 @@ export class ConfigsController {
 
   // PATCH /api/configs/:id — 更新
   @Patch(':id')
-  update(
+  async update(
     @Req() req: ActorRequest,
     @Param('id') id: string,
     @Body() body: UpdateConfigResourceRequest,
   ): Promise<ConfigMutationResponse> {
     const actor = req.user?.user;
     assertWritePermission(actor);
+    const existing = await this.configsService.getById(id);
+    await this.clusterAccess.assertCanMutate(actor, existing.clusterId);
     return this.configsService.update(id, body, actor).then((result) => {
       this.triggerClusterSync(result.item.clusterId);
       return result;
@@ -142,13 +150,15 @@ export class ConfigsController {
 
   // POST /api/configs/:id/rollback — 回滚到指定版本
   @Post(':id/rollback')
-  rollback(
+  async rollback(
     @Req() req: ActorRequest,
     @Param('id') id: string,
     @Body() body: { revision: number; note?: string },
   ): Promise<ConfigMutationResponse> {
     const actor = req.user?.user;
     assertWritePermission(actor);
+    const existing = await this.configsService.getById(id);
+    await this.clusterAccess.assertCanMutate(actor, existing.clusterId);
     return this.configsService
       .rollback(id, body.revision, actor?.username)
       .then((result) => {
@@ -159,13 +169,15 @@ export class ConfigsController {
 
   // POST /api/configs/:id/actions — 状态操作（enable/disable/delete）
   @Post(':id/actions')
-  applyAction(
+  async applyAction(
     @Req() req: ActorRequest,
     @Param('id') id: string,
     @Body() body: ConfigActionRequest,
   ): Promise<ConfigMutationResponse> {
     const actor = req.user?.user;
     assertWritePermission(actor);
+    const existing = await this.configsService.getById(id);
+    await this.clusterAccess.assertCanMutate(actor, existing.clusterId);
     return this.configsService.applyAction(id, body, actor).then((result) => {
       this.triggerClusterSync(result.item.clusterId);
       return result;
