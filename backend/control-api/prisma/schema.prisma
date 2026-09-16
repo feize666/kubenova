@@ -22,6 +22,11 @@ model User {
   auditLogs              AuditLog[]
   preferences            UserPreference[]
   clusterRoleBindings    ClusterRoleBinding[]
+  accessGrants           AccessGrant[]           @relation("AccessGrantUser")
+  createdAccessGrants    AccessGrant[]           @relation("AccessGrantCreatedBy")
+  updatedAccessGrants    AccessGrant[]           @relation("AccessGrantUpdatedBy")
+  groupMemberships       GroupMembership[]
+  authorizationChanges   AuthorizationChange[]   @relation("AuthzAffectedUser")
 }
 
 model UserPreference {
@@ -46,6 +51,7 @@ model Session {
   revokedAt        DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  authzVersion     Int       @default(1)
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -77,9 +83,105 @@ model ClusterRegistry {
   clusterRoleBindings   ClusterRoleBinding[]
   aiAnalysisRuns        AiAnalysisRun[]
   monitoringDataSources MonitoringDataSource[]
+  accessGrants          AccessGrant[]
 
   // 仅对未删除集群强制名称唯一（deletedAt 为 null 时才参与唯一约束）
   @@index([name, deletedAt])
+}
+
+model IdentityGroup {
+  id           String            @id @default(cuid())
+  externalId   String?
+  name         String
+  active       Boolean           @default(true)
+  version      Int               @default(1)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  memberships  GroupMembership[]
+  accessGrants AccessGrant[]
+
+  @@unique([externalId, name])
+  @@index([active])
+}
+
+model GroupMembership {
+  id        String        @id @default(cuid())
+  groupId   String
+  userId    String
+  state     String        @default("active")
+  validFrom DateTime      @default(now())
+  expiresAt DateTime?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  group     IdentityGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([userId, state, expiresAt])
+}
+
+model AccessGrant {
+  id              String                @id @default(cuid())
+  userId          String?
+  groupId         String?
+  clusterId       String
+  role            String
+  state           String                @default("active")
+  validFrom       DateTime              @default(now())
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  version         Int                   @default(1)
+  createdByUserId String
+  updatedByUserId String
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  user            User?                 @relation("AccessGrantUser", fields: [userId], references: [id], onDelete: Cascade)
+  group           IdentityGroup?        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  cluster         ClusterRegistry       @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  createdBy       User                  @relation("AccessGrantCreatedBy", fields: [createdByUserId], references: [id])
+  updatedBy       User                  @relation("AccessGrantUpdatedBy", fields: [updatedByUserId], references: [id])
+  namespaces      GrantNamespace[]
+  capabilities    GrantCapability[]
+  changes         AuthorizationChange[]
+
+  @@index([userId, state, expiresAt])
+  @@index([groupId, state, expiresAt])
+  @@index([clusterId, state, expiresAt])
+}
+
+model GrantNamespace {
+  id            String      @id @default(cuid())
+  grantId       String
+  namespaceName String
+  namespaceUid  String
+  grant         AccessGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@unique([grantId, namespaceUid])
+  @@index([namespaceUid])
+}
+
+model GrantCapability {
+  id         String      @id @default(cuid())
+  grantId    String
+  capability String
+  grant      AccessGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@unique([grantId, capability])
+}
+
+model AuthorizationChange {
+  id             String       @id @default(cuid())
+  actorUserId    String
+  affectedUserId String?
+  grantId        String?
+  version        Int          @default(1)
+  reason         String
+  committedAt    DateTime     @default(now())
+  affectedUser   User?        @relation("AuthzAffectedUser", fields: [affectedUserId], references: [id], onDelete: SetNull)
+  grant          AccessGrant? @relation(fields: [grantId], references: [id], onDelete: SetNull)
+
+  @@index([affectedUserId, committedAt])
+  @@index([grantId, committedAt])
 }
 
 // AI provider 配置。apiKeyCiphertext 只保存 AES-256-GCM 密文，永不通过 API 返回。
