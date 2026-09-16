@@ -38,4 +38,12 @@ describe('AuthorizationService', () => {
     const { service } = setup({ groupMembership: { findMany: jest.fn().mockResolvedValue([{ groupId: 'team' }]) }, accessGrant: { findMany: jest.fn().mockResolvedValue([{ ...grant, groupId: 'team' }]) } });
     await expect(service.authorize({ userId: 'u', clusterId: 'c', namespaceUid: 'ns', at: now })).resolves.toMatchObject({ allowed: true });
   });
+  it.each([
+    { userId: 'team', groupId: null },
+    { userId: null, groupId: 'u' },
+  ])('does not mix user and group identity domains: %p', async subject => {
+    const grant = { id: 'g', ...subject, clusterId: 'c', role: 'viewer', state: 'active', validFrom: new Date(0), expiresAt: null, revokedAt: null, namespaces: [{ namespaceUid: 'ns' }], capabilities: [] };
+    const { service } = setup({ groupMembership: { findMany: async () => [{ groupId: 'team' }] }, accessGrant: { findMany: async () => [grant] } });
+    await expect(service.authorize({ userId: 'u', clusterId: 'c', namespaceUid: 'ns', at: now })).resolves.toMatchObject({ allowed: false });
+  });
 });

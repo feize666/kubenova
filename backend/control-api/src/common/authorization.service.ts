@@ -56,13 +56,13 @@ export class AuthorizationService {
       where: { userId: request.userId, state: 'active', validFrom: { lte: now }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
       select: { groupId: true },
     });
-    const subjectIds = [request.userId, ...memberships.map(item => item.groupId)];
+    const groupIds = memberships.map(item => item.groupId);
     const grants = await (this.prisma as unknown as AuthorizationPrisma).accessGrant.findMany({
-      where: { clusterId: request.clusterId, state: 'active', revokedAt: null, OR: [{ userId: request.userId }, { groupId: { in: subjectIds.slice(1) } }] },
+      where: { clusterId: request.clusterId, state: 'active', revokedAt: null, OR: [{ userId: request.userId }, { groupId: { in: groupIds } }] },
       include: { namespaces: { select: { namespaceUid: true } }, capabilities: { select: { capability: true } } },
     });
     const matching = grants.filter(grant => {
-      if (!subjectIds.includes(grant.userId ?? '') && !subjectIds.includes(grant.groupId ?? '')) return false;
+      if (grant.userId !== request.userId && !groupIds.includes(grant.groupId ?? '')) return false;
       if (!roles.has(grant.role as AuthorizationRole)) return false;
       if (grant.validFrom > now || (grant.expiresAt && grant.expiresAt <= now) || grant.revokedAt) return false;
       if (request.namespaceUid && !grant.namespaces.some(scope => scope.namespaceUid === request.namespaceUid)) return false;
