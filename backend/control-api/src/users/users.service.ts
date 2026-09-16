@@ -306,6 +306,10 @@ export class UsersService {
 
     await this.mustFindUser(id);
 
+    if (body.role !== undefined || body.password !== undefined) {
+      await this.assertNotLastAdministrator(id, body.role);
+    }
+
     const data: {
       email?: string;
       name?: string;
@@ -366,6 +370,7 @@ export class UsersService {
   ): Promise<{ id: string; deleted: true; state: 'deleted' }> {
     assertAdministrationPermission(actor);
     await this.mustFindUser(id);
+    await this.assertNotLastAdministrator(id, 'user');
 
     await this.prisma.user.delete({ where: { id } });
 
@@ -383,6 +388,7 @@ export class UsersService {
   ): Promise<UserListItem> {
     assertAdministrationPermission(actor);
     await this.mustFindUser(id);
+    if (!isActive) await this.assertNotLastAdministrator(id, 'disabled');
 
     const row = await this.prisma.user.update({
       where: { id },
@@ -774,6 +780,14 @@ export class UsersService {
       throw new BadRequestException('role 不受支持');
     }
     return value.trim();
+  }
+
+  private async assertNotLastAdministrator(id: string, nextRole: unknown): Promise<void> {
+    const current = await this.prisma.user.findUnique({ where: { id }, select: { role: true, isActive: true } });
+    if (!current || !current.isActive || !['admin', 'platform-admin'].includes(current.role)) return;
+    if (typeof nextRole === 'string' && ['admin', 'platform-admin'].includes(nextRole)) return;
+    const count = await this.prisma.user.count({ where: { isActive: true, role: { in: ['admin', 'platform-admin'] } } });
+    if (count <= 1) throw new BadRequestException('不能移除最后一个平台管理员');
   }
 
   private async mustFindUser(id: string): Promise<void> {

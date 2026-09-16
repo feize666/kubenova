@@ -90,4 +90,12 @@ describe('user administration authority', () => {
       expect(writes).toEqual([]);
     },
   );
+  it('protects the last active platform administrator', async () => {
+    const { service, prisma, writes } = setup();
+    prisma.user.findUnique.mockResolvedValue({ ...row, role: 'admin', isActive: true } as never);
+    (prisma.user as any).count = jest.fn().mockResolvedValue(1);
+    await expect(service.setState({ role: 'platform-admin' }, 'target', false)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.deleteUser({ role: 'platform-admin' }, 'target')).rejects.toBeInstanceOf(BadRequestException);
+    expect(writes).toEqual([]);
+  });
 });
