@@ -40,6 +40,9 @@ const envSchema = z.object({
   OIDC_CLIENT_ID: z.string().min(1).optional(),
   OIDC_REDIRECT_URI: z.string().url().optional(),
 }).superRefine((value, ctx) => {
+  if (value.OIDC_ENABLED && (!value.OIDC_ISSUER || !value.OIDC_CLIENT_ID || !value.OIDC_REDIRECT_URI)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['OIDC_ENABLED'], message: 'OIDC requires issuer, client id and redirect URI' });
+  }
   const key = value.AI_CREDENTIAL_ENCRYPTION_KEY?.trim();
   const looksLikePlaceholder =
     !key ||

@@ -27,11 +27,20 @@ describe('parseEnv', () => {
       aiModelMaxTokens: 2048,
       aiModelTimeoutMs: 30000,
       aiCredentialEncryptionKey: undefined,
+      oidcEnabled: false,
+      oidcIssuer: undefined,
+      oidcClientId: undefined,
+      oidcRedirectUri: undefined,
     });
   });
 
   it('throws when required env vars are missing', () => {
     expect(() => parseEnv({})).toThrow(/DATABASE_URL/i);
+  });
+  it('requires complete OIDC settings only when enabled', () => {
+    const base = { DATABASE_URL: 'postgresql://localhost:5432/k8s_aiops', JWT_SECRET: 'super-secret-value', REDIS_URL: 'redis://localhost:6379' };
+    expect(() => parseEnv({ ...base, OIDC_ENABLED: true })).toThrow(/OIDC requires/i);
+    expect(() => parseEnv({ ...base, OIDC_ENABLED: true, OIDC_ISSUER: 'https://sso.example.com/realms/ops', OIDC_CLIENT_ID: 'kubenova', OIDC_REDIRECT_URI: 'https://console.example.com/auth/callback' })).not.toThrow();
   });
 
   it('requires a strong AI credential key in production', () => {
