@@ -128,4 +128,17 @@ describe('ObservabilityService', () => {
     expect(result.reason).toMatch(/未配置/);
     expect(result.embedUrl).toBeNull();
   });
+
+  it('sends a rendered test notification and reports delivery status', async () => {
+    const { service, prisma } = createService();
+    prisma.monitoringNotificationTemplate.findUnique.mockResolvedValue({ id: 'n1', channel: 'webhook', endpoint: 'https://hooks.example/test', bodyTemplate: '{"title":"{{title}}","message":"{{message}}"}' });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = jest.fn().mockResolvedValue(new Response('{}', { status: 202 })) as never;
+    try {
+      const result = await service.testNotificationTemplate('n1');
+      expect(result.success).toBe(true);
+      expect(result.statusCode).toBe(202);
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://hooks.example/test', expect.objectContaining({ method: 'POST' }));
+    } finally { globalThis.fetch = originalFetch; }
+  });
 });
