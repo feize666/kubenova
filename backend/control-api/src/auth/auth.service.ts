@@ -145,6 +145,9 @@ export class AuthService {
     if (!session) {
       return null;
     }
+    if (session.authzVersion !== session.user.authzVersion) {
+      return null;
+    }
 
     return {
       token: accessToken,
