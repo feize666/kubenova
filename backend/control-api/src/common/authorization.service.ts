@@ -50,6 +50,8 @@ export class AuthorizationService {
     const now = request.at ?? new Date();
     if (!request.userId || !request.clusterId) return this.deny('IDENTITY_OR_CLUSTER_REQUIRED');
     if (request.capability && !capabilities.has(request.capability)) return this.deny('CAPABILITY_NOT_SUPPORTED');
+    // A namespaced grant cannot authorize an unscoped request.
+    if (!request.namespaceUid?.trim()) return this.deny('NAMESPACE_SCOPE_REQUIRED');
     const memberships = await (this.prisma as unknown as AuthorizationPrisma).groupMembership.findMany({
       where: { userId: request.userId, state: 'active', validFrom: { lte: now }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
       select: { groupId: true },
@@ -64,7 +66,6 @@ export class AuthorizationService {
       if (!roles.has(grant.role as AuthorizationRole)) return false;
       if (grant.validFrom > now || (grant.expiresAt && grant.expiresAt <= now) || grant.revokedAt) return false;
       if (request.namespaceUid && !grant.namespaces.some(scope => scope.namespaceUid === request.namespaceUid)) return false;
-      if (!request.namespaceUid && grant.namespaces.length === 0) return false;
       if (request.capability && !grant.capabilities.some(item => item.capability === request.capability)) return false;
       if (request.mutation && grant.role === 'viewer') return false;
       return true;

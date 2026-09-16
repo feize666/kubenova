@@ -23,6 +23,11 @@ describe('AuthorizationService', () => {
     await expect(service.authorize({ userId: 'u', clusterId: 'c', namespaceUid: 'ns', capability: 'exec', at: now })).resolves.toMatchObject({ allowed: false });
     await expect(service.authorize({ userId: 'u', clusterId: 'c', namespaceUid: 'ns', capability: 'logs', at: now })).resolves.toMatchObject({ allowed: true, grantIds: ['g'] });
   });
+  it.each([undefined, '', '   '])('does not widen namespace grants when namespace is %p', async namespaceUid => {
+    const grant = { id: 'g', userId: 'u', groupId: null, clusterId: 'c', role: 'operator', state: 'active', validFrom: new Date('2026-01-01'), expiresAt: null, revokedAt: null, namespaces: [{ namespaceUid: 'ns' }], capabilities: [{ capability: 'logs' }] };
+    const { service } = setup({ accessGrant: { findMany: jest.fn().mockResolvedValue([grant]) } });
+    await expect(service.authorize({ userId: 'u', clusterId: 'c', namespaceUid, capability: 'logs', at: now })).resolves.toMatchObject({ allowed: false });
+  });
   it('rejects expired, revoked, viewer mutation and future grants', async () => {
     const base = { id: 'g', userId: 'u', clusterId: 'c', role: 'viewer', state: 'active', validFrom: new Date('2027-01-01'), expiresAt: new Date('2027-02-01'), revokedAt: new Date('2027-01-02'), namespaces: [{ namespaceUid: 'ns' }], capabilities: [{ capability: 'logs' }] };
     const { service } = setup({ accessGrant: { findMany: jest.fn().mockResolvedValue([base]) } });
