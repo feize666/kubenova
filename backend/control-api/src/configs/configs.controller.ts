@@ -8,6 +8,7 @@ import {
   Query,
   Req,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { AuthGuard } from '../common/auth.guard';
 import { assertWritePermission, type PlatformRole } from '../common/governance';
@@ -27,12 +28,14 @@ import type {
 } from './configs.repository';
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
 
 interface ActorRequest {
   user?: {
     user?: {
       username?: string;
       role?: PlatformRole;
+      id?: string;
     };
   };
 }
@@ -44,6 +47,7 @@ export class ConfigsController {
     private readonly configsService: ConfigsService,
     private readonly clustersService: ClustersService,
     private readonly clusterSyncService: ClusterSyncService,
+    private readonly clusterAccess: ClusterAccessService,
   ) {}
 
   private triggerClusterSync(clusterId?: string): void {
@@ -68,14 +72,17 @@ export class ConfigsController {
 
   // GET /api/configs — 分页列表，支持 clusterId/namespace/kind/keyword/page/pageSize
   @Get()
-  list(@Query() query: ConfigListQuery): Promise<ConfigListResult> {
+  async list(@Req() req: ActorRequest, @Query() query: ConfigListQuery): Promise<ConfigListResult> {
+    await this.clusterAccess.assertCanRead(req.user?.user, query.clusterId ?? '');
     return this.configsService.list(query);
   }
 
   // GET /api/configs/:id — 获取单个（含 revisions）
   @Get(':id')
-  getById(@Param('id') id: string): Promise<ConfigResourceRecord> {
-    return this.configsService.getById(id);
+  async getById(@Req() req: ActorRequest, @Param('id') id: string): Promise<ConfigResourceRecord> {
+    const result = await this.configsService.getById(id);
+    await this.clusterAccess.assertCanRead(req.user?.user, result.clusterId);
+    return result;
   }
 
   // GET /api/configs/:id/revisions — 获取版本历史列表
