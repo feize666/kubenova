@@ -23,6 +23,7 @@ import {
 
 export interface ConfigListQuery {
   clusterId?: string;
+  clusterIds?: string[];
   namespace?: string;
   kind?: string;
   keyword?: string;

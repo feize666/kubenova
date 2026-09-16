@@ -73,8 +73,12 @@ export class ConfigsController {
   // GET /api/configs — 分页列表，支持 clusterId/namespace/kind/keyword/page/pageSize
   @Get()
   async list(@Req() req: ActorRequest, @Query() query: ConfigListQuery): Promise<ConfigListResult> {
-    await this.clusterAccess.assertCanRead(req.user?.user, query.clusterId ?? '');
-    return this.configsService.list(query);
+    if (query.clusterId?.trim()) {
+      await this.clusterAccess.assertCanRead(req.user?.user, query.clusterId);
+      return this.configsService.list(query);
+    }
+    const clusterIds = await this.clusterAccess.listAccessibleClusterIds(req.user?.user);
+    return this.configsService.list({ ...query, clusterIds: clusterIds ?? [] });
   }
 
   // GET /api/configs/:id — 获取单个（含 revisions）
