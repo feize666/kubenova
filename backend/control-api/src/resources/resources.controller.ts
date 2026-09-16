@@ -9,6 +9,7 @@ import {
   Query,
   Req,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { AuthGuard } from '../common/auth.guard';
 import {
@@ -25,6 +26,7 @@ import {
 } from './resources.service';
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
+import { AuthorizationService } from '../common/authorization.service';
 
 interface ResourcesRequest {
   user?: {
@@ -40,7 +42,16 @@ export class ResourcesController {
     private readonly clustersService: ClustersService,
     private readonly clusterSyncService: ClusterSyncService,
     private readonly clusterAccessService: ClusterAccessService,
+    private readonly authorizationService: AuthorizationService,
   ) {}
+
+  private async assertSecretCapability(req: ResourcesRequest, clusterId: string, kind?: string, namespace?: string) {
+    if (kind?.toLowerCase() !== 'secret' || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
+    const decision = await this.authorizationService.authorize({
+      userId: req.user?.user?.id ?? '', clusterId, namespaceUid: namespace?.trim() || undefined, capability: 'secrets',
+    });
+    if (!decision.allowed) throw new ForbiddenException({ code: 'AUTHZ_DENIED', reason: decision.reasonCode });
+  }
 
   private triggerClusterSync(clusterId?: string): void {
     const normalizedClusterId = clusterId?.trim();
@@ -154,6 +165,7 @@ export class ResourcesController {
       req.user?.user,
       identity.clusterId,
     );
+    await this.assertSecretCapability(req, identity.clusterId, identity.resource, identity.namespace);
     return this.resourcesService.getDynamicResourceDetail(identity);
   }
 
@@ -270,6 +282,7 @@ export class ResourcesController {
       req.user?.user,
       identity.clusterId,
     );
+    await this.assertSecretCapability(req, identity.clusterId, identity.kind, identity.namespace);
     return this.resourcesService.getYaml(identity);
   }
 
@@ -294,6 +307,7 @@ export class ResourcesController {
       req.user?.user,
       scope.clusterId,
     );
+    await this.assertSecretCapability(req, scope.clusterId, kind, undefined);
     return this.resourcesService.getDetail(kind, normalizedId);
   }
 
