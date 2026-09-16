@@ -9,6 +9,18 @@ describe('Secret namespace identity', () => {
     if (previous === undefined) delete process.env.KUBENOVA_AUTHZ_ENFORCE;
     else process.env.KUBENOVA_AUTHZ_ENFORCE = previous;
   });
+  it.each(['updateDynamicYaml', 'createDynamic', 'deleteDynamic'] as const)('blocks unauthorized %s before mutation', async method => {
+    const write = jest.fn().mockResolvedValue({});
+    const Controller = ResourcesController as unknown as new (...args: any[]) => ResourcesController;
+    const controller = new Controller(
+      { updateDynamicYaml: write, createDynamicResource: write, deleteDynamicResource: write },
+      { getKubeconfig: async () => null }, {}, { assertCanMutate: async () => {} },
+      { authorize: async () => ({ allowed: false, reasonCode: 'GRANT_NOT_FOUND' }) },
+      { resolve: async () => 'uid-apps' },
+    );
+    await expect(controller[method]({ user: { user: { id: 'u' } } }, { clusterId: 'c', namespace: 'apps', resource: 'secrets', name: 's' })).rejects.toThrow();
+    expect(write).not.toHaveBeenCalled();
+  });
   it.each(['yaml', 'dynamic', 'update'])('authorizes %s using UID, rejects a recreated namespace', async route => {
     const authz = new AuthorizationService({
       groupMembership: { findMany: async () => [] },

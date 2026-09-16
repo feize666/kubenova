@@ -58,7 +58,7 @@ export class ResourcesController {
   }
 
   private async assertSecretMutation(req: ResourcesRequest, clusterId: string, kind?: string, namespace?: string) {
-    if (kind?.toLowerCase() !== 'secret' || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
+    if (!['secret', 'secrets'].includes(kind?.trim().toLowerCase() ?? '') || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
     if (!this.namespaceIdentity) throw new ForbiddenException({ code: 'AUTHZ_UNAVAILABLE' });
     const namespaceUid = await this.namespaceIdentity.resolve(clusterId, namespace ?? '');
     const decision = await this.authorizationService.authorize({ userId: req.user?.user?.id ?? '', clusterId, namespaceUid, capability: 'secrets', mutation: true });
@@ -210,6 +210,7 @@ export class ResourcesController {
       req.user?.user,
       identity.clusterId,
     );
+    await this.assertSecretMutation(req, identity.clusterId, identity.resource, identity.namespace);
     const result = await this.resourcesService.updateDynamicYaml(identity);
     if (!identity.dryRun) {
       this.triggerClusterSync(identity.clusterId);
@@ -242,6 +243,7 @@ export class ResourcesController {
       req.user?.user,
       identity.clusterId,
     );
+    await this.assertSecretMutation(req, identity.clusterId, identity.resource, identity.namespace);
     const result = await this.resourcesService.deleteDynamicResource(identity);
     this.triggerClusterSync(identity.clusterId);
     return result;
@@ -273,6 +275,7 @@ export class ResourcesController {
       req.user?.user,
       identity.clusterId,
     );
+    await this.assertSecretMutation(req, identity.clusterId, identity.resource, identity.namespace);
     const result = await this.resourcesService.createDynamicResource({
       ...identity,
       body: body?.body ?? {},
