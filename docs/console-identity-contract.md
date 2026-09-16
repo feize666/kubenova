@@ -78,7 +78,7 @@ Backfill grants as disabled migration candidates from `ClusterRoleBinding`: enum
 
 ## API contract and ownership
 
-New APIs use `/api/authorization`; home consumes them. Cluster views pass a cluster filter and the server constrains it. All writes require superadmin, fresh MFA (authTime within 5 minutes, configured assurance satisfied), reason, request ID and optimistic version (`If-Match`); stale version returns 409. Recovery sessions use an independently configured audited recovery path, not fake OIDC MFA claims. Validate DTOs with unknown fields rejected. Error codes: 401 session invalid; 404 nonexistent/inaccessible scope; 403 action/capability denied; 409 version/scope conflict; 503 authoritative policy unavailable. No errors leak secrets or existence outside scope.
+New APIs use `/api/authorization`; home consumes them. Cluster views pass a cluster filter and the server constrains it. All writes require superadmin, reason, request ID and optimistic version (`If-Match`); stale version returns 409. MFA is optional for every role, including superadmin, and only superadmin can enable, disable or reset its policy. Where that policy enables MFA for an action/user, require fresh MFA (authTime within 5 minutes, configured assurance satisfied); otherwise do not silently mandate MFA. Recovery sessions use an independently configured audited recovery path, not fake OIDC MFA claims. Validate DTOs with unknown fields rejected. Error codes: 401 session invalid; 404 nonexistent/inaccessible scope; 403 action/capability denied; 409 version/scope conflict; 503 authoritative policy unavailable. No errors leak secrets or existence outside scope.
 
 | Method / endpoint | Request / response and authority |
 | --- | --- |
@@ -94,7 +94,7 @@ New APIs use `/api/authorization`; home consumes them. Cluster views pass a clus
 | `POST /api/auth/oidc/:providerId/start`, `GET /api/auth/oidc/:providerId/callback` | Library-driven code flow with PKCE/state/nonce; bounded server transaction, exact registered callback and allowlisted return path. Issue local revocable session after validated identity and MFA. |
 | `POST /api/auth/oidc/backchannel-logout` | Validate signed logout token with supported library, issuer/audience/events/jti replay protection; revoke linked sessions and streams. |
 | `GET /api/auth/mfa`, `POST /api/auth/mfa/enroll`, `POST /api/auth/step-up` | Own enrollment/status only; enrollment redirects to trusted Keycloak account/required-action flow; success derived from newly verified assurance, not a UI toggle. |
-| `GET /api/clusters/:id/kubeconfig/oidc` | Require kubeconfig capability and MFA, exact cluster enabled/readiness; return CA/server and approved exec-plugin OIDC configuration. No embedded access/refresh token, client secret or admin credential. |
+| `GET /api/clusters/:id/kubeconfig/oidc` | Require kubeconfig capability, MFA only when enabled by superadmin policy, exact cluster enabled/readiness; return CA/server and approved exec-plugin OIDC configuration. No embedded access/refresh token, client secret or admin credential. |
 | `GET /api/runtime/internal/sessions/:id/authorization` | Authenticated gateway only; fresh parent session/user/grant/target check; returns allow/deny, policyVersion, earliestExpiry, short lease. Does not return kubeconfig on every heartbeat. |
 | `GET /api/notifications`, `POST /api/notifications/:id/read` | Recipient predicate uses session user ID; no client owner override; current scope check for linked resources. |
 

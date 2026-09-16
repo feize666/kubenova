@@ -105,6 +105,7 @@ export function ObservabilityConfiguration() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [form] = Form.useForm();
+  const sourceKind = Form.useWatch("kind", form);
   const queryClient = useQueryClient();
   const enabled = !isInitializing && Boolean(accessToken);
   const sourcesQuery = useQuery({
@@ -174,6 +175,7 @@ export function ObservabilityConfiguration() {
         const payload = {
           ...values,
           clusterId: clusterId || undefined,
+          ...(values.metadata ? { metadata: { ...editor.record?.metadata, ...(values.metadata as Record<string, unknown>) } } : {}),
         } as DataSourceInput;
         return editor.record
           ? updateObservabilityDataSource(
@@ -731,9 +733,22 @@ export function ObservabilityConfiguration() {
                 placeholder="https://prometheus.example.com"
               />
             </Form.Item>
-            <Form.Item name="secretRef" label="Secret 引用">
-              <Input placeholder="namespace/secret-name" />
+            <Form.Item name="secretRef" label="Secret 引用" rules={sourceKind === "elasticsearch" ? [{ required: true, pattern: /^env:KUBENOVA_ES_API_KEY_[A-Z0-9_]+$/, message: "请输入 env:KUBENOVA_ES_API_KEY_ 开头的环境变量引用" }] : undefined}>
+              <Input placeholder={sourceKind === "elasticsearch" ? "env:KUBENOVA_ES_API_KEY_PRIMARY" : "namespace/secret-name"} />
             </Form.Item>
+            {sourceKind === "elasticsearch" ? <>
+              <Form.Item name={["metadata", "logQuery", "indexPattern"]} label="日志索引" rules={[{ required: true, pattern: /^[a-z0-9][a-z0-9_-]*\*?$/, message: "请输入索引名称或以 * 结尾的索引前缀" }]}>
+                <Input placeholder="logs-*" />
+              </Form.Item>
+              {[
+                ["clusterField", "集群字段", "kubenova.cluster_id"],
+                ["namespaceField", "命名空间字段", "kubernetes.namespace_name"],
+                ["timestampField", "时间字段", "@timestamp"],
+                ["messageField", "消息字段", "message"],
+              ].map(([field, label, initialValue]) => <Form.Item key={field} name={["metadata", "logQuery", field]} label={label} initialValue={initialValue} rules={[{ required: true, pattern: /^@?[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*$/, message: "请输入有效字段路径" }]}>
+                <Input />
+              </Form.Item>)}
+            </> : null}
             <Form.Item name="enabled" label="启用" valuePropName="checked">
               <Switch />
             </Form.Item>

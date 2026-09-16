@@ -31,7 +31,7 @@ function LogQueryResults({ input, range, token }: { input: Omit<LogCenterQuery, 
   const denied = query.error instanceof ApiError && query.error.status === 403;
   return <>
     <div className={styles.resultHeader}>
-      <OpsIconActionButton type="primary" opsTone="primary" icon={<SearchOutlined />} loading={query.isFetching} onClick={() => setRequestedAt(new Date())}>查询</OpsIconActionButton>
+      <OpsIconActionButton type="primary" opsTone="primary" opsVariant="primary" icon={<SearchOutlined />} loading={query.isFetching} onClick={() => setRequestedAt(new Date())}>查询</OpsIconActionButton>
       {query.isSuccess ? <Typography.Text type="secondary">{rows.length} 条{rows.length >= (input.limit ?? 100) ? " · 已达本次条数上限" : ""}</Typography.Text> : null}
       {requestedAt ? <Typography.Text type="secondary">截至 {requestedAt.toLocaleString()}</Typography.Text> : null}
     </div>
@@ -82,7 +82,7 @@ function ClusterLogCenter({ clusterId, token }: { clusterId: string; token: stri
     <OpsPageHeader title="日志中心" surface={false} actions={configuration} />
     {sourcesQuery.isPending ? <OpsState kind="loading" title="正在加载日志数据源" />
       : sourcesQuery.isError ? <OpsState kind={sourcesQuery.error instanceof ApiError && sourcesQuery.error.status === 403 ? "permission" : "error"} title="无法读取日志数据源" action={<OpsIconActionButton onClick={() => void sourcesQuery.refetch()}>重试</OpsIconActionButton>} />
-      : !sources.length ? <OpsState kind="disabled" title="当前集群未配置可用日志数据源" description="需要已启用且绑定当前集群的 Elasticsearch 数据源。" action={configuration} />
+      : !sources.length ? <OpsState kind="disabled" title="当前集群未配置可用日志数据源" description="需要已启用且绑定当前集群的 Elasticsearch 数据源。" />
       : <>
         <div className={styles.filters}>
           <Select aria-label="日志数据源" value={sourceId} onChange={setSelectedSource} options={sources.map((source) => ({ value: source.id, label: source.name }))} />
