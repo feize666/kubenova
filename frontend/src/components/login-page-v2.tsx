@@ -191,8 +191,8 @@ function LoginPageV2Content() {
 
           <div className="login-v2__separator">其他登录方式</div>
           <div className="login-v2__alternatives">
-            <Button icon={<SafetyCertificateOutlined />} block size="large">OIDC 单点登录</Button>
-            <Button block size="large">企业 SSO 登录</Button>
+            <Button disabled icon={<SafetyCertificateOutlined />} block size="large">OIDC 单点登录（即将支持）</Button>
+            <Button disabled block size="large">企业 SSO 登录（即将支持）</Button>
           </div>
           <div className="login-v2__footer">KubeNova v1.0 · 企业级容器云管理平台</div>
         </section>
