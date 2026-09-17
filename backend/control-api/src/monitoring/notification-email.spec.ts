@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { Socket } from 'node:net';
 import { sendNotificationEmail } from './notification-email';
 
 jest.mock('nodemailer', () => ({ createTransport: jest.fn() }));
@@ -7,6 +8,11 @@ describe('sendNotificationEmail', () => {
   const originalEnv = { ...process.env };
   const sendMail = jest.fn();
   const close = jest.fn();
+  const expectSocketDestroyed = () => {
+    const socket = (nodemailer.createTransport as jest.Mock).mock.calls[0][0].socket;
+    expect(socket).toBeInstanceOf(Socket);
+    expect(socket.destroyed).toBe(true);
+  };
   beforeEach(() => {
     process.env = { ...originalEnv };
     for (const key of Object.keys(process.env)) if (key.startsWith('SMTP_')) delete process.env[key];
@@ -29,6 +35,7 @@ describe('sendNotificationEmail', () => {
       envelope: { from: 'alerts@example.com', to: ['ops@example.com'] },
       subject: 'Alert', text: '<not html>', disableFileAccess: true, disableUrlAccess: true });
     expect(close).toHaveBeenCalledTimes(1);
+    expectSocketDestroyed();
   });
   it('requires STARTTLS when implicit TLS is explicitly false', async () => {
     Object.assign(process.env, { SMTP_SECURE: 'false', SMTP_PORT: '587', SMTP_USER: 'account', SMTP_PASSWORD: 'secret' });
@@ -58,6 +65,7 @@ describe('sendNotificationEmail', () => {
     sendMail.mockRejectedValue(new Error('password=secret'));
     await expect(sendNotificationEmail('ops@example.com', { title: 'Alert', message: 'text' })).rejects.toThrow('Email notification delivery failed');
     expect(close).toHaveBeenCalledTimes(1);
+    expectSocketDestroyed();
   });
   it('bounds total delivery time and closes a stalled transport', async () => {
     jest.useFakeTimers();
@@ -66,6 +74,7 @@ describe('sendNotificationEmail', () => {
     await jest.advanceTimersByTimeAsync(5000);
     await result;
     expect(close).toHaveBeenCalledTimes(1);
+    expectSocketDestroyed();
     expect(jest.getTimerCount()).toBe(0);
   });
 });

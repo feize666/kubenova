@@ -1,3 +1,4 @@
+import { Socket } from 'node:net';
 import { validateNotificationEndpoint } from './notification-endpoint';
 
 const nodemailer = require('nodemailer') as {
@@ -13,6 +14,7 @@ export async function sendNotificationEmail(
 ): Promise<void> {
   let transport: ReturnType<typeof nodemailer.createTransport> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let socket: Socket | undefined;
   try {
     const to = validateNotificationEndpoint('email', recipient);
     const from = validateNotificationEndpoint('email', process.env.SMTP_FROM ?? '');
@@ -29,7 +31,10 @@ export async function sendNotificationEmail(
       || typeof values?.message !== 'string' || Buffer.byteLength(values.message, 'utf8') > 65536) {
       throw new Error('Invalid email configuration or input');
     }
+    // Own the underlying socket so the total deadline also aborts active SMTP I/O.
+    socket = new Socket();
     transport = nodemailer.createTransport({
+      socket,
       host, port, secure: secure === 'true', requireTLS: true,
       ...(user && pass ? { auth: { user, pass } } : {}),
       tls: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
@@ -53,6 +58,7 @@ export async function sendNotificationEmail(
     throw new Error('Email notification delivery failed');
   } finally {
     if (timer) clearTimeout(timer);
+    socket?.destroy();
     try { transport?.close(); } catch { /* Transport errors must not expose SMTP credentials. */ }
   }
 }
