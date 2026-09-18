@@ -36,17 +36,22 @@ export function totpCode(secret: string, timestamp = Date.now()): string {
 }
 
 export function verifyTotp(secret: string, code: string, timestamp = Date.now(), window = 1): boolean {
+  return matchTotpCounter(secret, code, timestamp, window) !== null;
+}
+
+export function matchTotpCounter(secret: string, code: string, timestamp = Date.now(), window = 1): number | null {
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) throw new Error('invalid MFA timestamp');
   if (!Number.isInteger(window) || window < 0 || window > 10) throw new Error('invalid MFA window');
   base32Decode(secret);
-  if (!/^\d{6}$/.test(code)) return false;
-  for (let delta = -window; delta <= window; delta++) {
+  if (!/^\d{6}$/.test(code)) return null;
+  // Prefer the newest collision so advancing time cannot redeem the same code again.
+  for (let delta = window; delta >= -window; delta--) {
     const candidateTime = timestamp + delta * PERIOD * 1000;
     if (candidateTime < 0 || !Number.isSafeInteger(candidateTime)) continue;
     const expected = totpCode(secret, candidateTime);
-    if (timingSafeEqual(Buffer.from(expected), Buffer.from(code))) return true;
+    if (timingSafeEqual(Buffer.from(expected), Buffer.from(code))) return Math.floor(candidateTime / 1000 / PERIOD);
   }
-  return false;
+  return null;
 }
 
 export function encryptMfaSecret(secret: string, key: string): string {
