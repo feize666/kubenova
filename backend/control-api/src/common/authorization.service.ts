@@ -30,7 +30,7 @@ type Grant = {
   validFrom: Date;
   expiresAt: Date | null;
   revokedAt: Date | null;
-  namespaces: Array<{ namespaceUid: string }>;
+  namespaces: Array<{ namespaceUid: string; namespaceName?: string }>;
   capabilities: Array<{ capability: string }>;
 };
 
@@ -52,20 +52,10 @@ export class AuthorizationService {
     if (request.capability && !capabilities.has(request.capability)) return this.deny('CAPABILITY_NOT_SUPPORTED');
     // A namespaced grant cannot authorize an unscoped request.
     if (!request.namespaceUid?.trim()) return this.deny('NAMESPACE_SCOPE_REQUIRED');
-    const memberships = await (this.prisma as unknown as AuthorizationPrisma).groupMembership.findMany({
-      where: { userId: request.userId, state: 'active', validFrom: { lte: now }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
-      select: { groupId: true },
-    });
-    const groupIds = memberships.map(item => item.groupId);
-    const grants = await (this.prisma as unknown as AuthorizationPrisma).accessGrant.findMany({
-      where: { clusterId: request.clusterId, state: 'active', revokedAt: null, OR: [{ userId: request.userId }, { groupId: { in: groupIds } }] },
-      include: { namespaces: { select: { namespaceUid: true } }, capabilities: { select: { capability: true } } },
-    });
+    const grants = await this.listEffectiveGrants(request.userId, now, request.clusterId);
     const matching = grants.filter(grant => {
-      if (grant.userId !== request.userId && !groupIds.includes(grant.groupId ?? '')) return false;
-      if (!roles.has(grant.role as AuthorizationRole)) return false;
-      if (grant.validFrom > now || (grant.expiresAt && grant.expiresAt <= now) || grant.revokedAt) return false;
-      if (request.namespaceUid && !grant.namespaces.some(scope => scope.namespaceUid === request.namespaceUid)) return false;
+      if (grant.clusterId !== request.clusterId) return false;
+      if (!grant.namespaces.some(scope => scope.namespaceUid === request.namespaceUid)) return false;
       if (request.capability && !grant.capabilities.some(item => item.capability === request.capability)) return false;
       if (request.mutation && grant.role === 'viewer') return false;
       return true;
@@ -73,6 +63,27 @@ export class AuthorizationService {
     if (!matching.length) return this.deny('GRANT_NOT_FOUND');
     const expiresAt = matching.reduce<Date | null>((earliest, grant) => !grant.expiresAt ? earliest : !earliest || grant.expiresAt < earliest ? grant.expiresAt : earliest, null);
     return { allowed: true, reasonCode: 'GRANT_MATCHED', grantIds: matching.map(grant => grant.id), expiresAt };
+  }
+
+  async listEffectiveGrants(userId: string, now = new Date(), clusterId?: string): Promise<Grant[]> {
+    if (!userId?.trim()) return [];
+    const memberships = await (this.prisma as unknown as AuthorizationPrisma).groupMembership.findMany({
+      where: { userId, state: 'active', group: { active: true }, validFrom: { lte: now }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+      select: { groupId: true },
+    });
+    const groupIds = memberships.map(item => item.groupId);
+    const grants = await (this.prisma as unknown as AuthorizationPrisma).accessGrant.findMany({
+      where: { clusterId, state: 'active', revokedAt: null, cluster: { deletedAt: null, status: { not: 'deleted' } }, OR: [{ userId }, { groupId: { in: groupIds } }] },
+      include: { namespaces: { select: { namespaceUid: true, namespaceName: true } }, capabilities: { select: { capability: true } } },
+    });
+    return grants.filter(grant => {
+      if (grant.userId !== userId && !groupIds.includes(grant.groupId ?? '')) return false;
+      if (grant.state !== 'active' || (clusterId && grant.clusterId !== clusterId)) return false;
+      if (!roles.has(grant.role as AuthorizationRole)) return false;
+      if (grant.validFrom > now || (grant.expiresAt && grant.expiresAt <= now) || grant.revokedAt) return false;
+      if (!grant.namespaces.some(scope => scope.namespaceUid?.trim())) return false;
+      return true;
+    });
   }
 
   private deny(reasonCode: string): AuthorizationDecision {

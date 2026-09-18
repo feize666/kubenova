@@ -1,6 +1,18 @@
 import { AuthorizationService } from './authorization.service';
 
 describe('AuthorizationService', () => {
+  it('lists effective grants without widening identity, time or namespace scope', async () => {
+    const base = { id: 'direct', userId: 'u', groupId: null, clusterId: 'c', role: 'viewer', state: 'active', validFrom: new Date(0), expiresAt: null, revokedAt: null, namespaces: [{ namespaceUid: 'ns', namespaceName: 'ai' }], capabilities: [] };
+    const grants = [base, { ...base, id: 'group', userId: null, groupId: 'team' },
+      { ...base, id: 'foreign', userId: 'other' }, { ...base, id: 'disabled', state: 'disabled' },
+      { ...base, id: 'expired', expiresAt: now }, { ...base, id: 'future', validFrom: new Date('2030-01-01') },
+      { ...base, id: 'empty', namespaces: [] }, { ...base, id: 'revoked', revokedAt: now }];
+    const { service } = setup({ groupMembership: { findMany: async () => [{ groupId: 'team' }] }, accessGrant: { findMany: async () => grants } });
+    const result = await (service as any).listEffectiveGrants('u', now);
+    expect(result.map((grant: any) => grant.id)).toEqual(['direct', 'group']);
+    expect(result[0].namespaces).toEqual([{ namespaceUid: 'ns', namespaceName: 'ai' }]);
+    await expect((service as any).listEffectiveGrants('', now)).resolves.toEqual([]);
+  });
   const now = new Date('2026-09-16T00:00:00Z');
   function setup(overrides: Record<string, unknown> = {}) {
     const prisma = {
@@ -37,6 +49,14 @@ describe('AuthorizationService', () => {
     const grant = { id: 'g', userId: null, clusterId: 'c', role: 'viewer', state: 'active', validFrom: new Date('2026-01-01'), expiresAt: new Date('2026-12-01'), revokedAt: null, namespaces: [{ namespaceUid: 'ns' }], capabilities: [] };
     const { service } = setup({ groupMembership: { findMany: jest.fn().mockResolvedValue([{ groupId: 'team' }]) }, accessGrant: { findMany: jest.fn().mockResolvedValue([{ ...grant, groupId: 'team' }]) } });
     await expect(service.authorize({ userId: 'u', clusterId: 'c', namespaceUid: 'ns', at: now })).resolves.toMatchObject({ allowed: true });
+  });
+  it('excludes disabled groups from inherited authorization', async () => {
+    const grant = { id: 'g', userId: null, groupId: 'disabled-team', clusterId: 'c', role: 'viewer', state: 'active', validFrom: new Date(0), expiresAt: null, revokedAt: null, namespaces: [{ namespaceUid: 'ns' }], capabilities: [] };
+    const { service } = setup({
+      groupMembership: { findMany: async ({ where }: any) => where.group?.active === true ? [] : [{ groupId: 'disabled-team' }] },
+      accessGrant: { findMany: async () => [grant] },
+    });
+    await expect(service.authorize({ userId: 'u', clusterId: 'c', namespaceUid: 'ns', at: now })).resolves.toMatchObject({ allowed: false });
   });
   it.each([
     { userId: 'team', groupId: null },
