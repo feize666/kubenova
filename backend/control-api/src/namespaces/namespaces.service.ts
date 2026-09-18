@@ -15,6 +15,9 @@ import {
   type PlatformRole,
 } from '../common/governance';
 import { PrismaService } from '../platform/database/prisma.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 
 export interface NamespaceListQuery {
   clusterId?: string;
@@ -44,6 +47,7 @@ export interface NamespaceListResult {
 }
 
 interface Actor {
+  id?: string;
   username?: string;
   role?: PlatformRole;
 }
@@ -66,13 +70,23 @@ export class NamespacesService {
     private readonly clusterSyncService: ClusterSyncService,
     private readonly clustersService: ClustersService,
     private readonly k8sClientService: K8sClientService,
+    private readonly clusterAccess: ClusterAccessService,
+    private readonly authorization: AuthorizationService,
+    private readonly namespaceIdentity: NamespaceIdentityService,
   ) {}
 
-  async list(query: NamespaceListQuery): Promise<NamespaceListResult> {
+  async list(query: NamespaceListQuery, actor?: Actor): Promise<NamespaceListResult> {
     const keyword = query.keyword?.trim();
     const normalizedClusterId = query.clusterId?.trim();
     const page = this.parsePositiveInt(query.page, 1);
     const pageSize = this.parsePositiveInt(query.pageSize, 20);
+    const admin = this.clusterAccess.isPlatformAdmin(actor);
+    const empty = { items: [], total: 0, page, pageSize };
+    if (!admin && !actor?.id?.trim()) return empty;
+    const legacyIds = admin ? [] : (await this.clusterAccess.listAccessibleClusterIds(actor)) ?? [];
+    const grants = admin ? [] : await this.authorization.listEffectiveGrants(actor!.id!);
+    const allowedClusterIds = new Set([...legacyIds, ...grants.map(grant => grant.clusterId)]);
+    if (!admin && normalizedClusterId && !allowedClusterIds.has(normalizedClusterId)) return empty;
     let readableClusterIds: string[] | undefined;
     if (normalizedClusterId) {
       await this.clusterHealthService.assertClusterOnlineForRead(
@@ -82,6 +96,7 @@ export class NamespacesService {
     } else {
       readableClusterIds =
         await this.clusterHealthService.listReadableClusterIdsForResourceRead();
+      if (!admin) readableClusterIds = readableClusterIds.filter(id => allowedClusterIds.has(id));
       if (readableClusterIds.length === 0) {
         return {
           items: [],
@@ -123,7 +138,23 @@ export class NamespacesService {
       },
       orderBy: this.resolveOrderBy(query.sortBy, query.sortOrder),
     });
-    const items = rows.map((row) => ({
+    const visibleRows = [] as typeof rows;
+    for (const row of rows) {
+      if (admin || legacyIds.includes(row.clusterId)) {
+        visibleRows.push(row);
+        continue;
+      }
+      const scopes = grants.filter(grant => grant.clusterId === row.clusterId)
+        .flatMap(grant => grant.namespaces).filter(scope => scope.namespaceName === row.name);
+      if (!scopes.length) continue;
+      try {
+        const uid = await this.namespaceIdentity.resolve(row.clusterId, row.name);
+        if (scopes.some(scope => scope.namespaceUid === uid)) visibleRows.push(row);
+      } catch {
+        // Fail closed when the live namespace identity cannot be established.
+      }
+    }
+    const items = visibleRows.map((row) => ({
       id: row.id,
       clusterId: row.clusterId,
       clusterName: row.cluster.name,

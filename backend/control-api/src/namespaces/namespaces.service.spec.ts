@@ -27,6 +27,9 @@ describe('NamespacesService list online gate', () => {
       clusterSyncService,
       clustersService,
       k8sClientService,
+      { isPlatformAdmin: () => true } as any,
+      {} as any,
+      {} as any,
     );
     return { service, prisma, clusterHealthService };
   }

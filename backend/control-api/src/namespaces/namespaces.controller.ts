@@ -16,6 +16,7 @@ import { NamespacesService } from './namespaces.service';
 
 interface RequestActor {
   user?: {
+    id?: string;
     username?: string;
     role?: PlatformRole;
   };
@@ -28,6 +29,7 @@ export class NamespacesController {
 
   @Get()
   async list(
+    @Req() req: { user?: RequestActor },
     @Query('clusterId') clusterId?: string,
     @Query('keyword') keyword?: string,
     @Query('page') page?: string,
@@ -42,7 +44,7 @@ export class NamespacesController {
       pageSize: pageSize?.trim() || undefined,
       sortBy: sortBy?.trim() || undefined,
       sortOrder,
-    });
+    }, req.user?.user);
     return {
       items: result.items,
       total: result.total,
