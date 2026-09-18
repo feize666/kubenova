@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -7,6 +8,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
+import { ClusterAccessService, type ClusterAccessSubject } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 import { Prisma } from '@prisma/client';
 import { ClusterHealthService } from '../clusters/cluster-health.service';
 import { ClusterEventSyncService } from '../clusters/cluster-event-sync.service';
@@ -351,7 +355,49 @@ export class WorkloadsService {
     private readonly k8sClientService: K8sClientService,
     private readonly liveMetricsService: LiveMetricsService,
     private readonly prisma: PrismaService,
+    private readonly clusterAccess?: ClusterAccessService,
+    private readonly authorization?: AuthorizationService,
+    private readonly namespaceIdentity?: NamespaceIdentityService,
   ) {}
+
+  private async scopes(actor?: ClusterAccessSubject, mutation = false): Promise<WorkloadListParams['scopes']> {
+    // Internal sync callers omit the actor; HTTP controllers always pass an identity object.
+    if (actor === undefined) return undefined;
+    if (!actor.id?.trim() || !this.clusterAccess || !this.authorization || !this.namespaceIdentity) throw new ForbiddenException();
+    if (this.clusterAccess.isPlatformAdmin(actor)) return undefined;
+    const scopes: NonNullable<WorkloadListParams['scopes']> = [];
+    const legacy = await this.clusterAccess.listAccessibleClusterIds(actor) ?? [];
+    for (const clusterId of legacy) {
+      if (mutation) {
+        try { await this.clusterAccess.assertCanMutate(actor, clusterId); }
+        catch (error) {
+          if (error instanceof ForbiddenException || error instanceof NotFoundException) continue;
+          throw error;
+        }
+      }
+      scopes.push({ clusterId });
+    }
+    const grants = await this.authorization.listEffectiveGrants(actor.id);
+    const checked = new Map<string, string | null>();
+    for (const grant of grants) {
+      if (mutation && grant.role === 'viewer') continue;
+      for (const scope of grant.namespaces) {
+        if (!scope.namespaceName) continue;
+        const key = `${grant.clusterId}/${scope.namespaceName}`;
+        if (!checked.has(key)) {
+          try { checked.set(key, await this.namespaceIdentity.resolve(grant.clusterId, scope.namespaceName)); }
+          catch { checked.set(key, null); }
+        }
+        if (checked.get(key) === scope.namespaceUid) scopes.push({ clusterId: grant.clusterId, namespace: scope.namespaceName });
+      }
+    }
+    return scopes;
+  }
+
+  private async assertScope(actor: ClusterAccessSubject | undefined, clusterId: string, namespace: string, mutation = false): Promise<void> {
+    const scopes = await this.scopes(actor, mutation);
+    if (scopes && !scopes.some(scope => scope.clusterId === clusterId && (!scope.namespace || scope.namespace === namespace))) throw new ForbiddenException('工作负载不在授权范围内');
+  }
 
   private normalizeKind(kind: string): string {
     const k = kind.trim().toLowerCase();
@@ -448,8 +494,12 @@ export class WorkloadsService {
     return this.normalizeKind(kind) !== kind;
   }
 
-  async list(query: WorkloadsListQuery): Promise<WorkloadListResponse> {
+  async list(query: WorkloadsListQuery, actor?: ClusterAccessSubject): Promise<WorkloadListResponse> {
     const normalizedClusterId = query.clusterId?.trim();
+    const scopes = await this.scopes(actor);
+    if (scopes && !scopes.some(scope => (!normalizedClusterId || scope.clusterId === normalizedClusterId) && (!query.namespace || !scope.namespace || scope.namespace === query.namespace))) {
+      return { items: [], total: 0, page: this.parsePositiveInt(query.page, 1), pageSize: this.parsePositiveInt(query.pageSize, 10), timestamp: new Date().toISOString() };
+    }
     let readableClusterIds: string[] | undefined;
     if (normalizedClusterId) {
       await this.clusterHealthService.assertClusterOnlineForRead(
@@ -458,6 +508,7 @@ export class WorkloadsService {
     } else {
       readableClusterIds =
         await this.clusterHealthService.listReadableClusterIdsForResourceRead();
+      if (scopes) readableClusterIds = readableClusterIds.filter(id => scopes.some(scope => scope.clusterId === id));
       if (readableClusterIds.length === 0) {
         return {
           items: [],
@@ -470,6 +521,7 @@ export class WorkloadsService {
     }
 
     const params: WorkloadListParams = {
+      scopes,
       clusterId: normalizedClusterId,
       clusterIds: readableClusterIds,
       namespace: query.namespace,
@@ -717,11 +769,12 @@ export class WorkloadsService {
     this.workloadsSyncAt.set(clusterId, now);
   }
 
-  async getById(id: string): Promise<WorkloadRecord> {
+  async getById(id: string, actor?: ClusterAccessSubject): Promise<WorkloadRecord> {
     const record = await this.repository.findById(id);
     if (!record) {
       throw new NotFoundException(`工作负载 ${id} 不存在`);
     }
+    await this.assertScope(actor, record.clusterId, record.namespace);
     return record;
   }
 
@@ -750,10 +803,11 @@ export class WorkloadsService {
   async listByLegacyKind(
     kind: string,
     query: Omit<WorkloadsListQuery, 'kind'>,
+    actor?: ClusterAccessSubject,
   ): Promise<LegacyWorkloadsListResponse> {
     const normalizedKind = this.normalizeKind(kind);
     const { projection: _projection, fields: _fields, ...listQuery } = query;
-    const result = await this.list({ ...listQuery, kind: normalizedKind });
+    const result = await this.list({ ...listQuery, kind: normalizedKind }, actor);
     return {
       kind: kind.toLowerCase(),
       total: result.total,
@@ -773,17 +827,20 @@ export class WorkloadsService {
       namespace?: string;
       payload?: WorkloadActionPayload;
     },
+    actor?: ClusterAccessSubject,
   ): Promise<WorkloadActionResponse> {
     const record = await this.getByKindAndName(kind, name, identity);
-    return this.applyAction(record.id, action, identity.payload);
+    return this.applyAction(record.id, action, identity.payload, actor);
   }
 
   async applyAction(
     id: string,
     action: string,
     payload?: WorkloadActionPayload,
+    actor?: ClusterAccessSubject,
   ): Promise<WorkloadActionResponse> {
     const existing = await this.getById(id);
+    await this.assertScope(actor, existing.clusterId, existing.namespace, true);
 
     if (existing.state === 'deleted') {
       throw new BadRequestException('已删除工作负载不可执行动作');
@@ -935,7 +992,8 @@ export class WorkloadsService {
     };
   }
 
-  async create(dto: WorkloadCreateDto): Promise<WorkloadRecord> {
+  async create(dto: WorkloadCreateDto, actor?: ClusterAccessSubject): Promise<WorkloadRecord> {
+    await this.assertScope(actor, dto.clusterId, dto.namespace, true);
     const normalizedSpec = this.normalizeCreateSpec(dto.spec);
     await this.createWorkloadInCluster({
       ...dto,
@@ -947,8 +1005,10 @@ export class WorkloadsService {
     });
   }
 
-  async update(id: string, dto: WorkloadUpdateDto): Promise<WorkloadRecord> {
+  async update(id: string, dto: WorkloadUpdateDto, actor?: ClusterAccessSubject): Promise<WorkloadRecord> {
     const existing = await this.getById(id);
+    await this.assertScope(actor, existing.clusterId, existing.namespace, true);
+    if (dto.namespace) await this.assertScope(actor, existing.clusterId, dto.namespace, true);
     if (
       dto.namespace &&
       dto.namespace.trim() &&
@@ -961,8 +1021,10 @@ export class WorkloadsService {
 
   async validateWorkspace(
     body: WorkloadWorkspaceRequest,
+    actor?: ClusterAccessSubject,
   ): Promise<WorkloadWorkspaceValidateResponse> {
     const prepared = this.prepareWorkspaceExecutionInput(body);
+    await this.assertScope(actor, prepared.clusterId ?? '', prepared.namespace ?? '', true);
     return this.validateWorkspaceNormalized(prepared.input);
   }
 
@@ -1291,12 +1353,14 @@ export class WorkloadsService {
   async submitWorkspace(
     body: WorkloadWorkspaceRequest,
     actor?: {
+      id?: string;
       username?: string;
       role?: import('../common/governance').PlatformRole;
     },
   ): Promise<WorkloadWorkspaceSubmitResponse> {
     const prepared = this.prepareWorkspaceExecutionInput(body);
     const input = prepared.input;
+    await this.assertScope(actor, prepared.clusterId ?? '', prepared.namespace ?? '', true);
     const validation = await this.validateWorkspaceNormalized(input);
     if (!validation.valid) {
       throw new BadRequestException({
@@ -1521,8 +1585,10 @@ export class WorkloadsService {
 
   async renderWorkspaceYaml(
     body: WorkloadWorkspaceRequest,
+    actor?: ClusterAccessSubject,
   ): Promise<WorkloadWorkspaceRenderYamlResponse> {
     const prepared = this.prepareWorkspaceExecutionInput(body);
+    await this.assertScope(actor, prepared.clusterId ?? '', prepared.namespace ?? '', true);
     const input = prepared.input;
     const validation = await this.validateWorkspaceNormalized(input);
     if (!validation.valid) {

@@ -22,6 +22,7 @@ export interface WorkloadRecord {
 export type WorkloadListProjection = 'topology';
 
 export interface WorkloadListParams {
+  scopes?: Array<{ clusterId: string; namespace?: string }>;
   clusterId?: string;
   clusterIds?: string[];
   namespace?: string;
@@ -88,6 +89,7 @@ export class WorkloadsRepository {
     } else if (params.clusterIds) {
       where.clusterId = { in: params.clusterIds };
     }
+    if (params.scopes) where.AND = [{ OR: params.scopes }];
     if (params.namespace) {
       where.namespace = params.namespace;
     }

@@ -10,7 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../common/auth.guard';
-import { assertWritePermission, type PlatformRole } from '../common/governance';
+import { type PlatformRole } from '../common/governance';
 import { resolveRequestId } from '../common/request-id';
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
@@ -29,6 +29,7 @@ import {
 interface ActorRequest {
   user?: {
     user?: {
+      id?: string;
       username?: string;
       role?: PlatformRole;
     };
@@ -66,11 +67,11 @@ export class WorkloadsController {
 
   @Post('workspace/validate')
   validateWorkspace(
-    @Req() req: { requestId?: string },
+    @Req() req: ActorRequest & { requestId?: string },
     @Body() body: WorkloadWorkspaceRequest,
   ): Promise<WorkloadWorkspaceValidateResponse> {
     void resolveRequestId(req);
-    return this.workloadsService.validateWorkspace(body);
+    return this.workloadsService.validateWorkspace(body, req.user?.user ?? {});
   }
 
   @Post('workspace/submit')
@@ -79,8 +80,7 @@ export class WorkloadsController {
     @Body() body: WorkloadWorkspaceRequest,
   ): Promise<WorkloadWorkspaceSubmitResponse> {
     void resolveRequestId(req);
-    const actor = req.user?.user;
-    assertWritePermission(actor);
+    const actor = req.user?.user ?? {};
     const result = await this.workloadsService.submitWorkspace(body, actor);
     this.triggerClusterSync(result.workload.clusterId);
     return result;
@@ -88,11 +88,11 @@ export class WorkloadsController {
 
   @Post('workspace/render-yaml')
   renderWorkspaceYaml(
-    @Req() req: { requestId?: string },
+    @Req() req: ActorRequest & { requestId?: string },
     @Body() body: WorkloadWorkspaceRequest,
   ): Promise<WorkloadWorkspaceRenderYamlResponse> {
     void resolveRequestId(req);
-    return this.workloadsService.renderWorkspaceYaml(body);
+    return this.workloadsService.renderWorkspaceYaml(body, req.user?.user ?? {});
   }
 
   /**
@@ -100,9 +100,9 @@ export class WorkloadsController {
    * 列表查询，支持 clusterId/namespace/kind/keyword/state/page/pageSize
    */
   @Get()
-  list(@Req() req: { requestId?: string }, @Query() query: WorkloadsListQuery) {
+  list(@Req() req: ActorRequest & { requestId?: string }, @Query() query: WorkloadsListQuery) {
     void resolveRequestId(req);
-    return this.workloadsService.list(query);
+    return this.workloadsService.list(query, req.user?.user ?? {});
   }
 
   /**
@@ -111,15 +111,15 @@ export class WorkloadsController {
    */
   @Get(':idOrKind')
   getByIdOrLegacyKind(
-    @Req() req: { requestId?: string },
+    @Req() req: ActorRequest & { requestId?: string },
     @Param('idOrKind') idOrKind: string,
     @Query() query: Omit<WorkloadsListQuery, 'kind'>,
   ) {
     void resolveRequestId(req);
     if (this.workloadsService.isLegacyKind(idOrKind)) {
-      return this.workloadsService.listByLegacyKind(idOrKind, query);
+      return this.workloadsService.listByLegacyKind(idOrKind, query, req.user?.user ?? {});
     }
-    return this.workloadsService.getById(idOrKind);
+    return this.workloadsService.getById(idOrKind, req.user?.user ?? {});
   }
 
   /**
@@ -128,11 +128,11 @@ export class WorkloadsController {
    */
   @Post()
   async create(
-    @Req() req: { requestId?: string },
+    @Req() req: ActorRequest & { requestId?: string },
     @Body() dto: WorkloadCreateDto,
   ) {
     void resolveRequestId(req);
-    const result = await this.workloadsService.create(dto);
+    const result = await this.workloadsService.create(dto, req.user?.user ?? {});
     this.triggerClusterSync(result.clusterId);
     return result;
   }
@@ -143,13 +143,13 @@ export class WorkloadsController {
    */
   @Post(':id/actions')
   applyAction(
-    @Req() req: { requestId?: string },
+    @Req() req: ActorRequest & { requestId?: string },
     @Param('id') id: string,
     @Body() body: { action: string; payload?: WorkloadActionPayload },
   ) {
     void resolveRequestId(req);
     return this.workloadsService
-      .applyAction(id, body.action, body.payload)
+      .applyAction(id, body.action, body.payload, req.user?.user ?? {})
       .then((result) => {
         this.triggerClusterSync(result.record.clusterId);
         return result;
@@ -162,7 +162,7 @@ export class WorkloadsController {
    */
   @Post(':kind/:name/actions')
   applyActionByKindAndName(
-    @Req() req: { requestId?: string },
+    @Req() req: ActorRequest & { requestId?: string },
     @Param('kind') kind: string,
     @Param('name') name: string,
     @Body()
@@ -183,7 +183,7 @@ export class WorkloadsController {
         clusterId: body.clusterId,
         namespace: body.namespace,
         payload,
-      })
+      }, req.user?.user ?? {})
       .then((result) => {
         this.triggerClusterSync(result.record.clusterId);
         return result;
@@ -192,7 +192,7 @@ export class WorkloadsController {
 
   @Post(':kind/:name/disable')
   async disableByKindAndName(
-    @Req() req: { requestId?: string },
+    @Req() req: ActorRequest & { requestId?: string },
     @Param('kind') kind: string,
     @Param('name') name: string,
     @Body() body: { clusterId?: string; namespace?: string },
@@ -203,6 +203,7 @@ export class WorkloadsController {
       name,
       'disable',
       body,
+      req.user?.user ?? {},
     );
     this.triggerClusterSync(result.record.clusterId);
     return result;
@@ -210,7 +211,7 @@ export class WorkloadsController {
 
   @Post(':kind/:name/enable')
   async enableByKindAndName(
-    @Req() req: { requestId?: string },
+    @Req() req: ActorRequest & { requestId?: string },
     @Param('kind') kind: string,
     @Param('name') name: string,
     @Body() body: { clusterId?: string; namespace?: string },
@@ -221,6 +222,7 @@ export class WorkloadsController {
       name,
       'enable',
       body,
+      req.user?.user ?? {},
     );
     this.triggerClusterSync(result.record.clusterId);
     return result;
@@ -232,12 +234,12 @@ export class WorkloadsController {
    */
   @Patch(':id')
   async update(
-    @Req() req: { requestId?: string },
+    @Req() req: ActorRequest & { requestId?: string },
     @Param('id') id: string,
     @Body() dto: WorkloadUpdateDto,
   ) {
     void resolveRequestId(req);
-    const result = await this.workloadsService.update(id, dto);
+    const result = await this.workloadsService.update(id, dto, req.user?.user ?? {});
     this.triggerClusterSync(result.clusterId);
     return result;
   }
