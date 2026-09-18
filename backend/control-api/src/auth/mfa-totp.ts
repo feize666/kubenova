@@ -1,0 +1,55 @@
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+
+const PERIOD = 30;
+const DIGITS = 6;
+
+function base32Decode(value: string): Buffer {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const input = value.toUpperCase().replace(/=+$/, '').replace(/\s+/g, '');
+  let bits = 0; let buffer = 0; const out: number[] = [];
+  for (const char of input) {
+    const n = alphabet.indexOf(char);
+    if (n < 0) throw new Error('invalid MFA secret');
+    buffer = (buffer << 5) | n; bits += 5;
+    if (bits >= 8) { bits -= 8; out.push((buffer >> bits) & 255); }
+  }
+  return Buffer.from(out);
+}
+
+export function generateTotpSecret(): string {
+  const bytes = randomBytes(20); const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let result = ''; let bits = 0; let buffer = 0;
+  for (const byte of bytes) { buffer = (buffer << 8) | byte; bits += 8; while (bits >= 5) { bits -= 5; result += alphabet[(buffer >> bits) & 31]; } }
+  if (bits) result += alphabet[(buffer << (5 - bits)) & 31];
+  return result;
+}
+
+export function totpCode(secret: string, timestamp = Date.now()): string {
+  const counter = Math.floor(timestamp / 1000 / PERIOD); const data = Buffer.alloc(8);
+  data.writeBigUInt64BE(BigInt(counter)); const digest = createHmac('sha1', base32Decode(secret)).update(data).digest();
+  const offset = digest[digest.length - 1] & 15; const value = (digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000;
+  return String(value).padStart(DIGITS, '0');
+}
+
+export function verifyTotp(secret: string, code: string, timestamp = Date.now(), window = 1): boolean {
+  if (!/^\d{6}$/.test(code)) return false;
+  for (let delta = -window; delta <= window; delta++) {
+    const expected = totpCode(secret, timestamp + delta * PERIOD * 1000);
+    if (timingSafeEqual(Buffer.from(expected), Buffer.from(code))) return true;
+  }
+  return false;
+}
+
+export function encryptMfaSecret(secret: string, key: string): string {
+  const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', createHash('sha256').update(key).digest(), iv);
+  const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+  return `v1.${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${encrypted.toString('base64url')}`;
+}
+
+export function decryptMfaSecret(payload: string, key: string): string {
+  const [version, iv, tag, data] = payload.split('.'); if (version !== 'v1' || !iv || !tag || !data) throw new Error('invalid MFA secret');
+  const decipher = createDecipheriv('aes-256-gcm', createHash('sha256').update(key).digest(), Buffer.from(iv, 'base64url'));
+  decipher.setAuthTag(Buffer.from(tag, 'base64url')); return Buffer.concat([decipher.update(Buffer.from(data, 'base64url')), decipher.final()]).toString('utf8');
+}
+
+export function hashRecoveryCode(code: string): string { return createHash('sha256').update(code).digest('hex'); }
