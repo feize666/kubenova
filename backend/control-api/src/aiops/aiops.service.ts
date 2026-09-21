@@ -1,4 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { AuthorizationService } from '../common/authorization.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 import {
   appendAudit,
   assertWritePermission,
@@ -41,8 +44,15 @@ export interface AiopsRecommendationItem {
 }
 
 export interface AiopsActionActor {
+  id?: string;
   username?: string;
   role?: PlatformRole;
+}
+
+interface RecommendationTarget {
+  clusterId?: string | null;
+  namespace?: string | null;
+  secrets: boolean;
 }
 
 export interface AiopsRecommendationPrecheckResponse {
@@ -128,9 +138,18 @@ export class AiopsService {
     Promise<AiopsSummaryResponse>
   >();
 
-  constructor(private readonly monitoringService: MonitoringService) {}
+  constructor(
+    private readonly monitoringService: MonitoringService,
+    @Optional() private readonly authorization?: AuthorizationService,
+    @Optional() private readonly clusterAccess?: ClusterAccessService,
+    @Optional() private readonly namespaceIdentity?: NamespaceIdentityService,
+  ) {}
 
-  async getSummary(timeFilter: AiopsTimeFilter): Promise<AiopsSummaryResponse> {
+  async getSummary(timeFilter: AiopsTimeFilter, actor?: AiopsActionActor): Promise<AiopsSummaryResponse> {
+    if (actor !== undefined) {
+      this.assertActor(actor);
+      return this.buildSummary(timeFilter, actor);
+    }
     const key = this.summaryCacheKey(timeFilter);
     const now = Date.now();
     this.pruneSummaryCache(now);
@@ -162,9 +181,11 @@ export class AiopsService {
 
   private async buildSummary(
     timeFilter: AiopsTimeFilter,
+    actor?: AiopsActionActor,
+    targets?: Map<string, RecommendationTarget>,
   ): Promise<AiopsSummaryResponse> {
     const [observability, alerts, inspection] = await Promise.all([
-      this.monitoringService.getObservabilitySummary(timeFilter),
+      this.monitoringService.getObservabilitySummary(timeFilter, actor),
       this.monitoringService.getAlerts({
         clusterId: timeFilter.clusterId,
         page: 1,
@@ -173,13 +194,26 @@ export class AiopsService {
         range: timeFilter.range,
         from: timeFilter.from,
         to: timeFilter.to,
-      }),
+      }, actor),
       this.monitoringService.getClusterInspection(
         timeFilter.clusterId,
         undefined,
         timeFilter,
+        actor,
       ),
     ]);
+    for (const alert of alerts.items) {
+      targets?.set(`rec:alert:${alert.id}`, {
+        clusterId: alert.clusterId, namespace: alert.namespace,
+        secrets: alert.resourceType?.toLowerCase() === 'secret',
+      });
+    }
+    for (const issue of inspection.items) {
+      targets?.set(`rec:inspection:${issue.id}`, {
+        clusterId: issue.clusterId, namespace: issue.namespace,
+        secrets: issue.resourceKind?.toLowerCase() === 'secret',
+      });
+    }
     const incidentsFromAlerts: AiopsIncidentItem[] = alerts.items
       .filter(
         (alert) =>
@@ -407,10 +441,11 @@ export class AiopsService {
     };
   }
 
-  precheckRecommendation(
+  async precheckRecommendation(
     recommendationId: string,
     actor?: AiopsActionActor,
-  ): AiopsRecommendationPrecheckResponse {
+  ): Promise<AiopsRecommendationPrecheckResponse> {
+    await this.assertRecommendationAccess(recommendationId, actor);
     const recommendation = this.parseRecommendationId(recommendationId);
     const mutable = recommendationId.includes(':alert:');
     const checks = [
@@ -470,11 +505,11 @@ export class AiopsService {
     };
   }
 
-  approveRecommendation(
+  async approveRecommendation(
     recommendationId: string,
     actor?: AiopsActionActor,
-  ): AiopsRecommendationApprovalResponse {
-    assertWritePermission(actor);
+  ): Promise<AiopsRecommendationApprovalResponse> {
+    await this.assertRecommendationAccess(recommendationId, actor, true);
     const recommendation = this.parseRecommendationId(recommendationId);
     const audit = appendAudit({
       actor: actor?.username ?? 'system',
@@ -501,6 +536,40 @@ export class AiopsService {
         '真实变更执行前必须通过独立执行端点再次确认 precheck、影响范围和回滚路径。',
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private assertActor(actor?: AiopsActionActor): void {
+    if (!actor?.id?.trim() || !['platform-admin', 'cluster-operator', 'read-only'].includes(actor.role ?? '')) {
+      throw new ForbiddenException('Invalid AIOps subject');
+    }
+  }
+
+  private async assertRecommendationAccess(id: string, actor?: AiopsActionActor, mutation = false): Promise<void> {
+    this.assertActor(actor);
+    if (mutation) assertWritePermission(actor);
+    const targets = new Map<string, RecommendationTarget>();
+    const summary = await this.buildSummary({}, actor, targets);
+    if (!summary.recommendations.some((recommendation) => recommendation.id === id)) {
+      throw new ForbiddenException('Recommendation is unavailable in the current authorized scope');
+    }
+    if (!mutation || actor?.role === 'platform-admin') return;
+    const target = targets.get(id);
+    if (!target?.clusterId || !actor?.id) throw new ForbiddenException();
+    if (!target.secrets && this.clusterAccess) {
+      try {
+        await this.clusterAccess.assertCanMutate(actor, target.clusterId);
+        return;
+      } catch (error) {
+        if (!(error instanceof ForbiddenException) && !(error instanceof NotFoundException)) throw error;
+      }
+    }
+    if (!target.namespace || !this.namespaceIdentity || !this.authorization) throw new ForbiddenException();
+    const namespaceUid = await this.namespaceIdentity.resolve(target.clusterId, target.namespace);
+    const decision = await this.authorization.authorize({
+      userId: actor.id, clusterId: target.clusterId, namespaceUid,
+      mutation: true, capability: target.secrets ? 'secrets' : undefined,
+    });
+    if (!decision.allowed) throw new ForbiddenException();
   }
 
   private parseRecommendationId(

@@ -1,4 +1,5 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import type { ClusterAccessSubject } from '../common/cluster-access.service';
 import { AuthGuard } from '../common/auth.guard';
 import {
   MultiClusterService,
@@ -11,7 +12,7 @@ export class MultiClusterController {
   constructor(private readonly multiClusterService: MultiClusterService) {}
 
   @Post('query')
-  query(@Body() body: MultiClusterQueryRequest) {
-    return this.multiClusterService.query(body);
+  query(@Body() body: MultiClusterQueryRequest, @Req() request: { user?: ClusterAccessSubject }) {
+    return this.multiClusterService.query(body, request.user ?? {});
   }
 }

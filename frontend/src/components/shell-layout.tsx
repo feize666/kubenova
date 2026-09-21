@@ -651,6 +651,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
               menu={{
                 items: userItems,
                 onClick: async ({ key }) => {
+                  if (key === "profile") router.push("/profile");
                   if (key === "logout") {
                     await logout();
                     window.location.replace("/login");

@@ -12,11 +12,9 @@ import {
   DeploymentUnitOutlined,
   FireOutlined,
   GlobalOutlined,
-  HddOutlined,
   LineChartOutlined,
   NodeIndexOutlined,
   RadarChartOutlined,
-  ThunderboltOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Skeleton, Space } from "antd";
@@ -33,7 +31,12 @@ import {
 } from "@/components/ops";
 import { MetricUnitFormatter } from "@/components/visual-system";
 import { getClusters } from "@/lib/api/clusters";
-import { getDashboardStats, type DashboardStats } from "@/lib/api/dashboard";
+import {
+  formatDashboardCount,
+  getDashboardStats,
+  isDashboardMetricAvailable,
+  type DashboardStats,
+} from "@/lib/api/dashboard";
 import { OverviewCommandCenter } from "@/components/overview/overview-command-center";
 import { OverviewRiskPanel } from "@/components/overview/overview-risk-panel";
 import { OverviewMetricStrip } from "@/components/overview/overview-metric-strip";
@@ -101,6 +104,18 @@ function formatCount(value?: number) {
   return typeof value === "number" && Number.isFinite(value)
     ? String(value)
     : "--";
+}
+
+function formatMetricCount(value: number | undefined, metric?: DashboardMetricMeta) {
+  return formatDashboardCount(value, metric);
+}
+
+function metricCountShare(
+  value: number | undefined,
+  total: number | undefined,
+  metric?: DashboardMetricMeta,
+) {
+  return isDashboardMetricAvailable(metric) ? countShare(value, total) : 0;
 }
 
 function countShare(value: number | undefined, total: number | undefined) {
@@ -587,6 +602,12 @@ export default function HomePage() {
   });
 
   const stats = statsQuery.data?.stats;
+  const alerts = isDashboardMetricAvailable(stats?.metrics?.alerts)
+    ? stats?.alerts
+    : undefined;
+  const healthScore = isDashboardMetricAvailable(stats?.metrics?.healthScore)
+    ? stats?.healthScore
+    : undefined;
   const isLoading = statsQuery.isLoading;
   const scopedFallback = Boolean(statsQuery.data?.scopedFallback);
   const scopedDegraded = Boolean(stats?.scope?.degraded);
@@ -595,11 +616,14 @@ export default function HomePage() {
     (clusterId ? `Cluster ${clusterId.slice(0, 8)}` : "全部集群");
 
   const riskSummary = useMemo(() => {
-    const critical = stats?.alerts.critical ?? 0;
-    const unhealthy = stats?.workloads.unhealthy ?? 0;
-    const clusterWarning = stats?.clusters.warning ?? 0;
-    const healthScore = stats?.healthScore;
-    const unavailable = !stats || [stats.metrics?.clusters, stats.metrics?.workloads, stats.metrics?.alerts].some(
+    const critical = alerts?.critical ?? 0;
+    const unhealthy = isDashboardMetricAvailable(stats?.metrics?.workloads)
+      ? stats?.workloads.unhealthy ?? 0
+      : 0;
+    const clusterWarning = isDashboardMetricAvailable(stats?.metrics?.clusters)
+      ? stats?.clusters.warning ?? 0
+      : 0;
+    const unavailable = !stats || [stats.metrics?.clusters, stats.metrics?.workloads, stats.metrics?.alerts, stats.metrics?.healthScore].some(
       (metric) => metric?.freshness === "unavailable" || metric?.freshness === "stale",
     );
     const riskLevel =
@@ -619,7 +643,7 @@ export default function HomePage() {
       healthScore,
       riskLevel,
     } as const;
-  }, [stats]);
+  }, [alerts, healthScore, stats]);
 
   const timelineItems = useMemo(
     () =>
@@ -741,8 +765,8 @@ export default function HomePage() {
         <OverviewCommandCenter
           scopeLabel={scopeLabel}
           clusterId={clusterId}
-          clusterCount={stats?.clusters.total}
-          alertCount={stats?.alerts.total}
+          clusterCount={isDashboardMetricAvailable(stats?.metrics?.clusters) ? stats?.clusters.total : undefined}
+          alertCount={alerts?.total}
           riskLevel={riskSummary.riskLevel}
           generatedAt={stats?.scope?.generatedAt}
           isFetching={statsQuery.isFetching}
@@ -852,12 +876,12 @@ export default function HomePage() {
         <div className="ops-overview-scope-cell ops-overview-scope-cell--status">
           <span>集群运行状态</span>
           <div className="ops-overview-status-inline">
-            <b className="is-ok">正常 {formatCount(stats?.clusters.healthy)}</b>
+            <b className="is-ok">正常 {formatMetricCount(stats?.clusters.healthy, stats?.metrics?.clusters)}</b>
             <b className="is-warn">
-              警告 {formatCount(stats?.clusters.warning)}
+              警告 {formatMetricCount(stats?.clusters.warning, stats?.metrics?.clusters)}
             </b>
             <b className="is-danger">
-              严重 {formatCount(stats?.alerts.critical)}
+              严重 {formatCount(alerts?.critical)}
             </b>
           </div>
         </div>
@@ -866,27 +890,27 @@ export default function HomePage() {
           <div className="ops-overview-summary-row">
             <SummaryMetric
               label="集群数"
-              value={formatCount(stats?.clusters.total)}
+              value={formatMetricCount(stats?.clusters.total, stats?.metrics?.clusters)}
               meta={stats?.metrics?.clusters}
             />
             <SummaryMetric
               label="命名空间"
-              value={formatCount(stats?.namespaces)}
+              value={formatMetricCount(stats?.namespaces, stats?.metrics?.namespaces)}
               meta={stats?.metrics?.namespaces}
             />
             <SummaryMetric
               label="工作负载"
-              value={formatCount(stats?.workloads.total)}
+              value={formatMetricCount(stats?.workloads.total, stats?.metrics?.workloads)}
               meta={stats?.metrics?.workloads}
             />
             <SummaryMetric
               label="Pod 数"
-              value={formatCount(topology?.pods)}
+              value={formatMetricCount(topology?.pods, stats?.metrics?.pods)}
               meta={stats?.metrics?.pods}
             />
             <SummaryMetric
               label="告警数"
-              value={formatCount(stats?.alerts.total)}
+              value={formatCount(alerts?.total)}
               meta={stats?.metrics?.alerts}
             />
           </div>
@@ -931,26 +955,26 @@ export default function HomePage() {
             action={<AlertOutlined />}
           >
             <div className="ops-overview-big-number is-danger">
-              {formatCount(stats?.alerts.critical)}
+              {formatCount(alerts?.critical)}
             </div>
             <MetricProvenance meta={stats?.metrics?.alerts} />
             <div className="ops-overview-list">
               <BarRow
                 label="严重"
-                value={formatCount(stats?.alerts.critical)}
-                percent={countShare(stats?.alerts.critical, stats?.alerts.total)}
+                value={formatCount(alerts?.critical)}
+                percent={countShare(alerts?.critical, alerts?.total)}
                 tone="red"
               />
               <BarRow
                 label="警告"
-                value={formatCount(stats?.alerts.warning)}
-                percent={countShare(stats?.alerts.warning, stats?.alerts.total)}
+                value={formatCount(alerts?.warning)}
+                percent={countShare(alerts?.warning, alerts?.total)}
                 tone="orange"
               />
               <BarRow
                 label="告警总数"
-                value={formatCount(stats?.alerts.total)}
-                percent={countShare(stats?.alerts.total, stats?.alerts.total)}
+                value={formatCount(alerts?.total)}
+                percent={countShare(alerts?.total, alerts?.total)}
                 tone="blue"
               />
             </div>
@@ -963,26 +987,26 @@ export default function HomePage() {
             action={<DeploymentUnitOutlined />}
           >
             <div className="ops-overview-big-number is-warning">
-              {formatCount(stats?.workloads.unhealthy)}
+              {formatMetricCount(stats?.workloads.unhealthy, stats?.metrics?.workloads)}
             </div>
             <MetricProvenance meta={stats?.metrics?.workloads} />
             <div className="ops-overview-list">
               <BarRow
                 label="异常负载"
-                value={formatCount(stats?.workloads.unhealthy)}
-                percent={countShare(stats?.workloads.unhealthy, stats?.workloads.total)}
+                value={formatMetricCount(stats?.workloads.unhealthy, stats?.metrics?.workloads)}
+                percent={metricCountShare(stats?.workloads.unhealthy, stats?.workloads.total, stats?.metrics?.workloads)}
                 tone="orange"
               />
               <BarRow
                 label="健康负载"
-                value={formatCount(stats?.workloads.healthy)}
-                percent={countShare(stats?.workloads.healthy, stats?.workloads.total)}
+                value={formatMetricCount(stats?.workloads.healthy, stats?.metrics?.workloads)}
+                percent={metricCountShare(stats?.workloads.healthy, stats?.workloads.total, stats?.metrics?.workloads)}
                 tone="green"
               />
               <BarRow
                 label="全部负载"
-                value={formatCount(stats?.workloads.total)}
-                percent={countShare(stats?.workloads.total, stats?.workloads.total)}
+                value={formatMetricCount(stats?.workloads.total, stats?.metrics?.workloads)}
+                percent={metricCountShare(stats?.workloads.total, stats?.workloads.total, stats?.metrics?.workloads)}
                 tone="blue"
               />
             </div>
@@ -998,20 +1022,20 @@ export default function HomePage() {
             <div className="ops-overview-list ops-overview-list--bars">
               <BarRow
                 label="风险集群"
-                value={formatCount(stats?.clusters.warning)}
-                percent={countShare(stats?.clusters.warning, stats?.clusters.total)}
+                value={formatMetricCount(stats?.clusters.warning, stats?.metrics?.clusters)}
+                percent={metricCountShare(stats?.clusters.warning, stats?.clusters.total, stats?.metrics?.clusters)}
                 tone="red"
               />
               <BarRow
                 label="健康集群"
-                value={formatCount(stats?.clusters.healthy)}
-                percent={countShare(stats?.clusters.healthy, stats?.clusters.total)}
+                value={formatMetricCount(stats?.clusters.healthy, stats?.metrics?.clusters)}
+                percent={metricCountShare(stats?.clusters.healthy, stats?.clusters.total, stats?.metrics?.clusters)}
                 tone="green"
               />
               <BarRow
                 label="全部集群"
-                value={formatCount(stats?.clusters.total)}
-                percent={countShare(stats?.clusters.total, stats?.clusters.total)}
+                value={formatMetricCount(stats?.clusters.total, stats?.metrics?.clusters)}
+                percent={metricCountShare(stats?.clusters.total, stats?.clusters.total, stats?.metrics?.clusters)}
                 tone="blue"
               />
             </div>
@@ -1192,22 +1216,6 @@ export default function HomePage() {
                   <span>{item.label}</span>
                 </Link>
               ))}
-              <Link
-                href={formatScopedHref("/logs", clusterId)}
-                prefetch={false}
-                className="ops-overview-shortcut"
-              >
-                <HddOutlined />
-                <span>日志查询</span>
-              </Link>
-              <Link
-                href={formatScopedHref("/terminal", clusterId)}
-                prefetch={false}
-                className="ops-overview-shortcut"
-              >
-                <ThunderboltOutlined />
-                <span>执行命令</span>
-              </Link>
               <Link
                 href={formatScopedHref("/namespaces", clusterId)}
                 prefetch={false}

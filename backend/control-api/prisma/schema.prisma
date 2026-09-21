@@ -17,7 +17,10 @@ model User {
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   authzVersion           Int                     @default(1)
+  mfaEnabled             Boolean                 @default(false)
+  mfaCredential          MfaCredential?
   sessions               Session[]
+  externalIdentities     ExternalIdentity[]
   runtimeSessions        RuntimeSession[]
   aiConversationSessions AiConversationSession[]
   auditLogs              AuditLog[]
@@ -28,6 +31,29 @@ model User {
   updatedAccessGrants    AccessGrant[]           @relation("AccessGrantUpdatedBy")
   groupMemberships       GroupMembership[]
   authorizationChanges   AuthorizationChange[]   @relation("AuthzAffectedUser")
+}
+
+model MfaCredential {
+  userId             String   @id
+  encryptedSecret    String
+  version            Int      @default(1)
+  confirmedAt        DateTime
+  lastTotpCounter    BigInt?
+  recoveryCodeHashes String[]  @default([])
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ExternalIdentity {
+  id        String   @id @default(cuid())
+  issuer    String
+  subject   String
+  userId    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([issuer, subject])
+  @@index([userId])
 }
 
 model UserPreference {
@@ -53,6 +79,8 @@ model Session {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   authzVersion     Int       @default(1)
+  mfaVersion       Int?
+  mfaVerifiedAt    DateTime?
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -84,10 +112,30 @@ model ClusterRegistry {
   clusterRoleBindings   ClusterRoleBinding[]
   aiAnalysisRuns        AiAnalysisRun[]
   monitoringDataSources MonitoringDataSource[]
+  monitoringNotificationTemplates MonitoringNotificationTemplate[]
   accessGrants          AccessGrant[]
+  alertReceiverCredential AlertReceiverCredential?
+  nativeAccessConfig    NativeAccessConfig?
 
   // 仅对未删除集群强制名称唯一（deletedAt 为 null 时才参与唯一约束）
   @@index([name, deletedAt])
+}
+
+model NativeAccessConfig {
+  clusterId    String @id
+  enabled      Boolean @default(false)
+  issuer       String
+  audience     String
+  jwksUri      String
+  gatewayUrl   String
+  revision     Int @default(1)
+  syncState    String @default("pending")
+  syncRevision Int?
+  syncMessage  String?
+  syncedAt     DateTime?
+  updatedBy    String
+  updatedAt    DateTime @updatedAt
+  cluster      ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 }
 
 model IdentityGroup {
@@ -292,8 +340,18 @@ model MonitoringAlertTemplate {
   @@index([severity, enabled])
 }
 
+model AlertReceiverCredential {
+  clusterId String @id
+  tokenHash String
+  enabled Boolean @default(true)
+  updatedAt DateTime @updatedAt
+  cluster ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+}
+
 model MonitoringNotificationTemplate {
   id           String   @id @default(cuid())
+  clusterId    String?
+  cluster      ClusterRegistry? @relation(fields: [clusterId], references: [id], onDelete: Cascade)
   name         String
   channel      String // feishu|dingtalk|wecom|email|webhook|slack|pagerduty
   endpoint     String
@@ -305,6 +363,7 @@ model MonitoringNotificationTemplate {
   updatedAt    DateTime @updatedAt
 
   @@index([channel, enabled])
+  @@index([clusterId])
 }
 
 model ClusterHealthSnapshot {
@@ -349,6 +408,7 @@ model ClusterRoleBinding {
 
 model RuntimeSession {
   id        String          @id @default(cuid())
+  authzVersion Int?
   clusterId String
   userId    String?
   type      String
@@ -546,6 +606,8 @@ model NamespaceRecord {
 // ── 监控告警 ──────────────────────────────────────────
 model MonitoringAlert {
   id           String    @id @default(cuid())
+  occurrenceKey String? @unique
+  deliveries NotificationDelivery[]
   clusterId    String?
   namespace    String?
   severity     String // critical|warning|info
@@ -570,6 +632,25 @@ model MonitoringAlert {
 }
 
 // ── 集群凭证（加密存储）──────────────────────────────
+model NotificationDelivery {
+  id String @id @default(cuid())
+  alertId String
+  templateId String
+  event String
+  status String @default("pending")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  expiresAt DateTime
+  leaseUntil DateTime?
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  alert MonitoringAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@unique([alertId, templateId, event])
+  @@index([status, nextAttemptAt])
+}
+
 model ClusterCredential {
   id             String   @id @default(cuid())
   clusterId      String   @unique

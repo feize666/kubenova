@@ -141,6 +141,11 @@ export interface DashboardMetricMeta {
 export interface DashboardStatsOptions {
   clusterId?: string;
   accessibleClusterIds?: string[] | null;
+  namespaceScopes?: Array<{
+    clusterId: string;
+    namespace: string;
+    namespaceUid: string;
+  }>;
 }
 
 @Injectable()
@@ -182,6 +187,8 @@ export class DashboardService {
   }
 
   async getStats(options: DashboardStatsOptions = {}): Promise<DashboardStats> {
+    // Namespace grants are resolved live per request; never share the broad-scope cache.
+    if (options.namespaceScopes?.length) return this.buildStats(options);
     const now = Date.now();
     const clusterId = this.normalizeClusterId(options.clusterId);
     const accessibleClusterIds = clusterId
@@ -214,18 +221,41 @@ export class DashboardService {
     }
   }
 
-  private async buildStats(options: {
-    clusterId?: string;
-    accessibleClusterIds?: string[];
-  }): Promise<DashboardStats> {
+  private async buildStats(
+    options: DashboardStatsOptions,
+  ): Promise<DashboardStats> {
     const generatedAt = new Date().toISOString();
     const clusterId = options.clusterId;
     const clusterScope = Boolean(clusterId);
+    const namespaceScopes = options.namespaceScopes ?? [];
+    const restricted = namespaceScopes.length > 0;
+    const visibleClusterIds = restricted
+      ? [
+          ...new Set([
+            ...(options.accessibleClusterIds ?? []),
+            ...namespaceScopes.map((scope) => scope.clusterId),
+          ]),
+        ]
+      : options.accessibleClusterIds;
     const clusterSelector = clusterId
       ? clusterId
-      : options.accessibleClusterIds
-        ? { in: options.accessibleClusterIds }
+      : visibleClusterIds
+        ? { in: visibleClusterIds }
         : undefined;
+    const scopedWhere = (field: 'name' | 'namespace') =>
+      restricted
+        ? {
+            OR: [
+              ...(options.accessibleClusterIds?.length
+                ? [{ clusterId: { in: options.accessibleClusterIds } }]
+                : []),
+              ...namespaceScopes.map((scope) => ({
+                clusterId: scope.clusterId,
+                [field]: scope.namespace,
+              })),
+            ],
+          }
+        : {};
     const activeClusterWhere = {
       deletedAt: null,
       status: { not: 'deleted' },
@@ -237,16 +267,19 @@ export class DashboardService {
       ...(clusterSelector ? { id: clusterSelector } : {}),
     };
     const activeWorkloadWhere = {
+      ...scopedWhere('namespace'),
       state: 'active',
       ...(clusterSelector ? { clusterId: clusterSelector } : {}),
       cluster: activeClusterRelationWhere,
     };
     const activeNamespaceWhere = {
+      ...scopedWhere('name'),
       state: 'active',
       ...(clusterSelector ? { clusterId: clusterSelector } : {}),
       cluster: activeClusterRelationWhere,
     };
     const activeNetworkWhere = {
+      ...scopedWhere('namespace'),
       state: 'active',
       ...(clusterSelector ? { clusterId: clusterSelector } : {}),
       cluster: activeClusterRelationWhere,
@@ -290,20 +323,24 @@ export class DashboardService {
           readyReplicas: { gt: 0 },
         },
       }),
-      this.prisma.monitoringAlert.count({
-        where: this.activeAlertWhere({
-          ...(clusterSelector ? { clusterId: clusterSelector } : {}),
-          severity: 'critical',
-          status: 'firing',
-        }),
-      }),
-      this.prisma.monitoringAlert.count({
-        where: this.activeAlertWhere({
-          ...(clusterSelector ? { clusterId: clusterSelector } : {}),
-          severity: 'warning',
-          status: 'firing',
-        }),
-      }),
+      restricted
+        ? Promise.resolve(0)
+        : this.prisma.monitoringAlert.count({
+            where: this.activeAlertWhere({
+              ...(clusterSelector ? { clusterId: clusterSelector } : {}),
+              severity: 'critical',
+              status: 'firing',
+            }),
+          }),
+      restricted
+        ? Promise.resolve(0)
+        : this.prisma.monitoringAlert.count({
+            where: this.activeAlertWhere({
+              ...(clusterSelector ? { clusterId: clusterSelector } : {}),
+              severity: 'warning',
+              status: 'firing',
+            }),
+          }),
       this.prisma.namespaceRecord.count({
         where: activeNamespaceWhere,
       }),
@@ -343,21 +380,23 @@ export class DashboardService {
           kind: 'Pod',
         },
       }),
-      this.prisma.monitoringAlert.findMany({
-        where: this.activeAlertWhere({
-          ...(clusterSelector ? { clusterId: clusterSelector } : {}),
-          status: 'firing',
-        }),
-        orderBy: { firedAt: 'desc' },
-        take: 8,
-        select: {
-          id: true,
-          severity: true,
-          title: true,
-          source: true,
-          firedAt: true,
-        },
-      }),
+      restricted
+        ? Promise.resolve([])
+        : this.prisma.monitoringAlert.findMany({
+            where: this.activeAlertWhere({
+              ...(clusterSelector ? { clusterId: clusterSelector } : {}),
+              status: 'firing',
+            }),
+            orderBy: { firedAt: 'desc' },
+            take: 8,
+            select: {
+              id: true,
+              severity: true,
+              title: true,
+              source: true,
+              firedAt: true,
+            },
+          }),
       this.prisma.clusterRegistry.findMany({
         where: activeClusterWhere,
         select: { id: true, name: true, metadata: true },
@@ -365,8 +404,12 @@ export class DashboardService {
       this.buildServiceImpact({
         clusterSelector,
         activeClusterRelationWhere,
+        resourceScope: scopedWhere('namespace'),
+        restricted,
       }),
-      this.buildRecentOperations({ clusterSelector }),
+      restricted
+        ? Promise.resolve([])
+        : this.buildRecentOperations({ clusterSelector }),
     ]);
 
     const clusterWarning = clusterTotal - clusterHealthy;
@@ -379,23 +422,25 @@ export class DashboardService {
       Math.max(0, Math.round(healthyRatio * 70 + (1 - criticalRatio) * 30)),
     );
 
-    const liveSnapshots = await this.runBounded(
-      activeClusters,
-      this.liveMetricsFanoutLimit,
-      (row) => this.getCachedLiveSnapshot(row.id),
-    );
+    const liveSnapshots = restricted
+      ? []
+      : await this.runBounded(
+          activeClusters,
+          this.liveMetricsFanoutLimit,
+          (row) => this.getCachedLiveSnapshot(row.id),
+        );
     const availableSnapshots = liveSnapshots.filter(
       (snapshot): snapshot is ClusterLiveUsageSnapshot =>
         Boolean(snapshot?.available),
     );
     const cpuMetric = this.buildResourceMetric(
       'cpu',
-      activeClusters,
+      restricted ? [] : activeClusters,
       liveSnapshots,
     );
     const memoryMetric = this.buildResourceMetric(
       'memory',
-      activeClusters,
+      restricted ? [] : activeClusters,
       liveSnapshots,
     );
     const hasLiveMetric =
@@ -445,6 +490,14 @@ export class DashboardService {
           }
         : {}),
     });
+    const restrictedReason =
+      '当前视图仅包含授权命名空间；集群级指标、告警和审计不可用。';
+    const unavailableMetric: DashboardMetricMeta = {
+      capturedAt: null,
+      freshness: 'unavailable',
+      source: 'none',
+      degradedReason: restrictedReason,
+    };
 
     return {
       clusters: {
@@ -463,14 +516,14 @@ export class DashboardService {
         total: alertTotal,
       },
       namespaces: namespaceCount,
-      healthScore,
+      healthScore: restricted ? 0 : healthScore,
       metrics: {
         clusters: countMetric('集群'),
         workloads: countMetric('工作负载'),
         namespaces: countMetric('命名空间'),
         pods: countMetric('Pod'),
-        alerts: countMetric('告警'),
-        healthScore: countMetric('健康评分'),
+        alerts: restricted ? unavailableMetric : countMetric('告警'),
+        healthScore: restricted ? unavailableMetric : countMetric('健康评分'),
       },
       resourceUsage: {
         cpu: cpuMetric,
@@ -514,6 +567,9 @@ export class DashboardService {
         generatedAt,
         ...(scopeDegraded ? { degraded: true } : {}),
         ...(scopeDegradedReason ? { degradedReason: scopeDegradedReason } : {}),
+        ...(restricted
+          ? { degraded: true, degradedReason: restrictedReason }
+          : {}),
       },
     };
   }
@@ -521,8 +577,11 @@ export class DashboardService {
   private async buildServiceImpact(options: {
     clusterSelector?: string | { in: string[] };
     activeClusterRelationWhere: Record<string, unknown>;
+    resourceScope?: Record<string, unknown>;
+    restricted?: boolean;
   }): Promise<DashboardStats['serviceImpact']> {
     const activeNetworkWhere = {
+      ...options.resourceScope,
       state: 'active',
       ...(options.clusterSelector
         ? { clusterId: options.clusterSelector }
@@ -530,6 +589,7 @@ export class DashboardService {
       cluster: options.activeClusterRelationWhere,
     };
     const activeWorkloadWhere = {
+      ...options.resourceScope,
       state: 'active',
       ...(options.clusterSelector
         ? { clusterId: options.clusterSelector }
@@ -575,24 +635,35 @@ export class DashboardService {
           labels: true,
         },
       }),
-      this.prisma.monitoringAlert.findMany({
-        where: this.activeAlertWhere({
-          ...(options.clusterSelector
-            ? { clusterId: options.clusterSelector }
-            : {}),
-          status: 'firing',
-        }),
-        orderBy: { firedAt: 'desc' },
-        take: 80,
-        select: {
-          id: true,
-          clusterId: true,
-          namespace: true,
-          severity: true,
-          resourceType: true,
-          resourceName: true,
-        },
-      }),
+      options.restricted
+        ? Promise.resolve<
+            Array<{
+              id: string;
+              clusterId: string | null;
+              namespace: string | null;
+              severity: string;
+              resourceType: string | null;
+              resourceName: string | null;
+            }>
+          >([])
+        : this.prisma.monitoringAlert.findMany({
+            where: this.activeAlertWhere({
+              ...(options.clusterSelector
+                ? { clusterId: options.clusterSelector }
+                : {}),
+              status: 'firing',
+            }),
+            orderBy: { firedAt: 'desc' },
+            take: 80,
+            select: {
+              id: true,
+              clusterId: true,
+              namespace: true,
+              severity: true,
+              resourceType: true,
+              resourceName: true,
+            },
+          }),
     ]);
 
     const serviceCandidates =
@@ -666,6 +737,28 @@ export class DashboardService {
       })
       .sort((a, b) => b.impactScore - a.impactScore)
       .slice(0, 5);
+
+    if (options.restricted) {
+      return {
+        nodes: services.map((service) => ({
+          id: service.id,
+          label: service.name,
+          kind: 'service' as const,
+          status: 'unknown' as const,
+        })),
+        edges: [],
+        impactedServices: impactedServices.map((service) => ({
+          ...service,
+          severity:
+            service.severity === 'healthy'
+              ? ('info' as const)
+              : service.severity,
+        })),
+        generatedAt: new Date().toISOString(),
+        degraded: true,
+        note: '仅展示授权命名空间资源；缺少授权范围内的告警与路由证据，无法判断完整服务影响链路。',
+      };
+    }
 
     const primaryIngress = ingresses[0];
     const visibleServices = impactedServices.slice(0, 3);

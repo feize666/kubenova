@@ -11,10 +11,10 @@ import { NamespaceSelect } from "@/components/namespace-select";
 import { OpsIconActionButton, OpsPageHeader, OpsState } from "@/components/ops";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
 import { ApiError } from "@/lib/api/client";
-import { canQueryLogCenter, eligibleLogSources, logQueryWindow, queryLogCenter, type LogCenterQuery, type LogCenterRow, type LogTimeRange } from "@/lib/api/log-center";
-import { listObservabilityDataSources } from "@/lib/api/observability-config";
+import { canQueryLogCenter, eligibleLogSources, listLogCenterSources, logQueryWindow, queryLogCenter, type LogCenterQuery, type LogCenterRow, type LogTimeRange } from "@/lib/api/log-center";
 import { buildClusterResourceHref } from "@/lib/cluster-workspace";
 import styles from "./log-center-page.module.css";
+import { LogCollectionPreview } from "./log-collection-preview";
 
 function LogQueryResults({ input, range, token }: { input: Omit<LogCenterQuery, "from" | "to">; range: LogTimeRange; token: string }) {
   const [requestedAt, setRequestedAt] = useState<Date | null>(null);
@@ -37,7 +37,7 @@ function LogQueryResults({ input, range, token }: { input: Omit<LogCenterQuery, 
     </div>
     {!requestedAt ? <OpsState kind="empty" title="尚未查询" />
       : query.isFetching ? <OpsState kind="loading" title="正在查询日志" />
-      : query.isError ? <OpsState kind={denied ? "permission" : "error"} title={denied ? "当前账号无日志查询权限" : "日志查询失败"} description={denied ? "日志中心当前仅向平台管理员开放。" : "数据源可能不可用或配置不完整，请检查数据源后重试。"} />
+      : query.isError ? <OpsState kind={denied ? "permission" : "error"} title={denied ? "当前账号无日志查询权限" : "日志查询失败"} description={denied ? "当前命名空间未授予日志读取权限，或授权已失效。" : "数据源可能不可用或配置不完整，请联系管理员检查后重试。"} />
       : !rows.length ? <OpsState kind="filtered-empty" title="未找到匹配日志" />
       : <Table<LogCenterRow>
         size="small"
@@ -62,24 +62,30 @@ function LogQueryResults({ input, range, token }: { input: Omit<LogCenterQuery, 
   </>;
 }
 
-function ClusterLogCenter({ clusterId, token }: { clusterId: string; token: string }) {
+function ClusterLogCenter({ clusterId, token, role }: { clusterId: string; token: string; role: string }) {
   const { namespace, onNamespaceChange } = useClusterNamespaceFilter(clusterId);
   const [selectedSource, setSelectedSource] = useState<string>();
   const [keyword, setKeyword] = useState("");
+  const [pod, setPod] = useState("");
+  const [container, setContainer] = useState("");
   const [range, setRange] = useState<LogTimeRange>("15m");
   const [limit, setLimit] = useState(100);
   const sourcesQuery = useQuery({
     queryKey: ["log-center-sources", clusterId, token],
-    queryFn: () => listObservabilityDataSources(clusterId, token),
+    queryFn: ({ signal }) => listLogCenterSources(clusterId, token, signal),
     retry: false,
+    gcTime: 0,
   });
   const sources = eligibleLogSources(sourcesQuery.data?.items ?? [], clusterId);
   const sourceId = sources.some((source) => source.id === selectedSource) ? selectedSource! : sources[0]?.id;
-  const configuration = <Link href={buildClusterResourceHref(clusterId, "observability/configuration")}><SettingOutlined /> 数据源配置</Link>;
-  const input = { clusterId, dataSourceId: sourceId ?? "", namespace: namespace || undefined, keyword: keyword || undefined, limit };
+  const configuration = canQueryLogCenter(role) ? <Link href={buildClusterResourceHref(clusterId, "observability/configuration")}><SettingOutlined /> 数据源配置</Link> : null;
+  const input = { clusterId, dataSourceId: sourceId ?? "", namespace: namespace || undefined, keyword: keyword || undefined, pod: pod.trim() || undefined, container: container.trim() || undefined, limit };
 
   return <div className={styles.page}>
-    <OpsPageHeader title="日志中心" surface={false} actions={configuration} />
+    <OpsPageHeader title="日志中心" surface={false} actions={<>
+      {configuration}
+      {canQueryLogCenter(role) && sourceId ? <LogCollectionPreview key={sourceId} clusterId={clusterId} sourceId={sourceId} token={token} /> : null}
+    </>} />
     {sourcesQuery.isPending ? <OpsState kind="loading" title="正在加载日志数据源" />
       : sourcesQuery.isError ? <OpsState kind={sourcesQuery.error instanceof ApiError && sourcesQuery.error.status === 403 ? "permission" : "error"} title="无法读取日志数据源" action={<OpsIconActionButton onClick={() => void sourcesQuery.refetch()}>重试</OpsIconActionButton>} />
       : !sources.length ? <OpsState kind="disabled" title="当前集群未配置可用日志数据源" description="需要已启用且绑定当前集群的 Elasticsearch 数据源。" />
@@ -91,8 +97,12 @@ function ClusterLogCenter({ clusterId, token }: { clusterId: string; token: stri
           <Select aria-label="结果条数上限" value={limit} onChange={setLimit} options={[50, 100, 200].map((value) => ({ value, label: `最多 ${value} 条` }))} />
           <Input className={styles.search} aria-label="搜索日志文本" placeholder="搜索日志文本" prefix={<SearchOutlined />} maxLength={512} allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} />
         </div>
+        <div className={styles.resourceFilters}>
+          <Input aria-label="Pod 名称精确筛选" placeholder="Pod 名称" maxLength={253} allowClear value={pod} onChange={event => setPod(event.target.value)} />
+          <Input aria-label="容器名称精确筛选" placeholder="容器名称" maxLength={63} allowClear value={container} onChange={event => setContainer(event.target.value)} />
+        </div>
         {/* Remount each query session on scope/filter changes; consumed signals cancel old requests. */}
-        <LogQueryResults key={JSON.stringify([input, range])} input={input} range={range} token={token} />
+        {canQueryLogCenter(role, namespace) ? <LogQueryResults key={JSON.stringify([input, range])} input={input} range={range} token={token} /> : <OpsState kind="empty" title="请选择命名空间" />}
       </>}
   </div>;
 }
@@ -101,7 +111,7 @@ export default function LogCenterPage() {
   const workspace = useOptionalClusterWorkspace();
   const { accessToken, role, isInitializing } = useAuth();
   if (isInitializing) return <OpsState kind="loading" title="正在验证访问权限" />;
-  if (!accessToken || !canQueryLogCenter(role)) return <div className={styles.page}><OpsPageHeader title="日志中心" surface={false} /><OpsState kind="permission" title="日志中心当前仅向平台管理员开放" /></div>;
+  if (!accessToken) return <div className={styles.page}><OpsPageHeader title="日志中心" surface={false} /><OpsState kind="permission" title="请登录后访问日志中心" /></div>;
   if (!workspace?.clusterId) return <OpsState kind="disabled" title="请从集群工作区打开日志中心" />;
-  return <ClusterLogCenter key={`${workspace.clusterId}:${accessToken}`} clusterId={workspace.clusterId} token={accessToken} />;
+  return <ClusterLogCenter key={`${workspace.clusterId}:${accessToken}:${role}`} clusterId={workspace.clusterId} token={accessToken} role={role} />;
 }

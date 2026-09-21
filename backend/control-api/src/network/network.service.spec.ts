@@ -1,6 +1,7 @@
 jest.mock('@kubernetes/client-node', () => ({}));
 
 import { NetworkService } from './network.service';
+import { ForbiddenException } from '@nestjs/common';
 import type { NetworkRepository } from './network.repository';
 import type { ClusterHealthService } from '../clusters/cluster-health.service';
 import type { ClusterEventSyncService } from '../clusters/cluster-event-sync.service';
@@ -61,6 +62,13 @@ describe('NetworkService list online gate', () => {
     expect(result.total).toBe(0);
     expect(result.page).toBe(2);
     expect(result.pageSize).toBe(5);
+    expect(networkRepository.list).not.toHaveBeenCalled();
+  });
+
+  it('rejects an HTTP identity without authorization dependencies before listing', async () => {
+    const { service, networkRepository } = build();
+    (networkRepository.list as jest.Mock).mockResolvedValue({ items: [], total: 0 });
+    await expect(service.list({ clusterId: 'c-1' }, {})).rejects.toBeInstanceOf(ForbiddenException);
     expect(networkRepository.list).not.toHaveBeenCalled();
   });
 

@@ -4,13 +4,13 @@ import { withQuery } from "./query";
 export interface MonitoringOverview {
   range: string;
   timestamp: string;
-  healthScore: number;
+  healthScore: number | null;
   clusterTotal: number;
-  clusterHealthy: number;
+  clusterHealthy: number | null;
   warningCount: number;
   criticalCount: number;
-  cpuUsagePercent: number;
-  memoryUsagePercent: number;
+  cpuUsagePercent: number | null;
+  memoryUsagePercent: number | null;
   usageDataSource?: "metrics-server" | "k8s-metadata" | "none";
   dataSource?: "monitoring-alert" | "workload-derived" | "mixed";
   degraded?: boolean;

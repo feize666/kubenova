@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  formatDashboardCount,
   formatDashboardMetric,
+  isDashboardMetricAvailable,
+  type DashboardMetricMeta,
   type DashboardResourceMetric,
 } from "./dashboard";
 
@@ -49,6 +52,32 @@ test("dashboard metric preserves live usage when capacity is unavailable", () =>
       freshnessLabel: "实时",
     },
   );
+});
+
+function metricMeta(freshness: DashboardMetricMeta["freshness"]): DashboardMetricMeta {
+  return {
+    capturedAt: "2026-09-10T06:00:00.000Z",
+    freshness,
+    source: "dashboard-service",
+  };
+}
+
+test("dashboard overview hides an unavailable metric even when its payload is zero", () => {
+  const unavailable = metricMeta("unavailable");
+
+  assert.equal(isDashboardMetricAvailable(unavailable), false);
+  assert.equal(formatDashboardCount(0, unavailable), "--");
+});
+
+test("dashboard overview preserves an available zero metric", () => {
+  const fresh = metricMeta("fresh");
+
+  assert.equal(isDashboardMetricAvailable(fresh), true);
+  assert.equal(formatDashboardCount(0, fresh), "0");
+});
+
+test("dashboard overview hides stale metrics", () => {
+  assert.equal(formatDashboardCount(7, metricMeta("stale")), "--");
 });
 
 test("dashboard metric labels requested metadata as a synchronized snapshot", () => {

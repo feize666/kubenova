@@ -44,8 +44,8 @@ export class UsersController {
 
   /** GET /users — 列表（数据库分页） */
   @Get()
-  listUsers(@Query() query: UsersListQuery) {
-    return this.usersService.listUsers(query);
+  listUsers(@Query() query: UsersListQuery, @Req() req: { user?: RequestActor }) {
+    return this.usersService.listUsers(query, req.user?.user);
   }
 
   // -------------------------------------------------------------------------
@@ -59,8 +59,48 @@ export class UsersController {
   }
 
   @Get('access-grants')
-  listAccessGrants(@Query('clusterId') clusterId?: string) {
-    return this.usersService.listAccessGrants(clusterId);
+  listAccessGrants(@Query('clusterId') clusterId: string | undefined, @Req() req: { user?: RequestActor }) {
+    return this.usersService.listAccessGrants(clusterId, req.user?.user);
+  }
+
+  @Get('grant-groups')
+  listGrantGroups(@Req() req: { user?: RequestActor }, @Query('keyword') keyword?: string) {
+    return this.usersService.listGrantGroups(req.user?.user, keyword);
+  }
+
+  @Post('identity-groups')
+  createIdentityGroup(@Req() req: { user?: RequestActor }, @Body() body: unknown) {
+    return this.usersService.createIdentityGroup(req.user?.user, body);
+  }
+
+  @Put('identity-groups/:groupId/members/:userId')
+  addGroupMember(@Req() req: { user?: RequestActor }, @Param('groupId') groupId: string, @Param('userId') userId: string) {
+    return this.usersService.setGroupMembership(req.user?.user, groupId, userId, true);
+  }
+
+  @Get('identity-groups/:groupId/members')
+  listGroupMembers(@Req() req: { user?: RequestActor }, @Param('groupId') groupId: string, @Query('page') page?: string) {
+    return this.usersService.listGroupMembers(req.user?.user, groupId, page);
+  }
+
+  @Delete('identity-groups/:groupId/members/:userId')
+  removeGroupMember(@Req() req: { user?: RequestActor }, @Param('groupId') groupId: string, @Param('userId') userId: string) {
+    return this.usersService.setGroupMembership(req.user?.user, groupId, userId, false);
+  }
+
+  @Get('authorization-changes')
+  listAuthorizationChanges(@Req() req: { user?: RequestActor }, @Query() query: { grantId?: string; page?: string; pageSize?: string }) {
+    return this.usersService.listAuthorizationChanges(req.user?.user, query);
+  }
+
+  @Post('access-grants/:id/revoke')
+  revokeAccessGrant(@Req() req: { user?: RequestActor }, @Param('id') id: string) {
+    return this.usersService.revokeAccessGrant(req.user?.user, id);
+  }
+
+  @Post('access-grants')
+  createAccessGrant(@Req() req: { user?: RequestActor }, @Body() body: unknown) {
+    return this.usersService.createAccessGrant(req.user?.user, body);
   }
 
   /** POST /users/rbac — 创建 RBAC 绑定 */
@@ -125,8 +165,8 @@ export class UsersController {
 
   /** GET /users/:id — 单条查询 */
   @Get(':id')
-  async findById(@Param('id') id: string) {
-    const user = await this.usersService.findById(id);
+  async findById(@Param('id') id: string, @Req() req: { user?: RequestActor }) {
+    const user = await this.usersService.findById(id, req.user?.user);
     if (!user) throw new NotFoundException('用户不存在');
     return user;
   }
@@ -166,5 +206,25 @@ export class UsersController {
   @Post(':id/disable')
   disableUser(@Req() req: { user?: RequestActor }, @Param('id') id: string) {
     return this.usersService.setState(req.user?.user, id, false);
+  }
+
+  @Patch(':id/mfa')
+  setMfa(@Req() req: { user?: RequestActor }, @Param('id') id: string, @Body() body: { enabled?: unknown }) {
+    return this.usersService.setMfaEnabled(req.user?.user, id, body?.enabled as boolean);
+  }
+
+  @Get(':id/external-identities')
+  listExternalIdentities(@Req() req: { user?: RequestActor }, @Param('id') id: string) {
+    return this.usersService.listExternalIdentities(req.user?.user, id);
+  }
+
+  @Post(':id/external-identities')
+  bindExternalIdentity(@Req() req: { user?: RequestActor }, @Param('id') id: string, @Body() body: unknown) {
+    return this.usersService.bindExternalIdentity(req.user?.user, id, body);
+  }
+
+  @Delete(':id/external-identities/:identityId')
+  unbindExternalIdentity(@Req() req: { user?: RequestActor }, @Param('id') id: string, @Param('identityId') identityId: string) {
+    return this.usersService.unbindExternalIdentity(req.user?.user, id, identityId);
   }
 }

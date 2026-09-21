@@ -13,7 +13,7 @@ export type PlatformNavigationItem = {
 const PLATFORM_NAVIGATION: readonly PlatformNavigationItem[] = [
   { key: "platform-overview", label: "概览", path: "/", icon: "home" },
   { key: "platform-clusters", label: "集群", path: "/clusters", icon: "clusters" },
-  { key: "platform-access", label: "授权管理", path: "/authorization", icon: "authorization", requiredRole: "admin" },
+  { key: "platform-access", label: "访问控制", path: "/authorization", icon: "authorization", requiredRole: "admin" },
   { key: "platform-applications", label: "应用中心", path: "/applications", icon: "applications" },
   { key: "platform-settings", label: "系统设置", path: "/settings", icon: "settings", requiredRole: "admin" },
 ];
@@ -29,7 +29,7 @@ export function getPlatformNavigation(userRole: string, disabledPaths?: Readonly
 }
 
 export function getConsoleSurface(pathname: string): ConsoleSurface {
-  if (pathname === "/login" || pathname === "/login-new") return "public";
+  if (pathname === "/login" || pathname === "/login-new" || pathname === "/login/oidc") return "public";
   if (/^\/clusters\/[^/?#]+\/[^/?#]+/.test(pathname)) {
     return "cluster-workspace";
   }

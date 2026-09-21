@@ -51,7 +51,7 @@ export function AlertReceiverConfiguration({ clusterId, token }: { clusterId: st
       </Popconfirm>
       <OpsIconActionButton title="刷新接收状态" icon={<ReloadOutlined />} loading={query.isFetching} onClick={() => void query.refetch()} />
     </Space>
-    <OpsModalShell title="新的接收令牌" open={secret !== null} onCancel={() => setSecret(null)} footer={<Button onClick={() => setSecret(null)}>关闭</Button>}>
+    <OpsModalShell title="新的接收令牌" destroyOnHidden open={secret !== null} onCancel={() => setSecret(null)} footer={<Button onClick={() => setSecret(null)}>关闭</Button>}>
       <Alert type="warning" showIcon title="令牌仅展示一次，关闭后无法再次查看。" style={{ marginBottom: 12 }} />
       <Input.Password aria-label="新接收令牌" value={secret ?? ""} readOnly autoComplete="off" />
       <OpsIconActionButton title="复制接收令牌" icon={<CopyOutlined />} onClick={async () => {

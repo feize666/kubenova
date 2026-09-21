@@ -3,12 +3,16 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
 import { timingSafeEqual } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import { ClustersService } from '../clusters/clusters.service';
 import { K8sClientService } from '../clusters/k8s-client.service';
+import { RuntimeInvalidationService } from './runtime-invalidation.service';
+import { createRuntimeAuthorizationLease } from './runtime-authorization-lease';
 import {
   RuntimeSessionService,
   type RuntimeTokenPayload,
@@ -16,6 +20,7 @@ import {
 } from './runtime-session.service';
 
 export interface CreateRuntimeSessionRequest {
+  authzVersion?: number;
   type: 'terminal' | 'logs';
   userId?: string;
   clusterId: string;
@@ -36,6 +41,7 @@ export interface CreateRuntimeSessionRequest {
 }
 
 export interface RuntimeGatewayAccessContext {
+  authzVersion?: number;
   userId?: string;
   requestHost?: string;
   requestProtocol?: 'http' | 'https';
@@ -110,6 +116,7 @@ export class RuntimeService {
     private readonly runtimeSessionService: RuntimeSessionService,
     private readonly clustersService: ClustersService,
     private readonly k8sClientService: K8sClientService,
+    @Optional() private readonly invalidation?: RuntimeInvalidationService,
   ) {}
 
   async createSession(
@@ -166,6 +173,7 @@ export class RuntimeService {
     } satisfies RuntimeTokenPayload);
 
     await this.runtimeSessionService.persistSession({
+      authzVersion: runtimeInput.authzVersion,
       id: sessionId,
       clusterId: runtimeInput.clusterId,
       userId: runtimeInput.userId,
@@ -195,6 +203,22 @@ export class RuntimeService {
       sessionState: 'ready',
       target,
     };
+  }
+
+  async watchGatewaySession(input: { sessionId: string; runtimeToken: string; path: RuntimeGatewayPath; internalSecret?: string }) {
+    const status = await this.getGatewaySessionStatus(input);
+    if (!status.active) throw new ForbiddenException('Runtime access denied');
+    if (!this.invalidation) throw new ServiceUnavailableException('Runtime invalidation unavailable');
+    return createRuntimeAuthorizationLease({ sessionId: input.sessionId, runtimeToken: input.runtimeToken, expectedPath: input.path }, this.runtimeSessionService, await this.invalidation.get());
+  }
+
+  async getGatewaySessionStatus(input: { sessionId: string; runtimeToken: string; path: RuntimeGatewayPath; internalSecret?: string }) {
+    if (!this.isValidInternalSecret(input.internalSecret)) throw new ForbiddenException('runtime gateway internal secret is invalid');
+    if (typeof input.runtimeToken !== 'string' || input.runtimeToken.length > 16384 || !input.sessionId || !['/ws/logs', '/ws/terminal'].includes(input.path)) {
+      throw new BadRequestException('Invalid runtime status request');
+    }
+    const result = await this.runtimeSessionService.validateSessionTokenDetailed({ sessionId: input.sessionId, runtimeToken: input.runtimeToken, expectedPath: input.path });
+    return { active: Boolean(result.payload) };
   }
 
   async getGatewaySessionBootstrap(input: {

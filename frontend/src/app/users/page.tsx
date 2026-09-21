@@ -2,10 +2,13 @@
 
 import { ReloadOutlined, UserOutlined, CrownOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Form, Input, Select, Space, Typography, theme, Badge } from "antd";
+import { Alert, Form, Input, Space, Typography, theme, Badge } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
+import { ExternalIdentities } from "./external-identities";
 import { useAuth } from "@/components/auth-context";
+import { useRouter } from "next/navigation";
+import { getMfaStatus } from "@/lib/api/mfa-reset";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { useModuleTableState } from "@/components/module-page";
 import { OpsFilterChip, OpsFormSection, OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
@@ -42,7 +45,6 @@ const USERS_QUERY_KEY = ["users", "list"] as const;
 interface CreateUserFormValues {
   username: string;
   password: string;
-  role: string;
 }
 
 interface CreateUserModalProps {
@@ -60,7 +62,6 @@ function CreateUserModal({ open, accessToken, onClose, onSuccess }: CreateUserMo
       const payload: CreateUserPayload = {
         username: values.username,
         password: values.password,
-        role: values.role,
       };
       return createUser(payload, accessToken);
     },
@@ -80,7 +81,7 @@ function CreateUserModal({ open, accessToken, onClose, onSuccess }: CreateUserMo
   return (
     <OpsModalShell
       title="新建用户"
-      description="创建可登录 Kubenova 控制台的本地用户，并分配基础访问角色。"
+      description="创建可登录 KubeNova 控制台的本地用户。"
       identity="用户"
       open={open}
       onCancel={() => {
@@ -127,26 +128,6 @@ function CreateUserModal({ open, accessToken, onClose, onSuccess }: CreateUserMo
             <Input.Password placeholder="请输入密码（至少 8 位）" autoComplete="new-password" />
           </Form.Item>
         </OpsFormSection>
-        <OpsFormSection title="权限范围" description="角色决定用户可访问的控制台能力。">
-          <Form.Item
-            name="role"
-            label="角色"
-            rules={[{ required: true, message: "请选择角色" }]}
-            extra={
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                管理员：拥有所有权限；普通用户：只能查看基础资源
-              </Typography.Text>
-            }
-          >
-            <Select
-              options={[
-                { label: "管理员 (admin)", value: "admin" },
-                { label: "普通用户 (user)", value: "user" },
-              ]}
-              placeholder="请选择角色"
-            />
-          </Form.Item>
-        </OpsFormSection>
       </Form>
     </OpsModalShell>
   );
@@ -155,7 +136,6 @@ function CreateUserModal({ open, accessToken, onClose, onSuccess }: CreateUserMo
 // ── EditUserModal ──────────────────────────────────────────────────────────────
 interface EditUserFormValues {
   username: string;
-  role: string;
   password?: string;
 }
 
@@ -173,7 +153,6 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
     mutationFn: (values: EditUserFormValues) => {
       const payload: UpdateUserPayload = {
         username: values.username,
-        role: values.role,
         ...(values.password ? { password: values.password } : {}),
       };
       return updateUser(record!.id, payload, accessToken);
@@ -194,7 +173,7 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
   return (
     <OpsModalShell
       title="编辑用户"
-      description="更新用户登录标识、角色或密码；留空密码则保留原密码。"
+      description="更新用户登录标识或密码；留空密码则保留原密码。"
       identity={record?.username ?? "用户"}
       open={Boolean(record)}
       onCancel={() => {
@@ -210,7 +189,7 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
       width={520}
       afterOpenChange={(visible) => {
         if (visible && record) {
-          form.setFieldsValue({ username: record.username, role: record.role });
+          form.setFieldsValue({ username: record.username });
         }
       }}
     >
@@ -224,7 +203,7 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
         />
       ) : null}
       <Form form={form} layout="vertical" requiredMark>
-        <OpsFormSection title="账号资料" description="用户名与角色会立即影响控制台访问范围。">
+        <OpsFormSection title="账号资料">
           <Form.Item
             name="username"
             label="用户名"
@@ -234,15 +213,6 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
             ]}
           >
             <Input placeholder="请输入用户名" />
-          </Form.Item>
-          <Form.Item name="role" label="角色" rules={[{ required: true, message: "请选择角色" }]}>
-            <Select
-              options={[
-                { label: "管理员 (admin)", value: "admin" },
-                { label: "普通用户 (user)", value: "user" },
-              ]}
-              placeholder="请选择角色"
-            />
           </Form.Item>
         </OpsFormSection>
         <OpsFormSection title="密码" description="留空则不修改当前登录密码。">
@@ -261,15 +231,18 @@ function EditUserModal({ record, accessToken, onClose, onSuccess }: EditUserModa
 
 // ── 主页面 ────────────────────────────────────────────────────────────────────
 export default function UsersPage() {
+  const router = useRouter();
   const { token: themeToken } = theme.useToken();
   const queryClient = useQueryClient();
   const { accessToken, isInitializing } = useAuth();
+  const mfaStatus = useQuery({ queryKey: ["mfa-management", accessToken], queryFn: () => getMfaStatus(accessToken), enabled: Boolean(accessToken), retry: false });
   const [status, setStatus] = useState<string>("");
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [actionTargetId, setActionTargetId] = useState<string>("");
   const [createOpen, setCreateOpen] = useState(false);
   const [editRecord, setEditRecord] = useState<UserTableRecord | null>(null);
   const [detailRecord, setDetailRecord] = useState<UserTableRecord | null>(null);
+  const [identityRecord, setIdentityRecord] = useState<UserTableRecord | null>(null);
   const tableState = useModuleTableState(10);
   const {
     sortBy,
@@ -450,6 +423,12 @@ export default function UsersPage() {
         ),
     },
     {
+      title: "MFA 策略",
+      key: "mfa",
+      width: 130,
+      render: (_, row) => row.mfaEnabled ? <OpsFilterChip tone="success">已启用</OpsFilterChip> : <OpsFilterChip tone="neutral">未启用</OpsFilterChip>,
+    },
+    {
       title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
@@ -481,6 +460,11 @@ export default function UsersPage() {
             onClick: () => setEditRecord(row),
           },
           {
+            key: "external-identities",
+            label: "企业身份",
+            onClick: () => setIdentityRecord(row),
+          },
+          {
             key: "delete",
             label: "删除",
             danger: true,
@@ -496,7 +480,10 @@ export default function UsersPage() {
           },
         ];
         return (
-          <ResourceActionDropdown actions={actions} ariaLabel={`${row.username} 更多操作`} />
+          <ResourceActionDropdown actions={mfaStatus.data?.canManageMfa && row.mfaEnabled ? [...actions, {
+            key: "mfa-reset", label: "重置 MFA", danger: true,
+            onClick: () => router.push(`/authorization/mfa-reset?target=${encodeURIComponent(row.id)}`),
+          }] : actions} ariaLabel={`${row.username} 更多操作`} />
         );
       },
     },
@@ -608,6 +595,7 @@ export default function UsersPage() {
           void queryClient.invalidateQueries({ queryKey: [...USERS_QUERY_KEY, accessToken] })
         }
       />
+      {identityRecord && accessToken ? <ExternalIdentities key={identityRecord.id} user={identityRecord} token={accessToken} onClose={() => setIdentityRecord(null)} /> : null}
       <BusinessDetailDrawer
         open={Boolean(detailRecord)}
         title={detailRecord ? `用户详情 · ${detailRecord.name || detailRecord.username}` : "用户详情"}
@@ -632,6 +620,7 @@ function buildUserDetailSections(record: UserTableRecord | null): BusinessDetail
         { key: "username", label: "用户名", value: <Typography.Text code>{record.username}</Typography.Text> },
         { key: "role", label: "角色", value: record.role === "admin" ? "管理员" : "普通用户" },
         { key: "state", label: "状态", value: record.isActive ? "已启用" : "已禁用" },
+        { key: "mfa", label: "MFA 策略", value: record.mfaEnabled ? "已启用" : "未启用" },
       ],
     },
     {

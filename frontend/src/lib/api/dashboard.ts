@@ -16,6 +16,21 @@ export interface DashboardMetricMeta {
   degradedReason?: string;
 }
 
+export function isDashboardMetricAvailable(metric?: DashboardMetricMeta): boolean {
+  return metric?.freshness !== "unavailable" && metric?.freshness !== "stale";
+}
+
+export function formatDashboardCount(
+  value: number | undefined,
+  metric?: DashboardMetricMeta,
+): string {
+  return isDashboardMetricAvailable(metric) &&
+    typeof value === "number" &&
+    Number.isFinite(value)
+    ? String(value)
+    : "--";
+}
+
 export interface DashboardResourceMetric {
   value: number | null;
   used: number | null;
@@ -235,5 +250,14 @@ export async function getDashboardStats(
     clusterId: params.clusterId || undefined,
   };
 
-  return apiRequest<DashboardStats>("/api/dashboard/stats", { token: resolvedToken, query });
+  const data = await apiRequest<DashboardStats>("/api/dashboard/stats", { token: resolvedToken, query });
+  const counts = [
+    data?.clusters?.total, data?.clusters?.healthy, data?.clusters?.warning,
+    data?.workloads?.total, data?.workloads?.healthy, data?.workloads?.unhealthy,
+    data?.alerts?.critical, data?.alerts?.warning, data?.alerts?.total, data?.namespaces,
+  ];
+  if (counts.some(value => typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+    throw new Error("仪表盘数据格式异常，请刷新重试");
+  }
+  return data;
 }

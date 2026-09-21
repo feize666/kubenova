@@ -916,7 +916,11 @@ export default function ClustersPage() {
             </span>
           )}
           description="查看集群版本、资源使用率和运行状态。系统自动健康探测与资源同步，支持禁用/启用。"
-          extra={<ResourceAddButton onClick={openAddModal} aria-label="创建集群" />}
+          titleSuffix={(
+            <span className="resource-page-header__title-suffix">
+              <ResourceAddButton onClick={openAddModal} aria-label="创建集群" />
+            </span>
+          )}
         />
 
         <Space className="resource-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>

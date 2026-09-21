@@ -29,6 +29,28 @@ function createService() {
 }
 
 describe('ObservabilityService', () => {
+  it('does not expose webhook secrets from transport errors', async () => {
+    const { service, prisma } = createService();
+    prisma.monitoringNotificationTemplate.findUnique.mockResolvedValue({ id: 'n', channel: 'webhook', endpoint: 'https://hooks.example/test?key=private-secret', bodyTemplate: '{}' });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = jest.fn().mockRejectedValue(new Error('failed https://hooks.example/test?key=private-secret'));
+    try {
+      const result = await service.testNotificationTemplate({ role: 'platform-admin' }, 'n');
+      expect(result.success).toBe(false);
+      expect(result.error).not.toContain('private-secret');
+    } finally { globalThis.fetch = originalFetch; }
+  });
+  it.each(['file:///etc/passwd', 'not-a-url'])('rejects invalid saved notification endpoints %s before network access', async endpoint => {
+    const { service, prisma } = createService();
+    prisma.monitoringNotificationTemplate.findUnique.mockResolvedValue({ id: 'n', channel: 'webhook', endpoint, bodyTemplate: '{}' });
+    const originalFetch = globalThis.fetch;
+    const send = jest.fn().mockResolvedValue(new Response('{}'));
+    globalThis.fetch = send;
+    try {
+      expect(await service.testNotificationTemplate({ role: 'platform-admin' }, 'n')).toMatchObject({ success: false, statusCode: null });
+      expect(send).not.toHaveBeenCalled();
+    } finally { globalThis.fetch = originalFetch; }
+  });
   it('lists configured sources and ignores empty environment defaults', async () => {
     const { service, prisma } = createService();
     process.env.OBSERVABILITY_PROMETHEUS_URL = 'http://prometheus:9090';
@@ -135,10 +157,59 @@ describe('ObservabilityService', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = jest.fn().mockResolvedValue(new Response('{}', { status: 202 })) as never;
     try {
-      const result = await service.testNotificationTemplate('n1');
+      const result = await service.testNotificationTemplate({ role: 'platform-admin' }, 'n1');
       expect(result.success).toBe(true);
       expect(result.statusCode).toBe(202);
       expect(globalThis.fetch).toHaveBeenCalledWith('https://hooks.example/test', expect.objectContaining({ method: 'POST' }));
     } finally { globalThis.fetch = originalFetch; }
+  });
+  it('does not report HTTP reachability as successful email delivery', async () => {
+    const { service, prisma } = createService();
+    prisma.monitoringNotificationTemplate.findUnique.mockResolvedValue({ id: 'mail', channel: 'email', endpoint: 'https://mail.example', bodyTemplate: '{{message}}' });
+    const originalFetch = globalThis.fetch;
+    const fetchSpy = jest.fn();
+    globalThis.fetch = fetchSpy;
+    try {
+      expect(await service.testNotificationTemplate({ role: 'platform-admin' }, 'mail')).toMatchObject({ success: false, statusCode: null });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally { globalThis.fetch = originalFetch; }
+  });
+  it.each([302, 400, 429, 500])('does not automatically repeat a notification POST after HTTP %s', async status => {
+    const { service, prisma } = createService();
+    prisma.monitoringNotificationTemplate.findUnique.mockResolvedValue({ id: 'n', channel: 'webhook', endpoint: 'https://hooks.example/test', bodyTemplate: '{}' });
+    const originalFetch = globalThis.fetch;
+    const send = jest.fn().mockResolvedValue(new Response('{}', { status }));
+    globalThis.fetch = send;
+    try {
+      expect(await service.testNotificationTemplate({ role: 'platform-admin' }, 'n')).toMatchObject({ success: false, statusCode: status });
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith('https://hooks.example/test', expect.objectContaining({ redirect: 'manual' }));
+    } finally { globalThis.fetch = originalFetch; }
+  });
+  it.each([
+    ['feishu', { code: 0 }, true],
+    ['feishu', { code: 19001 }, false],
+    ['dingtalk', { errcode: 0 }, true],
+    ['dingtalk', { errcode: 310000 }, false],
+    ['wecom', { errcode: 0 }, true],
+    ['wecom', {}, false],
+  ])('checks business delivery status for %s: %j', async (channel, body, success) => {
+    const { service, prisma } = createService();
+    prisma.monitoringNotificationTemplate.findUnique.mockResolvedValue({ id: 'n', channel, endpoint: 'https://hooks.example/test', bodyTemplate: '{}' });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = jest.fn().mockResolvedValue(Response.json(body));
+    try { expect(await service.testNotificationTemplate({ role: 'platform-admin' }, 'n')).toMatchObject({ success, statusCode: 200 }); }
+    finally { globalThis.fetch = originalFetch; }
+  });
+  it.each([
+    ['slack', 'ok', true], ['slack', 'invalid_payload', false],
+    ['pagerduty', '{"status":"success"}', true], ['pagerduty', '{"status":"invalid event"}', false],
+  ])('validates %s provider response %s', async (channel, body, success) => {
+    const { service, prisma } = createService();
+    prisma.monitoringNotificationTemplate.findUnique.mockResolvedValue({ id: 'n', channel, endpoint: 'https://hooks.example/test', bodyTemplate: '{}' });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = jest.fn().mockResolvedValue(new Response(body));
+    try { expect(await service.testNotificationTemplate({ role: 'platform-admin' }, 'n')).toMatchObject({ success, statusCode: 200 }); }
+    finally { globalThis.fetch = originalFetch; }
   });
 });

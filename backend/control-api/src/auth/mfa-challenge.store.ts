@@ -1,4 +1,4 @@
-import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { OnModuleDestroy, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import type Redis from 'ioredis';
 
@@ -8,8 +8,10 @@ export interface MfaChallenge {
   enrollmentVersion: number;
 }
 
-export class MfaChallengeStore {
-  constructor(private readonly redis: Pick<Redis, 'set' | 'getdel'>) {}
+export class MfaChallengeStore implements OnModuleDestroy {
+  constructor(private readonly redis: Pick<Redis, 'set' | 'getdel'> & Partial<Pick<Redis, 'disconnect'>>) {}
+
+  onModuleDestroy(): void { this.redis.disconnect?.(); }
 
   private key(token: string): string {
     if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) {

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
@@ -17,26 +18,35 @@ import {
   type ClusterLiveUsageSnapshot,
 } from '../metrics/live-metrics.service';
 import { PrismaService } from '../platform/database/prisma.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 import { ObservabilityService, type GrafanaPanelConfiguration } from './observability.service';
 
 export type MonitoringRange = '15m' | '1h' | '6h' | '24h' | '7d';
 type ResourceState = 'active' | 'disabled';
 
 interface Actor {
+  id?: string;
   username?: string;
   role?: PlatformRole;
 }
 
+type MonitoringScope = {
+  resources: Array<{ clusterId: string; namespace?: string }>;
+  secrets: Array<{ clusterId: string; namespace: string }>;
+};
+
 export interface MonitoringOverviewResponse {
   range: MonitoringRange;
   timestamp: string;
-  healthScore: number;
+  healthScore: number | null;
   clusterTotal: number;
-  clusterHealthy: number;
+  clusterHealthy: number | null;
   warningCount: number;
   criticalCount: number;
-  cpuUsagePercent: number;
-  memoryUsagePercent: number;
+  cpuUsagePercent: number | null;
+  memoryUsagePercent: number | null;
   usageDataSource: 'metrics-server' | 'k8s-metadata' | 'none';
   dataSource: 'monitoring-alert' | 'workload-derived' | 'mixed';
   degraded: boolean;
@@ -130,6 +140,7 @@ export interface InspectionIssue {
     | 'alert';
   title: string;
   resourceRef: string;
+  resourceKind?: string | null;
   clusterId?: string | null;
   namespace?: string | null;
   suggestion: string;
@@ -264,7 +275,7 @@ export interface ObservabilitySummaryResponse {
     from: string;
     to: string;
   };
-  healthScore: number;
+  healthScore: number | null;
   activeAlerts: {
     critical: number;
     warning: number;
@@ -320,12 +331,77 @@ export class MonitoringService {
     private readonly clustersService: ClustersService,
     private readonly liveMetricsService: LiveMetricsService,
     @Optional() private readonly observabilityService?: ObservabilityService,
+    private readonly clusterAccessService: ClusterAccessService = new ClusterAccessService(prisma),
+    @Optional() private readonly authorization?: AuthorizationService,
+    @Optional() private readonly namespaceIdentity?: NamespaceIdentityService,
   ) {}
+
+  private async resolveScope(actor?: Actor, clusterId?: string, namespace?: string, mutation = false): Promise<MonitoringScope | undefined> {
+    // Only trusted internal callers omit actor. HTTP always supplies an object.
+    if (actor === undefined) return undefined;
+    if (!actor.id?.trim() || !this.clusterAccessService.isKnownPlatformRole(actor)) throw new ForbiddenException();
+    if (mutation) assertWritePermission(actor);
+    if (this.clusterAccessService.isPlatformAdmin(actor)) return undefined;
+    if (!this.authorization || !this.namespaceIdentity) throw new ForbiddenException();
+    const scope: MonitoringScope = { resources: [], secrets: [] };
+    for (const id of await this.clusterAccessService.listAccessibleClusterIds(actor) ?? []) {
+      if (clusterId && clusterId !== id) continue;
+      if (mutation) {
+        try { await this.clusterAccessService.assertCanMutate(actor, id); }
+        catch (error) {
+          if (error instanceof ForbiddenException || error instanceof NotFoundException) continue;
+          throw error;
+        }
+      }
+      scope.resources.push({ clusterId: id });
+    }
+    const identities = new Map<string, string | null>();
+    for (const grant of await this.authorization.listEffectiveGrants(actor.id, new Date(), clusterId)) {
+      if (mutation && grant.role === 'viewer') continue;
+      for (const ns of grant.namespaces) {
+        if (!ns.namespaceName || !ns.namespaceUid || (namespace && namespace !== ns.namespaceName)) continue;
+        const key = `${grant.clusterId}/${ns.namespaceName}`;
+        if (!identities.has(key)) {
+          try { identities.set(key, await this.namespaceIdentity.resolve(grant.clusterId, ns.namespaceName)); }
+          catch { identities.set(key, null); }
+        }
+        if (identities.get(key) !== ns.namespaceUid) continue;
+        const pair = { clusterId: grant.clusterId, namespace: ns.namespaceName };
+        scope.resources.push(pair);
+        if (grant.capabilities.some(item => item.capability === 'secrets')) scope.secrets.push(pair);
+      }
+    }
+    if ((clusterId || namespace) && !scope.resources.some(pair => (!clusterId || pair.clusterId === clusterId) && (!namespace || !pair.namespace || pair.namespace === namespace))) throw new ForbiddenException();
+    return scope;
+  }
+
+  private resourceScopeWhere(scope?: MonitoringScope, namespaceField = 'namespace') {
+    return scope ? { OR: scope.resources.map(pair => ({ clusterId: pair.clusterId, ...(pair.namespace ? { [namespaceField]: pair.namespace } : {}) })) } : {};
+  }
+
+  private secretScopeWhere(scope: MonitoringScope | undefined, kindField = 'kind') {
+    return scope ? { OR: [
+      ...(kindField === 'resourceType' ? [{ resourceType: null }] : []),
+      { NOT: { [kindField]: { in: ['secret', 'secrets'], mode: 'insensitive' as const } } },
+      ...scope.secrets,
+    ] } : {};
+  }
+
+  private clusterScopeWhere(scope?: MonitoringScope, fullOnly = false) {
+    return scope ? { id: { in: [...new Set(scope.resources.filter(pair => !fullOnly || !pair.namespace).map(pair => pair.clusterId))] } } : {};
+  }
+
+  private hasNamespaceOnlyScope(scope?: MonitoringScope): boolean {
+    return Boolean(scope && (!scope.resources.length || scope.resources.some(pair => pair.namespace && !scope.resources.some(full => full.clusterId === pair.clusterId && !full.namespace))));
+  }
 
   async getGrafanaPanelConfiguration(
     clusterId: string,
     range?: string,
+    actor?: Actor,
   ): Promise<GrafanaPanelConfiguration> {
+    const scope = await this.resolveScope(actor, clusterId);
+    if (scope && !scope.resources.some(pair => pair.clusterId === clusterId && !pair.namespace)) throw new ForbiddenException('Cluster-wide monitoring access required');
     // Keep this facade on the monitoring service so monitoring routes retain
     // their existing ownership while the config service owns validation.
     const service = this.observabilityService ?? new ObservabilityService(this.prisma);
@@ -459,14 +535,19 @@ export class MonitoringService {
 
   async getOverview(
     timeFilter: InspectionTimeFilter,
+    actor?: Actor,
   ): Promise<MonitoringOverviewResponse> {
     const { range, from, to } = this.resolveTimeWindow(timeFilter, '24h');
     const clusterId = timeFilter.clusterId?.trim() || undefined;
+    const scope = await this.resolveScope(actor, clusterId);
+    const namespaceOnly = this.hasNamespaceOnlyScope(scope);
+    const alertScope = [this.resourceScopeWhere(scope), this.secretScopeWhere(scope, 'resourceType')];
     const firedAt = this.buildDateRangeWhere(from, to);
     const activeClusterWhere: Prisma.ClusterRegistryWhereInput = {
       deletedAt: null,
       status: { not: 'deleted' },
       ...(clusterId ? { id: clusterId } : {}),
+      AND: this.clusterScopeWhere(scope),
     };
     const [clusterTotal, clusterHealthy, warningCountRaw, criticalCountRaw] =
       await Promise.all([
@@ -478,12 +559,14 @@ export class MonitoringService {
             deletedAt: null,
             status: { in: ['healthy', '正常'] },
             ...(clusterId ? { id: clusterId } : {}),
+            AND: this.clusterScopeWhere(scope, true),
           },
         }),
         this.prisma.monitoringAlert.count({
           where: this.activeClusterAlertWhere(
             {
               severity: 'warning',
+              AND: alertScope,
               status: 'firing',
               ...(firedAt ? { firedAt } : {}),
             },
@@ -494,6 +577,7 @@ export class MonitoringService {
           where: this.activeClusterAlertWhere(
             {
               severity: 'critical',
+              AND: alertScope,
               status: 'firing',
               ...(firedAt ? { firedAt } : {}),
             },
@@ -511,7 +595,7 @@ export class MonitoringService {
     let note: string | undefined;
 
     if (firingTotal === 0) {
-      const derived = await this.buildDerivedAlerts(400, clusterId);
+      const derived = await this.buildDerivedAlerts(400, clusterId, scope);
       warningCount = derived.filter(
         (item) => item.severity === 'warning',
       ).length;
@@ -531,7 +615,7 @@ export class MonitoringService {
     );
 
     const activeClusters = await this.prisma.clusterRegistry.findMany({
-      where: activeClusterWhere,
+      where: { ...activeClusterWhere, AND: namespaceOnly ? { id: { in: [] } } : this.clusterScopeWhere(scope, true) },
       select: { id: true },
     });
     const liveSnapshots = await this.runBounded(
@@ -587,28 +671,31 @@ export class MonitoringService {
     return {
       range,
       timestamp: new Date().toISOString(),
-      healthScore,
+      healthScore: namespaceOnly ? null : healthScore,
       clusterTotal,
-      clusterHealthy,
+      clusterHealthy: namespaceOnly ? null : clusterHealthy,
       warningCount,
       criticalCount,
-      cpuUsagePercent,
-      memoryUsagePercent,
+      cpuUsagePercent: namespaceOnly ? null : cpuUsagePercent,
+      memoryUsagePercent: namespaceOnly ? null : memoryUsagePercent,
       usageDataSource,
       dataSource,
       degraded,
-      note,
+      note: namespaceOnly ? '当前授权仅包含命名空间，集群级健康评分和实时指标不可用。' : note,
       liveSnapshot: availableSnapshots[0] ?? undefined,
     };
   }
 
   async getObservabilitySummary(
     timeFilter: InspectionTimeFilter,
+    actor?: Actor,
   ): Promise<ObservabilitySummaryResponse> {
     const window = {
       ...this.resolveTimeWindow(timeFilter, '24h'),
       clusterId: timeFilter.clusterId?.trim() || undefined,
     };
+    // Authorization and namespace UIDs are re-evaluated on every HTTP request.
+    if (actor !== undefined) return this.buildObservabilitySummary(window, actor);
     const key = this.observabilitySummaryCacheKey(window);
     const now = Date.now();
     this.pruneObservabilitySummaryCache(now);
@@ -643,9 +730,11 @@ export class MonitoringService {
     range: MonitoringRange;
     from?: Date;
     to?: Date;
-  }): Promise<ObservabilitySummaryResponse> {
+  }, actor?: Actor): Promise<ObservabilitySummaryResponse> {
+    const scope = await this.resolveScope(actor, window.clusterId);
+    const namespaceOnly = this.hasNamespaceOnlyScope(scope);
     const [overview, alerts, events, inspection] = await Promise.all([
-      this.getOverview(window),
+      this.getOverview(window, actor),
       this.getAlerts({
         clusterId: window.clusterId,
         page: 1,
@@ -654,9 +743,9 @@ export class MonitoringService {
         range: window.range,
         from: window.from,
         to: window.to,
-      }),
-      this.getEvents(window),
-      this.getClusterInspection(window.clusterId, undefined, window),
+      }, actor),
+      this.getEvents(window, actor),
+      this.getClusterInspection(window.clusterId, undefined, window, actor),
     ]);
     const [
       namespaceTotal,
@@ -667,6 +756,7 @@ export class MonitoringService {
     ] = await Promise.all([
       this.prisma.namespaceRecord.count({
         where: {
+          AND: this.resourceScopeWhere(scope, 'name'),
           state: { not: 'deleted' },
           ...(window.clusterId ? { clusterId: window.clusterId } : {}),
           cluster: { deletedAt: null, status: { not: 'deleted' } },
@@ -674,6 +764,7 @@ export class MonitoringService {
       }),
       this.prisma.workloadRecord.count({
         where: {
+          AND: this.resourceScopeWhere(scope),
           state: { not: 'deleted' },
           ...(window.clusterId ? { clusterId: window.clusterId } : {}),
           cluster: { deletedAt: null, status: { not: 'deleted' } },
@@ -681,6 +772,7 @@ export class MonitoringService {
       }),
       this.prisma.networkResource.count({
         where: {
+          AND: this.resourceScopeWhere(scope),
           state: { not: 'deleted' },
           kind: 'Service',
           ...(window.clusterId ? { clusterId: window.clusterId } : {}),
@@ -689,6 +781,7 @@ export class MonitoringService {
       }),
       this.prisma.workloadRecord.count({
         where: {
+          AND: this.resourceScopeWhere(scope),
           state: { not: 'deleted' },
           kind: 'Pod',
           ...(window.clusterId ? { clusterId: window.clusterId } : {}),
@@ -697,6 +790,7 @@ export class MonitoringService {
       }),
       this.prisma.networkResource.count({
         where: {
+          AND: this.resourceScopeWhere(scope),
           state: { not: 'deleted' },
           ...(window.clusterId ? { clusterId: window.clusterId } : {}),
           cluster: { deletedAt: null, status: { not: 'deleted' } },
@@ -728,7 +822,9 @@ export class MonitoringService {
 
     const hasMetrics = overview.usageDataSource === 'metrics-server';
     const hasAlertSource = alerts.dataSource === 'monitoring-alert';
-    const externalLinkByKey = {
+    const externalLinkByKey = actor !== undefined && !this.clusterAccessService.isPlatformAdmin(actor) ? {
+      metrics: undefined, logs: undefined, traces: undefined, alerts: undefined, slo: undefined, runbook: undefined,
+    } : {
       metrics: process.env.OBSERVABILITY_GRAFANA_URL,
       logs: process.env.OBSERVABILITY_LOGS_URL,
       traces: process.env.OBSERVABILITY_TRACES_URL,
@@ -738,7 +834,7 @@ export class MonitoringService {
     };
     const buildSignals = (): ObservabilityEntityHealth['signals'] => ({
       metrics: hasMetrics ? 'available' : 'degraded',
-      logs: 'available',
+      logs: scope ? 'unavailable' : 'available',
       traces: externalLinkByKey.traces ? 'available' : 'unavailable',
       events: events.degraded ? 'degraded' : 'available',
       alerts: alerts.degraded ? 'degraded' : 'available',
@@ -851,9 +947,9 @@ export class MonitoringService {
       {
         key: 'logs',
         label: 'Logs',
-        available: true,
-        degraded: false,
-        note: 'Kubernetes Pod 日志查询入口可用。',
+        available: !scope,
+        degraded: Boolean(scope),
+        note: scope ? '日志访问需在目标 Pod 或日志中心独立校验授权。' : 'Kubernetes Pod 日志查询入口可用。',
         deepLink: externalLinkByKey.logs,
       },
       {
@@ -954,8 +1050,8 @@ export class MonitoringService {
       entity.scope === 'cluster'
         ? {
             ...entity,
-            warning:
-              overview.clusterTotal - overview.clusterHealthy + clusterIssues,
+            warning: namespaceOnly ? 0 : overview.clusterTotal - (overview.clusterHealthy ?? 0) + clusterIssues,
+            status: namespaceOnly ? 'unavailable' as const : entity.status,
           }
         : entity,
     );
@@ -973,8 +1069,8 @@ export class MonitoringService {
       {
         key: 'logs',
         title: '日志',
-        status: 'available',
-        summary: 'Pod 日志查询与日志流入口可用。',
+        status: scope ? 'unavailable' : 'available',
+        summary: scope ? '日志访问需在目标 Pod 或日志中心独立校验授权。' : 'Pod 日志查询与日志流入口可用。',
         updatedAt: overview.timestamp,
         detailPath: '/logs',
       },
@@ -1121,14 +1217,17 @@ export class MonitoringService {
 
   async getEvents(
     timeFilter: InspectionTimeFilter,
+    actor?: Actor,
   ): Promise<MonitoringEventsResponse> {
     const { range, from, to } = this.resolveTimeWindow(timeFilter, '1h');
     const clusterId = timeFilter.clusterId?.trim() || undefined;
+    const scope = await this.resolveScope(actor, clusterId);
     const firedAt = this.buildDateRangeWhere(from, to);
     const rows = await this.prisma.monitoringAlert.findMany({
       where: this.activeClusterAlertWhere(
         {
           ...(firedAt ? { firedAt } : {}),
+          AND: [this.resourceScopeWhere(scope), this.secretScopeWhere(scope, 'resourceType')],
         },
         clusterId,
       ),
@@ -1166,7 +1265,7 @@ export class MonitoringService {
       };
     }
 
-    const derived = await this.buildDerivedAlerts(200, clusterId);
+    const derived = await this.buildDerivedAlerts(200, clusterId, scope);
     const items: MonitoringEventItem[] = derived.map((item) => ({
       id: item.id,
       level: item.severity === 'critical' ? 'CRITICAL' : 'WARN',
@@ -1192,12 +1291,23 @@ export class MonitoringService {
     };
   }
 
-  async resolveAlert(id: string): Promise<AlertItem> {
+  async resolveAlert(id: string, actor: Actor | undefined): Promise<AlertItem> {
+    assertWritePermission(actor);
+    if (!actor?.id?.trim() || !this.clusterAccessService.isKnownPlatformRole(actor)) throw new ForbiddenException();
     const record = await this.prisma.monitoringAlert.findUnique({
       where: { id },
     });
     if (!record) {
       throw new NotFoundException('告警不存在');
+    }
+
+    if (record.clusterId) {
+      const scope = await this.resolveScope(actor ?? {}, record.clusterId, record.namespace ?? undefined, true);
+      const secret = ['secret', 'secrets'].includes(record.resourceType?.toLowerCase() ?? '');
+      const pairs = secret ? scope?.secrets : scope?.resources;
+      if (pairs && !pairs.some(pair => pair.clusterId === record.clusterId && (!pair.namespace || pair.namespace === record.namespace))) throw new ForbiddenException();
+    } else {
+      this.clusterAccessService.assertPlatformAdmin(actor);
     }
 
     const updated = await this.prisma.monitoringAlert.update({
@@ -1224,7 +1334,8 @@ export class MonitoringService {
     };
   }
 
-  async getAlerts(query: AlertsQuery): Promise<AlertsResponse> {
+  async getAlerts(query: AlertsQuery, actor?: Actor): Promise<AlertsResponse> {
+    const scope = await this.resolveScope(actor, query.clusterId?.trim() || undefined);
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 20));
     const skip = (page - 1) * pageSize;
@@ -1238,7 +1349,9 @@ export class MonitoringService {
     );
     const firedAt = this.buildDateRangeWhere(from, to);
 
-    const where: Prisma.MonitoringAlertWhereInput = {};
+    const where: Prisma.MonitoringAlertWhereInput = {
+      AND: [this.resourceScopeWhere(scope), this.secretScopeWhere(scope, 'resourceType')],
+    };
     if (query.severity) {
       where['severity'] = query.severity;
     }
@@ -1264,7 +1377,7 @@ export class MonitoringService {
 
     // Fallback to derived real-time alerts from synced workload data
     if (total === 0) {
-      const derivedItems = (await this.buildDerivedAlerts(300, clusterId))
+      const derivedItems = (await this.buildDerivedAlerts(300, clusterId, scope))
         .filter((item) =>
           query.severity ? item.severity === query.severity : true,
         )
@@ -1314,16 +1427,19 @@ export class MonitoringService {
     clusterId?: string,
     namespace?: string,
     timeFilter?: InspectionTimeFilter,
+    actor?: Actor,
   ): Promise<ClusterInspectionReport> {
     const { from, to } = this.resolveTimeWindow(timeFilter, '24h');
     const updatedAt = this.buildDateRangeWhere(from, to);
     const firedAt = this.buildDateRangeWhere(from, to);
     const namespaceFilter = namespace?.trim();
+    const scope = await this.resolveScope(actor, clusterId, namespaceFilter);
     const clusters = await this.prisma.clusterRegistry.findMany({
       where: {
         deletedAt: null,
         status: { not: 'deleted' },
         ...(clusterId ? { id: clusterId } : {}),
+        AND: this.clusterScopeWhere(scope),
       },
       select: {
         id: true,
@@ -1337,6 +1453,7 @@ export class MonitoringService {
       await Promise.all([
         this.prisma.namespaceRecord.findMany({
           where: {
+            AND: this.resourceScopeWhere(scope, 'name'),
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
             ...(namespaceFilter ? { name: namespaceFilter } : {}),
@@ -1346,6 +1463,7 @@ export class MonitoringService {
         }),
         this.prisma.workloadRecord.findMany({
           where: {
+            AND: this.resourceScopeWhere(scope),
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
             ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
@@ -1367,6 +1485,7 @@ export class MonitoringService {
         }),
         this.prisma.networkResource.findMany({
           where: {
+            AND: this.resourceScopeWhere(scope),
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
             ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
@@ -1384,6 +1503,7 @@ export class MonitoringService {
         }),
         this.prisma.storageResource.findMany({
           where: {
+            AND: this.resourceScopeWhere(scope),
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
             ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
@@ -1401,6 +1521,7 @@ export class MonitoringService {
         }),
         this.prisma.configResource.findMany({
           where: {
+            AND: [this.resourceScopeWhere(scope), this.secretScopeWhere(scope)],
             clusterId: { in: clusterIds },
             state: { not: 'deleted' },
             ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
@@ -1418,6 +1539,7 @@ export class MonitoringService {
         }),
         this.prisma.monitoringAlert.findMany({
           where: this.activeClusterAlertWhere({
+            AND: [this.resourceScopeWhere(scope), this.secretScopeWhere(scope, 'resourceType')],
             status: 'firing',
             clusterId: { in: clusterIds },
             ...(namespaceFilter ? { namespace: namespaceFilter } : {}),
@@ -1444,7 +1566,8 @@ export class MonitoringService {
       });
     };
 
-    clusters.forEach((cluster) => {
+    const fullClusters = scope ? clusters.filter(cluster => scope.resources.some(pair => pair.clusterId === cluster.id && !pair.namespace)) : clusters;
+    fullClusters.forEach((cluster) => {
       const status = (cluster.status ?? '').toLowerCase();
       if (status && !['healthy', '正常', 'ready'].includes(status)) {
         pushIssue({
@@ -1452,6 +1575,7 @@ export class MonitoringService {
           category: 'cluster',
           title: '集群健康状态异常',
           resourceRef: `Cluster/${cluster.name}`,
+          resourceKind: 'Cluster',
           clusterId: cluster.id,
           suggestion: '检查 apiserver、节点和网络连通性，恢复到 Healthy 状态。',
           evidence: `当前状态：${cluster.status}`,
@@ -1467,6 +1591,7 @@ export class MonitoringService {
           category: 'namespace',
           title: '名称空间状态非 active',
           resourceRef: `Namespace/${ns.name}`,
+          resourceKind: 'Namespace',
           clusterId: ns.clusterId,
           namespace: ns.name,
           suggestion:
@@ -1487,6 +1612,7 @@ export class MonitoringService {
           category: 'security',
           title: '名称空间缺少准入策略标识',
           resourceRef: `Namespace/${ns.name}`,
+          resourceKind: 'Namespace',
           clusterId: ns.clusterId,
           namespace: ns.name,
           suggestion: '为业务名称空间启用 PSA/准入策略并标识策略版本。',
@@ -1504,6 +1630,7 @@ export class MonitoringService {
           category: 'workload',
           title: '工作负载状态非 active',
           resourceRef: ref,
+          resourceKind: workload.kind,
           clusterId: workload.clusterId,
           namespace: workload.namespace,
           suggestion:
@@ -1521,6 +1648,7 @@ export class MonitoringService {
           category: 'workload',
           title: '副本未完全就绪',
           resourceRef: ref,
+          resourceKind: workload.kind,
           clusterId: workload.clusterId,
           namespace: workload.namespace,
           suggestion: '排查镜像、探针、资源配额和事件，恢复到期望就绪副本数。',
@@ -1543,6 +1671,7 @@ export class MonitoringService {
           category: 'workload',
           title: '缺少弹性伸缩策略（HPA/VPA）',
           resourceRef: ref,
+          resourceKind: workload.kind,
           clusterId: workload.clusterId,
           namespace: workload.namespace,
           suggestion: '建议为关键工作负载配置 HPA（可选 VPA）并设置合理阈值。',
@@ -1571,6 +1700,7 @@ export class MonitoringService {
           category: 'network',
           title: '网络资源状态非 active',
           resourceRef: ref,
+          resourceKind: resource.kind,
           clusterId: resource.clusterId,
           namespace: resource.namespace,
           suggestion: '确认网络资源是否仍在使用，避免产生无效路由和流量黑洞。',
@@ -1588,6 +1718,7 @@ export class MonitoringService {
             category: 'network',
             title: 'Service 未配置端口',
             resourceRef: ref,
+          resourceKind: resource.kind,
             clusterId: resource.clusterId,
             namespace: resource.namespace,
             suggestion: '补充 Service 端口定义并核对 selector 与后端工作负载。',
@@ -1604,6 +1735,7 @@ export class MonitoringService {
             category: 'network',
             title: 'Ingress 未配置规则',
             resourceRef: ref,
+          resourceKind: resource.kind,
             clusterId: resource.clusterId,
             namespace: resource.namespace,
             suggestion: '补充 host/path 路由规则并校验后端 Service 可达性。',
@@ -1621,6 +1753,7 @@ export class MonitoringService {
           category: 'storage',
           title: '存储资源状态非 active',
           resourceRef: ref,
+          resourceKind: resource.kind,
           clusterId: resource.clusterId,
           namespace: resource.namespace,
           suggestion: '排查存储后端和绑定关系，避免存储资源长期不可用。',
@@ -1634,6 +1767,7 @@ export class MonitoringService {
           category: 'storage',
           title: 'PVC 长时间 Pending',
           resourceRef: ref,
+          resourceKind: resource.kind,
           clusterId: resource.clusterId,
           namespace: resource.namespace,
           suggestion: '检查 StorageClass、容量与节点可用区，尽快完成绑定。',
@@ -1654,6 +1788,7 @@ export class MonitoringService {
           category: 'config',
           title: '配置资源状态非 active',
           resourceRef: ref,
+          resourceKind: resource.kind,
           clusterId: resource.clusterId,
           namespace: resource.namespace,
           suggestion: '确认配置资源是否仍被业务依赖，避免灰色配置残留。',
@@ -1667,6 +1802,7 @@ export class MonitoringService {
           category: 'config',
           title: `${resource.kind} 未包含有效键值`,
           resourceRef: ref,
+          resourceKind: resource.kind,
           clusterId: resource.clusterId,
           namespace: resource.namespace,
           suggestion: '检查配置内容是否正确同步，避免空配置导致应用启动失败。',
@@ -1679,6 +1815,7 @@ export class MonitoringService {
       pushIssue({
         severity: alert.severity === 'critical' ? 'critical' : 'warning',
         category: 'alert',
+        resourceKind: alert.resourceType,
         title: `活跃告警：${alert.title}`,
         resourceRef: `${alert.resourceType ?? 'Resource'}/${alert.namespace ?? '-'}/${alert.resourceName ?? '-'}`,
         clusterId: alert.clusterId,
@@ -1690,7 +1827,7 @@ export class MonitoringService {
     });
 
     const totalResources =
-      clusters.length +
+      fullClusters.length +
       namespaces.length +
       workloads.length +
       networks.length +
@@ -1727,19 +1864,21 @@ export class MonitoringService {
     clusterId?: string,
     namespace?: string,
     timeFilter?: InspectionTimeFilter,
+    actor?: Actor,
   ): Promise<ClusterInspectionReport> {
-    return this.getClusterInspection(clusterId, namespace, timeFilter);
+    return this.getClusterInspection(clusterId, namespace, timeFilter, actor);
   }
 
   async exportAlerts(
     query: AlertsQuery,
     format: InspectionExportFormat,
+    actor?: Actor,
   ): Promise<AlertsExportResult> {
     const alerts = await this.getAlerts({
       ...query,
       page: 1,
       pageSize: 5000,
-    });
+    }, actor);
     const timestampSegment = new Date()
       .toISOString()
       .replace(/[:]/g, '-')
@@ -1776,11 +1915,13 @@ export class MonitoringService {
     namespace: string | undefined,
     format: InspectionExportFormat,
     timeFilter?: InspectionTimeFilter,
+    actor?: Actor,
   ): Promise<InspectionReportExportResult> {
     const report = await this.getClusterInspection(
       clusterId,
       namespace,
       timeFilter,
+      actor,
     );
     const clusterSegment = clusterId?.trim()
       ? clusterId.trim()
@@ -1821,14 +1962,24 @@ export class MonitoringService {
     issueId: string,
     action: InspectionActionType,
     request: ExecuteInspectionActionRequest,
+    actor?: Actor,
   ): Promise<InspectionActionResponse> {
     const report = await this.getClusterInspection(
       request.clusterId?.trim() || undefined,
       request.namespace?.trim() || undefined,
+      undefined,
+      actor,
     );
     const issue = report.items.find((item) => item.id === issueId);
     if (!issue) {
       throw new NotFoundException('巡检问题项不存在或已过期，请重新巡检。');
+    }
+    if (actor !== undefined) {
+      const scope = await this.resolveScope(actor, issue.clusterId ?? undefined, issue.namespace ?? undefined, true);
+      const secret = ['secret', 'secrets'].includes(issue.resourceKind?.toLowerCase() ?? '');
+      const clusterResource = ['Cluster', 'Namespace', 'Node', 'PV', 'PersistentVolume', 'StorageClass', 'SC'].includes(issue.resourceKind ?? '');
+      const pairs = secret ? scope?.secrets : scope?.resources;
+      if (pairs && !pairs.some(pair => pair.clusterId === issue.clusterId && (!pair.namespace || (!clusterResource && pair.namespace === issue.namespace)))) throw new ForbiddenException();
     }
 
     const supportedAction = issue.actions.find((item) => item.type === action);
@@ -1867,9 +2018,11 @@ export class MonitoringService {
   private async buildDerivedAlerts(
     limit: number,
     clusterId?: string,
+    scope?: MonitoringScope,
   ): Promise<AlertItem[]> {
     const derived = await this.prisma.workloadRecord.findMany({
       where: {
+        AND: this.resourceScopeWhere(scope),
         state: { not: 'deleted' },
         ...(clusterId ? { clusterId } : {}),
         cluster: { deletedAt: null },
@@ -1956,7 +2109,8 @@ export class MonitoringService {
       .filter((item): item is AlertItem => Boolean(item));
   }
 
-  listAlertRules(): MonitoringAlertRulesResponse {
+  listAlertRules(actor?: Actor): MonitoringAlertRulesResponse {
+    if (actor !== undefined) this.assertRuleAdministration(actor);
     return {
       items: this.alertRules,
       total: this.alertRules.length,
@@ -1969,6 +2123,7 @@ export class MonitoringService {
     body: CreateAlertRuleRequest,
   ): AlertRuleItem {
     assertWritePermission(actor);
+    this.assertRuleAdministration(actor);
     const name = body?.name?.trim();
     const condition = body?.condition?.trim();
     const target = body?.target?.trim();
@@ -2002,6 +2157,7 @@ export class MonitoringService {
     body: UpdateAlertRuleRequest,
   ): AlertRuleItem {
     assertWritePermission(actor);
+    this.assertRuleAdministration(actor);
     const item = this.findRule(id);
 
     if (body.name !== undefined) {
@@ -2046,6 +2202,7 @@ export class MonitoringService {
     id: string,
   ): { id: string; deleted: true; state: 'deleted'; version: number } {
     assertWritePermission(actor);
+    this.assertRuleAdministration(actor);
     const index = this.findRuleIndex(id);
     const removed = this.alertRules[index];
     this.alertRules.splice(index, 1);
@@ -2065,12 +2222,18 @@ export class MonitoringService {
     state: ResourceState,
   ): AlertRuleItem {
     assertWritePermission(actor);
+    this.assertRuleAdministration(actor);
     const item = this.findRule(id);
     item.state = state;
     item.version += 1;
     item.updatedAt = new Date().toISOString();
     this.audit(actor, state === 'active' ? 'enable' : 'disable', item.id);
     return item;
+  }
+
+  private assertRuleAdministration(actor?: Actor): void {
+    if (!actor?.id?.trim()) throw new ForbiddenException();
+    this.clusterAccessService.assertPlatformAdmin(actor);
   }
 
   private findRule(id: string): AlertRuleItem {

@@ -8,7 +8,7 @@ export function OverviewCommandCenter({ scopeLabel, clusterId, clusterCount, ale
   const freshness = generatedAt ? new Date(generatedAt).toLocaleString("zh-CN") : "等待采集";
   const riskLabel = { critical: "高风险", warning: "需关注", success: "稳定", unknown: "数据不足" }[riskLevel];
   return <OpsSurface variant="panel" padding="sm">
-    <ResourcePageHeader path="/" embedded className="resource-workbench__header dashboard-workbench__page-header"
+    <ResourcePageHeader path="/" embedded className="ops-overview-header resource-workbench__header dashboard-workbench__page-header"
       title={<span className="resource-workbench__title-row"><span className="resource-workbench__title">Overview</span><OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>总览</OpsFilterChip></span>}
       description={`${scopeLabel} 的风险态势、资源容量、服务影响与运维入口`}
       actions={<Space size={8} wrap className="ops-overview-header__chips">

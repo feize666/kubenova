@@ -2,6 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { ClusterHealthService } from '../clusters/cluster-health.service';
 import { PrismaService } from '../platform/database/prisma.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
+import { resolveTopologyScopes, topologyScopeWhere, type TopologyActor } from '../topology-graph/topology-access';
 
 type SummaryNamespace = string | null;
 
@@ -79,12 +83,18 @@ export class TopologySummaryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly clusterHealthService: ClusterHealthService,
+    private readonly clusterAccess?: ClusterAccessService,
+    private readonly authorization?: AuthorizationService,
+    private readonly namespaceIdentity?: NamespaceIdentityService,
   ) {}
 
   async listNamespaceSummaries(
     query: TopologyNamespaceSummaryQuery = {},
+    actor: TopologyActor = {},
   ): Promise<TopologyNamespaceSummaryResponse> {
-    const clusterIds = await this.resolveReadableClusterIds(query.clusterId);
+    const scopes = await resolveTopologyScopes(actor, query, this.clusterAccess, this.authorization, this.namespaceIdentity);
+    const clusterIds = (await this.resolveReadableClusterIds(query.clusterId))
+      .filter(id => !scopes || scopes.some(scope => scope.clusterId === id));
     if (clusterIds.length === 0) {
       return { items: [], timestamp: new Date().toISOString() };
     }
@@ -92,7 +102,7 @@ export class TopologySummaryService {
     const [namespaces, workloads, networkResources, storageResources, configs] =
       await Promise.all([
         this.prisma.namespaceRecord.findMany({
-          where: this.clusterScopedWhere(clusterIds),
+          where: { ...this.clusterScopedWhere(clusterIds), ...topologyScopeWhere(scopes, 'namespaces') },
           select: {
             clusterId: true,
             name: true,
@@ -101,7 +111,7 @@ export class TopologySummaryService {
           },
         }),
         this.prisma.workloadRecord.findMany({
-          where: this.resourceWhere(clusterIds),
+          where: { ...this.resourceWhere(clusterIds), ...topologyScopeWhere(scopes) },
           select: {
             clusterId: true,
             namespace: true,
@@ -114,7 +124,7 @@ export class TopologySummaryService {
           },
         }),
         this.prisma.networkResource.findMany({
-          where: this.resourceWhere(clusterIds),
+          where: { ...this.resourceWhere(clusterIds), ...topologyScopeWhere(scopes) },
           select: {
             clusterId: true,
             namespace: true,
@@ -125,7 +135,7 @@ export class TopologySummaryService {
           },
         }),
         this.prisma.storageResource.findMany({
-          where: this.resourceWhere(clusterIds),
+          where: { ...this.resourceWhere(clusterIds), ...topologyScopeWhere(scopes) },
           select: {
             clusterId: true,
             namespace: true,
@@ -136,7 +146,7 @@ export class TopologySummaryService {
           },
         }),
         this.prisma.configResource.findMany({
-          where: this.resourceWhere(clusterIds),
+          where: { ...this.resourceWhere(clusterIds), ...topologyScopeWhere(scopes, 'configuration') },
           select: {
             clusterId: true,
             namespace: true,

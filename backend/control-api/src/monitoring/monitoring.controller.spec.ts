@@ -42,6 +42,6 @@ describe('MonitoringController', () => {
       range: '1h',
       from: new Date('2026-01-01T00:00:00.000Z'),
       to: new Date('2026-01-01T01:00:00.000Z'),
-    });
+    }, {});
   });
 });

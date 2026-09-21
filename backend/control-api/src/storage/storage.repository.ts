@@ -23,6 +23,7 @@ export interface StorageResourceRecord {
 }
 
 export interface StorageListParams {
+  scopes?: Array<{ clusterId: string; namespace?: string }>;
   clusterId?: string;
   clusterIds?: string[];
   namespace?: string;
@@ -80,6 +81,11 @@ export class StorageRepository {
       state: { not: 'deleted' },
       cluster: { deletedAt: null, status: { not: 'deleted' } },
     };
+    if (params.scopes) {
+      where.OR = params.scopes.map(scope => scope.namespace
+        ? { clusterId: scope.clusterId, namespace: scope.namespace, kind: 'PVC' }
+        : { clusterId: scope.clusterId });
+    }
 
     if (params.clusterId) {
       where.clusterId = params.clusterId;

@@ -138,6 +138,12 @@
   box-shadow: none !important;
 }
 
+@media (max-width: 640px) {
+  .app-header .ant-breadcrumb {
+    min-width: 0;
+  }
+}
+
 .logo-wrap.kn-halo-focus,
 .shell-status-band,
 .app-header .ant-input-affix-wrapper,
@@ -185,4 +191,16 @@
 .resource-scope-filter-button.ant-btn:focus-visible {
   background: var(--ops-control-bg-hover) !important;
   box-shadow: none !important;
+}
+/* Preserve danger semantics against the shared primary-button theme overrides. */
+[data-theme] .ant-btn-primary.ant-btn-color-danger:not(:disabled),
+[data-theme] .ant-btn-primary.ant-btn-dangerous:not(:disabled) {
+  color: var(--ant-color-text-light-solid, #fff) !important;
+  background: var(--ant-color-error, #ff4d4f) !important;
+  border-color: var(--ant-color-error, #ff4d4f) !important;
+}
+[data-theme] .ant-btn-primary.ant-btn-color-danger:not(:disabled):hover,
+[data-theme] .ant-btn-primary.ant-btn-dangerous:not(:disabled):hover {
+  background: var(--ant-color-error-hover, #ff7875) !important;
+  border-color: var(--ant-color-error-hover, #ff7875) !important;
 }

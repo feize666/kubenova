@@ -1,5 +1,12 @@
 import { apiRequest } from "./client";
-import type { ObservabilityDataSource } from "./observability-config";
+
+export interface LogCenterSource {
+  id: string;
+  name: string;
+  clusterId: string;
+  kind: string;
+  enabled: boolean;
+}
 
 export type LogTimeRange = "15m" | "1h" | "6h" | "24h";
 export interface LogCenterQuery {
@@ -9,6 +16,8 @@ export interface LogCenterQuery {
   to: string;
   namespace?: string;
   keyword?: string;
+  pod?: string;
+  container?: string;
   limit?: number;
 }
 export interface LogCenterRow {
@@ -20,12 +29,17 @@ export interface LogCenterRow {
   message: string;
 }
 
-export function canQueryLogCenter(role: string) {
-  return role === "admin" || role === "platform-admin";
+// Query readiness only; the server checks the effective logs grant for each request.
+export function canQueryLogCenter(role: string, namespace?: string) {
+  return role === "admin" || role === "platform-admin" || Boolean(namespace?.trim());
 }
 
-export function eligibleLogSources(sources: ObservabilityDataSource[], clusterId: string) {
+export function eligibleLogSources(sources: LogCenterSource[], clusterId: string) {
   return sources.filter((source) => source.clusterId === clusterId && source.kind === "elasticsearch" && source.enabled);
+}
+
+export function listLogCenterSources(clusterId: string, token?: string, signal?: AbortSignal) {
+  return apiRequest<{ items: LogCenterSource[] }>(`/api/log-center/sources?clusterId=${encodeURIComponent(clusterId)}`, { token, signal });
 }
 
 export function logQueryWindow(range: LogTimeRange, now = new Date()) {

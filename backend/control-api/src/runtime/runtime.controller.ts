@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UseGuards, ForbiddenException, Optional } from '@nestjs/common';
+import { Body, Controller, Post, Req, UseGuards, ForbiddenException, NotFoundException, Optional } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthGuard } from '../common/auth.guard';
 import { ClusterAccessService } from '../common/cluster-access.service';
@@ -11,6 +11,7 @@ import type {
 } from './runtime.service';
 
 type RuntimeRequestUser = {
+  authzVersion?: number;
   user?: {
     id?: string;
     username?: string;
@@ -34,13 +35,17 @@ export class RuntimeController {
     @Req() req: Request & { user?: RuntimeRequestUser },
   ): Promise<RuntimeSessionBootstrapResponse> {
     const fallbackUserId = req.user?.user?.id;
-    if (body.type === 'logs') {
-      await this.clusterAccess.assertCanRead(req.user?.user, body.clusterId);
-      await this.assertCapability(req.user?.user, body.clusterId, body.namespace, 'logs');
-    } else {
-      await this.clusterAccess.assertCanMutate(req.user?.user, body.clusterId);
-      await this.assertCapability(req.user?.user, body.clusterId, body.namespace, 'exec', true);
+    let requiresGrant = process.env.KUBENOVA_AUTHZ_ENFORCE === 'true';
+    try {
+      const access = body.type === 'logs'
+        ? await this.clusterAccess.assertCanRead(req.user?.user, body.clusterId)
+        : await this.clusterAccess.assertCanMutate(req.user?.user, body.clusterId);
+      if (access?.source === 'access-grant') requiresGrant = true;
+    } catch (error) {
+      if (!(error instanceof ForbiddenException || error instanceof NotFoundException)) throw error;
+      requiresGrant = true;
     }
+    if (requiresGrant) await this.assertCapability(req.user?.user, body.clusterId, body.namespace, body.type === 'logs' ? 'logs' : 'exec');
     const forwardedHost = req.headers['x-forwarded-host'];
     const forwardedProto = req.headers['x-forwarded-proto'];
     const origin = req.headers.origin;
@@ -64,6 +69,7 @@ export class RuntimeController {
       {
         ...body,
         userId: fallbackUserId,
+        authzVersion: req.user?.authzVersion,
       },
       {
         requestHost: normalizedRequestHost,
@@ -79,7 +85,6 @@ export class RuntimeController {
   }
 
   private async assertCapability(subject: RuntimeRequestUser['user'] | undefined, clusterId: string, namespace: string, capability: 'logs' | 'exec', mutation = false) {
-    if (process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
     if (!this.authorization || !this.namespaceIdentity) throw new ForbiddenException({ code: 'AUTHZ_UNAVAILABLE' });
     const namespaceUid = await this.namespaceIdentity.resolve(clusterId, namespace);
     const decision = await this.authorization.authorize({ userId: subject?.id ?? '', clusterId, namespaceUid, capability, mutation });

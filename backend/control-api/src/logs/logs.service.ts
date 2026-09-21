@@ -272,6 +272,7 @@ export class LogsService {
     const sessionInput: CreateRuntimeSessionRequest = {
       type: 'logs',
       userId: access?.userId,
+      authzVersion: access?.authzVersion,
       clusterId: input.clusterId,
       namespace: input.namespace,
       pod: input.pod,

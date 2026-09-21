@@ -7,6 +7,11 @@ import type { ClusterEventSyncService } from '../clusters/cluster-event-sync.ser
 import type { ClusterSyncService } from '../clusters/cluster-sync.service';
 import type { ClustersService } from '../clusters/clusters.service';
 import type { K8sClientService } from '../clusters/k8s-client.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
+
+const actor = { id: 'admin', role: 'platform-admin' as const };
 
 describe('ConfigsService list online gate', () => {
   function build() {
@@ -34,6 +39,9 @@ describe('ConfigsService list online gate', () => {
       clusterSyncService,
       clusterEventSyncService,
       k8sClientService,
+      new ClusterAccessService({} as any),
+      {} as AuthorizationService,
+      {} as NamespaceIdentityService,
     );
     return { service, configsRepository, clusterHealthService };
   }
@@ -44,7 +52,7 @@ describe('ConfigsService list online gate', () => {
       clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
     ).mockResolvedValue([]);
 
-    const result = await service.list({ page: '3', pageSize: '7' });
+    const result = await service.list({ page: '3', pageSize: '7' }, actor);
 
     expect(result.items).toEqual([]);
     expect(result.total).toBe(0);
@@ -65,7 +73,7 @@ describe('ConfigsService list online gate', () => {
       pageSize: 20,
     });
 
-    await service.list({ keyword: 'cfg' });
+    await service.list({ keyword: 'cfg' }, actor);
 
     expect(configsRepository.list).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -84,7 +92,7 @@ describe('ConfigsService list online gate', () => {
       pageSize: 20,
     });
 
-    await service.list({ clusterId: ' c-1 ' });
+    await service.list({ clusterId: ' c-1 ' }, actor);
 
     expect(
       clusterHealthService.assertClusterOnlineForRead,

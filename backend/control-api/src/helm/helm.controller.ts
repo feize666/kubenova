@@ -11,7 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../common/auth.guard';
-import { assertWritePermission, type PlatformRole } from '../common/governance';
+import { assertAdministrationPermission, type PlatformRole } from '../common/governance';
 import type {
   HelmInstallRequest,
   HelmChartQuery,
@@ -43,12 +43,14 @@ export class HelmController {
   constructor(private readonly helmService: HelmService) {}
 
   @Get('repository-presets')
-  listRepositoryPresets(): unknown {
+  listRepositoryPresets(@Req() req: ActorRequest): unknown {
+    assertAdministrationPermission(req.user?.user);
     return this.helmService.listRepositoryPresets();
   }
 
   @Get('repositories')
-  listRepositories(@Query() query: HelmRepositoryQuery): Promise<unknown> {
+  listRepositories(@Req() req: ActorRequest, @Query() query: HelmRepositoryQuery): Promise<unknown> {
+    assertAdministrationPermission(req.user?.user);
     return this.helmService.listRepositories(query);
   }
 
@@ -58,7 +60,7 @@ export class HelmController {
     @Body() body: HelmRepositoryImportPresetsRequest,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.importRepositoryPresets(body);
   }
 
@@ -68,7 +70,7 @@ export class HelmController {
     @Body() body: HelmRepositoryImportHostRequest,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.importHostRepositories(body);
   }
 
@@ -78,7 +80,7 @@ export class HelmController {
     @Body() body: HelmRepositoryCreateRequest,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.createRepository(body);
   }
 
@@ -89,7 +91,7 @@ export class HelmController {
     @Body() body: HelmRepositoryUpdateRequest,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.updateRepository(name, body);
   }
 
@@ -100,7 +102,7 @@ export class HelmController {
     @Query() query: HelmRepositoryQuery,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.deleteRepository(name, query);
   }
 
@@ -111,49 +113,59 @@ export class HelmController {
     @Query() query: HelmRepositoryQuery,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.syncRepository(name, query);
   }
 
   @Get('charts')
-  listCharts(@Query() query: HelmChartQuery): Promise<unknown> {
+  listCharts(@Req() req: ActorRequest, @Query() query: HelmChartQuery): Promise<unknown> {
+    assertAdministrationPermission(req.user?.user);
     return this.helmService.listCharts(query);
   }
 
   @Get('releases')
-  listReleases(@Query() query: HelmListQuery): Promise<unknown> {
+  listReleases(@Req() req: ActorRequest, @Query() query: HelmListQuery): Promise<unknown> {
+    assertAdministrationPermission(req.user?.user);
     return this.helmService.listReleases(query);
   }
 
   @Get('releases/:name')
   getRelease(
+    @Req() req: ActorRequest,
     @Param('name') name: string,
     @Query() query: HelmReleaseQuery,
   ): Promise<unknown> {
+    assertAdministrationPermission(req.user?.user);
     return this.helmService.getRelease(name, query);
   }
 
   @Get('releases/:name/values')
   getReleaseValues(
+    @Req() req: ActorRequest,
     @Param('name') name: string,
     @Query() query: HelmReleaseQuery,
   ): Promise<unknown> {
+    assertAdministrationPermission(req.user?.user);
     return this.helmService.getReleaseValues(name, query);
   }
 
   @Get('releases/:name/manifest')
   getReleaseManifest(
+    @Req() req: ActorRequest,
     @Param('name') name: string,
     @Query() query: HelmReleaseQuery,
   ): Promise<unknown> {
+    assertAdministrationPermission(req.user?.user);
     return this.helmService.getReleaseManifest(name, query);
   }
 
   @Get('releases/:name/history')
   getReleaseHistory(
+    @Req() req: ActorRequest,
     @Param('name') name: string,
     @Query() query: HelmReleaseQuery,
   ): Promise<unknown> {
+    assertAdministrationPermission(req.user?.user);
     return this.helmService.getReleaseHistory(name, query);
   }
 
@@ -163,7 +175,7 @@ export class HelmController {
     @Body() body: HelmInstallRequest,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.installRelease(body);
   }
 
@@ -174,7 +186,7 @@ export class HelmController {
     @Body() body: HelmUpgradeRequest,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.upgradeRelease(name, body);
   }
 
@@ -185,7 +197,7 @@ export class HelmController {
     @Body() body: HelmRollbackRequest,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.rollbackRelease(name, body);
   }
 
@@ -197,7 +209,7 @@ export class HelmController {
     @Body() body: HelmUninstallRequest,
   ): Promise<unknown> {
     const actor = req.user?.user;
-    assertWritePermission(actor);
+    assertAdministrationPermission(actor);
     return this.helmService.uninstallRelease(name, {
       ...body,
       clusterId: body.clusterId ?? query.clusterId,

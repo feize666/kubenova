@@ -9,17 +9,19 @@ import { RuntimeRepository } from './runtime.repository';
 import { RuntimeSessionService } from './runtime-session.service';
 import { RuntimeService } from './runtime.service';
 import { AuthorizationModule } from '../common/authorization.module';
+import { RuntimeInvalidationService } from './runtime-invalidation.service';
 
 @Module({
   imports: [AuthModule, ClustersModule, AuthorizationModule],
   controllers: [RuntimeController, RuntimeInternalController],
   providers: [
     RuntimeService,
+    RuntimeInvalidationService,
     RuntimeRepository,
     RuntimeSessionService,
     RuntimeGateway,
     AuthGuard,
   ],
-  exports: [RuntimeService, RuntimeSessionService],
+  exports: [RuntimeService, RuntimeSessionService, RuntimeInvalidationService],
 })
 export class RuntimeModule {}

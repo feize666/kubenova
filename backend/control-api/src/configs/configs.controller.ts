@@ -8,7 +8,7 @@ import {
   Query,
   Req,
   UseGuards,
-  ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthGuard } from '../common/auth.guard';
 import { assertWritePermission, type PlatformRole } from '../common/governance';
@@ -72,34 +72,34 @@ export class ConfigsController {
 
   // GET /api/configs — 分页列表，支持 clusterId/namespace/kind/keyword/page/pageSize
   @Get()
-  async list(@Req() req: ActorRequest, @Query() query: ConfigListQuery): Promise<ConfigListResult> {
-    if (query.clusterId?.trim()) {
-      await this.clusterAccess.assertCanRead(req.user?.user, query.clusterId);
-      return this.configsService.list(query);
-    }
-    const clusterIds = await this.clusterAccess.listAccessibleClusterIds(req.user?.user);
-    return this.configsService.list({ ...query, clusterIds: clusterIds ?? [] });
+  async list(
+    @Req() req: ActorRequest,
+    @Query() query: ConfigListQuery,
+  ): Promise<ConfigListResult> {
+    return this.configsService.list(query, req.user?.user ?? {});
   }
 
   // GET /api/configs/:id — 获取单个（含 revisions）
   @Get(':id')
-  async getById(@Req() req: ActorRequest, @Param('id') id: string): Promise<ConfigResourceRecord> {
-    const result = await this.configsService.getById(id);
-    await this.clusterAccess.assertCanRead(req.user?.user, result.clusterId);
-    return result;
+  async getById(
+    @Req() req: ActorRequest,
+    @Param('id') id: string,
+  ): Promise<ConfigResourceRecord> {
+    return this.configsService.getById(id, req.user?.user ?? {});
   }
 
   // GET /api/configs/:id/revisions — 获取版本历史列表
   @Get(':id/revisions')
-  async getRevisions(@Req() req: ActorRequest, @Param('id') id: string): Promise<{
+  async getRevisions(
+    @Req() req: ActorRequest,
+    @Param('id') id: string,
+  ): Promise<{
     configId: string;
     items: ConfigRevisionRecord[];
     total: number;
     timestamp: string;
   }> {
-    const item = await this.configsService.getById(id);
-    await this.clusterAccess.assertCanRead(req.user?.user, item.clusterId);
-    return this.configsService.getRevisions(id);
+    return this.configsService.getRevisions(id, req.user?.user ?? {});
   }
 
   // GET /api/configs/:id/diff?from=1&to=2 — 对比两个版本差异
@@ -110,14 +110,15 @@ export class ConfigsController {
     @Query('from') from: string,
     @Query('to') to: string,
   ): Promise<RevisionDiffResult> {
-    const fromRev = Number.parseInt(from, 10);
-    const toRev = Number.parseInt(to, 10);
-    if (Number.isNaN(fromRev) || Number.isNaN(toRev)) {
-      throw new Error('from 和 to 参数必须为合法整数');
+    if (!/^\d+$/.test(from ?? '') || !/^\d+$/.test(to ?? '')) {
+      throw new BadRequestException('from 和 to 参数必须为合法整数');
     }
-    const item = await this.configsService.getById(id);
-    await this.clusterAccess.assertCanRead(req.user?.user, item.clusterId);
-    return this.configsService.getRevisionDiff(id, fromRev, toRev);
+    return this.configsService.getRevisionDiff(
+      id,
+      Number(from),
+      Number(to),
+      req.user?.user ?? {},
+    );
   }
 
   // POST /api/configs — 创建
@@ -126,9 +127,8 @@ export class ConfigsController {
     @Req() req: ActorRequest,
     @Body() body: CreateConfigResourceRequest,
   ): Promise<ConfigMutationResponse> {
-    const actor = req.user?.user;
+    const actor = req.user?.user ?? {};
     assertWritePermission(actor);
-    await this.clusterAccess.assertCanMutate(actor, body.clusterId);
     return this.configsService.create(body, actor).then((result) => {
       this.triggerClusterSync(result.item.clusterId);
       return result;
@@ -142,10 +142,8 @@ export class ConfigsController {
     @Param('id') id: string,
     @Body() body: UpdateConfigResourceRequest,
   ): Promise<ConfigMutationResponse> {
-    const actor = req.user?.user;
+    const actor = req.user?.user ?? {};
     assertWritePermission(actor);
-    const existing = await this.configsService.getById(id);
-    await this.clusterAccess.assertCanMutate(actor, existing.clusterId);
     return this.configsService.update(id, body, actor).then((result) => {
       this.triggerClusterSync(result.item.clusterId);
       return result;
@@ -159,12 +157,10 @@ export class ConfigsController {
     @Param('id') id: string,
     @Body() body: { revision: number; note?: string },
   ): Promise<ConfigMutationResponse> {
-    const actor = req.user?.user;
+    const actor = req.user?.user ?? {};
     assertWritePermission(actor);
-    const existing = await this.configsService.getById(id);
-    await this.clusterAccess.assertCanMutate(actor, existing.clusterId);
     return this.configsService
-      .rollback(id, body.revision, actor?.username)
+      .rollback(id, body.revision, actor.username, actor)
       .then((result) => {
         this.triggerClusterSync(result.item.clusterId);
         return result;
@@ -178,10 +174,8 @@ export class ConfigsController {
     @Param('id') id: string,
     @Body() body: ConfigActionRequest,
   ): Promise<ConfigMutationResponse> {
-    const actor = req.user?.user;
+    const actor = req.user?.user ?? {};
     assertWritePermission(actor);
-    const existing = await this.configsService.getById(id);
-    await this.clusterAccess.assertCanMutate(actor, existing.clusterId);
     return this.configsService.applyAction(id, body, actor).then((result) => {
       this.triggerClusterSync(result.item.clusterId);
       return result;

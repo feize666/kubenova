@@ -71,7 +71,7 @@ export class ClusterHealthController {
   ) {
     const requestId = resolveRequestId(req, res);
     const accessibleClusterIds =
-      await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+      await this.clusterAccessService.listDiscoverableClusterIds(req.user?.user);
     const list = await this.clusterHealthService.listClusterHealth(query, {
       accessibleClusterIds,
     });

@@ -1,6 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { ClustersService } from '../clusters/clusters.service';
 import { PrismaService } from '../platform/database/prisma.service';
+import { ClusterAccessService, type ClusterAccessSubject } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 
 type ResourceDomain = 'workload' | 'network' | 'storage' | 'config';
 
@@ -43,11 +46,23 @@ export class MultiClusterService {
   constructor(
     private readonly clustersService: ClustersService,
     private readonly prisma: PrismaService,
+    private readonly clusterAccess: ClusterAccessService,
+    private readonly authorization: AuthorizationService,
+    private readonly namespaceIdentity: NamespaceIdentityService,
   ) {}
 
   async query(
     body: MultiClusterQueryRequest,
+    actor: ClusterAccessSubject,
   ): Promise<MultiClusterQueryResponse> {
+    if (!actor?.id?.trim() || !this.clusterAccess.isKnownPlatformRole(actor)) {
+      throw new ForbiddenException();
+    }
+    if (!body || !Array.isArray(body.clusterIds) ||
+      body.clusterIds.some(id => typeof id !== 'string') ||
+      [body.domain, body.namespace, body.keyword, body.kind].some(value => value !== undefined && typeof value !== 'string')) {
+      throw new BadRequestException('查询参数格式不正确');
+    }
     const clusterIds = Array.isArray(body.clusterIds)
       ? Array.from(
           new Set(body.clusterIds.map((id) => id.trim()).filter(Boolean)),
@@ -61,6 +76,7 @@ export class MultiClusterService {
     const keyword = body.keyword?.trim() || undefined;
     const kind = body.kind?.trim() || undefined;
     const limitPerCluster = this.parsePositiveInt(body.limitPerCluster, 200);
+    const scopes = await this.resolveScopes(actor, clusterIds, domain, namespace, kind);
 
     const items: MultiClusterQueryItem[] = [];
     const partialErrors: MultiClusterPartialError[] = [];
@@ -78,6 +94,7 @@ export class MultiClusterService {
 
       try {
         const query = this.buildWhere(clusterId, namespace, keyword, kind);
+        if (scopes) query.AND = [{ OR: scopes.get(clusterId)! }];
         const collected = await this.fetchByDomain(
           domain,
           query,
@@ -99,6 +116,46 @@ export class MultiClusterService {
       total: items.length,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private async resolveScopes(
+    actor: ClusterAccessSubject,
+    clusterIds: string[],
+    domain: ResourceDomain,
+    namespace?: string,
+    kind?: string,
+  ): Promise<Map<string, Array<{ namespace?: string; kind?: string }>> | undefined> {
+    if (this.clusterAccess.isPlatformAdmin(actor)) return undefined;
+    const full = new Set(await this.clusterAccess.listAccessibleClusterIds(actor));
+    const grants = await this.authorization.listEffectiveGrants(actor.id!);
+    const result = new Map<string, Array<{ namespace?: string; kind?: string }>>();
+    for (const clusterId of clusterIds) {
+      const scopes: Array<{ namespace?: string; kind?: string }> = [];
+      if (full.has(clusterId)) scopes.push(domain === 'config' ? { kind: 'ConfigMap' } : {});
+      const checked = new Map<string, string | null>();
+      for (const grant of grants) {
+        if (grant.clusterId !== clusterId) continue;
+        for (const scope of grant.namespaces) {
+          if (!scope.namespaceName || (namespace && scope.namespaceName !== namespace)) continue;
+          if (!checked.has(scope.namespaceName)) {
+            try {
+              checked.set(scope.namespaceName, await this.namespaceIdentity.resolve(clusterId, scope.namespaceName));
+            } catch {
+              checked.set(scope.namespaceName, null);
+            }
+          }
+          if (checked.get(scope.namespaceName) !== scope.namespaceUid) continue;
+          scopes.push({ namespace: scope.namespaceName, ...(domain === 'config' ? { kind: 'ConfigMap' } : domain === 'storage' ? { kind: 'PVC' } : {}) });
+          if (domain === 'config' && grant.capabilities.some(item => item.capability === 'secrets')) {
+            scopes.push({ namespace: scope.namespaceName, kind: 'Secret' });
+          }
+        }
+      }
+      const allowed = scopes.filter(scope => (!namespace || !scope.namespace || namespace === scope.namespace) && (!kind || !scope.kind || kind === scope.kind));
+      if (!allowed.length) throw new ForbiddenException('资源不在授权范围内');
+      result.set(clusterId, allowed);
+    }
+    return result;
   }
 
   private normalizeDomain(value: string | undefined): ResourceDomain {

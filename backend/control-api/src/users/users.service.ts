@@ -1,16 +1,24 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
+  Inject,
   NotFoundException,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomBytes, scrypt, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
+import { ConfigService } from '@nestjs/config';
 import {
   appendAudit,
   assertAdministrationPermission,
   type PlatformRole,
 } from '../common/governance';
 import { PrismaService } from '../platform/database/prisma.service';
+import type { NamespaceIdentityService } from '../common/namespace-identity.service';
+import { validatedEndpoint } from '../auth/oidc-flow.service';
 
 const scryptAsync = promisify(scrypt);
 
@@ -64,6 +72,7 @@ export interface UserListItem {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  mfaEnabled?: boolean;
 }
 
 export interface PaginatedUsersResult {
@@ -174,16 +183,231 @@ export interface RbacListQuery {
 
 @Injectable()
 export class UsersService {
-  async listAccessGrants(clusterId?: string): Promise<{ items: unknown[]; total: number; timestamp: string }> {
-    const rows = await (this.prisma as any).accessGrant.findMany({
+  async listExternalIdentities(actor: Actor | undefined, userId: string) {
+    assertAdministrationPermission(actor);
+    const items = await this.prisma.externalIdentity.findMany({
+      where: { userId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, issuer: true, subject: true, createdAt: true }, take: 100,
+    });
+    return { items };
+  }
+
+  async bindExternalIdentity(actor: Actor | undefined, userId: string, body: unknown) {
+    assertAdministrationPermission(actor);
+    await this.assertSuperadministrator(actor, userId);
+    const input = body as { issuer?: unknown; subject?: unknown } | null;
+    if (!actor?.id || !userId || typeof input?.issuer !== 'string' || typeof input.subject !== 'string'
+      || !input.subject.trim() || input.subject.length > 255 || input.issuer.length > 2048
+      || input.subject !== input.subject.trim() || input.issuer !== input.issuer.trim()) {
+      throw new BadRequestException('Valid issuer and subject required');
+    }
+    const endpoint = validatedEndpoint(input.issuer);
+    if (endpoint.search) throw new BadRequestException('Issuer must not contain query parameters');
+    const issuer = input.issuer;
+    const subject = input.subject;
+    try {
+      return await this.prisma.$transaction(async tx => {
+        // Lock the account so disable and binding cannot race past each other.
+        const updated = await tx.user.updateMany({ where: { id: userId, isActive: true }, data: { authzVersion: { increment: 1 } } });
+        if (!updated.count) throw new BadRequestException('User unavailable');
+        const identity = await tx.externalIdentity.create({
+          data: { userId, issuer, subject }, select: { id: true, issuer: true, subject: true, createdAt: true },
+        });
+        const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { authzVersion: true } });
+        await tx.authorizationChange.create({ data: { actorUserId: actor.id!, affectedUserId: userId, version: user.authzVersion, reason: `identity-bound:${identity.id}` } });
+        return identity;
+      });
+    } catch (error) {
+      if ((error as { code?: string })?.code === 'P2002') throw new ConflictException('External identity already bound');
+      throw error;
+    }
+  }
+
+  async unbindExternalIdentity(actor: Actor | undefined, userId: string, identityId: string) {
+    assertAdministrationPermission(actor);
+    await this.assertSuperadministrator(actor, userId);
+    if (!actor?.id || !userId || !identityId) throw new BadRequestException('Identity required');
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.user.updateMany({ where: { id: userId }, data: { authzVersion: { increment: 1 } } });
+      if (!updated.count) throw new NotFoundException('User not found');
+      const removed = await tx.externalIdentity.deleteMany({ where: { id: identityId, userId } });
+      if (!removed.count) throw new NotFoundException('Identity not found');
+      const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { authzVersion: true } });
+      await tx.authorizationChange.create({ data: { actorUserId: actor.id!, affectedUserId: userId, version: user.authzVersion, reason: `identity-unbound:${identityId}` } });
+      return { removed: true };
+    });
+  }
+
+  async listGroupMembers(actor: Actor | undefined, groupId: string, pageValue = '1') {
+    assertAdministrationPermission(actor);
+    const page = Number(pageValue);
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger((page - 1) * 20)) throw new BadRequestException('Invalid page');
+    const group = await this.prisma.identityGroup.findUnique({ where: { id: groupId }, select: { id: true, name: true, active: true, externalId: true } });
+    if (!group) throw new NotFoundException('Group not found');
+    const where = { groupId };
+    const items = await this.prisma.groupMembership.findMany({
+      where, skip: (page - 1) * 20, take: 20, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, state: true, validFrom: true, expiresAt: true, user: { select: { id: true, email: true, name: true, isActive: true } } },
+    });
+    const total = await this.prisma.groupMembership.count({ where });
+    return { group: { id: group.id, name: group.name, active: group.active, managedExternally: Boolean(group.externalId) }, items, total, page, pageSize: 20 };
+  }
+  async setGroupMembership(actor: Actor | undefined, groupId: string, userId: string, active: boolean) {
+    assertAdministrationPermission(actor);
+    if (!actor?.id || !groupId?.trim() || !userId?.trim()) throw new BadRequestException('Identity required');
+    const actorId = actor.id;
+    return this.prisma.$transaction(async tx => {
+      const group = await tx.identityGroup.findUnique({ where: { id: groupId } });
+      if (!group) throw new NotFoundException('Group not found');
+      if (group.externalId) throw new ForbiddenException('Membership is managed by the identity provider');
+      if (active && !group.active) throw new BadRequestException('Group disabled');
+      const user = await tx.user.findUnique({ where: { id: userId }, select: { isActive: true } });
+      if (!user || (active && !user.isActive)) throw new BadRequestException('User unavailable');
+      if (active) {
+        await tx.groupMembership.upsert({
+          where: { groupId_userId: { groupId, userId } },
+          create: { groupId, userId },
+          update: { state: 'active', validFrom: new Date(), expiresAt: null },
+        });
+      } else {
+        const changed = await tx.groupMembership.updateMany({ where: { groupId, userId, state: 'active' }, data: { state: 'disabled' } });
+        if (!changed.count) return { groupId, userId, active };
+      }
+      await tx.user.update({ where: { id: userId }, data: { authzVersion: { increment: 1 } } });
+      await tx.authorizationChange.create({ data: { actorUserId: actorId, affectedUserId: userId, reason: `group-member-${active ? 'added' : 'removed'}:${groupId}` } });
+      return { groupId, userId, active };
+    }, { isolationLevel: 'Serializable' });
+  }
+  async createIdentityGroup(actor: Actor | undefined, body: unknown) {
+    assertAdministrationPermission(actor);
+    if (!actor?.id) throw new BadRequestException('Actor identity required');
+    const actorId = actor.id;
+    const name = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).name : undefined;
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 128) throw new BadRequestException('Group name must contain 1-128 characters');
+    return this.prisma.$transaction(async tx => {
+      const group = await tx.identityGroup.create({ data: { name: name.trim() }, select: { id: true, name: true, active: true } });
+      await tx.authorizationChange.create({ data: { actorUserId: actorId, reason: `group-created:${group.id}`, version: 1 } });
+      return group;
+    });
+  }
+  async listGrantGroups(actor: Actor | undefined, keyword = '') {
+    assertAdministrationPermission(actor);
+    if (typeof keyword !== 'string' || keyword.length > 200) throw new BadRequestException('Invalid group search');
+    const items = await this.prisma.identityGroup.findMany({
+      where: { active: true, ...(keyword.trim() ? { name: { contains: keyword.trim(), mode: 'insensitive' as const } } : {}) },
+      select: { id: true, name: true }, orderBy: [{ name: 'asc' }, { id: 'asc' }], take: 100,
+    });
+    return { items };
+  }
+  async listAuthorizationChanges(actor: Actor | undefined, query: { grantId?: string; page?: string; pageSize?: string } = {}) {
+    assertAdministrationPermission(actor);
+    const page = query.page === undefined ? 1 : Number(query.page);
+    const pageSize = query.pageSize === undefined ? 20 : Number(query.pageSize);
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100 || !Number.isSafeInteger((page - 1) * pageSize)) throw new BadRequestException('Invalid pagination');
+    if (query.grantId !== undefined && typeof query.grantId !== 'string') throw new BadRequestException('Invalid grant ID');
+    const where = query.grantId?.trim() ? { grantId: query.grantId.trim() } : {};
+    const items = await this.prisma.authorizationChange.findMany({
+      where, skip: (page - 1) * pageSize, take: pageSize,
+      orderBy: [{ committedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, actorUserId: true, affectedUserId: true, grantId: true, version: true, reason: true, committedAt: true },
+    });
+    const total = await this.prisma.authorizationChange.count({ where });
+    return { items, total, page, pageSize };
+  }
+  async createAccessGrant(actor: Actor | undefined, body: unknown) {
+    assertAdministrationPermission(actor);
+    if (!actor?.id) throw new BadRequestException('Actor identity required');
+    const actorId = actor.id;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new BadRequestException('Invalid grant');
+    const input = body as Record<string, unknown>;
+    const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+    const userId = text(input.userId);
+    const groupId = text(input.groupId);
+    const clusterId = text(input.clusterId);
+    const role = text(input.role);
+    if (Boolean(userId) === Boolean(groupId) || !clusterId || !['cluster-admin', 'operator', 'viewer'].includes(role)) throw new BadRequestException('Invalid principal, cluster or role');
+    if (!Array.isArray(input.namespaces) || !input.namespaces.length || input.namespaces.length > 100 || input.namespaces.some(value => !text(value))) throw new BadRequestException('Explicit namespace scope required');
+    if (!Array.isArray(input.capabilities) || input.capabilities.some(value => !['logs', 'exec', 'secrets', 'kubeconfig'].includes(String(value)))) throw new BadRequestException('Invalid capabilities');
+    const now = new Date();
+    const validFrom = input.validFrom === undefined ? now : new Date(text(input.validFrom));
+    const expiresAt = input.expiresAt === undefined || input.expiresAt === null ? null : new Date(text(input.expiresAt));
+    if (!Number.isFinite(validFrom.getTime()) || (expiresAt && (!Number.isFinite(expiresAt.getTime()) || expiresAt <= validFrom || expiresAt <= now))) throw new BadRequestException('Invalid validity interval');
+    if (!this.namespaceIdentity) throw new BadRequestException('Namespace resolver unavailable');
+    const namespaces: Array<{ namespaceName: string; namespaceUid: string }> = [];
+    for (const name of new Set(input.namespaces.map(text))) {
+      const uid = await this.namespaceIdentity.resolve(clusterId, name);
+      namespaces.push({ namespaceName: name, namespaceUid: uid });
+    }
+    const capabilities = [...new Set(input.capabilities as string[])];
+    return this.prisma.$transaction(async tx => {
+      const cluster = await tx.clusterRegistry.findUnique({
+        where: { id: clusterId }, select: { id: true, deletedAt: true },
+      });
+      if (!cluster || cluster.deletedAt) throw new BadRequestException('Cluster unavailable');
+      if (userId) {
+        const user = await tx.user.findUnique({ where: { id: userId }, select: { isActive: true } });
+        if (!user?.isActive) throw new BadRequestException('User unavailable');
+      } else {
+        const group = await tx.identityGroup.findUnique({ where: { id: groupId }, select: { active: true } });
+        if (!group?.active) throw new BadRequestException('Group unavailable');
+      }
+      const grant = await tx.accessGrant.create({ data: {
+        userId: userId || null, groupId: groupId || null, clusterId, role, validFrom, expiresAt,
+        createdByUserId: actorId, updatedByUserId: actorId,
+        namespaces: { create: namespaces }, capabilities: { create: capabilities.map(capability => ({ capability })) },
+      }, select: { id: true, version: true } });
+      const userIds = userId ? [userId] : (await tx.groupMembership.findMany({ where: { groupId }, select: { userId: true } })).map(member => member.userId);
+      if (userIds.length) await tx.user.updateMany({ where: { id: { in: userIds } }, data: { authzVersion: { increment: 1 } } });
+      await tx.authorizationChange.create({ data: { actorUserId: actorId, affectedUserId: userId || null, grantId: grant.id, version: grant.version, reason: 'grant-created' } });
+      return grant;
+    });
+  }
+  async revokeAccessGrant(actor: Actor | undefined, id: string) {
+    assertAdministrationPermission(actor);
+    if (!actor?.id) throw new BadRequestException('Actor identity required');
+    const actorId = actor.id;
+    return this.prisma.$transaction(async (tx) => {
+      const grant = await tx.accessGrant.findUnique({ where: { id } });
+      if (!grant) throw new NotFoundException('Access grant not found');
+      if (grant.revokedAt) return { id, revoked: true };
+      const changed = await tx.accessGrant.updateMany({
+        where: { id, version: grant.version, revokedAt: null },
+        data: { state: 'revoked', revokedAt: new Date(), updatedByUserId: actor.id, version: { increment: 1 } },
+      });
+      if (changed.count !== 1) throw new ConflictException('Access grant changed; reload and retry');
+      const userIds = grant.userId ? [grant.userId] : grant.groupId
+        ? (await tx.groupMembership.findMany({ where: { groupId: grant.groupId }, select: { userId: true } })).map(member => member.userId)
+        : [];
+      if (userIds.length) await tx.user.updateMany({ where: { id: { in: userIds } }, data: { authzVersion: { increment: 1 } } });
+      await tx.authorizationChange.create({ data: { actorUserId: actorId, affectedUserId: grant.userId, grantId: id, version: grant.version + 1, reason: 'grant-revoked' } });
+      return { id, revoked: true };
+    });
+  }
+  async listAccessGrants(clusterId?: string, actor?: Actor): Promise<{ items: unknown[]; total: number; timestamp: string }> {
+    assertAdministrationPermission(actor);
+    const rows = await this.prisma.accessGrant.findMany({
       where: clusterId?.trim() ? { clusterId: clusterId.trim() } : {},
-      include: { user: { select: { id: true, username: true, name: true } }, group: { select: { id: true, name: true } }, cluster: { select: { id: true, name: true } }, namespaces: true, capabilities: true },
+      include: { user: { select: { id: true, email: true, name: true } }, group: { select: { id: true, name: true } }, cluster: { select: { id: true, name: true } }, namespaces: true, capabilities: true },
       orderBy: { updatedAt: 'desc' },
     });
-    const items = rows.map((row: any) => ({ id: row.id, principal: row.user ? { type: 'user', ...row.user } : row.group ? { type: 'group', ...row.group } : null, cluster: row.cluster, role: row.role, state: row.state, validFrom: row.validFrom.toISOString(), expiresAt: row.expiresAt?.toISOString() ?? null, namespaces: row.namespaces.map((item: any) => ({ name: item.namespaceName, uid: item.namespaceUid })), capabilities: row.capabilities.map((item: any) => item.capability), version: row.version, updatedAt: row.updatedAt.toISOString() }));
+    const items = rows.map(row => ({ id: row.id, principal: row.user ? { type: 'user', id: row.user.id, username: row.user.email, name: row.user.name } : row.group ? { type: 'group', ...row.group } : null, cluster: row.cluster, role: row.role, state: row.state, validFrom: row.validFrom.toISOString(), expiresAt: row.expiresAt?.toISOString() ?? null, namespaces: row.namespaces.map(item => ({ name: item.namespaceName, uid: item.namespaceUid })), capabilities: row.capabilities.map(item => item.capability), version: row.version, updatedAt: row.updatedAt.toISOString() }));
     return { items, total: items.length, timestamp: new Date().toISOString() };
   }
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, @Optional() @Inject('NamespaceIdentityResolver') private readonly namespaceIdentity?: NamespaceIdentityService, @Optional() private readonly config?: ConfigService) {}
+
+  private async assertSuperadministrator(actor: Actor | undefined, protectedTargetId?: string): Promise<void> {
+    const designatedId = this.config?.get<string>('superadminUserId');
+    // Unrelated account administration retains the existing administrator boundary.
+    if (protectedTargetId !== undefined && protectedTargetId !== designatedId) return;
+    if (!designatedId || actor?.id !== designatedId) {
+      throw new ForbiddenException('Explicit superadministrator identity required');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: designatedId }, select: { isActive: true, role: true },
+    });
+    if (!user?.isActive) throw new ForbiddenException('Active superadministrator required');
+    assertAdministrationPermission(user);
+  }
 
   // -------------------------------------------------------------------------
   // Users — 数据库 CRUD
@@ -192,7 +416,8 @@ export class UsersService {
   /**
    * 列表查询（数据库分页）
    */
-  async listUsers(query: UsersListQuery = {}): Promise<PaginatedUsersResult> {
+  async listUsers(query: UsersListQuery = {}, actor?: Actor): Promise<PaginatedUsersResult> {
+    assertAdministrationPermission(actor);
     const page = this.parsePositiveInt(query.page, 1);
     const pageSize = this.parsePositiveInt(query.pageSize, 10);
 
@@ -228,6 +453,7 @@ export class UsersService {
           name: true,
           role: true,
           isActive: true,
+          mfaEnabled: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -246,7 +472,8 @@ export class UsersService {
   /**
    * 单条查询
    */
-  async findById(id: string): Promise<UserListItem | null> {
+  async findById(id: string, actor?: Actor): Promise<UserListItem | null> {
+    assertAdministrationPermission(actor);
     const row = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -255,6 +482,7 @@ export class UsersService {
         name: true,
         role: true,
         isActive: true,
+        mfaEnabled: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -274,7 +502,10 @@ export class UsersService {
     const username = body?.username?.trim();
     const name = username;
     const password = body?.password;
-    const role = body?.role === undefined ? 'user' : this.validUserRole(body.role);
+    if (body?.role !== undefined && body.role !== 'user') {
+      throw new BadRequestException('创建账号时不能分配管理角色');
+    }
+    const role = 'user';
 
     if (!username) throw new BadRequestException('username 不能为空');
     if (!password) throw new BadRequestException('password 不能为空');
@@ -294,6 +525,7 @@ export class UsersService {
         name: true,
         role: true,
         isActive: true,
+        mfaEnabled: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -312,18 +544,18 @@ export class UsersService {
     body: UpdateUserRequest,
   ): Promise<UserListItem> {
     assertAdministrationPermission(actor);
+    await this.assertSuperadministrator(actor, id);
 
-    await this.mustFindUser(id);
-
-    if (body.role !== undefined || body.password !== undefined) {
-      await this.assertNotLastAdministrator(id, body.role);
+    if (body.role !== undefined) {
+      throw new BadRequestException('账号资料编辑不支持角色变更');
     }
+    await this.mustFindUser(id);
 
     const data: {
       email?: string;
       name?: string;
-      role?: string;
       passwordHash?: string;
+      authzVersion?: { increment: number };
     } = {};
 
     if (body.username !== undefined) {
@@ -342,9 +574,6 @@ export class UsersService {
     if (body.name !== undefined) {
       data.name = this.requiredTrim(body.name, 'name');
     }
-    if (body.role !== undefined) {
-      data.role = this.validUserRole(body.role);
-    }
     if (body.password !== undefined) {
       if (!body.password) throw new BadRequestException('password 不能为空');
       data.passwordHash = await hashPassword(body.password);
@@ -352,6 +581,9 @@ export class UsersService {
 
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('更新内容不能为空');
+    }
+    if (body.password !== undefined || body.username !== undefined) {
+      data.authzVersion = { increment: 1 };
     }
 
     const row = await this.prisma.user.update({
@@ -363,6 +595,7 @@ export class UsersService {
         name: true,
         role: true,
         isActive: true,
+        mfaEnabled: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -378,6 +611,7 @@ export class UsersService {
     id: string,
   ): Promise<{ id: string; deleted: true; state: 'deleted' }> {
     assertAdministrationPermission(actor);
+    await this.assertSuperadministrator(actor, id);
     await this.mustFindUser(id);
     await this.assertNotLastAdministrator(id, 'user');
 
@@ -396,18 +630,20 @@ export class UsersService {
     isActive: boolean,
   ): Promise<UserListItem> {
     assertAdministrationPermission(actor);
+    await this.assertSuperadministrator(actor, id);
     await this.mustFindUser(id);
     if (!isActive) await this.assertNotLastAdministrator(id, 'disabled');
 
     const row = await this.prisma.user.update({
       where: { id },
-      data: { isActive },
+      data: { isActive, authzVersion: { increment: 1 } },
       select: {
         id: true,
         email: true,
         name: true,
         role: true,
         isActive: true,
+        mfaEnabled: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -415,6 +651,13 @@ export class UsersService {
 
     this.audit(actor, isActive ? 'enable' : 'disable', 'users', id);
     return this.toUserItem(row);
+  }
+
+  async setMfaEnabled(actor: Actor | undefined, id: string, enabled: boolean): Promise<{ id: string; mfaEnabled: boolean }> {
+    assertAdministrationPermission(actor);
+    await this.assertSuperadministrator(actor);
+    if (typeof enabled !== 'boolean') throw new BadRequestException('enabled must be boolean');
+    throw new ServiceUnavailableException('MFA administration requires verified reauthentication and atomic reset support');
   }
 
   // -------------------------------------------------------------------------
@@ -784,14 +1027,10 @@ export class UsersService {
   // Private helpers
   // -------------------------------------------------------------------------
 
-  private validUserRole(value: unknown): string {
-    if (typeof value !== 'string' || !['platform-admin', 'admin', 'cluster-operator', 'operator', 'read-only', 'user'].includes(value.trim())) {
-      throw new BadRequestException('role 不受支持');
-    }
-    return value.trim();
-  }
-
   private async assertNotLastAdministrator(id: string, nextRole: unknown): Promise<void> {
+    if (id === this.config?.get<string>('superadminUserId')) {
+      throw new BadRequestException('Cannot delete or disable the designated superadministrator; transfer the deployment designation first');
+    }
     const current = await this.prisma.user.findUnique({ where: { id }, select: { role: true, isActive: true } });
     if (!current || !current.isActive || !['admin', 'platform-admin'].includes(current.role)) return;
     if (typeof nextRole === 'string' && ['admin', 'platform-admin'].includes(nextRole)) return;
@@ -810,6 +1049,7 @@ export class UsersService {
     name: string | null;
     role: string;
     isActive: boolean;
+    mfaEnabled: boolean;
     createdAt: Date;
     updatedAt: Date;
   }): UserListItem {
@@ -819,6 +1059,7 @@ export class UsersService {
       name: row.name ?? '',
       role: row.role,
       isActive: row.isActive,
+      mfaEnabled: row.mfaEnabled,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };

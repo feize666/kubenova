@@ -1,0 +1,19 @@
+{
+  "clientId": "kubenova-kubectl",
+  "name": "KubeNova personal kubectl",
+  "enabled": true,
+  "protocol": "openid-connect",
+  "publicClient": true,
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": false,
+  "fullScopeAllowed": false,
+  "redirectUris": ["http://localhost:8000", "http://localhost:18000"],
+  "webOrigins": [],
+  "attributes": {
+    "pkce.code.challenge.method": "S256"
+  },
+  "defaultClientScopes": ["profile"],
+  "optionalClientScopes": []
+}

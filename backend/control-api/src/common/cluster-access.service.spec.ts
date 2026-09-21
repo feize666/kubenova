@@ -6,6 +6,46 @@ import {
 import { ClusterAccessService } from './cluster-access.service';
 
 describe('ClusterAccessService', () => {
+  it('discovers grant-authorized clusters without treating them as cluster-wide resource bindings', async () => {
+    const { prisma } = harness();
+    const grants = { listEffectiveGrants: async () => [{ clusterId: 'cluster-a' }] };
+    const service = Reflect.construct(ClusterAccessService, [prisma, grants]) as ClusterAccessService;
+    await expect((service as any).listDiscoverableClusterIds({ id: 'u', role: 'user' })).resolves.toEqual(['cluster-a']);
+    await expect((service as any).assertCanDiscover({ id: 'u', role: 'user' }, 'cluster-a')).resolves.toBeUndefined();
+    await expect((service as any).assertCanDiscover({ id: 'u', role: 'user' }, 'other')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.assertCanRead({ id: 'u', role: 'user' }, 'cluster-a')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('opens a discovered namespace grant when no legacy role binding exists', async () => {
+    const prisma = {
+      clusterRegistry: { findFirst: jest.fn() },
+      clusterRoleBinding: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as any;
+    const authorization = {
+      listEffectiveGrants: jest.fn().mockResolvedValue([
+        { clusterId: 'cluster-a', role: 'viewer', namespaces: [{ namespaceUid: 'ns-a' }] },
+      ]),
+    } as any;
+    const service = Reflect.construct(ClusterAccessService, [prisma, authorization]) as ClusterAccessService;
+    await expect(service.assertCanRead({ id: 'user-a', role: 'user' }, 'cluster-a'))
+      .resolves.toMatchObject({ clusterId: 'cluster-a', accessRole: 'viewer', source: 'access-grant' });
+  });
+
+  it('keeps grant discovery working when an older deployment is missing the legacy binding table', async () => {
+    const { prisma } = harness();
+    const missingTable = Object.assign(new Error('The table `public.ClusterRoleBinding` does not exist'), { code: 'P2021' });
+    prisma.clusterRoleBinding.findMany.mockRejectedValue(missingTable);
+    prisma.clusterRoleBinding.findFirst.mockRejectedValue(missingTable);
+    const grants = { listEffectiveGrants: async () => [{ clusterId: 'cluster-a' }] };
+    const service = Reflect.construct(ClusterAccessService, [prisma, grants]) as ClusterAccessService;
+
+    await expect(service.listDiscoverableClusterIds({ id: 'u', role: 'user' })).resolves.toEqual(['cluster-a']);
+    await expect(service.assertCanDiscover({ id: 'u', role: 'user' }, 'cluster-a')).resolves.toBeUndefined();
+    await expect(service.assertCanRead({ id: 'u', role: 'user' }, 'cluster-a')).rejects.toBeInstanceOf(NotFoundException);
+  });
   function harness(binding: { role: string; clusterId: string } | null = null) {
     const prisma = {
       clusterRegistry: {

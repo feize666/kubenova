@@ -11,7 +11,7 @@ export class NotificationHistoryService {
     access.assertPlatformAdmin(actor);
     const scope = await access.assertCanRead(actor, clusterId);
     const take = query.take === undefined ? 20 : Number(query.take);
-    if (!Number.isInteger(take) || take < 1 || take > 100 || (query.take !== undefined && !/^\d+$/.test(query.take))) throw new BadRequestException('take 必须为 1-100 的整数');
+    if (!Number.isInteger(take) || take < 1 || take > 100 || (query.take !== undefined && (typeof query.take !== 'string' || !/^\d+$/.test(query.take)))) throw new BadRequestException('take 必须为 1-100 的整数');
     if (query.status !== undefined && !['pending', 'sending', 'sent', 'failed', 'expired', 'cancelled'].includes(query.status)) throw new BadRequestException('无效的投递状态');
     if (query.event !== undefined && !['firing', 'resolved'].includes(query.event)) throw new BadRequestException('无效的通知事件');
     const where = { alert: { clusterId: scope.clusterId }, ...(query.status ? { status: query.status } : {}), ...(query.event ? { event: query.event } : {}) };

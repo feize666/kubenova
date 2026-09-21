@@ -27,6 +27,11 @@ data:
   AI_MODEL_NAME: "gpt-4o-mini"
   AI_MODEL_MAX_TOKENS: "4096"
   AI_MODEL_TIMEOUT_MS: "30000"
+  NOTIFICATION_DELIVERY_ENABLED: "false"
+  SMTP_HOST: ""
+  SMTP_PORT: "465"
+  SMTP_SECURE: "true"
+  SMTP_FROM: ""
   SWAGGER_ENABLED: "false"
 ---
 apiVersion: v1
@@ -48,3 +53,5 @@ stringData:
   RUNTIME_TOKEN_SECRET: replace-with-runtime-token-secret
   RUNTIME_GATEWAY_INTERNAL_SECRET: replace-with-internal-shared-secret
   AI_MODEL_API_KEY: ""
+  SMTP_USER: ""
+  SMTP_PASSWORD: ""

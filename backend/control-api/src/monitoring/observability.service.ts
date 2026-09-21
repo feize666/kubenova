@@ -10,6 +10,10 @@ import {
   type PlatformRole,
 } from '../common/governance';
 import { PrismaService } from '../platform/database/prisma.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { renderNotificationPayload } from './notification-payload';
+import { validateNotificationEndpoint } from './notification-endpoint';
+import { sendNotificationEmail } from './notification-email';
 
 export const OBSERVABILITY_KINDS = [
   'prometheus',
@@ -114,6 +118,7 @@ export interface AlertTemplateView extends AlertTemplateInput {
 }
 
 export interface NotificationTemplateInput {
+  clusterId?: string;
   name: string;
   channel: NotificationChannel;
   endpoint: string;
@@ -122,7 +127,8 @@ export interface NotificationTemplateInput {
   enabled?: boolean;
 }
 
-export interface NotificationTemplateView extends NotificationTemplateInput {
+export interface NotificationTemplateView extends Omit<NotificationTemplateInput, 'clusterId'> {
+  clusterId: string | null;
   id: string;
   version: number;
   createdAt: string;
@@ -149,7 +155,10 @@ const PROBE_PATHS: Record<ObservabilityKind, string> = {
 export class ObservabilityService {
   private readonly probeTimeoutMs = 2_000;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly clusterAccessService: ClusterAccessService = new ClusterAccessService(prisma),
+  ) {}
 
   async listDataSources(clusterId?: string): Promise<{
     items: DataSourceView[];
@@ -391,27 +400,28 @@ export class ObservabilityService {
     return { id, deleted: true };
   }
 
-  async listNotificationTemplates(): Promise<{ items: NotificationTemplateView[]; total: number; timestamp: string }> {
-    const items = await this.prisma.monitoringNotificationTemplate.findMany({ orderBy: { updatedAt: 'desc' } });
+  async listNotificationTemplates(actor: ObservabilityActor | undefined, clusterId?: string): Promise<{ items: NotificationTemplateView[]; total: number; timestamp: string }> {
+    const scope = await this.notificationScope(actor, clusterId);
+    const items = await this.prisma.monitoringNotificationTemplate.findMany({ where: { clusterId: scope }, orderBy: { updatedAt: 'desc' } });
     return { items: items.map((item) => this.toNotificationTemplateView(item)), total: items.length, timestamp: new Date().toISOString() };
   }
 
   async createNotificationTemplate(actor: ObservabilityActor | undefined, input: NotificationTemplateInput): Promise<NotificationTemplateView> {
-    assertWritePermission(actor);
+    const clusterId = await this.notificationScope(actor, input?.clusterId);
     const data = this.validateNotificationTemplate(input);
+    if (clusterId) data.cluster = { connect: { id: clusterId } };
     const created = await this.prisma.monitoringNotificationTemplate.create({ data });
     this.audit(actor, 'create', created.id);
     return this.toNotificationTemplateView(created);
   }
 
-  async updateNotificationTemplate(actor: ObservabilityActor | undefined, id: string, input: Partial<NotificationTemplateInput>): Promise<NotificationTemplateView> {
-    assertWritePermission(actor);
-    const existing = await this.prisma.monitoringNotificationTemplate.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('通知模板不存在');
+  async updateNotificationTemplate(actor: ObservabilityActor | undefined, id: string, input: Partial<NotificationTemplateInput>, clusterId?: string): Promise<NotificationTemplateView> {
+    const existing = await this.requireNotificationTemplate(actor, id, clusterId);
+    if (Object.prototype.hasOwnProperty.call(input, 'clusterId')) throw new BadRequestException('通知模板所属范围不可修改');
     const data: Prisma.MonitoringNotificationTemplateUpdateInput = {};
     if (input.name !== undefined) data.name = this.requiredText(input.name, 'name');
     if (input.channel !== undefined) data.channel = this.validChannel(input.channel);
-    if (input.endpoint !== undefined) data.endpoint = this.validEndpoint(input.endpoint);
+    if (input.channel !== undefined || input.endpoint !== undefined) data.endpoint = validateNotificationEndpoint(input.channel ?? existing.channel, input.endpoint ?? existing.endpoint);
     if (input.secretRef !== undefined) data.secretRef = this.normalizeOptional(input.secretRef);
     if (input.bodyTemplate !== undefined) data.bodyTemplate = this.requiredText(input.bodyTemplate, 'bodyTemplate');
     if (input.enabled !== undefined) data.enabled = Boolean(input.enabled);
@@ -421,40 +431,60 @@ export class ObservabilityService {
     return this.toNotificationTemplateView(updated);
   }
 
-  async deleteNotificationTemplate(actor: ObservabilityActor | undefined, id: string): Promise<{ id: string; deleted: true }> {
-    assertWritePermission(actor);
-    await this.requireById('monitoringNotificationTemplate', id, '通知模板不存在');
+  async deleteNotificationTemplate(actor: ObservabilityActor | undefined, id: string, clusterId?: string): Promise<{ id: string; deleted: true }> {
+    await this.requireNotificationTemplate(actor, id, clusterId);
     await this.prisma.monitoringNotificationTemplate.delete({ where: { id } });
     this.audit(actor, 'delete', id);
     return { id, deleted: true };
   }
 
-  async testNotificationTemplate(id: string): Promise<{ id: string; success: boolean; statusCode: number | null; latencyMs: number; error: string | null }> {
-    const template = await this.prisma.monitoringNotificationTemplate.findUnique({ where: { id } });
-    if (!template) throw new NotFoundException('通知模板不存在');
+  async testNotificationTemplate(actor: ObservabilityActor | undefined, id: string, clusterId?: string): Promise<{ id: string; success: boolean; statusCode: number | null; latencyMs: number; error: string | null }> {
+    const template = await this.requireNotificationTemplate(actor, id, clusterId);
+    return this.sendNotification(template, { message: 'KubeNova 通知渠道测试', title: 'KubeNova 测试通知' });
+  }
+
+  async sendNotification(template: { id: string; channel: string; endpoint: string; bodyTemplate: string }, values: { title: string; message: string }): Promise<{ id: string; success: boolean; statusCode: number | null; latencyMs: number; error: string | null }> {
+    const { id } = template;
     const started = Date.now();
-    const payload = template.bodyTemplate.replace(/\{\{\s*message\s*\}\}/g, 'KubeNova 通知渠道测试').replace(/\{\{\s*title\s*\}\}/g, 'KubeNova 测试通知');
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      let response: Response | undefined;
-      let lastError: unknown;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          response = await fetch(template.endpoint, {
-        method: template.channel === 'email' ? 'GET' : 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: template.channel === 'email' ? undefined : payload,
-        signal: controller.signal,
-          });
-          if (response.ok || attempt === 1) break;
-        } catch (error) { lastError = error; if (attempt === 1) throw error; }
+    if (template.channel === 'email') {
+      try {
+        const payload = JSON.parse(renderNotificationPayload(template.bodyTemplate, values));
+        await sendNotificationEmail(template.endpoint, { title: payload.subject ?? values.title, message: payload.text ?? values.message });
+        return { id, success: true, statusCode: null, latencyMs: Date.now() - started, error: null };
+      } catch {
+        return { id, success: false, statusCode: null, latencyMs: Date.now() - started, error: '邮件投递失败或结果未知，请检查 SMTP 配置与连接' };
       }
-      clearTimeout(timeout);
-      if (!response) throw lastError ?? new Error('通知发送失败');
+    }
+    const payload = renderNotificationPayload(template.bodyTemplate, values);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const endpoint = validateNotificationEndpoint(template.channel, template.endpoint);
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: payload,
+        signal: controller.signal,
+      });
+      if (response.ok && ['feishu', 'dingtalk', 'wecom'].includes(template.channel)) {
+        const result = await response.json().catch(() => null) as Record<string, unknown> | null;
+        const code = template.channel === 'feishu' ? result?.code ?? result?.StatusCode : result?.errcode;
+        const success = code === 0;
+        return { id, success, statusCode: response.status, latencyMs: Date.now() - started, error: success ? null : '通知渠道未确认投递成功，请检查机器人配置与权限' };
+      }
+      if (response.ok && ['slack', 'pagerduty'].includes(template.channel)) {
+        const success = template.channel === 'slack'
+          ? (await response.text()).trim() === 'ok'
+          : (await response.json().catch(() => null))?.status === 'success';
+        return { id, success, statusCode: response.status, latencyMs: Date.now() - started, error: success ? null : '通知渠道未确认投递成功，请检查机器人配置与权限' };
+      }
+      await response.body?.cancel();
       return { id, success: response.ok, statusCode: response.status, latencyMs: Date.now() - started, error: response.ok ? null : `HTTP ${response.status}` };
     } catch (error) {
-      return { id, success: false, statusCode: null, latencyMs: Date.now() - started, error: error instanceof Error ? error.message.slice(0, 240) : '连接失败' };
+      return { id, success: false, statusCode: null, latencyMs: Date.now() - started, error: controller.signal.aborted ? '通知发送超时，投递结果未知' : '通知发送失败，请检查渠道配置与网络连接' };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -499,7 +529,23 @@ export class ObservabilityService {
   }
 
   private toNotificationTemplateView(record: any): NotificationTemplateView {
-    return { id: record.id, name: record.name, channel: this.validChannel(record.channel), endpoint: record.endpoint, secretRef: record.secretRef ?? undefined, bodyTemplate: record.bodyTemplate, enabled: record.enabled, version: record.version, createdAt: record.createdAt.toISOString(), updatedAt: record.updatedAt.toISOString() };
+    return { id: record.id, clusterId: record.clusterId ?? null, name: record.name, channel: this.validChannel(record.channel), endpoint: record.endpoint, secretRef: record.secretRef ?? undefined, bodyTemplate: record.bodyTemplate, enabled: record.enabled, version: record.version, createdAt: record.createdAt.toISOString(), updatedAt: record.updatedAt.toISOString() };
+  }
+
+  private async notificationScope(actor: ObservabilityActor | undefined, clusterId: unknown): Promise<string | null> {
+    this.clusterAccessService.assertPlatformAdmin(actor);
+    if (clusterId === undefined) return null;
+    if (typeof clusterId !== 'string' || !clusterId.trim()) throw new BadRequestException('必须提供有效的集群 ID');
+    const scope = clusterId.trim();
+    await this.clusterAccessService.assertCanRead(actor, scope);
+    return scope;
+  }
+
+  private async requireNotificationTemplate(actor: ObservabilityActor | undefined, id: string, clusterId?: string) {
+    const scope = await this.notificationScope(actor, clusterId);
+    const template = await this.prisma.monitoringNotificationTemplate.findUnique({ where: { id } });
+    if (!template || (template.clusterId ?? null) !== scope) throw new NotFoundException('通知模板不存在');
+    return template;
   }
 
   private validateDataSource(input: DataSourceInput): Prisma.MonitoringDataSourceCreateInput {
@@ -518,7 +564,7 @@ export class ObservabilityService {
   }
 
   private validateNotificationTemplate(input: NotificationTemplateInput): Prisma.MonitoringNotificationTemplateCreateInput {
-    return { name: this.requiredText(input.name, 'name'), channel: this.validChannel(input.channel), endpoint: this.validEndpoint(input.endpoint), secretRef: this.normalizeOptional(input.secretRef), bodyTemplate: this.requiredText(input.bodyTemplate, 'bodyTemplate'), enabled: input.enabled ?? true };
+    return { name: this.requiredText(input.name, 'name'), channel: this.validChannel(input.channel), endpoint: validateNotificationEndpoint(input.channel, input.endpoint), secretRef: this.normalizeOptional(input.secretRef), bodyTemplate: this.requiredText(input.bodyTemplate, 'bodyTemplate'), enabled: input.enabled ?? true };
   }
 
   private async requireById(model: 'monitoringAlertTemplate' | 'monitoringNotificationTemplate', id: string, message: string): Promise<void> {

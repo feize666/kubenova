@@ -39,6 +39,9 @@ pnpm-debug.log*
 *.sqlite3
 *.dump
 *.sql
+frontend/.next-candidate/
+frontend/.next-validation/
+!backend/control-api/prisma/migrations/**/migration.sql
 *.bak
 /tmp/
 /temp/

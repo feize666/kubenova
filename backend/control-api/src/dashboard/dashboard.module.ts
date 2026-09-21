@@ -5,9 +5,10 @@ import { AuthGuard } from '../common/auth.guard';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
 import { MetricsModule } from '../metrics/metrics.module';
+import { AuthorizationModule } from '../common/authorization.module';
 
 @Module({
-  imports: [AuthModule, ClustersModule, MetricsModule],
+  imports: [AuthModule, ClustersModule, MetricsModule, AuthorizationModule],
   controllers: [DashboardController],
   providers: [DashboardService, AuthGuard],
 })

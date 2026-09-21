@@ -1,11 +1,17 @@
 # Log query foundation
 
-`POST /api/log-center/query` uses the existing bearer session guard. It temporarily
-requires a platform administrator (including the existing `admin` alias) and a
-live, accessible cluster. This is a fail-closed initial gate, not namespace RBAC.
+`POST /api/log-center/query` uses the existing bearer session guard. Platform
+administrators require an accessible cluster. Other recognized users require an
+explicit namespace, a live namespace UID and an effective `logs` capability for
+that scope. Sources must configure `namespaceUidField` for scoped users; missing
+identity mapping fails closed. Source discovery returns no credentials.
 
 Body: `clusterId`, `dataSourceId`, `from`, `to`, optional `namespace`, `keyword`,
-and `limit` (default 100). Timestamps must be ISO 8601 with a timezone, with a
+optional exact `pod` and `container` names, and `limit` (default 100). Pod names
+are bounded DNS-subdomain names; container names are bounded DNS-label names.
+These add term filters and never replace cluster/namespace/UID restrictions.
+Map their fixed Kubernetes fields as Elasticsearch keyword fields.
+Timestamps must be ISO 8601 with a timezone, with a
 positive range no longer than 24 hours. Limit is an integer from 1 to 200;
 keyword is at most 512 characters. Unknown properties are rejected.
 

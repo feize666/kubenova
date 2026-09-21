@@ -278,9 +278,9 @@ export default function ObservabilityCenterPage() {
           <OpsMetricTile
             label="健康分"
             meta={`覆盖 ${entities.length} 个实体 · ${availableSources}/${sourceStatus.length} 数据源可用`}
-            suffix="/ 100"
-            tone="success"
-            value={summary?.healthScore ?? 0}
+            suffix={summary?.healthScore == null ? undefined : "/ 100"}
+            tone={summary?.healthScore == null ? "neutral" : "success"}
+            value={summary?.healthScore ?? "--"}
           />
         </Col>
         <Col xs={24} md={6}>

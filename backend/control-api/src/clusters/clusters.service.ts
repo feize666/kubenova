@@ -264,7 +264,7 @@ export class ClustersService implements OnModuleInit {
     return this.toResponse(record, await this.getProfileByClusterId(record.id));
   }
 
-  async getDetail(id: string): Promise<ClusterDetailResponse> {
+  async getDetail(id: string, options: { includeNodes?: boolean } = {}): Promise<ClusterDetailResponse> {
     const record = await this.mustFind(id);
     if (record.state === 'deleted') {
       throw new BadRequestException('已删除的集群不可查看详情');
@@ -293,7 +293,9 @@ export class ClustersService implements OnModuleInit {
               ? 'offline-mode'
               : 'checking';
 
-    const nodeInventory = await this.fetchNodeInventory(record.id, kubeconfig);
+    const nodeInventory = options.includeNodes === false
+      ? { items: [], degraded: true, degradationReason: '当前授权不包含节点信息' }
+      : await this.fetchNodeInventory(record.id, kubeconfig);
     const detailJson = this.parseClusterHealthDetail(
       healthSnapshot?.detailJson,
     );

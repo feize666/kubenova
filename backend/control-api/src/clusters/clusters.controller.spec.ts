@@ -45,6 +45,8 @@ describe('ClustersController', () => {
     } as any;
     const clusterAccessService = {
       listAccessibleClusterIds: jest.fn().mockResolvedValue(null),
+      listDiscoverableClusterIds: jest.fn().mockResolvedValue(null),
+      assertCanDiscover: jest.fn().mockResolvedValue(undefined),
       assertCanRead: jest.fn().mockResolvedValue({
         clusterId: 'c-1',
         accessRole: 'viewer',
@@ -319,7 +321,7 @@ describe('ClustersController', () => {
     } as any);
 
     expect(clustersService.list).toHaveBeenCalled();
-    expect(clusterAccessService.listAccessibleClusterIds).toHaveBeenCalled();
+    expect(clusterAccessService.listDiscoverableClusterIds).toHaveBeenCalled();
     expect(resp.data.items).toHaveLength(1);
     expect(resp.data.items[0].id).toBe('c-1');
     expect(resp.data.total).toBe(1);
@@ -329,7 +331,7 @@ describe('ClustersController', () => {
   it('passes active bound cluster ids into regular list queries', async () => {
     const { controller, clustersService, clusterAccessService } =
       createController();
-    clusterAccessService.listAccessibleClusterIds.mockResolvedValue([
+    clusterAccessService.listDiscoverableClusterIds.mockResolvedValue([
       'cluster-a',
     ]);
     clustersService.list.mockResolvedValue({
@@ -558,6 +560,7 @@ describe('ClustersController', () => {
     'authorizes %s reads before downstream work',
     async (_label, method, downstream) => {
       const h = createController();
+      h.clusterAccessService.assertCanDiscover.mockRejectedValue(new NotFoundException());
       h.clusterAccessService.assertCanRead.mockRejectedValue(
         new NotFoundException(),
       );

@@ -12,13 +12,13 @@ const sourceFilterSource = readFileSync(new URL("../../components/topology-sourc
 
 test("focused resource topology exposes an immersive page state", () => {
   assert.match(pageSource, /resource-map-shell--focused/);
-  assert.match(topologyCss, /\.resource-map-shell--workbench\s*\{[^}]*display:\s*flex/s);
+  assert.match(topologyCss, /\.resource-map-shell--workbench\s*\{[^}]*display:\s*flex/);
 });
 
 test("topology canvas fills the remaining workbench without a fixed height floor", () => {
   assert.match(
     topologyCss,
-    /\.resource-map-shell--workbench \.resource-map-canvas,\s*\.topology-kubejojo,\s*\.topology-kubejojo__canvas\s*\{[^}]*height:\s*100%[^}]*min-height:\s*0/s,
+    /\.resource-map-shell--workbench \.resource-map-canvas,\s*\.topology-kubejojo,\s*\.topology-kubejojo__canvas\s*\{[^}]*height:\s*100%[^}]*min-height:\s*0/,
   );
 });
 
@@ -48,8 +48,8 @@ test("namespace is a filter context and workload resources are the only topology
   assert.match(pageSource, /Deployment、StatefulSet、DaemonSet、Job 或 CronJob/);
   assert.doesNotMatch(pageSource, /projectTopologyNeighborhood/);
   assert.doesNotMatch(pageSource, /setNeighborhoodResourceId/);
-  assert.match(topologyCss, /resource-map-canvas-state\.topology-root-picker-state\s*\{[^}]*position:\s*relative/s);
-  assert.match(topologyCss, /resource-map-canvas-state\.topology-root-picker-state\s*\{[^}]*max-width:\s*none/s);
+  assert.match(topologyCss, /resource-map-canvas-state\.topology-root-picker-state\s*\{[^}]*position:\s*relative/);
+  assert.match(topologyCss, /resource-map-canvas-state\.topology-root-picker-state\s*\{[^}]*max-width:\s*none/);
 });
 
 test("canvas does not turn scope or isolated aggregates into topology scenes", () => {

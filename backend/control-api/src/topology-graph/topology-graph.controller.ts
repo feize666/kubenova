@@ -1,4 +1,5 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
+import type { TopologyActorRequest } from './topology-access';
 import { AuthGuard } from '../common/auth.guard';
 import { TopologyGraphService } from './topology-graph.service';
 
@@ -12,6 +13,7 @@ export class TopologyGraphController {
     @Query('clusterId') clusterId?: string,
     @Query('namespace') namespace?: string,
     @Query('sources') sources?: string,
+    @Req() request?: TopologyActorRequest,
   ) {
     return this.topologyGraphService.getGraph({
       clusterId: clusterId?.trim() || undefined,
@@ -20,7 +22,7 @@ export class TopologyGraphController {
         ?.split(',')
         .map((source) => source.trim())
         .filter(Boolean),
-    });
+    }, request?.user?.user ?? {});
   }
 
   @Get('graph/v2')
@@ -28,6 +30,7 @@ export class TopologyGraphController {
     @Query('clusterId') clusterId?: string,
     @Query('namespace') namespace?: string,
     @Query('sources') sources?: string,
+    @Req() request?: TopologyActorRequest,
   ) {
     return this.topologyGraphService.getGraphV2({
       clusterId: clusterId?.trim() || undefined,
@@ -36,6 +39,6 @@ export class TopologyGraphController {
         ?.split(',')
         .map((source) => source.trim())
         .filter(Boolean),
-    });
+    }, request?.user?.user ?? {});
   }
 }

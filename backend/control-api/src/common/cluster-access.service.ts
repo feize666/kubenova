@@ -3,9 +3,11 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../platform/database/prisma.service';
+import { AuthorizationService } from './authorization.service';
 
 export type ClusterAccessRole = 'cluster-admin' | 'operator' | 'viewer';
 
@@ -18,7 +20,7 @@ export interface ClusterAccessSubject {
 export interface ClusterAccessContext {
   clusterId: string;
   accessRole: ClusterAccessRole;
-  source: 'platform-admin' | 'role-binding';
+  source: 'platform-admin' | 'role-binding' | 'access-grant';
 }
 
 type ClusterAccessPrisma = {
@@ -56,9 +58,35 @@ function inaccessibleCluster(): NotFoundException {
   });
 }
 
+function isLegacyBindingSchemaUnavailable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  const message = (error as { message?: unknown }).message;
+  return (
+    (code === 'P2021' || code === 'P2022') &&
+    typeof message === 'string' &&
+    /ClusterRoleBinding/i.test(message)
+  );
+}
+
 @Injectable()
 export class ClusterAccessService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(private readonly prismaService: PrismaService, @Optional() private readonly authorization?: AuthorizationService) {}
+
+  // Discovery grants expose cluster identity, not unrestricted cluster resources.
+  async listDiscoverableClusterIds(subject: ClusterAccessSubject | undefined): Promise<string[] | null> {
+    const legacy = await this.listAccessibleClusterIds(subject);
+    if (legacy === null || !this.isKnownPlatformRole(subject)) return legacy;
+    const grants = await this.authorization?.listEffectiveGrants(this.requireUserId(subject)) ?? [];
+    return [...new Set([...legacy, ...grants.map(grant => grant.clusterId)])];
+  }
+
+  async assertCanDiscover(subject: ClusterAccessSubject | undefined, clusterId: string): Promise<void> {
+    const id = this.requireClusterId(clusterId);
+    if (this.isPlatformAdmin(subject)) { await this.assertCanRead(subject, id); return; }
+    const ids = await this.listDiscoverableClusterIds(subject);
+    if (!ids?.includes(id)) throw inaccessibleCluster();
+  }
 
   private get prisma(): ClusterAccessPrisma {
     return this.prismaService as unknown as ClusterAccessPrisma;
@@ -130,32 +158,48 @@ export class ClusterAccessService {
       throw inaccessibleCluster();
     }
 
-    const binding = await this.prisma.clusterRoleBinding.findFirst({
-      where: {
-        userId,
-        clusterId: normalizedClusterId,
-        state: 'active',
-        role: { in: BINDING_ROLES },
-        cluster: {
-          is: {
-            deletedAt: null,
-            status: { not: 'deleted' },
+    let binding: { clusterId: string; role: string } | null = null;
+    try {
+      binding = await this.prisma.clusterRoleBinding.findFirst({
+        where: {
+          userId,
+          clusterId: normalizedClusterId,
+          state: 'active',
+          role: { in: BINDING_ROLES },
+          cluster: {
+            is: {
+              deletedAt: null,
+              status: { not: 'deleted' },
+            },
           },
         },
-      },
-      select: { clusterId: true, role: true },
-    });
-    if (
-      !binding ||
-      !BINDING_ROLES.includes(binding.role as ClusterAccessRole)
-    ) {
-      throw inaccessibleCluster();
+        select: { clusterId: true, role: true },
+      });
+    } catch (error) {
+      // Older deployments may have recorded the migration without creating
+      // the legacy table. Grant-based access remains authoritative for
+      // namespace-scoped users; do not turn that compatibility gap into 500.
+      if (!isLegacyBindingSchemaUnavailable(error)) throw error;
+    }
+    if (binding && BINDING_ROLES.includes(binding.role as ClusterAccessRole)) {
+      return {
+        clusterId: binding.clusterId,
+        accessRole: binding.role as ClusterAccessRole,
+        source: 'role-binding',
+      };
     }
 
+    // AccessGrant is the authoritative path for namespace-scoped users such
+    // as loop-read. Discovery already includes these grants; the same grant
+    // must also authorize the cluster route or the UI discovers a cluster it
+    // cannot open.
+    const grants = await this.authorization?.listEffectiveGrants(userId, new Date(), normalizedClusterId) ?? [];
+    const grant = grants.find((item) => BINDING_ROLES.includes(item.role as ClusterAccessRole));
+    if (!grant) throw inaccessibleCluster();
     return {
-      clusterId: binding.clusterId,
-      accessRole: binding.role as ClusterAccessRole,
-      source: 'role-binding',
+      clusterId: normalizedClusterId,
+      accessRole: grant.role as ClusterAccessRole,
+      source: 'access-grant',
     };
   }
 
@@ -209,20 +253,25 @@ export class ClusterAccessService {
       return [];
     }
 
-    const bindings = await this.prisma.clusterRoleBinding.findMany({
-      where: {
-        userId,
-        state: 'active',
-        role: { in: BINDING_ROLES },
-        cluster: {
-          is: {
-            deletedAt: null,
-            status: { not: 'deleted' },
+    let bindings: Array<{ clusterId: string }> = [];
+    try {
+      bindings = await this.prisma.clusterRoleBinding.findMany({
+        where: {
+          userId,
+          state: 'active',
+          role: { in: BINDING_ROLES },
+          cluster: {
+            is: {
+              deletedAt: null,
+              status: { not: 'deleted' },
+            },
           },
         },
-      },
-      select: { clusterId: true },
-    });
+        select: { clusterId: true },
+      });
+    } catch (error) {
+      if (!isLegacyBindingSchemaUnavailable(error)) throw error;
+    }
     return [...new Set(bindings.map((binding) => binding.clusterId))];
   }
 

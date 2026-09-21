@@ -70,6 +70,7 @@ export interface AlertTemplate {
 
 export interface NotificationTemplate {
   id: string;
+  clusterId?: string | null;
   name: string;
   channel: NotificationChannel;
   endpoint: string;
@@ -114,6 +115,7 @@ export interface AlertTemplateInput {
 }
 
 export interface NotificationTemplateInput {
+  clusterId?: string;
   name: string;
   channel: NotificationChannel;
   endpoint: string;
@@ -217,8 +219,8 @@ export function deleteAlertTemplate(id: string, token?: string) {
   });
 }
 
-export function listNotificationTemplates(token?: string) {
-  return apiRequest<Collection<NotificationTemplate>>("/api/observability/notification-templates", { token });
+export function listNotificationTemplates(token?: string, clusterId?: string) {
+  return apiRequest<Collection<NotificationTemplate>>("/api/observability/notification-templates", { token, query: { clusterId } });
 }
 
 export function createNotificationTemplate(input: NotificationTemplateInput, token?: string) {
@@ -229,17 +231,19 @@ export function createNotificationTemplate(input: NotificationTemplateInput, tok
   });
 }
 
-export function updateNotificationTemplate(id: string, input: Partial<NotificationTemplateInput>, token?: string) {
+export function updateNotificationTemplate(id: string, input: Partial<NotificationTemplateInput>, token?: string, clusterId?: string) {
   return apiRequest<NotificationTemplate, Partial<NotificationTemplateInput>>(`/api/observability/notification-templates/${encodeURIComponent(id)}`, {
     method: "PATCH",
     token,
     body: input,
+    query: { clusterId },
   });
 }
 
-export function deleteNotificationTemplate(id: string, token?: string) {
+export function deleteNotificationTemplate(id: string, token?: string, clusterId?: string) {
   return apiRequest<{ id: string; deleted: true }>(`/api/observability/notification-templates/${encodeURIComponent(id)}`, {
     method: "DELETE",
     token,
+    query: { clusterId },
   });
 }

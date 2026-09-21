@@ -1,3 +1,4 @@
+jest.mock('@kubernetes/client-node', () => ({}));
 import {
   BadGatewayException,
   BadRequestException,
@@ -9,6 +10,9 @@ import {
 import { ClusterAccessService } from '../common/cluster-access.service';
 import { PrismaService } from '../platform/database/prisma.service';
 import { LogCenterService } from './log-center.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
+import { buildCollectorConfig } from './collector-config';
 
 describe('bounded log queries', () => {
   const actor = { id: 'admin', role: 'platform-admin' };
@@ -47,12 +51,50 @@ describe('bounded log queries', () => {
       },
     };
     const prisma = db as unknown as PrismaService;
-    service = new LogCenterService(prisma, new ClusterAccessService(prisma));
+    service = new LogCenterService(prisma, new ClusterAccessService(prisma), new AuthorizationService({
+      groupMembership: { findMany: async () => [] }, accessGrant: { findMany: async () => [] },
+    } as unknown as PrismaService), {
+      resolve: async () => { throw new ForbiddenException(); },
+    } as unknown as NamespaceIdentityService);
     fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(response());
   });
   afterEach(() => {
     jest.restoreAllMocks();
     delete process.env.KUBENOVA_ES_API_KEY_TEST;
+  });
+  it.each(['a'.repeat(128), 'Cluster.A_1', 'cluster-a', 'cluster-a-'])('queries generated metadata for valid cluster identity %s', async clusterId => {
+    const generated = buildCollectorConfig({ clusterId, endpoint: source.endpoint });
+    db.monitoringDataSource.findFirst.mockResolvedValue({ ...source, clusterId, metadata: { logQuery: generated.logQuery } });
+    await expect(service.query(actor, { ...input, clusterId })).resolves.toEqual({ rows: [] });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.query.bool.filter).toContainEqual({ term: { 'kubenova.cluster_id': clusterId } });
+    expect(generated.config['filebeat.inputs'][0].fields.kubenova.cluster_id).toBe(clusterId);
+  });
+
+  it('previews the registered source without credentials or network side effects', async () => {
+    const result = await service.previewCollection(actor, { clusterId: 'cluster-a', dataSourceId: 'source-a', retentionDays: 30, caSecretName: 'elastic-ca' });
+    expect(result.config['output.elasticsearch'].ssl.certificate_authorities).toEqual(['/etc/filebeat-ca/ca.crt']);
+    expect(result.config['output.elasticsearch'].hosts).toEqual(['https://logs.example.test']);
+    expect(result.lifecyclePolicy.body.policy.phases.delete.min_age).toBe('30d');
+    expect((result as any).manifests).toMatchObject({ apiVersion: 'v1', kind: 'List', items: expect.arrayContaining([expect.objectContaining({ kind: 'DaemonSet' })]) });
+    expect(JSON.stringify(result)).not.toContain('test-api-key');
+    expect(JSON.stringify(result)).not.toContain('KUBENOVA_ES_API_KEY_TEST');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each(['viewer', 'operator', 'cluster-admin', 'read-only'])('denies %s collector preview before data access', async role => {
+    await expect(service.previewCollection({ id: 'reader', role }, {})).rejects.toBeInstanceOf(ForbiddenException);
+    expect(db.monitoringDataSource.findFirst).not.toHaveBeenCalled();
+  });
+  it.each([{ endpoint: 'https://other.test' }, { retentionDays: 0 }, { dataSourceId: '' }, { token: 'secret' }])('rejects invalid preview input %j', async patch => {
+    await expect(service.previewCollection(actor, { clusterId: 'cluster-a', dataSourceId: 'source-a', ...patch })).rejects.toBeInstanceOf(BadRequestException);
+    expect(db.monitoringDataSource.findFirst).not.toHaveBeenCalled();
+  });
+  it('rejects foreign or unsafe preview sources', async () => {
+    db.monitoringDataSource.findFirst.mockResolvedValue({ ...source, clusterId: 'other' });
+    await expect(service.previewCollection(actor, { clusterId: 'cluster-a', dataSourceId: 'source-a' })).rejects.toBeInstanceOf(NotFoundException);
+    db.monitoringDataSource.findFirst.mockResolvedValue({ ...source, endpoint: 'http://insecure.test' });
+    await expect(service.previewCollection(actor, { clusterId: 'cluster-a', dataSourceId: 'source-a' })).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects missing identity and non-admin cluster viewers', async () => {
@@ -69,6 +111,24 @@ describe('bounded log queries', () => {
     await expect(service.query(actor, input)).rejects.toBeInstanceOf(
       NotFoundException,
     );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it('adds exact Pod and container terms without removing scope filters', async () => {
+    await service.query(actor, { ...input, pod: 'api-v2.1', container: 'main' });
+    const filters = JSON.parse(fetchMock.mock.calls[0][1].body).query.bool.filter;
+    expect(filters).toEqual(expect.arrayContaining([
+      { term: { 'kubenova.cluster_id': 'cluster-a' } },
+      { term: { 'kubernetes.namespace_name': 'apps' } },
+      { term: { 'kubernetes.pod_name': 'api-v2.1' } },
+      { term: { 'kubernetes.container_name': 'main' } },
+    ]));
+  });
+  it.each([
+    { pod: '*' }, { pod: '' }, { pod: 'a'.repeat(254) },
+    { pod: 'api..v2' }, { container: 'main.sidecar' },
+    { container: 'a'.repeat(64) }, { container: {} },
+  ])('rejects invalid resource filters before upstream access: %j', async filters => {
+    await expect(service.query(actor, { ...input, ...filters })).rejects.toBeInstanceOf(BadRequestException);
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it.each([

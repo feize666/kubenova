@@ -1,13 +1,81 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
+
+func TestKeepaliveClosesExpiredSessionConnection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(50*time.Millisecond))
+		defer cancel()
+		go pumpWebsocketKeepalive(ctx, &wsConnIO{conn: conn})
+		// Like an idle terminal, the reader must unblock when authorization expires.
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, err = conn.ReadMessage()
+	if err == nil {
+		t.Fatal("expired connection remained open")
+	}
+	if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+		t.Fatal("connection did not close before read timeout")
+	}
+}
+
+func TestNormalLogDisconnectCancelsUpstream(t *testing.T) {
+	done := make(chan bool, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		pumpLogsClientMessages(ctx, cancel, conn, &terminalWSWriter{io: &wsConnIO{conn: conn}})
+		done <- ctx.Err() != nil
+	}))
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case canceled := <-done:
+		if !canceled {
+			t.Fatal("normal client close left upstream active")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reader did not stop")
+	}
+}
 
 func TestRuntimeTokenTimeClaimsValidation(t *testing.T) {
 	payload := runtimeTokenPayload{

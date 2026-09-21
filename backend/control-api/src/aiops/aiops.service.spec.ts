@@ -1,8 +1,63 @@
 jest.mock('@kubernetes/client-node', () => ({}));
 
 import { AiopsService } from './aiops.service';
+import { AuthorizationService } from '../common/authorization.service';
 
 describe('AiopsService', () => {
+  it('requires a matching mutation grant rather than the platform operator role alone', async () => {
+    let role = 'viewer';
+    const authorization = new AuthorizationService({
+      groupMembership: { findMany: async () => [] },
+      accessGrant: { findMany: async () => [{
+        id: 'grant', userId: 'operator', groupId: null, clusterId: 'cluster', role,
+        state: 'active', validFrom: new Date(0), expiresAt: null, revokedAt: null,
+        namespaces: [{ namespaceUid: 'uid' }], capabilities: [],
+      }] },
+    } as never);
+    const base = createService({ getAlerts: jest.fn().mockResolvedValue({
+      items: [{ id: 'a', clusterId: 'cluster', namespace: 'ai', resourceType: 'Pod',
+        resourceName: 'pod', severity: 'critical', title: 'issue', firedAt: '2026-01-01' }],
+      dataSource: 'monitoring-alert', degraded: false,
+    }) });
+    const monitoring = (base as unknown as { monitoringService: never }).monitoringService;
+    const service = new AiopsService(monitoring, authorization, undefined,
+      { resolve: async () => 'uid' } as never);
+    const actor = { id: 'operator', role: 'cluster-operator' as const };
+    await expect(service.approveRecommendation('rec:alert:a', actor)).rejects.toThrow();
+    role = 'operator';
+    await expect(service.approveRecommendation('rec:alert:a', actor)).resolves.toMatchObject({
+      approved: true, executionStatus: 'not-executed',
+    });
+  });
+
+  it('forwards the subject and does not reuse user summaries after revocation', async () => {
+    const actor = { id: 'reader', role: 'read-only' };
+    let revoked = false;
+    const service = createService({
+      getAlerts: jest.fn().mockImplementation((_filter, subject) => {
+        if (subject?.id !== 'reader' || revoked) throw new Error('forbidden');
+        return { items: [], dataSource: 'workload-derived', degraded: true };
+      }),
+    });
+    await expect(Reflect.apply(service.getSummary, service, [{}, actor])).resolves.toHaveProperty('incidentQueue');
+    revoked = true;
+    await expect(Reflect.apply(service.getSummary, service, [{}, actor])).rejects.toThrow('forbidden');
+  });
+
+  it('rejects missing and unknown HTTP subjects before reading monitoring', async () => {
+    const service = createService();
+    for (const actor of [{}, { id: 'reader', role: 'unknown' }]) {
+      await expect(Reflect.apply(service.getSummary, service, [{}, actor])).rejects.toThrow();
+    }
+  });
+
+  it('does not approve arbitrary recommendation identifiers', async () => {
+    const service = createService();
+    await expect(Promise.resolve().then(() => Reflect.apply(service.approveRecommendation, service, [
+      'rec:alert:foreign', { id: 'admin', role: 'platform-admin' },
+    ]))).rejects.toThrow();
+  });
+
   function createService(overrides: Partial<Record<string, jest.Mock>> = {}) {
     const monitoringService = {
       getObservabilitySummary: jest.fn().mockResolvedValue({
@@ -139,19 +194,23 @@ describe('AiopsService', () => {
     };
     expect(harness.monitoringService.getAlerts).toHaveBeenCalledWith(
       expect.objectContaining({ clusterId: 'cluster-a' }),
+      undefined,
     );
     expect(harness.monitoringService.getAlerts).toHaveBeenCalledWith(
       expect.objectContaining({ clusterId: 'cluster-b' }),
+      undefined,
     );
     expect(harness.monitoringService.getClusterInspection).toHaveBeenCalledWith(
       'cluster-a',
       undefined,
       expect.objectContaining({ clusterId: 'cluster-a' }),
+      undefined,
     );
     expect(harness.monitoringService.getClusterInspection).toHaveBeenCalledWith(
       'cluster-b',
       undefined,
       expect.objectContaining({ clusterId: 'cluster-b' }),
+      undefined,
     );
   });
 

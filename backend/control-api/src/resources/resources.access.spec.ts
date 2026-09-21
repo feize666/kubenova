@@ -49,6 +49,7 @@ describe('ResourcesController explicit cluster authorization', () => {
         ? jest.fn().mockRejectedValue(rejection)
         : jest.fn().mockResolvedValue(undefined),
       listAccessibleClusterIds: jest.fn().mockResolvedValue(['cluster-a']),
+      listDiscoverableClusterIds: jest.fn().mockResolvedValue(['cluster-a']),
     };
     const ControllerConstructor = ResourcesController as unknown as new (
       ...args: unknown[]

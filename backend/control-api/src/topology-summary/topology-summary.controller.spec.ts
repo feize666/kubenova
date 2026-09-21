@@ -16,7 +16,7 @@ describe('TopologySummaryController', () => {
     );
     expect(service.listNamespaceSummaries).toHaveBeenCalledWith({
       clusterId: 'c-1',
-    });
+    }, {});
   });
 
   it('passes undefined clusterId for all readable clusters', async () => {
@@ -32,6 +32,6 @@ describe('TopologySummaryController', () => {
 
     expect(service.listNamespaceSummaries).toHaveBeenCalledWith({
       clusterId: undefined,
-    });
+    }, {});
   });
 });

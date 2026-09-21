@@ -497,10 +497,26 @@ func TerminalWS(w http.ResponseWriter, r *http.Request) {
 	reader := newTerminalWSReader()
 	defer reader.Close()
 
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithDeadline(r.Context(), time.Unix(tokenPayload.Exp, 0))
 	defer cancel()
 
-	go pumpTerminalClientMessages(ctx, conn, reader, writer)
+	if err := checkRuntimeSession(ctx, tokenPayload, authContext.RuntimeToken); err != nil {
+		return
+	}
+	go watchRuntimeSession(ctx, tokenPayload, authContext.RuntimeToken, func() {
+		cancel()
+		reader.Close()
+		conn.Close()
+	})
+	closeWatch, watchErr := subscribeRuntimeSession(ctx, tokenPayload, authContext.RuntimeToken, func() { cancel(); reader.Close(); conn.Close() })
+	if watchErr != nil {
+		return
+	}
+	defer closeWatch()
+	go func() {
+		defer cancel()
+		pumpTerminalClientMessages(ctx, conn, reader, writer)
+	}()
 	go pumpWebsocketKeepalive(ctx, connIO)
 
 	if err = writer.writeFrame(WSFrame{
@@ -557,9 +573,21 @@ func LogsWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithDeadline(r.Context(), time.Unix(tokenPayload.Exp, 0))
 	defer cancel()
 
+	if err := checkRuntimeSession(ctx, tokenPayload, authContext.RuntimeToken); err != nil {
+		return
+	}
+	go watchRuntimeSession(ctx, tokenPayload, authContext.RuntimeToken, func() {
+		cancel()
+		conn.Close()
+	})
+	closeWatch, watchErr := subscribeRuntimeSession(ctx, tokenPayload, authContext.RuntimeToken, func() { cancel(); conn.Close() })
+	if watchErr != nil {
+		return
+	}
+	defer closeWatch()
 	writer := &terminalWSWriter{io: connIO}
 	go pumpLogsClientMessages(ctx, cancel, conn, writer)
 	go pumpWebsocketKeepalive(ctx, connIO)
@@ -616,7 +644,8 @@ func fetchRuntimeBootstrap(
 	client := &http.Client{Timeout: defaultRuntimeGatewayDeadline}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("control-api bootstrap request failed: %w", err)
+		// Transport errors include the request URL, which contains a runtime token.
+		return nil, errors.New("control-api bootstrap request failed")
 	}
 	defer resp.Body.Close()
 
@@ -1281,6 +1310,7 @@ func pumpLogsClientMessages(
 	conn *websocket.Conn,
 	writer *terminalWSWriter,
 ) {
+	defer cancel()
 	for {
 		select {
 		case <-ctx.Done():
@@ -1436,6 +1466,8 @@ func pumpWebsocketKeepalive(ctx context.Context, connIO *wsConnIO) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Closing the socket also releases idle readers blocked on client input.
+			_ = connIO.conn.Close()
 			return
 		case <-ticker.C:
 			if err := connIO.writeControl(websocket.PingMessage, []byte("ping")); err != nil {

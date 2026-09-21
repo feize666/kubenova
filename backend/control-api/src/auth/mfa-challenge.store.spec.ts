@@ -3,6 +3,11 @@ import Redis from 'ioredis';
 import { MfaChallengeStore } from './mfa-challenge.store';
 
 describe('MfaChallengeStore', () => {
+  it('disconnects its Redis connection on shutdown', () => {
+    const disconnect = jest.fn();
+    new MfaChallengeStore({ disconnect } as never).onModuleDestroy();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+  });
   const payload = { userId: 'user-1', authzVersion: 1, enrollmentVersion: 2 };
   const entries = new Map<string, string>();
   const redis = {

@@ -231,7 +231,7 @@ export class ClustersController {
     const requestId = resolveRequestId(req, res);
     const selectableOnly = this.parseBoolean(query.selectableOnly);
     const accessibleClusterIds =
-      await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+      await this.clusterAccessService.listDiscoverableClusterIds(req.user?.user);
     const list = selectableOnly
       ? {
           items: await this.listAllClusters(query, accessibleClusterIds),
@@ -357,8 +357,9 @@ export class ClustersController {
     @Param('id') id: string,
   ) {
     const requestId = resolveRequestId(req, res);
-    await this.clusterAccessService.assertCanRead(req.user?.user, id);
-    const detail = await this.clustersService.getDetail(id);
+    await this.clusterAccessService.assertCanDiscover(req.user?.user, id);
+    const unrestricted = await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+    const detail = await this.clustersService.getDetail(id, { includeNodes: unrestricted === null || unrestricted.includes(id) });
     return this.ok(detail, requestId, { action: 'detail' });
   }
 

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { AuthProvider } from "@/components/auth-context";
+import { AuthProvider, useAuth } from "@/components/auth-context";
 import { ThemeProvider } from "@/components/theme-context";
 import { defaultQueryOptions, listQueryOptions } from "@/lib/query";
 
@@ -16,7 +16,9 @@ const RealtimeSyncBridge = dynamic(
 
 function RealtimeSyncBridgeSlot() {
   const pathname = usePathname();
-  if (pathname === "/login" || pathname === "/login-new") {
+  const { enrollmentConfirming, recoveryCodes } = useAuth();
+  if (enrollmentConfirming || recoveryCodes) return null;
+  if (pathname === "/login" || pathname === "/login-new" || pathname === "/login/oidc") {
     return null;
   }
   return <RealtimeSyncBridge />;

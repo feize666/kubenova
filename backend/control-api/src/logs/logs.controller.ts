@@ -7,6 +7,7 @@ import {
   Req,
   UseGuards,
   ForbiddenException,
+  NotFoundException,
   Optional,
 } from '@nestjs/common';
 import type { Request } from 'express';
@@ -31,7 +32,17 @@ export class LogsController {
   ) {}
 
   private async assertCapability(subject: ClusterAccessSubject | undefined, clusterId: string, namespace: string) {
-    if (process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
+    let requiresGrant = process.env.KUBENOVA_AUTHZ_ENFORCE === 'true';
+    try {
+      const access = await this.clusterAccess.assertCanRead(subject, clusterId);
+      // Namespace-scoped AccessGrants must always be checked for the
+      // capability; the compatibility flag only applies to legacy bindings.
+      if (access?.source === 'access-grant') requiresGrant = true;
+    } catch (error) {
+      if (!(error instanceof ForbiddenException || error instanceof NotFoundException)) throw error;
+      requiresGrant = true;
+    }
+    if (!requiresGrant) return;
     if (!this.authorization || !this.namespaceIdentity) throw new ForbiddenException({ code: 'AUTHZ_UNAVAILABLE' });
     const namespaceUid = await this.namespaceIdentity.resolve(clusterId, namespace);
     const decision = await this.authorization.authorize({
@@ -46,7 +57,6 @@ export class LogsController {
     @Req() req: Request & { user?: { user?: ClusterAccessSubject } },
   ) {
     const clusterId = query.clusterId?.trim() || query.cluster || '';
-    await this.clusterAccess.assertCanRead(req.user?.user, clusterId);
     await this.assertCapability(req.user?.user, clusterId, query.namespace?.trim() || query.ns?.trim() || '');
     return this.logsService.query(query);
   }
@@ -54,9 +64,8 @@ export class LogsController {
   @Post('stream')
   async createStreamSession(
     @Body() body: LogsStreamBootstrapRequest,
-    @Req() req: Request & { user?: { user?: ClusterAccessSubject } },
+    @Req() req: Request & { user?: { user?: ClusterAccessSubject; authzVersion?: number } },
   ) {
-    await this.clusterAccess.assertCanRead(req.user?.user, body.clusterId);
     await this.assertCapability(req.user?.user, body.clusterId, body.namespace);
     const forwardedHost = req.headers['x-forwarded-host'];
     const forwardedProto = req.headers['x-forwarded-proto'];
@@ -80,6 +89,7 @@ export class LogsController {
 
     return this.logsService.createStreamSession(body, {
       userId: req.user?.user?.id,
+      authzVersion: req.user?.authzVersion,
       requestHost: normalizedRequestHost,
       requestProtocol:
         normalizedRequestProtocol === 'https' ||

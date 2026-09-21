@@ -31,6 +31,7 @@ import { ResponseEnvelopeInterceptor } from './common/interceptors/response-enve
 import { parseEnv } from './platform/config/env.schema';
 import { DatabaseModule } from './platform/database/database.module';
 import { AuthorizationModule } from './common/authorization.module';
+import { NativeGatewayModule } from './auth/native-gateway.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { AuthorizationModule } from './common/authorization.module';
     }),
     DatabaseModule,
     AuthorizationModule,
+    NativeGatewayModule,
     AiAssistantModule,
     AiopsModule,
     AutoscalingModule,

@@ -207,6 +207,14 @@ describe('ClustersService access-filtered listing', () => {
 });
 
 describe('ClustersService detail', () => {
+  it('does not fetch cluster-wide nodes for namespace-grant discovery', async () => {
+    const { service } = buildService();
+    (service as any).repository.findById.mockResolvedValue(BASE_RECORD);
+    const inventory = jest.spyOn(service as any, 'fetchNodeInventory').mockResolvedValue({ items: [{ name: 'private-node' }], degraded: false });
+    const detail = await Reflect.apply(service.getDetail, service, ['c-001', { includeNodes: false }]);
+    expect(detail.nodeSummary.items).toEqual([]);
+    expect(inventory).not.toHaveBeenCalled();
+  });
   it('does not expose a raw kubeconfig export method', () => {
     const { service } = buildService();
 

@@ -64,7 +64,7 @@ export interface ObservabilitySummary {
     from: string;
     to: string;
   };
-  healthScore: number;
+  healthScore: number | null;
   activeAlerts: {
     critical: number;
     warning: number;

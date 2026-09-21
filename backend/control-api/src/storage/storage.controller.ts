@@ -27,6 +27,7 @@ import type { StorageResourceRecord } from './storage.repository';
 interface ActorRequest {
   user?: {
     user?: {
+      id?: string;
       username?: string;
       role?: PlatformRole;
     };
@@ -64,14 +65,14 @@ export class StorageController {
 
   // GET /api/storage — 分页列表，支持 clusterId/namespace/kind/keyword/page/pageSize
   @Get()
-  list(@Query() query: StorageListQuery): Promise<StorageListResult> {
-    return this.storageService.list(query);
+  list(@Req() req: ActorRequest, @Query() query: StorageListQuery): Promise<StorageListResult> {
+    return this.storageService.list(query, req.user?.user ?? {});
   }
 
   // GET /api/storage/:id — 获取单个
   @Get(':id')
-  getById(@Param('id') id: string): Promise<StorageResourceRecord> {
-    return this.storageService.getById(id);
+  getById(@Req() req: ActorRequest, @Param('id') id: string): Promise<StorageResourceRecord> {
+    return this.storageService.getById(id, req.user?.user ?? {});
   }
 
   // POST /api/storage — 创建
@@ -80,7 +81,7 @@ export class StorageController {
     @Req() req: ActorRequest,
     @Body() body: CreateStorageResourceRequest,
   ): Promise<StorageMutationResponse> {
-    const actor = req.user?.user;
+    const actor = req.user?.user ?? {};
     assertWritePermission(actor);
     const result = await this.storageService.create(body, actor);
     this.triggerClusterSync(result.item.clusterId);
@@ -94,7 +95,7 @@ export class StorageController {
     @Param('id') id: string,
     @Body() body: UpdateStorageResourceRequest,
   ): Promise<StorageMutationResponse> {
-    const actor = req.user?.user;
+    const actor = req.user?.user ?? {};
     assertWritePermission(actor);
     const result = await this.storageService.update(id, body, actor);
     this.triggerClusterSync(result.item.clusterId);
@@ -108,7 +109,7 @@ export class StorageController {
     @Param('id') id: string,
     @Body() body: StorageActionRequest,
   ): Promise<StorageMutationResponse> {
-    const actor = req.user?.user;
+    const actor = req.user?.user ?? {};
     assertWritePermission(actor);
     const result = await this.storageService.applyAction(id, body, actor);
     this.triggerClusterSync(result.item.clusterId);

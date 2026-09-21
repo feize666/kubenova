@@ -94,6 +94,7 @@ type DetailIdentityRef = {
 export type ResourceDetailClusterScope = {
   clusterId: string;
   scope: 'cluster' | 'namespace';
+  namespace?: string;
 };
 
 const LIVE_NETWORK_DETAIL_KINDS = new Set([
@@ -844,6 +845,10 @@ export class ResourcesService {
     },
   };
 
+  isNamespacedKind(kind: string): boolean {
+    return this.resolveKind(kind).namespaced;
+  }
+
   async getYaml(identity: ResourceIdentity) {
     const meta = this.resolveKind(identity.kind);
     const namespace = this.resolveNamespace(meta, identity.namespace);
@@ -1518,6 +1523,11 @@ export class ResourcesService {
       namespace,
       name,
     };
+  }
+
+  async resolveDynamicReadScope(identity: DynamicResourceIdentity): Promise<{ namespace: string; kind: string }> {
+    const { capability, namespace } = await this.resolveDynamicIdentity(identity);
+    return { namespace, kind: capability.kind };
   }
 
   async getDynamicResourceDetail(identity: DynamicResourceIdentity): Promise<{
@@ -2195,7 +2205,7 @@ export class ResourcesService {
     const clusterFilter = accessibleClusterIds
       ? { clusterId: { in: [...accessibleClusterIds] } }
       : {};
-    let row: { clusterId: string } | null = null;
+    let row: { clusterId: string; namespace?: string } | null = null;
     if (meta.detailSource === 'workload') {
       row = await this.prisma.workloadRecord.findFirst({
         where: {
@@ -2204,7 +2214,7 @@ export class ResourcesService {
           kind: meta.kind,
           state: { not: 'deleted' },
         },
-        select: { clusterId: true },
+        select: { clusterId: true, namespace: true },
       });
     } else if (meta.detailSource === 'network') {
       row = await this.prisma.networkResource.findFirst({
@@ -2246,7 +2256,7 @@ export class ResourcesService {
     if (!row) {
       throw this.detailScopeNotFound();
     }
-    return { clusterId: row.clusterId, scope };
+    return { clusterId: row.clusterId, scope, ...(row.namespace ? { namespace: row.namespace } : {}) };
   }
 
   private checkedDetailScope(

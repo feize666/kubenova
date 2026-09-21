@@ -67,6 +67,11 @@ export class ApiError extends Error {
 let authExpiredBroadcasted = false;
 let authExpiryController = new AbortController();
 
+export function abortPendingApiRequests() {
+  authExpiryController.abort();
+  resetAuthExpiryState();
+}
+
 export function resetAuthExpiryState() {
   authExpiredBroadcasted = false;
   authExpiryController = new AbortController();

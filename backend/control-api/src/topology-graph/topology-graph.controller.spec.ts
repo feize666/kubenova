@@ -16,7 +16,7 @@ describe('TopologyGraphController', () => {
     const controller = new TopologyGraphController(service);
 
     await expect(controller.getGraph(' c-1 ')).resolves.toBe(response);
-    expect(getGraph).toHaveBeenCalledWith({ clusterId: 'c-1' });
+    expect(getGraph).toHaveBeenCalledWith({ clusterId: 'c-1' }, {});
   });
 
   it('delegates the normalized single-cluster V2 query', async () => {
@@ -36,6 +36,6 @@ describe('TopologyGraphController', () => {
       clusterId: 'c-1',
       namespace: 'app',
       sources: ['workloads', 'network'],
-    });
+    }, {});
   });
 });

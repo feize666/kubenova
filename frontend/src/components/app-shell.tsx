@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
 import { getConsoleSurface } from "@/lib/console-routing";
+import { useAuth } from "@/components/auth-context";
+import { MfaRecovery } from "@/components/mfa-recovery";
 
 const PortalShell = dynamic(
   () => import("@/components/shell-layout").then((mod) => mod.PortalShell),
@@ -24,6 +26,9 @@ const ClusterWorkspaceShell = dynamic(
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { recoveryCodes, enrollmentConfirming } = useAuth();
+  if (recoveryCodes) return <MfaRecovery />;
+  if (enrollmentConfirming) return <BootstrapScreen description="正在启用多因素验证..." />;
   const surface = getConsoleSurface(pathname);
   if (surface === "public") {
     return <>{children}</>;

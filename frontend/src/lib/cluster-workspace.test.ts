@@ -9,7 +9,6 @@ test("日志中心为独立一级入口，保留 Pod 日志和终端上下文路
   assert.equal(isSupportedClusterWorkspaceResource("terminal"), true);
 });
 
-// @ts-expect-error -- Node 24 native TypeScript tests require an explicit extension.
 import {
   buildClusterResourceHref,
   buildClusterWorkspaceHref,
@@ -24,6 +23,7 @@ import {
   resolveWorkspaceResourceHref,
   scopeWorkspaceClusterFormData,
   scopeWorkspaceClusterValues,
+// @ts-expect-error -- Node 24 native TypeScript tests require an explicit extension.
 } from "./cluster-workspace.ts";
 
 test("集群工作区菜单同一时间只展开一个资源域", () => {

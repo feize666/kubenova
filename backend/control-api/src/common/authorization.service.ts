@@ -36,7 +36,7 @@ type Grant = {
 
 type AuthorizationPrisma = {
   accessGrant: { findMany(args: unknown): Promise<Grant[]> };
-  groupMembership: { findMany(args: unknown): Promise<Array<{ groupId: string }>> };
+  groupMembership: { findMany(args: unknown): Promise<Array<{ groupId: string; expiresAt: Date | null }>> };
 };
 
 const roles = new Set<AuthorizationRole>(['cluster-admin', 'operator', 'viewer']);
@@ -69,14 +69,19 @@ export class AuthorizationService {
     if (!userId?.trim()) return [];
     const memberships = await (this.prisma as unknown as AuthorizationPrisma).groupMembership.findMany({
       where: { userId, state: 'active', group: { active: true }, validFrom: { lte: now }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
-      select: { groupId: true },
+      select: { groupId: true, expiresAt: true },
     });
     const groupIds = memberships.map(item => item.groupId);
     const grants = await (this.prisma as unknown as AuthorizationPrisma).accessGrant.findMany({
       where: { clusterId, state: 'active', revokedAt: null, cluster: { deletedAt: null, status: { not: 'deleted' } }, OR: [{ userId }, { groupId: { in: groupIds } }] },
       include: { namespaces: { select: { namespaceUid: true, namespaceName: true } }, capabilities: { select: { capability: true } } },
     });
-    return grants.filter(grant => {
+    return grants.map(grant => {
+      const membershipExpiry = grant.userId === userId ? null : memberships.find(item => item.groupId === grant.groupId)?.expiresAt;
+      // A stream inherited through a group must end when that membership ends.
+      return membershipExpiry && (!grant.expiresAt || membershipExpiry < grant.expiresAt)
+        ? { ...grant, expiresAt: membershipExpiry } : grant;
+    }).filter(grant => {
       if (grant.userId !== userId && !groupIds.includes(grant.groupId ?? '')) return false;
       if (grant.state !== 'active' || (clusterId && grant.clusterId !== clusterId)) return false;
       if (!roles.has(grant.role as AuthorizationRole)) return false;

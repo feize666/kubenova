@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -12,6 +13,10 @@ import {
   ClusterAccessSubject,
 } from '../common/cluster-access.service';
 import { PrismaService } from '../platform/database/prisma.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
+import { buildCollectorConfig, collectorCaSecretSchema } from './collector-config';
+import { buildCollectorManifests } from './collector-manifests';
 
 const querySchema = z
   .object({
@@ -33,6 +38,8 @@ const querySchema = z
     from: z.string().datetime({ offset: true }),
     to: z.string().datetime({ offset: true }),
     keyword: z.string().max(512).optional(),
+    pod: z.string().min(1).max(253).regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/).optional(),
+    container: z.string().min(1).max(63).regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/).optional(),
     limit: z.number().int().min(1).max(200).default(100),
   })
   .strict()
@@ -61,6 +68,7 @@ const metadataSchema = z
       .regex(/^[a-z0-9][a-z0-9_-]*\*?$/),
     clusterField: field.default('kubenova.cluster_id'),
     namespaceField: field.default('kubernetes.namespace_name'),
+    namespaceUidField: field.optional(),
     timestampField: field.default('@timestamp'),
     messageField: field.default('message'),
   })
@@ -98,18 +106,89 @@ export class LogCenterService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly access: ClusterAccessService,
+    private readonly authorization: AuthorizationService,
+    private readonly namespaceIdentity: NamespaceIdentityService,
   ) {}
+
+  async previewCollection(actor: ClusterAccessSubject | undefined, input: unknown) {
+    if (!actor?.id) throw new UnauthorizedException('Authentication required');
+    this.access.assertPlatformAdmin(actor);
+    const shape = querySchema.innerType().shape;
+    const parsed = z.object({
+      clusterId: shape.clusterId, dataSourceId: shape.dataSourceId,
+      retentionDays: z.number().int().min(1).max(365).default(14),
+      caSecretName: collectorCaSecretSchema.optional(),
+    }).strict().safeParse(input);
+    if (!parsed.success) throw new BadRequestException('Invalid collection preview');
+    const { clusterId, dataSourceId, retentionDays, caSecretName } = parsed.data;
+    await this.access.assertCanRead(actor, clusterId);
+    const source = await this.prisma.monitoringDataSource.findFirst({
+      where: { id: dataSourceId, clusterId, kind: 'elasticsearch', enabled: true },
+      select: { id: true, clusterId: true, kind: true, enabled: true, endpoint: true },
+    });
+    if (!source || source.id !== dataSourceId || source.clusterId !== clusterId ||
+        source.kind !== 'elasticsearch' || !source.enabled) {
+      throw new NotFoundException('Log source not found or unavailable');
+    }
+    try {
+      const config = { clusterId, endpoint: source.endpoint, retentionDays, caSecretName };
+      return { ...buildCollectorConfig(config), manifests: buildCollectorManifests(config) };
+    } catch {
+      throw new ServiceUnavailableException('Collector requires a valid HTTPS log source');
+    }
+  }
+
+  async sources(actor: ClusterAccessSubject | undefined, clusterId: unknown) {
+    if (!actor?.id) throw new UnauthorizedException('Authentication required');
+    const parsed = querySchema.innerType().shape.clusterId.safeParse(clusterId);
+    if (!parsed.success) throw new BadRequestException('Invalid cluster ID');
+    if (this.access.isPlatformAdmin(actor)) {
+      await this.access.assertCanRead(actor, parsed.data);
+    } else {
+      if (!this.access.isKnownPlatformRole(actor)) throw new ForbiddenException('Log access denied');
+      const grants = await this.authorization.listEffectiveGrants(actor.id, undefined, parsed.data);
+      if (!grants.some(grant => grant.capabilities.some(item => item.capability === 'logs'))) {
+        throw new ForbiddenException('Log access denied');
+      }
+    }
+    const sources = await this.prisma.monitoringDataSource.findMany({
+      where: { clusterId: parsed.data, kind: 'elasticsearch', enabled: true },
+      select: { id: true, name: true, clusterId: true, kind: true, enabled: true },
+      orderBy: { name: 'asc' },
+    });
+    return { items: sources.map(({ id, name, clusterId, kind, enabled }) => ({ id, name, clusterId, kind, enabled })) };
+  }
 
   async query(
     actor: ClusterAccessSubject | undefined,
     input: unknown,
   ): Promise<{ rows: LogQueryRow[] }> {
     if (!actor?.id) throw new UnauthorizedException('Authentication required');
-    this.access.assertPlatformAdmin(actor);
     const parsed = querySchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException('Invalid log query');
     const query = parsed.data;
-    await this.access.assertCanRead(actor, query.clusterId);
+    let namespaceUid: string | undefined;
+    if (this.access.isPlatformAdmin(actor)) {
+      await this.access.assertCanRead(actor, query.clusterId);
+    } else {
+      if (!this.access.isKnownPlatformRole(actor) || !query.namespace) {
+        throw new ForbiddenException('Explicit namespace and log grant required');
+      }
+      const grants = await this.authorization.listEffectiveGrants(actor.id, undefined, query.clusterId);
+      if (!grants.some(grant =>
+        grant.namespaces.some(scope => scope.namespaceName === query.namespace) &&
+        grant.capabilities.some(item => item.capability === 'logs'),
+      )) throw new ForbiddenException('Log access denied');
+      namespaceUid = await this.namespaceIdentity.resolve(query.clusterId, query.namespace);
+      const decision = await this.authorization.authorize({
+        userId: actor.id,
+        clusterId: query.clusterId,
+        namespaceUid,
+        capability: 'logs',
+        mutation: false,
+      });
+      if (!decision.allowed) throw new ForbiddenException('Log access denied');
+    }
     const source = await this.prisma.monitoringDataSource.findFirst({
       where: {
         id: query.dataSourceId,
@@ -144,6 +223,9 @@ export class LogCenterService {
       );
     }
     const config = metadata.data;
+    if (namespaceUid && !config.namespaceUidField) {
+      throw new ServiceUnavailableException('Log source namespace identity mapping required');
+    }
     let endpoint: URL;
     try {
       endpoint = new URL(source.endpoint);
@@ -174,6 +256,12 @@ export class LogCenterService {
     ];
     if (query.namespace)
       filters.push({ term: { [config.namespaceField]: query.namespace } });
+    if (query.pod)
+      filters.push({ term: { 'kubernetes.pod_name': query.pod } });
+    if (query.container)
+      filters.push({ term: { 'kubernetes.container_name': query.container } });
+    if (namespaceUid && config.namespaceUidField)
+      filters.push({ term: { [config.namespaceUidField]: namespaceUid } });
     const body = {
       size: query.limit,
       track_total_hits: false,

@@ -1,4 +1,7 @@
 import { BackupStatusService } from './backup-status.service';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 describe('BackupStatusService', () => {
   const names = [
@@ -42,5 +45,34 @@ describe('BackupStatusService', () => {
     const status = await new BackupStatusService().getStatus();
     expect(status.lastRun).toEqual({ status: 'unknown', startedAt: null, completedAt: null });
     expect(status.recovery).toEqual({ webRestoreEnabled: false, rehearsalRequired: true });
+  });
+
+  it('requires the S3-compatible Restic scheme even for OSS', async () => {
+    process.env.RESTIC_PASSWORD_FILE = '/configured/password';
+    process.env.DATABASE_URL = 'configured';
+    process.env.KEYCLOAK_DATABASE_URL = 'configured';
+    process.env.BACKUP_CONFIG_FILES = '["/configured/env"]';
+    process.env.RESTIC_REPOSITORY = 'oss:https://oss-cn-beijing.aliyuncs.com/bucket';
+    expect((await new BackupStatusService().getStatus()).configuration.ready).toBe(false);
+    process.env.RESTIC_REPOSITORY = 's3:https://oss-cn-beijing.aliyuncs.com/bucket';
+    expect((await new BackupStatusService().getStatus()).repository.type).toBe('oss');
+    expect((await new BackupStatusService().getStatus()).configuration.ready).toBe(true);
+  });
+
+  it('reads published outcomes without returning extra persisted fields', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'backup-status-'));
+    try {
+      process.env.BACKUP_STATUS_FILE = join(directory, 'status.json');
+      for (const status of ['running', 'success', 'failed']) {
+        const expected = { status, startedAt: '2026-09-22T00:00:00.000Z',
+          completedAt: status === 'running' ? null : '2026-09-22T00:01:00.000Z' };
+        await writeFile(process.env.BACKUP_STATUS_FILE, JSON.stringify({ ...expected, credentials: 'must-not-return' }));
+        const result = await new BackupStatusService().getStatus();
+        expect(result.lastRun).toEqual(expected);
+        expect(JSON.stringify(result)).not.toContain('must-not-return');
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

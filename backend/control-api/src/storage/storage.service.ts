@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,7 +12,10 @@ import { ClusterEventSyncService } from '../clusters/cluster-event-sync.service'
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
 import { K8sClientService } from '../clusters/k8s-client.service';
-import { appendAudit, type PlatformRole } from '../common/governance';
+import { appendAudit, assertWritePermission, type PlatformRole } from '../common/governance';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
 import {
   StorageRepository,
   type StorageCreateData,
@@ -73,6 +77,8 @@ export interface StorageActionRequest {
   reason?: string;
 }
 
+type StorageActor = { id?: string; username?: string; role?: PlatformRole };
+
 @Injectable()
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
@@ -85,16 +91,69 @@ export class StorageService {
     private readonly clusterSyncService: ClusterSyncService,
     private readonly clusterHealthService: ClusterHealthService,
     private readonly clusterEventSyncService: ClusterEventSyncService,
+    private readonly clusterAccess?: ClusterAccessService,
+    private readonly authorization?: AuthorizationService,
+    private readonly namespaceIdentity?: NamespaceIdentityService,
   ) {}
 
-  async list(query: StorageListQuery): Promise<StorageListResult> {
+  private async scopes(actor?: StorageActor, mutation = false): Promise<StorageListParams['scopes']> {
+    // Trusted internal callers omit actor; public controllers always supply an object.
+    if (actor === undefined) return undefined;
+    if (!actor.id?.trim() || !this.clusterAccess || !this.authorization || !this.namespaceIdentity) throw new ForbiddenException();
+    if (!this.clusterAccess.isKnownPlatformRole(actor)) throw new ForbiddenException();
+    if (mutation) assertWritePermission(actor);
+    if (this.clusterAccess.isPlatformAdmin(actor)) return undefined;
+    const scopes: NonNullable<StorageListParams['scopes']> = [];
+    for (const clusterId of await this.clusterAccess.listAccessibleClusterIds(actor) ?? []) {
+      if (mutation) {
+        try { await this.clusterAccess.assertCanMutate(actor, clusterId); }
+        catch (error) {
+          if (error instanceof ForbiddenException || error instanceof NotFoundException) continue;
+          throw error;
+        }
+      }
+      scopes.push({ clusterId });
+    }
+    const checked = new Map<string, string | null>();
+    for (const grant of await this.authorization.listEffectiveGrants(actor.id)) {
+      if (mutation && grant.role === 'viewer') continue;
+      for (const scope of grant.namespaces) {
+        if (!scope.namespaceName) continue;
+        const key = `${grant.clusterId}/${scope.namespaceName}`;
+        if (!checked.has(key)) {
+          try { checked.set(key, await this.namespaceIdentity.resolve(grant.clusterId, scope.namespaceName)); }
+          catch { checked.set(key, null); }
+        }
+        if (checked.get(key) === scope.namespaceUid) scopes.push({ clusterId: grant.clusterId, namespace: scope.namespaceName });
+      }
+    }
+    return scopes;
+  }
+
+  private async assertScope(actor: StorageActor | undefined, target: { clusterId: string; namespace?: string | null; kind: string }, mutation = false): Promise<void> {
+    const scopes = await this.scopes(actor, mutation);
+    if (scopes && !scopes.some(scope => scope.clusterId === target.clusterId && (!scope.namespace || (target.kind === 'PVC' && scope.namespace === target.namespace)))) throw new ForbiddenException('存储资源不在授权范围内');
+  }
+
+  async list(query: StorageListQuery, actor?: StorageActor): Promise<StorageListResult> {
     const clusterId = query.clusterId?.trim();
+    const namespace = query.namespace?.trim();
+    const kind = query.kind?.trim();
+    const scopes = (await this.scopes(actor))?.filter(scope =>
+      (!clusterId || scope.clusterId === clusterId) &&
+      (!namespace || !scope.namespace || scope.namespace === namespace) &&
+      (!kind || kind === 'PVC' || !scope.namespace));
+    if (scopes?.length === 0) {
+      if (clusterId || namespace) throw new ForbiddenException('存储资源不在授权范围内');
+      return { items: [], total: 0, page: this.parsePositiveInt(query.page, 1), pageSize: this.parsePositiveInt(query.pageSize, 20), timestamp: new Date().toISOString() };
+    }
     let readableClusterIds: string[] | undefined;
     if (clusterId) {
       await this.clusterHealthService.assertClusterOnlineForRead(clusterId);
     } else {
       readableClusterIds =
         await this.clusterHealthService.listReadableClusterIdsForResourceRead();
+      if (scopes) readableClusterIds = readableClusterIds.filter(id => scopes.some(scope => scope.clusterId === id));
       if (readableClusterIds.length === 0) {
         return {
           items: [],
@@ -112,8 +171,9 @@ export class StorageService {
     const params: StorageListParams = {
       clusterId,
       clusterIds: readableClusterIds,
-      namespace: query.namespace,
-      kind: query.kind,
+      scopes,
+      namespace,
+      kind,
       keyword: query.keyword,
       page: this.parsePositiveInt(query.page, 1),
       pageSize: this.parsePositiveInt(query.pageSize, 20),
@@ -213,17 +273,18 @@ export class StorageService {
     this.storageSyncAt.set(clusterId, now);
   }
 
-  async getById(id: string): Promise<StorageResourceRecord> {
+  async getById(id: string, actor?: StorageActor): Promise<StorageResourceRecord> {
     const item = await this.storageRepository.findById(id);
     if (!item) {
       throw new NotFoundException(`StorageResource ${id} 不存在`);
     }
+    await this.assertScope(actor, item);
     return item;
   }
 
   async create(
     body: CreateStorageResourceRequest,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: StorageActor,
   ): Promise<StorageMutationResponse> {
     const clusterId = body.clusterId?.trim();
     const name = body.name?.trim();
@@ -237,6 +298,7 @@ export class StorageService {
     if (body.kind === 'PVC' && !body.namespace?.trim()) {
       throw new BadRequestException('PVC 资源必须指定 namespace');
     }
+    await this.assertScope(actor, { clusterId, namespace: body.namespace?.trim(), kind: body.kind }, true);
 
     const data: StorageCreateData = {
       clusterId,
@@ -251,7 +313,7 @@ export class StorageService {
       spec: body.spec as Prisma.InputJsonValue,
     };
 
-    await this.createStorageResourceInCluster(body);
+    await this.createStorageResourceInCluster({ ...body, clusterId, name, namespace: body.namespace?.trim() });
 
     const item = await this.storageRepository.create(data);
     this.audit(actor, 'create', item.id, 'success');
@@ -266,11 +328,15 @@ export class StorageService {
   async update(
     id: string,
     body: UpdateStorageResourceRequest,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: StorageActor,
   ): Promise<StorageMutationResponse> {
     const existing = await this.storageRepository.findById(id);
     if (!existing) {
       throw new NotFoundException(`StorageResource ${id} 不存在`);
+    }
+    await this.assertScope(actor, existing, true);
+    if ('namespace' in body && (body.namespace?.trim() ?? null) !== existing.namespace) {
+      throw new BadRequestException('资源 namespace 不可变更');
     }
     if (existing.state === 'deleted') {
       throw new BadRequestException('已删除的资源不可编辑');
@@ -314,7 +380,7 @@ export class StorageService {
   async applyAction(
     id: string,
     body: StorageActionRequest,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: StorageActor,
   ): Promise<StorageMutationResponse> {
     const existing = await this.storageRepository.findById(id);
     if (!existing) {
@@ -322,6 +388,7 @@ export class StorageService {
     }
 
     const { action, reason } = body;
+    await this.assertScope(actor, existing, true);
 
     if (action === 'delete') {
       if (existing.state === 'deleted') {

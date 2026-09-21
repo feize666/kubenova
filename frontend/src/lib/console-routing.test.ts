@@ -12,7 +12,7 @@ test("管理员的平台门户只显示五个一级入口", () => {
     [
       { label: "概览", path: "/" },
       { label: "集群", path: "/clusters" },
-      { label: "授权管理", path: "/authorization" },
+      { label: "访问控制", path: "/authorization" },
       { label: "应用中心", path: "/applications" },
       { label: "系统设置", path: "/settings" },
     ],
@@ -41,7 +41,7 @@ test("登录成功后的默认入口是平台概览", () => {
 
 test("平台规范路由返回稳定的页面标题", () => {
   assert.equal(getPlatformTitle("/"), "概览");
-  assert.equal(getPlatformTitle("/authorization"), "授权管理");
+  assert.equal(getPlatformTitle("/authorization"), "访问控制");
   assert.equal(getPlatformTitle("/applications"), "应用中心");
   assert.equal(getPlatformTitle("/settings/update"), "系统设置");
 });

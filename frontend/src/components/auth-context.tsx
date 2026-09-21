@@ -1,7 +1,11 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { AUTH_EXPIRED_EVENT, CONTROL_API_BASE, resetAuthExpiryState } from "@/lib/api/client";
+import { AUTH_EXPIRED_EVENT, CONTROL_API_BASE, resetAuthExpiryState, abortPendingApiRequests } from "@/lib/api/client";
+import { useQueryClient } from "@tanstack/react-query";
+
+export const MFA_OIDC_PURPOSE_KEY = "kubenova_oidc_purpose";
+type Enrollment = { token: string; secret: string; expiresIn: number; deadline: number };
 
 type LoginPayload = {
   username: string;
@@ -16,12 +20,25 @@ type AuthUser = {
 };
 
 type AuthContextValue = {
+  enrollment: Enrollment | null;
+  enrollmentError: string;
+  enrollmentConfirming: boolean;
+  recoveryCodes: string[] | null;
+  beginEnrollment: (password: string) => Promise<void>;
+  completeEnrollmentOidc: (callbackUrl: string) => Promise<void>;
+  confirmEnrollment: (code: string) => Promise<void>;
+  cancelEnrollment: () => void;
+  finishRecovery: () => void;
   isAuthenticated: boolean;
   isInitializing: boolean;
   username: string;
   role: string;
   lastRequestId: string;
-  login: (payload: LoginPayload) => Promise<{ ok: boolean; message: string }>;
+  login: (payload: LoginPayload) => Promise<{ ok: boolean; message: string; mfaRequired?: boolean }>;
+  completeOidc: (callbackUrl: string) => Promise<boolean>;
+  mfaPending: boolean;
+  cancelMfa: () => void;
+  verifyMfa: (code: string, method: "totp" | "recovery") => Promise<{ ok: boolean; message: string }>;
   logout: () => Promise<void>;
   accessToken: string;
 };
@@ -40,6 +57,8 @@ type RefreshResponse = {
   user: AuthUser;
   expiresAt?: string;
 };
+
+type MfaResponse = { mfaRequired: true; challengeToken: string; expiresIn: number };
 
 type RefreshAttempt = {
   snapshot: AuthSnapshot | null;
@@ -378,6 +397,12 @@ export function useAuth() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
+  const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
+  const [enrollmentError, setEnrollmentError] = useState("");
+  const [enrollmentConfirming, setEnrollmentConfirming] = useState(false);
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  const recoveryGateRef = useRef(false);
   const [accessToken, setAccessToken] = useState("");
   const [refreshToken, setRefreshToken] = useState("");
   const [username, setUsername] = useState("");
@@ -385,6 +410,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [expiresAt, setExpiresAt] = useState("");
   const [lastRequestId, setLastRequestId] = useState("");
   const [isInitializing, setIsInitializing] = useState(true);
+  const [mfaPending, setMfaPending] = useState(false);
+  const mfaRef = useRef<{ token: string; deadline: number; remember: boolean } | null>(null);
+  const cancelMfa = () => { mfaRef.current = null; setMfaPending(false); };
+  const beginMfa = (data: MfaResponse, remember: boolean) => {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(data.challengeToken) || !Number.isInteger(data.expiresIn) || data.expiresIn <= 0 || data.expiresIn > 300) {
+      throw new Error("多因素验证响应无效，请重新登录");
+    }
+    mfaRef.current = { token: data.challengeToken, deadline: Date.now() + data.expiresIn * 1000, remember };
+    setMfaPending(true);
+  };
   const bootstrappedRef = useRef(false);
   const authGenerationRef = useRef(0);
   const refreshInFlightRef = useRef<Promise<RefreshAttempt> | null>(null);
@@ -406,6 +441,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setRole,
       setExpiresAt,
     });
+    setEnrollment(null);
   };
 
   const refreshSession = useCallback(
@@ -413,6 +449,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       currentRefreshToken: string,
       expectedGeneration = authGenerationRef.current,
     ): Promise<RefreshAttempt> => {
+      if (recoveryGateRef.current) return { snapshot: null, unauthorized: false };
       if (!currentRefreshToken) {
         return { snapshot: null, unauthorized: true };
       }
@@ -604,6 +641,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       storageSyncTimerRef.current = window.setTimeout(() => {
         storageSyncTimerRef.current = null;
+        if (recoveryGateRef.current) return;
         const snapshot = readAuthSnapshot();
         markAuthGeneration();
         authExpiredHandled = false;
@@ -631,6 +669,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const handleAuthExpired = (event: Event) => {
+      if (recoveryGateRef.current) return;
       const detail = (event as CustomEvent<{ message?: string }>).detail;
       if (authExpiredHandled || !detail?.message) {
         return;
@@ -657,23 +696,132 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<AuthContextValue>(
     () => ({
+      enrollment,
+      enrollmentError,
+      enrollmentConfirming,
+      recoveryCodes,
+      cancelEnrollment: () => { setEnrollment(null); setEnrollmentError(""); },
+      finishRecovery: () => { setRecoveryCodes(null); recoveryGateRef.current = false; },
+      beginEnrollment: async (password) => {
+        const generation = authGenerationRef.current;
+        setEnrollment(null);
+        setEnrollmentError("");
+        const result = await requestAuthJson<Omit<Enrollment, "deadline">>("mfa/enrollment", {
+          method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ password }),
+        });
+        if (generation !== authGenerationRef.current || !readAuthSnapshot()?.accessToken) throw new Error("Session changed");
+        if (!/^[A-Za-z0-9_-]{43}$/.test(result.data.token) || !/^[A-Z2-7]+$/.test(result.data.secret) || result.data.expiresIn <= 0 || result.data.expiresIn > 300) throw new Error("Invalid enrollment");
+        setEnrollment({ ...result.data, deadline: Date.now() + result.data.expiresIn * 1000 });
+      },
+      completeEnrollmentOidc: async (callbackUrl) => {
+        if (!accessToken) throw new Error("Session required");
+        const generation = authGenerationRef.current;
+        setEnrollment(null);
+        setEnrollmentError("");
+        const result = await requestJson<Omit<Enrollment, "deadline">>("/api/v1/auth/oidc/enrollment/exchange", {
+          method: "POST", cache: "no-store", credentials: "same-origin", headers: { Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ callbackUrl }),
+        });
+        if (generation !== authGenerationRef.current || !readAuthSnapshot()?.accessToken) throw new Error("Session changed");
+        if (!/^[A-Za-z0-9_-]{43}$/.test(result.data.token) || !/^[A-Z2-7]+$/.test(result.data.secret) || result.data.expiresIn <= 0 || result.data.expiresIn > 300) throw new Error("Invalid enrollment");
+        setEnrollment({ ...result.data, deadline: Date.now() + result.data.expiresIn * 1000 });
+      },
+      confirmEnrollment: async (code) => {
+        if (recoveryGateRef.current) return;
+        const pending = enrollment;
+        setEnrollment(null);
+        if (!pending || Date.now() >= pending.deadline) { setEnrollmentError("验证已过期，请重新验证身份。"); return; }
+        // Unmount authenticated consumers before the server revokes every session.
+        recoveryGateRef.current = true;
+        markAuthGeneration();
+        setEnrollmentConfirming(true);
+        abortPendingApiRequests();
+        await queryClient.cancelQueries();
+        try {
+          const result = await requestAuthJson<{ recoveryCodes: string[] }>("mfa/enrollment/confirm", {
+            method: "POST", cache: "no-store", headers: { Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ token: pending.token, code }),
+          });
+          markAuthGeneration();
+          applyClearAuthState();
+          queryClient.clear();
+          if (!Array.isArray(result.data.recoveryCodes) || !result.data.recoveryCodes.length || result.data.recoveryCodes.some(value => typeof value !== "string")) throw new Error("Invalid recovery result");
+          setRecoveryCodes(result.data.recoveryCodes);
+        } catch {
+          recoveryGateRef.current = false;
+          setEnrollmentError("启用失败或请求已失效，请重新验证身份。若已启用但未收到恢复码，请联系管理员。");
+        } finally { setEnrollmentConfirming(false); }
+      },
       isAuthenticated: Boolean(accessToken),
       isInitializing,
       username,
       role,
       lastRequestId,
       accessToken,
-      login: async ({ username: inputUser, password, remember }) => {
+      mfaPending,
+      cancelMfa,
+      verifyMfa: async (code, method) => {
+        const challenge = mfaRef.current;
+        cancelMfa();
+        if (!challenge || Date.now() >= challenge.deadline) return { ok: false, message: "验证已过期，请重新登录" };
         try {
-          const payload = await requestAuthJson<{
-            accessToken: string;
-            refreshToken: string;
-            expiresAt?: string;
-            user: AuthUser;
-          }>("login", {
+          const payload = await requestAuthJson<RefreshResponse>("mfa/verify", {
+            method: "POST", body: JSON.stringify({ challengeToken: challenge.token, code, method }),
+          });
+          const data = payload.data;
+          if (!data?.accessToken || !data?.refreshToken || !data?.user?.username) throw new Error("验证响应无效，请重新登录");
+          const snapshot: AuthSnapshot = { accessToken: data.accessToken, refreshToken: data.refreshToken, username: data.user.username, role: normalizeRole(data.user.role), expiresAt: data.expiresAt };
+          markAuthGeneration();
+          authExpiredHandled = false;
+          resetAuthExpiryState();
+          persistAuth(snapshot, challenge.remember);
+          setAccessToken(snapshot.accessToken);
+          setRefreshToken(snapshot.refreshToken);
+          setUsername(snapshot.username);
+          setRole(snapshot.role);
+          setExpiresAt(snapshot.expiresAt ?? "");
+          return { ok: true, message: "登录成功" };
+        } catch {
+          return { ok: false, message: "验证失败或已失效，请重新登录" };
+        }
+      },
+      completeOidc: async (callbackUrl: string) => {
+        cancelMfa();
+        const payload = await requestJson<RefreshResponse | MfaResponse>("/api/v1/auth/oidc/exchange", {
+          method: "POST", credentials: "same-origin", body: JSON.stringify({ callbackUrl }),
+        });
+        if (payload.data && "mfaRequired" in payload.data) {
+          beginMfa(payload.data, false);
+          return false;
+        }
+        if (!payload.data?.accessToken || !payload.data?.refreshToken || !payload.data?.user?.username) {
+          throw new Error("单点登录响应无效");
+        }
+        const snapshot: AuthSnapshot = {
+          accessToken: payload.data.accessToken, refreshToken: payload.data.refreshToken,
+          username: payload.data.user.username, role: normalizeRole(payload.data.user.role), expiresAt: payload.data.expiresAt,
+        };
+        markAuthGeneration();
+        authExpiredHandled = false;
+        resetAuthExpiryState();
+        persistAuth(snapshot, false);
+        setAccessToken(snapshot.accessToken);
+        setRefreshToken(snapshot.refreshToken);
+        setUsername(snapshot.username);
+        setRole(snapshot.role);
+        setExpiresAt(snapshot.expiresAt ?? "");
+        return true;
+      },
+      login: async ({ username: inputUser, password, remember }) => {
+        cancelMfa();
+        try {
+          const payload = await requestAuthJson<RefreshResponse | MfaResponse>("login", {
             method: "POST",
             body: JSON.stringify({ username: inputUser.trim(), password }),
           });
+
+          if (payload.data && "mfaRequired" in payload.data) {
+            beginMfa(payload.data, remember);
+            return { ok: false, mfaRequired: true, message: "请完成多因素验证" };
+          }
 
           if (!payload.data?.accessToken || !payload.data?.refreshToken || !payload.data?.user?.username) {
             throw new AuthApiError(
@@ -725,6 +873,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       },
       logout: async () => {
+        cancelMfa();
         try {
           if (accessToken) {
             const result = await requestAuthJson<{ message: string }>("logout", {
@@ -745,7 +894,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       },
     }),
-    [accessToken, isInitializing, lastRequestId, role, username],
+    [accessToken, isInitializing, lastRequestId, role, username, mfaPending, enrollment, enrollmentError, enrollmentConfirming, recoveryCodes, queryClient],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

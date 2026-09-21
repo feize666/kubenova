@@ -35,6 +35,8 @@ import {
 } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
+import { NotificationHistory } from "@/components/notification-history";
+import { AlertReceiverConfiguration } from "@/components/alert-receiver-configuration";
 import { getClusterIdFromPathname } from "@/lib/cluster-workspace";
 import {
   OBSERVABILITY_KINDS,
@@ -99,6 +101,11 @@ function statusTag(status: ObservabilityDataSource["status"]) {
 export function ObservabilityConfiguration() {
   const pathname = usePathname();
   const clusterId = getClusterIdFromPathname(pathname);
+  return <ScopedObservabilityConfiguration key={clusterId || "platform"} clusterId={clusterId} />;
+}
+
+function ScopedObservabilityConfiguration({ clusterId }: { clusterId: string | null }) {
+  const pathname = usePathname();
   const { accessToken, isInitializing, role } = useAuth();
   const canWrite = role === "admin" || role === "platform-admin";
   const [messageApi, contextHolder] = message.useMessage();
@@ -106,6 +113,7 @@ export function ObservabilityConfiguration() {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [form] = Form.useForm();
   const sourceKind = Form.useWatch("kind", form);
+  const notificationChannel = Form.useWatch("channel", form);
   const queryClient = useQueryClient();
   const enabled = !isInitializing && Boolean(accessToken);
   const sourcesQuery = useQuery({
@@ -123,9 +131,9 @@ export function ObservabilityConfiguration() {
     enabled,
   });
   const notificationsQuery = useQuery({
-    queryKey: ["observability", "config", "notifications", accessToken],
-    queryFn: () => listNotificationTemplates(accessToken || undefined),
-    enabled,
+    queryKey: ["observability", "config", "notifications", clusterId, accessToken],
+    queryFn: () => listNotificationTemplates(accessToken || undefined, clusterId || undefined),
+    enabled: enabled && canWrite,
   });
   const catalogQuery = useQuery({
     queryKey: ["observability", "config", "catalog", accessToken],
@@ -202,9 +210,10 @@ export function ObservabilityConfiguration() {
             editor.record.id,
             values as unknown as Partial<NotificationTemplateInput>,
             accessToken || undefined,
+            clusterId || undefined,
           )
         : createNotificationTemplate(
-            values as unknown as NotificationTemplateInput,
+            { ...values, clusterId: clusterId || undefined } as unknown as NotificationTemplateInput,
             accessToken || undefined,
           );
     },
@@ -229,14 +238,14 @@ export function ObservabilityConfiguration() {
         if (type === "alert")
           await deleteAlertTemplate(id, accessToken || undefined);
         if (type === "notification")
-          await deleteNotificationTemplate(id, accessToken || undefined);
+          await deleteNotificationTemplate(id, accessToken || undefined, clusterId || undefined);
         await invalidate();
         messageApi.success("配置已删除");
       } catch (error) {
         messageApi.error(error instanceof Error ? error.message : "删除失败");
       }
     },
-    [accessToken, canWrite, invalidate, messageApi],
+    [accessToken, canWrite, clusterId, invalidate, messageApi],
   );
   const refetchSources = sourcesQuery.refetch;
   const testSource = useCallback(
@@ -653,7 +662,7 @@ export function ObservabilityConfiguration() {
                     }}
                   >
                     <Typography.Text type="secondary">
-                      通知凭据只引用 Secret，不在平台中保存明文。
+                      {clusterId ? "当前集群通知渠道" : "平台通知渠道"}
                     </Typography.Text>
                     <Button
                       type="primary"
@@ -664,7 +673,9 @@ export function ObservabilityConfiguration() {
                       添加通知模板
                     </Button>
                   </div>
-                  <ResourceTable<NotificationTemplate>
+                  {!canWrite ? <Alert type="info" showIcon title="通知渠道配置仅限平台管理员访问" /> : notificationsQuery.isError ? (
+                    <Alert type="error" showIcon title="通知渠道加载失败" description={notificationsQuery.error instanceof Error ? notificationsQuery.error.message : "请稍后重试"} />
+                  ) : <ResourceTable<NotificationTemplate>
                     tableKey="observability-notifications"
                     showToolbar={false}
                     viewportScroll={false}
@@ -675,10 +686,12 @@ export function ObservabilityConfiguration() {
                     dataSource={notificationsQuery.data?.items ?? []}
                     pagination={false}
                     emptyDescription="尚未配置通知模板"
-                  />
+                  />}
                 </>
               ),
             },
+            ...(clusterId && canWrite ? [{ key: "deliveries", label: "投递记录", children: <NotificationHistory key={clusterId} clusterId={clusterId} token={accessToken || ""} /> }] : []),
+            ...(clusterId && canWrite ? [{ key: "receiver", label: "告警接收", destroyOnHidden: true, children: <AlertReceiverConfiguration key={clusterId} clusterId={clusterId} token={accessToken || ""} /> }] : []),
           ]}
         />
       </OpsSurface>
@@ -748,6 +761,9 @@ export function ObservabilityConfiguration() {
               ].map(([field, label, initialValue]) => <Form.Item key={field} name={["metadata", "logQuery", field]} label={label} initialValue={initialValue} rules={[{ required: true, pattern: /^@?[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*$/, message: "请输入有效字段路径" }]}>
                 <Input />
               </Form.Item>)}
+              <Form.Item name={["metadata", "logQuery", "namespaceUidField"]} label="命名空间 UID 字段" normalize={(value: string) => value.trim() || undefined} rules={[{ pattern: /^@?[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*$/, message: "请输入有效字段路径" }]}>
+                <Input placeholder="kubernetes.namespace_uid" />
+              </Form.Item>
             </> : null}
             <Form.Item name="enabled" label="启用" valuePropName="checked">
               <Switch />
@@ -819,16 +835,40 @@ export function ObservabilityConfiguration() {
             </Form.Item>
             <Form.Item
               name="endpoint"
-              label="Endpoint"
+              label={notificationChannel === "email" ? "收件邮箱" : "Endpoint"}
+              dependencies={["channel"]}
               rules={[
-                {
-                  required: true,
-                  type: "url",
-                  message: "请输入合法的 HTTP(S) 地址",
-                },
+                ({ getFieldValue }) => getFieldValue("channel") === "email"
+                  ? {
+                      required: true,
+                      type: "email",
+                      message: "请输入单个有效收件邮箱（最多 254 个字符）",
+                    }
+                  : {
+                      validator: async (_, value: unknown) => {
+                        try {
+                          if (typeof value !== "string" || /\s/.test(value)) throw new Error();
+                          const url = new URL(value);
+                          if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error();
+                        } catch {
+                          throw new Error("请输入不含账号密码的 HTTP(S) 地址");
+                        }
+                      },
+                    },
+                ({ getFieldValue }) => getFieldValue("channel") === "email"
+                  ? {
+                      type: "string",
+                      max: 254,
+                      pattern: /^[^\s<>;,]+@[^\s<>;,]+$/,
+                      message: "请输入单个有效收件邮箱（最多 254 个字符）",
+                    }
+                  : {},
               ]}
             >
-              <Input placeholder="https://open.feishu.cn/..." />
+              <Input
+                placeholder={notificationChannel === "email" ? "ops@example.com" : "https://open.feishu.cn/..."}
+                maxLength={notificationChannel === "email" ? 254 : undefined}
+              />
             </Form.Item>
             <Form.Item name="secretRef" label="Secret 引用">
               <Input placeholder="namespace/secret-name" />

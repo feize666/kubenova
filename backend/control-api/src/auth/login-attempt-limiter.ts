@@ -9,7 +9,9 @@ return {count, redis.call('TTL', KEYS[1])}
 `;
 
 export class LoginAttemptLimiter {
-  constructor(private readonly redis: Pick<Redis, 'eval'>) {}
+  constructor(private readonly redis: Pick<Redis, 'eval'> & Partial<Pick<Redis, 'disconnect'>>) {}
+
+  onModuleDestroy(): void { this.redis.disconnect?.(); }
 
   consumeAccount(id: string): Promise<void> {
     return this.consume('account', id, 10);

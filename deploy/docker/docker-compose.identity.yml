@@ -1,0 +1,42 @@
+services:
+  identity-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set a dedicated Keycloak database password}
+    volumes:
+      - keycloak_database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 768m
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    command: ["start"]
+    restart: unless-stopped
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://identity-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set a dedicated Keycloak database password}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:?Set the HTTPS identity URL reachable from browsers and the API}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:?Set temporary bootstrap administrator}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:?Set temporary bootstrap password}
+    ports:
+      - "127.0.0.1:${KEYCLOAK_HTTP_PORT:-8080}:8080"
+    depends_on:
+      identity-db:
+        condition: service_healthy
+    mem_limit: 1536m
+    stop_grace_period: 60s
+
+volumes:
+  keycloak_database:

@@ -10,6 +10,8 @@ function normalizeHttpBase(raw: string, fallback: string): string {
 }
 
 const nextConfig: NextConfig = {
+  // Build candidates separately from the directory used by the running server.
+  distDir: process.env.KUBENOVA_NEXT_DIST_DIR || ".next",
   output: "standalone",
   devIndicators: false,
   allowedDevOrigins: ["127.0.0.1", "localhost"],

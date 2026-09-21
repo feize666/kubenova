@@ -100,6 +100,99 @@ function createService(clusterIds: string[]) {
 }
 
 describe('DashboardService', () => {
+  it('keeps mixed legacy and namespace scopes paired and refreshes restricted inventory', async () => {
+    const { service, prisma } = createService(['cluster-a', 'cluster-b']);
+    prisma.networkResource.findMany.mockResolvedValue([
+      {
+        id: 's',
+        clusterId: 'cluster-b',
+        namespace: 'beta',
+        name: 'api',
+        labels: {},
+      },
+    ] as never);
+    const stats = await service.getStats({
+      accessibleClusterIds: ['cluster-a'],
+      namespaceScopes: [
+        { clusterId: 'cluster-b', namespace: 'beta', namespaceUid: 'uid-b' },
+      ],
+    });
+    expect(prisma.workloadRecord.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        OR: [
+          { clusterId: { in: ['cluster-a'] } },
+          { clusterId: 'cluster-b', namespace: 'beta' },
+        ],
+      }),
+    });
+    expect(stats.serviceImpact.nodes).toEqual([
+      { id: 's', label: 'api', kind: 'service', status: 'unknown' },
+    ]);
+    expect(stats.serviceImpact.impactedServices[0].severity).toBe('info');
+    jest.clearAllMocks();
+    await service.getStats({
+      accessibleClusterIds: [],
+      namespaceScopes: [
+        { clusterId: 'cluster-b', namespace: 'gamma', namespaceUid: 'uid-c' },
+      ],
+    });
+    expect(prisma.networkResource.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [{ clusterId: 'cluster-b', namespace: 'gamma' }],
+        }),
+      }),
+    );
+  });
+  it('pairs namespace scopes with clusters and excludes unscoped sources without reusing admin cache', async () => {
+    const { service, prisma, liveMetricsService } = createService([
+      'cluster-a',
+      'cluster-b',
+    ]);
+    await service.getStats();
+    jest.clearAllMocks();
+    const stats = await service.getStats({
+      accessibleClusterIds: [],
+      namespaceScopes: [
+        { clusterId: 'cluster-a', namespace: 'alpha', namespaceUid: 'uid-a' },
+        { clusterId: 'cluster-b', namespace: 'beta', namespaceUid: 'uid-b' },
+      ],
+    } as never);
+    expect(prisma.workloadRecord.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        OR: [
+          { clusterId: 'cluster-a', namespace: 'alpha' },
+          { clusterId: 'cluster-b', namespace: 'beta' },
+        ],
+      }),
+    });
+    expect(prisma.networkResource.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        OR: [
+          { clusterId: 'cluster-a', namespace: 'alpha' },
+          { clusterId: 'cluster-b', namespace: 'beta' },
+        ],
+      }),
+    });
+    expect(prisma.namespaceRecord.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        OR: [
+          { clusterId: 'cluster-a', name: 'alpha' },
+          { clusterId: 'cluster-b', name: 'beta' },
+        ],
+      }),
+    });
+    expect(prisma.monitoringAlert.count).not.toHaveBeenCalled();
+    expect(prisma.monitoringAlert.findMany).not.toHaveBeenCalled();
+    expect(prisma.auditLog.findMany).not.toHaveBeenCalled();
+    expect(liveMetricsService.getClusterSnapshot).not.toHaveBeenCalled();
+    expect(stats.resourceUsage.cpu.value).toBeNull();
+    expect(stats.resourceUsage.liveSnapshot).toBeUndefined();
+    expect(stats.metrics.alerts.freshness).toBe('unavailable');
+    expect(stats.metrics.healthScore.freshness).toBe('unavailable');
+    expect(stats.serviceImpact.degraded).toBe(true);
+    expect(stats.serviceImpact.edges).toEqual([]);
+  });
   afterEach(() => {
     jest.restoreAllMocks();
   });

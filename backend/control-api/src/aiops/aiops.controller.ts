@@ -2,7 +2,9 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
   Get,
+  Header,
   Post,
   Query,
   Req,
@@ -27,11 +29,13 @@ export class AiopsController {
   constructor(private readonly aiopsService: AiopsService) {}
 
   @Get('summary')
+  @Header('Cache-Control', 'no-store')
   getSummary(
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('clusterId') clusterId?: string,
+    @Req() req?: { user?: { user?: { id?: string; username?: string; role?: string } } },
   ) {
     const fromDate = from ? this.parseDate(from, 'from') : undefined;
     const toDate = to ? this.parseDate(to, 'to') : undefined;
@@ -41,14 +45,14 @@ export class AiopsController {
       range: this.parseRange(range),
       from: fromDate,
       to: toDate,
-    });
+    }, this.extractActor(req ?? {}));
   }
 
   @Post('recommendations/precheck')
   precheckRecommendation(
     @Req()
     req: {
-      user?: { user?: { username?: string; role?: string } };
+      user?: { user?: { id?: string; username?: string; role?: string } };
     },
     @Body() body: { recommendationId?: string },
   ) {
@@ -63,7 +67,7 @@ export class AiopsController {
   approveRecommendation(
     @Req()
     req: {
-      user?: { user?: { username?: string; role?: string } };
+      user?: { user?: { id?: string; username?: string; role?: string } };
     },
     @Body() body: { recommendationId?: string },
   ) {
@@ -107,17 +111,22 @@ export class AiopsController {
   }
 
   private extractActor(req: {
-    user?: { user?: { username?: string; role?: string } };
-  }): { username?: string; role?: PlatformRole } {
+    user?: { user?: { id?: string; username?: string; role?: string } };
+  }): { id: string; username?: string; role?: PlatformRole } {
     const role = String(req.user?.user?.role ?? '')
       .trim()
       .toLowerCase();
+    const id = req.user?.user?.id?.trim();
+    if (!id || !['admin', 'platform-admin', 'cluster-operator', 'operator', 'read-only', 'user'].includes(role)) {
+      throw new ForbiddenException('Invalid AIOps subject');
+    }
     return {
+      id,
       username: req.user?.user?.username,
       role:
         role === 'platform-admin' || role === 'admin'
           ? 'platform-admin'
-          : role === 'cluster-operator'
+          : role === 'cluster-operator' || role === 'operator'
             ? 'cluster-operator'
             : 'read-only',
     };

@@ -27,6 +27,7 @@ import { ClustersService } from '../clusters/clusters.service';
 interface ActorRequest {
   user?: {
     user?: {
+      id?: string;
       username?: string;
       role?: PlatformRole;
     };
@@ -64,14 +65,14 @@ export class NetworkController {
 
   // GET /api/network — 分页列表，支持 clusterId/namespace/kind/keyword/page/pageSize
   @Get()
-  list(@Query() query: NetworkListQuery): Promise<NetworkListResult> {
-    return this.networkService.list(query);
+  list(@Req() req: ActorRequest, @Query() query: NetworkListQuery): Promise<NetworkListResult> {
+    return this.networkService.list(query, req.user?.user ?? {});
   }
 
   // GET /api/network/:id — 获取单个
   @Get(':id')
-  getById(@Param('id') id: string): Promise<NetworkResourceRecord> {
-    return this.networkService.getById(id);
+  getById(@Req() req: ActorRequest, @Param('id') id: string): Promise<NetworkResourceRecord> {
+    return this.networkService.getById(id, req.user?.user ?? {});
   }
 
   // POST /api/network — 创建

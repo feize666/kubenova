@@ -12,6 +12,7 @@
 }
 
 .filters > * { min-width: 0; }
+.resourceFilters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .search { min-width: 0; }
 .resultHeader { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .raw { max-height: 320px; overflow: auto; }
@@ -25,4 +26,5 @@
 
 @media (max-width: 480px) {
   .filters { grid-template-columns: minmax(0, 1fr); }
+  .resourceFilters { grid-template-columns: minmax(0, 1fr); }
 }

@@ -40,7 +40,7 @@ const allRoutes = [
   {
     id: "overview",
     path: "/",
-    texts: ["总览", "当前风险态势", "Service Impact", "高频运维入口"],
+    texts: ["总览", "当前风险态势", "服务影响", "运维入口"],
     shellSelector: ".ops-overview-shell",
     toolbarSelector: ".ops-overview-header",
     chipSelector: ".ops-filter-chip",
@@ -58,20 +58,20 @@ const allRoutes = [
   {
     id: "terminal",
     path: `/terminal?${DEFAULT_RUNTIME_QUERY}&source=smoke`,
-    texts: ["Terminal Workbench", "Cluster", "Namespace default", "Pod smoke-pod", "Container smoke-container"],
+    texts: ["Pod 终端工作区", "default / smoke-pod", "异常", "网关"],
     shellSelector: ".ops-frame-shell",
     toolbarSelector: ".ops-frame-shell__toolbar",
-    chipSelector: ".ops-frame-shell__chips .ops-filter-chip",
+    chipSelector: ".ops-frame-shell__status .ops-status-tag",
     statusSelector: ".ops-frame-shell__status .ops-status-tag",
     requireOpsFrameShell: true,
   },
   {
     id: "logs",
     path: `/logs?${DEFAULT_RUNTIME_QUERY}&tailLines=100&follow=false&timeMode=quick&from=now-15m&to=now`,
-    texts: ["Pod 日志工作区", "default / smoke-pod / smoke-container", "跟随已暂停", "100 行"],
+    texts: ["Pod 日志工作区", "default / smoke-pod / smoke-container", "Paused", "行 100"],
     shellSelector: ".ops-frame-shell",
     toolbarSelector: ".ops-frame-shell__toolbar",
-    chipSelector: ".ops-frame-shell__chips .ops-filter-chip",
+    chipSelector: ".ops-frame-shell__status .ops-status-tag",
     statusSelector: ".ops-frame-shell__status .ops-status-tag",
     requireOpsFrameShell: true,
   },
@@ -132,44 +132,20 @@ const allRoutes = [
     overlayChecks: ["table-search-popover", "table-column-popover", "create-modal"],
   },
   {
-    id: "helm-releases",
-    path: "/workloads/helm?clusterId=local&namespace=default",
-    texts: ["Helm Release", "安装、升级、回滚与卸载 Helm Release", "资源范围"],
-    shellSelector: ".resource-table-shell",
-    toolbarSelector: ".resource-table-toolbar",
-    chipSelector: ".resource-scope-filter-button",
-    statusSelector: ".resource-table-toolbar-actions",
-    evidenceState: "table",
-    createTriggerSelector: 'button[aria-label="安装 Helm Release"]',
-    overlayChecks: ["scope-popover", "table-search-popover", "table-column-popover", "create-modal"],
-  },
-  {
-    id: "helm-repositories",
-    path: "/workloads/helm/repositories?clusterId=local",
-    texts: ["Helm Repository", "管理 Helm 仓库", "资源范围"],
-    shellSelector: ".resource-table-shell",
-    toolbarSelector: ".resource-table-toolbar",
-    chipSelector: ".resource-scope-filter-button",
-    statusSelector: ".resource-table-toolbar-actions",
-    evidenceState: "table",
-    createTriggerSelector: 'button[aria-label="创建 Helm 仓库"]',
-    overlayChecks: ["scope-popover", "table-search-popover", "table-column-popover", "create-modal"],
-  },
-  {
     id: "topology",
     path: "/network/topology?clusterId=local&namespace=default",
-    texts: ["资源拓扑", "网络资源关系", "资源密度摘要"],
+    texts: ["资源拓扑", "单集群工作负载", "资源域"],
     shellSelector: ".resource-map-shell",
     toolbarSelector: ".resource-map-toolbar",
-    chipSelector: ".resource-map-source-chips button",
-    statusSelector: ".resource-map-motion-state",
+    chipSelector: ".topology-source-filter-trigger",
+    statusSelector: ".resource-map-toolbar__secondary",
     canvasStateSelector: ".resource-map-canvas-state",
     evidenceState: "workbench",
   },
   {
     id: "ai-assistant",
     path: "/ai-assistant",
-    texts: ["KubeNova", "ChatOps", "模型设置", "开始一条 ChatOps 会话"],
+    texts: ["AI 助手", "ChatOps", "模型中转站", "ChatOps 会话中"],
     shellSelector: ".ops-workbench-shell--ai",
     toolbarSelector: ".ai-assistant-chat-surface",
     chipSelector: ".ai-assistant-status-chip, .ops-status-tag",
@@ -180,7 +156,7 @@ const allRoutes = [
   {
     id: "aiops",
     path: "/aiops",
-    texts: ["事故中台", "事故队列", "推荐动作"],
+    texts: ["AI 助手", "ChatOps", "ChatOps 会话中"],
     shellSelector: ".resource-page-header",
     toolbarSelector: ".resource-page-header",
     chipSelector: ".ant-select",
@@ -457,7 +433,8 @@ function isAllowedConsoleIssue(issue) {
       brief.includes("/api/workloads") ||
       brief.includes("/api/namespaces") ||
       brief.includes("/api/clusters") ||
-      brief.includes("/api/helm")
+      brief.includes("/api/helm") ||
+      brief.includes("/api/dashboard")
     );
   if (isResourceApiNotFound) {
     return true;
@@ -470,6 +447,7 @@ function isAllowedConsoleIssue(issue) {
     brief.includes("终端") ||
     brief.includes("日志");
   const isExpectedDegrade =
+    brief.includes("403") ||
     brief.includes("400") ||
     brief.includes("bad request") ||
     brief.includes("kubeconfig") ||

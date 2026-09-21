@@ -31,6 +31,11 @@ export interface ConfigResourceRecord {
 }
 
 export interface ConfigListParams {
+  scopes?: Array<{
+    clusterId: string;
+    namespace?: string;
+    kind: ConfigResourceKind;
+  }>;
   clusterId?: string;
   clusterIds?: string[];
   namespace?: string;
@@ -93,6 +98,7 @@ export class ConfigsRepository {
     if (params.keyword) {
       where.name = { contains: params.keyword, mode: 'insensitive' };
     }
+    if (params.scopes) where.AND = [{ OR: params.scopes }];
 
     const [rows, total] = await Promise.all([
       this.prisma.configResource.findMany({
@@ -112,13 +118,18 @@ export class ConfigsRepository {
     };
   }
 
-  async findById(id: string): Promise<ConfigResourceRecord | null> {
+  async findById(
+    id: string,
+    includeRevisions = true,
+  ): Promise<ConfigResourceRecord | null> {
     const row = await this.prisma.configResource.findUnique({
       where: { id },
       include: {
-        revisions: {
-          orderBy: { revision: 'desc' },
-        },
+        revisions: includeRevisions
+          ? {
+              orderBy: { revision: 'desc' },
+            }
+          : false,
       },
     });
     if (!row) return null;

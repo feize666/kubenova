@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,7 +12,14 @@ import { ClusterEventSyncService } from '../clusters/cluster-event-sync.service'
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
 import { K8sClientService } from '../clusters/k8s-client.service';
-import { appendAudit, type PlatformRole } from '../common/governance';
+import {
+  appendAudit,
+  assertWritePermission,
+  type PlatformRole,
+} from '../common/governance';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 import {
   ConfigsRepository,
   type ConfigCreateData,
@@ -29,6 +37,12 @@ export interface ConfigListQuery {
   keyword?: string;
   page?: string;
   pageSize?: string;
+}
+
+export interface ConfigActor {
+  id?: string;
+  username?: string;
+  role?: PlatformRole;
 }
 
 export interface ConfigListResult {
@@ -85,10 +99,119 @@ export class ConfigsService {
     private readonly clusterSyncService: ClusterSyncService,
     private readonly clusterEventSyncService: ClusterEventSyncService,
     private readonly k8sClientService: K8sClientService,
+    private readonly clusterAccess: ClusterAccessService,
+    private readonly authorization: AuthorizationService,
+    private readonly namespaceIdentity: NamespaceIdentityService,
   ) {}
 
-  async list(query: ConfigListQuery): Promise<ConfigListResult> {
+  private async scopes(
+    actor: ConfigActor | undefined,
+    mutation = false,
+  ): Promise<ConfigListParams['scopes']> {
+    if (!actor?.id?.trim() || !this.clusterAccess.isKnownPlatformRole(actor))
+      throw new ForbiddenException();
+    if (mutation) assertWritePermission(actor);
+    if (this.clusterAccess.isPlatformAdmin(actor)) return undefined;
+    const scopes: NonNullable<ConfigListParams['scopes']> = [];
+    for (const clusterId of (await this.clusterAccess.listAccessibleClusterIds(
+      actor,
+    )) ?? []) {
+      if (mutation) {
+        try {
+          await this.clusterAccess.assertCanMutate(actor, clusterId);
+        } catch (error) {
+          if (
+            error instanceof ForbiddenException ||
+            error instanceof NotFoundException
+          )
+            continue;
+          throw error;
+        }
+      }
+      scopes.push({ clusterId, kind: 'ConfigMap' });
+    }
+    const checked = new Map<string, string | null>();
+    for (const grant of await this.authorization.listEffectiveGrants(
+      actor.id,
+    )) {
+      if (mutation && grant.role === 'viewer') continue;
+      for (const scope of grant.namespaces) {
+        if (!scope.namespaceName) continue;
+        const key = JSON.stringify([grant.clusterId, scope.namespaceName]);
+        if (!checked.has(key)) {
+          try {
+            checked.set(
+              key,
+              await this.namespaceIdentity.resolve(
+                grant.clusterId,
+                scope.namespaceName,
+              ),
+            );
+          } catch {
+            checked.set(key, null);
+          }
+        }
+        if (checked.get(key) !== scope.namespaceUid) continue;
+        scopes.push({
+          clusterId: grant.clusterId,
+          namespace: scope.namespaceName,
+          kind: 'ConfigMap',
+        });
+        if (grant.capabilities.some((item) => item.capability === 'secrets')) {
+          scopes.push({
+            clusterId: grant.clusterId,
+            namespace: scope.namespaceName,
+            kind: 'Secret',
+          });
+        }
+      }
+    }
+    return scopes;
+  }
+
+  private async assertScope(
+    actor: ConfigActor | undefined,
+    target: { clusterId: string; namespace: string; kind: string },
+    mutation = false,
+  ): Promise<void> {
+    const scopes = await this.scopes(actor, mutation);
+    if (
+      scopes &&
+      !scopes.some(
+        (scope) =>
+          scope.clusterId === target.clusterId &&
+          scope.kind === target.kind &&
+          (!scope.namespace || scope.namespace === target.namespace),
+      )
+    ) {
+      throw new ForbiddenException('配置资源不在授权范围内');
+    }
+  }
+
+  async list(
+    query: ConfigListQuery,
+    actor?: ConfigActor,
+  ): Promise<ConfigListResult> {
     const normalizedClusterId = query.clusterId?.trim();
+    const scopes = (await this.scopes(actor))?.filter(
+      (scope) =>
+        (!normalizedClusterId || scope.clusterId === normalizedClusterId) &&
+        (!query.namespace ||
+          !scope.namespace ||
+          scope.namespace === query.namespace) &&
+        (!query.kind || scope.kind === query.kind),
+    );
+    if (scopes?.length === 0) {
+      if (normalizedClusterId || query.namespace)
+        throw new ForbiddenException('配置资源不在授权范围内');
+      return {
+        items: [],
+        total: 0,
+        page: this.parsePositiveInt(query.page, 1),
+        pageSize: this.parsePositiveInt(query.pageSize, 20),
+        timestamp: new Date().toISOString(),
+      };
+    }
     let readableClusterIds: string[] | undefined;
     if (normalizedClusterId) {
       await this.clusterHealthService.assertClusterOnlineForRead(
@@ -97,6 +220,10 @@ export class ConfigsService {
     } else {
       readableClusterIds =
         await this.clusterHealthService.listReadableClusterIdsForResourceRead();
+      if (scopes)
+        readableClusterIds = readableClusterIds.filter((id) =>
+          scopes.some((scope) => scope.clusterId === id),
+        );
       if (readableClusterIds.length === 0) {
         return {
           items: [],
@@ -111,6 +238,7 @@ export class ConfigsService {
     const params: ConfigListParams = {
       clusterId: normalizedClusterId,
       clusterIds: readableClusterIds,
+      scopes,
       namespace: query.namespace,
       kind: query.kind,
       keyword: query.keyword,
@@ -179,17 +307,24 @@ export class ConfigsService {
     return { errors: configErrors };
   }
 
-  async getById(id: string): Promise<ConfigResourceRecord> {
-    const item = await this.configsRepository.findById(id);
+  async getById(
+    id: string,
+    actor?: ConfigActor,
+  ): Promise<ConfigResourceRecord> {
+    const item = await this.configsRepository.findById(id, false);
     if (!item) {
       throw new NotFoundException(`ConfigResource ${id} 不存在`);
     }
-    return item;
+    await this.assertScope(actor, item);
+    return {
+      ...item,
+      revisions: await this.configsRepository.getRevisions(id),
+    };
   }
 
   async create(
     body: CreateConfigResourceRequest,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: ConfigActor,
   ): Promise<ConfigMutationResponse> {
     const clusterId = body.clusterId?.trim();
     const namespace = body.namespace?.trim();
@@ -201,6 +336,11 @@ export class ConfigsService {
     if (body.kind !== 'ConfigMap' && body.kind !== 'Secret') {
       throw new BadRequestException('kind 必须为 ConfigMap 或 Secret');
     }
+    await this.assertScope(
+      actor,
+      { clusterId, namespace, kind: body.kind },
+      true,
+    );
 
     // 检查是否已存在
     const existing = await this.configsRepository.findByKey(
@@ -244,20 +384,25 @@ export class ConfigsService {
   async update(
     id: string,
     body: UpdateConfigResourceRequest,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: ConfigActor,
   ): Promise<ConfigMutationResponse> {
-    const existing = await this.configsRepository.findById(id);
+    const existing = await this.configsRepository.findById(id, false);
     if (!existing) {
       throw new NotFoundException(`ConfigResource ${id} 不存在`);
     }
     if (existing.state === 'deleted') {
       throw new BadRequestException('已删除的配置不可编辑');
     }
+    await this.assertScope(actor, existing, true);
 
     const data: ConfigUpdateData = {};
     if (body.namespace !== undefined) {
       const ns = body.namespace.trim();
       if (!ns) throw new BadRequestException('namespace 不能为空');
+      if (ns !== existing.namespace)
+        throw new BadRequestException(
+          '暂不支持跨名称空间直接修改，请新建后迁移',
+        );
       data.namespace = ns;
     }
     if (body.dataKeys !== undefined) {
@@ -282,14 +427,15 @@ export class ConfigsService {
   async applyAction(
     id: string,
     body: ConfigActionRequest,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: ConfigActor,
   ): Promise<ConfigMutationResponse> {
-    const existing = await this.configsRepository.findById(id);
+    const existing = await this.configsRepository.findById(id, false);
     if (!existing) {
       throw new NotFoundException(`ConfigResource ${id} 不存在`);
     }
 
     const { action, reason } = body;
+    await this.assertScope(actor, existing, true);
 
     if (action === 'delete') {
       if (existing.state === 'deleted') {
@@ -440,18 +586,22 @@ export class ConfigsService {
     });
   }
 
-  async getRevisions(id: string): Promise<{
+  async getRevisions(
+    id: string,
+    actor?: ConfigActor,
+  ): Promise<{
     configId: string;
     items: ConfigRevisionRecord[];
     total: number;
     timestamp: string;
   }> {
     // 验证 config 存在
-    const config = await this.configsRepository.findById(id);
+    const config = await this.configsRepository.findById(id, false);
     if (!config) {
       throw new NotFoundException(`ConfigResource ${id} 不存在`);
     }
 
+    await this.assertScope(actor, config);
     const revisions = await this.configsRepository.getRevisions(id);
     return {
       configId: id,
@@ -465,13 +615,17 @@ export class ConfigsService {
     id: string,
     fromRev: number,
     toRev: number,
+    actor?: ConfigActor,
   ): Promise<RevisionDiffResult> {
     // 验证 config 存在
-    const config = await this.configsRepository.findById(id);
+    this.assertRevision(fromRev);
+    this.assertRevision(toRev);
+    const config = await this.configsRepository.findById(id, false);
     if (!config) {
       throw new NotFoundException(`ConfigResource ${id} 不存在`);
     }
 
+    await this.assertScope(actor, config);
     const [fromRevision, toRevision] = await Promise.all([
       this.configsRepository.getRevision(id, fromRev),
       this.configsRepository.getRevision(id, toRev),
@@ -490,8 +644,10 @@ export class ConfigsService {
     id: string,
     revision: number,
     changedBy?: string,
+    actor?: ConfigActor,
   ): Promise<ConfigMutationResponse> {
-    const existing = await this.configsRepository.findById(id);
+    this.assertRevision(revision);
+    const existing = await this.configsRepository.findById(id, false);
     if (!existing) {
       throw new NotFoundException(`ConfigResource ${id} 不存在`);
     }
@@ -499,6 +655,7 @@ export class ConfigsService {
       throw new BadRequestException('已删除的配置不可回滚');
     }
 
+    await this.assertScope(actor, existing, true);
     const targetRev = await this.configsRepository.getRevision(id, revision);
     if (!targetRev) {
       throw new NotFoundException(`版本 ${revision} 不存在`);
@@ -538,6 +695,11 @@ export class ConfigsService {
     }
 
     return diff;
+  }
+
+  private assertRevision(revision: number): void {
+    if (!Number.isSafeInteger(revision) || revision <= 0)
+      throw new BadRequestException('版本必须为正整数');
   }
 
   private parsePositiveInt(raw: string | undefined, fallback: number): number {

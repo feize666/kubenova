@@ -15,6 +15,7 @@ const envSchema = z.object({
   SWAGGER_ENABLED: z.coerce.boolean().default(true),
   DEFAULT_ADMIN_EMAIL: z.string().email().default('admin@local.dev'),
   DEFAULT_ADMIN_PASSWORD: z.string().min(6).default('admin123456'),
+  SUPERADMIN_USER_ID: z.string().min(1).max(256).regex(/^\S+$/, 'Must be an exact user ID without whitespace').optional(),
   AI_MODEL_BASE_URL: z
     .string()
     .url()
@@ -35,7 +36,12 @@ const envSchema = z.object({
     .optional()
     .default(30000),
   AI_CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
-  OIDC_ENABLED: z.coerce.boolean().default(false),
+  MFA_ENCRYPTION_KEY: z.string().optional(),
+  OIDC_ENABLED: z.preprocess(value => {
+    if (value === 'true' || value === '1') return true;
+    if (value === 'false' || value === '0') return false;
+    return value;
+  }, z.boolean().default(false)),
   OIDC_ISSUER: z.string().url().optional(),
   OIDC_CLIENT_ID: z.string().min(1).optional(),
   OIDC_REDIRECT_URI: z.string().url().optional(),
@@ -75,12 +81,14 @@ export type AppConfig = {
   swaggerEnabled: boolean;
   defaultAdminEmail: string;
   defaultAdminPassword: string;
+  superadminUserId?: string;
   aiModelBaseUrl: string;
   aiModelApiKey: string;
   aiModelName: string;
   aiModelMaxTokens: number;
   aiModelTimeoutMs: number;
   aiCredentialEncryptionKey?: string;
+  mfaEncryptionKey?: string;
   oidcEnabled: boolean;
   oidcIssuer?: string;
   oidcClientId?: string;
@@ -110,12 +118,14 @@ export function parseEnv(env: Record<string, unknown>): AppConfig {
     swaggerEnabled: parsed.data.SWAGGER_ENABLED,
     defaultAdminEmail: parsed.data.DEFAULT_ADMIN_EMAIL,
     defaultAdminPassword: parsed.data.DEFAULT_ADMIN_PASSWORD,
+    superadminUserId: parsed.data.SUPERADMIN_USER_ID,
     aiModelBaseUrl: parsed.data.AI_MODEL_BASE_URL,
     aiModelApiKey: parsed.data.AI_MODEL_API_KEY,
     aiModelName: parsed.data.AI_MODEL_NAME,
     aiModelMaxTokens: parsed.data.AI_MODEL_MAX_TOKENS,
     aiModelTimeoutMs: parsed.data.AI_MODEL_TIMEOUT_MS,
     aiCredentialEncryptionKey: parsed.data.AI_CREDENTIAL_ENCRYPTION_KEY,
+    mfaEncryptionKey: parsed.data.MFA_ENCRYPTION_KEY,
     oidcEnabled: parsed.data.OIDC_ENABLED,
     oidcIssuer: parsed.data.OIDC_ISSUER,
     oidcClientId: parsed.data.OIDC_CLIENT_ID,

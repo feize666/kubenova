@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
+import { resolveTopologyScopes, topologyScopeWhere, type TopologyActor, type TopologyScope } from './topology-access';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import {
   ClusterHealthService,
@@ -77,12 +81,18 @@ export class TopologyGraphService {
     private readonly prisma: PrismaService,
     private readonly clusterHealthService: ClusterHealthService,
     private readonly cache: TopologyGraphCacheService,
+    private readonly clusterAccess?: ClusterAccessService,
+    private readonly authorization?: AuthorizationService,
+    private readonly namespaceIdentity?: NamespaceIdentityService,
   ) {}
 
   async getGraph(
     query: TopologyGraphQuery = {},
+    actor: TopologyActor = {},
   ): Promise<TopologyGraphResponse> {
-    const clusterIds = await this.resolveReadableClusterIds(query.clusterId);
+    const scopes = await resolveTopologyScopes(actor, query, this.clusterAccess, this.authorization, this.namespaceIdentity);
+    const clusterIds = (await this.resolveReadableClusterIds(query.clusterId))
+      .filter(id => !scopes || scopes.some(scope => scope.clusterId === id));
     const enabledSources = this.normalizeLegacySources(query.sources);
     if (clusterIds.length === 0)
       return this.assembler.assembleLegacy({
@@ -95,6 +105,8 @@ export class TopologyGraphService {
       clusterIds,
       query.namespace,
       enabledSources,
+      true,
+      scopes,
     );
     const topologyRows = collapseDeploymentReplicaSets(rows);
     const resources = this.projector.projectLegacy(topologyRows, indexWarnings(alerts));
@@ -107,6 +119,7 @@ export class TopologyGraphService {
 
   async getGraphV2(
     query: TopologyGraphQuery = {},
+    actor?: TopologyActor,
   ): Promise<TopologyGraphV2Response> {
     const clusterId = query.clusterId?.trim();
     if (!clusterId)
@@ -115,6 +128,7 @@ export class TopologyGraphService {
       );
     const enabledSources = this.normalizeV2Sources(query.sources);
     const namespace = query.namespace?.trim() || undefined;
+    const scopes = await resolveTopologyScopes(actor, { clusterId, namespace }, this.clusterAccess, this.authorization, this.namespaceIdentity);
     const legacySources = new Set<LegacyTopologySource>(enabledSources);
     if (enabledSources.has('network')) legacySources.add('gateway');
 
@@ -122,6 +136,7 @@ export class TopologyGraphService {
       clusterId,
       namespace,
       enabledSources,
+      scopes,
     );
     const cacheKey = this.v2CacheKey(
       clusterId,
@@ -147,6 +162,7 @@ export class TopologyGraphService {
       namespace,
       legacySources,
       true,
+      scopes,
     );
     const topologyRows = collapseDeploymentReplicaSets(rows);
     const resources = this.projector.projectV2(topologyRows, indexWarnings(alerts));
@@ -169,12 +185,14 @@ export class TopologyGraphService {
     namespace: string | undefined,
     enabledSources: ReadonlySet<LegacyTopologySource>,
     scopeAlertsToNamespace = false,
+    scopes?: TopologyScope[],
   ): Promise<{ rows: TopologyRow[]; alerts: MonitoringAlert[] }> {
     const where = {
       clusterId: { in: clusterIds },
       state: { not: 'deleted' },
       cluster: { deletedAt: null, status: { not: 'deleted' } },
       ...(namespace ? { namespace } : {}),
+      ...topologyScopeWhere(scopes),
     };
     const [workloads, networkResources, storageResources, configs, alerts] =
       await Promise.all([
@@ -235,7 +253,7 @@ export class TopologyGraphService {
           : Promise.resolve([]),
         enabledSources.has('configuration')
           ? this.prisma.configResource.findMany({
-              where,
+              where: { ...where, ...topologyScopeWhere(scopes, 'configuration') },
               select: {
                 id: true,
                 clusterId: true,
@@ -256,6 +274,7 @@ export class TopologyGraphService {
             status: 'firing',
             severity: { in: ['warning', 'critical'] },
             ...(scopeAlertsToNamespace && namespace ? { namespace } : {}),
+            ...topologyScopeWhere(scopes, 'alerts'),
           },
           select: {
             clusterId: true,
@@ -290,12 +309,14 @@ export class TopologyGraphService {
     clusterId: string,
     namespace: string | undefined,
     enabledSources: ReadonlySet<TopologySource>,
+    scopes?: TopologyScope[],
   ): Promise<string> {
     const where = {
       clusterId,
       state: { not: 'deleted' },
       cluster: { deletedAt: null, status: { not: 'deleted' } },
       ...(namespace ? { namespace } : {}),
+      ...topologyScopeWhere(scopes),
     };
     const aggregate = {
       _count: { _all: true },
@@ -313,7 +334,7 @@ export class TopologyGraphService {
           ? this.prisma.storageResource.aggregate({ where, ...aggregate })
           : Promise.resolve(null),
         enabledSources.has('configuration')
-          ? this.prisma.configResource.aggregate({ where, ...aggregate })
+          ? this.prisma.configResource.aggregate({ where: { ...where, ...topologyScopeWhere(scopes, 'configuration') }, ...aggregate })
           : Promise.resolve(null),
         this.prisma.monitoringAlert.aggregate({
           where: {
@@ -321,6 +342,7 @@ export class TopologyGraphService {
             status: 'firing',
             severity: { in: ['warning', 'critical'] },
             ...(namespace ? { namespace } : {}),
+            ...topologyScopeWhere(scopes, 'alerts'),
           },
           ...aggregate,
         }),
@@ -330,6 +352,7 @@ export class TopologyGraphService {
       clusterId,
       namespace: namespace ?? null,
       sources: [...enabledSources].sort(),
+      scopes: scopes?.map(scope => JSON.stringify(scope)).sort() ?? null,
       inventory: {
         workloads: aggregateRevision(workloads),
         network: aggregateRevision(network),

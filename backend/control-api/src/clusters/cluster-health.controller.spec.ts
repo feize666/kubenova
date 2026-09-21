@@ -12,6 +12,7 @@ describe('ClusterHealthController', () => {
     } as any;
     const clusterAccessService = {
       listAccessibleClusterIds: jest.fn().mockResolvedValue(null),
+      listDiscoverableClusterIds: jest.fn().mockResolvedValue(null),
       assertCanRead: jest.fn(),
       assertCanMutate: jest.fn(),
     } as any;
@@ -46,9 +47,9 @@ describe('ClusterHealthController', () => {
     expect(resp.meta.action).toBe('list');
   });
 
-  it('filters health list through the current user cluster bindings', async () => {
+  it('filters health list through the current user cluster visibility', async () => {
     const { controller, service, clusterAccessService } = createController();
-    clusterAccessService.listAccessibleClusterIds.mockResolvedValue(['c1']);
+    clusterAccessService.listDiscoverableClusterIds.mockResolvedValue(['c1']);
     service.listClusterHealth.mockResolvedValue({
       items: [],
       page: 1,
@@ -67,6 +68,7 @@ describe('ClusterHealthController', () => {
       {},
       { accessibleClusterIds: ['c1'] },
     );
+    expect(clusterAccessService.listAccessibleClusterIds).not.toHaveBeenCalled();
   });
 
   it('authorizes health detail before loading it', async () => {

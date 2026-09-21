@@ -7,7 +7,7 @@ import { ClustersModule } from '../clusters/clusters.module';
 @Global()
 @Module({
   imports: [ClustersModule],
-  providers: [AuthorizationService, NamespaceIdentityService],
-  exports: [AuthorizationService, NamespaceIdentityService],
+  providers: [AuthorizationService, NamespaceIdentityService, { provide: 'NamespaceIdentityResolver', useExisting: NamespaceIdentityService }],
+  exports: [AuthorizationService, NamespaceIdentityService, 'NamespaceIdentityResolver'],
 })
 export class AuthorizationModule {}

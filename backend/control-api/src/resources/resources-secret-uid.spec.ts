@@ -29,7 +29,7 @@ describe('Secret namespace identity', () => {
     let uid = 'uid-original';
     const read = jest.fn().mockResolvedValue('authorized-result');
     const Controller = ResourcesController as unknown as new (...args: any[]) => ResourcesController;
-    const controller = new Controller({ getYaml: read, getDynamicResourceDetail: read, updateYaml: read }, {}, {}, { assertCanRead: async () => {}, assertCanMutate: async () => {} }, authz, { resolve: async () => uid });
+    const controller = new Controller({ getYaml: read, getDynamicResourceDetail: read, updateYaml: read }, {}, {}, { listAccessibleClusterIds: async () => ['c'], assertCanRead: async () => {}, assertCanMutate: async () => {} }, authz, { resolve: async () => uid });
     const request = { user: { user: { id: 'u' } } };
     const call = () => route === 'yaml' ? controller.getYaml(request, 'c', 'apps', 'Secret', 's') : route === 'dynamic' ? controller.getDynamicDetail(request, 'c', '', 'v1', 'secrets', 'apps', 's') : controller.updateYaml(request, { clusterId: 'c', namespace: 'apps', kind: 'Secret', name: 's', yaml: '{}', dryRun: true });
     await expect(call()).resolves.toBe('authorized-result');

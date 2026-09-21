@@ -1,6 +1,17 @@
 import { AuthorizationService } from './authorization.service';
 
 describe('AuthorizationService', () => {
+  it('caps inherited grants at membership expiry without shortening direct grants', async () => {
+    const expiresAt = new Date('2026-09-16T00:01:00Z');
+    const base = { id:'group', userId:null, groupId:'team', clusterId:'c', role:'viewer', state:'active', validFrom:new Date(0), expiresAt:null, revokedAt:null, namespaces:[{namespaceUid:'ns'}], capabilities:[] };
+    const grants = [base, {...base,id:'direct',userId:'u',groupId:null}];
+    const {service} = setup({groupMembership:{findMany:async()=>[{groupId:'team',expiresAt}]},accessGrant:{findMany:async()=>grants}});
+    const effective = await service.listEffectiveGrants('u',now);
+    expect(effective.find(g=>g.id==='group')?.expiresAt).toEqual(expiresAt);
+    expect(effective.find(g=>g.id==='direct')?.expiresAt).toBeNull();
+    expect(base.expiresAt).toBeNull();
+    expect((await service.authorize({userId:'u',clusterId:'c',namespaceUid:'ns',at:now})).expiresAt).toEqual(expiresAt);
+  });
   it('lists effective grants without widening identity, time or namespace scope', async () => {
     const base = { id: 'direct', userId: 'u', groupId: null, clusterId: 'c', role: 'viewer', state: 'active', validFrom: new Date(0), expiresAt: null, revokedAt: null, namespaces: [{ namespaceUid: 'ns', namespaceName: 'ai' }], capabilities: [] };
     const grants = [base, { ...base, id: 'group', userId: null, groupId: 'team' },

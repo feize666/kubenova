@@ -19,4 +19,21 @@ describe('logs namespace enforcement', () => {
     expect(resolve).toHaveBeenCalledWith('c', 'apps');
     expect(authorize).toHaveBeenCalledWith({ userId: 'u', clusterId: 'c', namespaceUid: 'uid-apps', capability: 'logs', mutation: false });
   });
+
+  it('enforces capabilities for namespace-scoped access grants without the compatibility flag', async () => {
+    delete process.env.KUBENOVA_AUTHZ_ENFORCE;
+    const authorize = jest.fn().mockResolvedValue({ allowed: false, reasonCode: 'CAPABILITY_NOT_GRANTED' });
+    const Controller = LogsController as unknown as new (...args: any[]) => LogsController;
+    const controller = new Controller(
+      { query: jest.fn() },
+      { assertCanRead: async () => ({ clusterId: 'c', accessRole: 'viewer', source: 'access-grant' }) },
+      { authorize },
+      { resolve: async () => 'uid-apps' },
+    );
+    const request = { user: { user: { id: 'u' } }, headers: {} } as never;
+
+    await expect(controller.query({ clusterId: 'c', namespace: 'apps', pod: 'p' } as never, request))
+      .rejects.toMatchObject({ status: 403 });
+    expect(authorize).toHaveBeenCalledWith({ userId: 'u', clusterId: 'c', namespaceUid: 'uid-apps', capability: 'logs', mutation: false });
+  });
 });

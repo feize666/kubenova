@@ -1,0 +1,25 @@
+[Unit]
+Description=KubeNova encrypted offsite recovery backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kubenova-backup
+Group=kubenova-backup
+EnvironmentFile=/etc/kubenova/backup.env
+WorkingDirectory=/data/kubenova/current
+Environment=BACKUP_STATUS_FILE=/data/kubenova/backup-state/status.json
+ExecStart=/bin/bash /data/kubenova/current/scripts/backup-all.sh
+TimeoutStartSec=2h
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/kubenova/backup-state
+CacheDirectory=kubenova-backup
+Environment=RESTIC_CACHE_DIR=/var/cache/kubenova-backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

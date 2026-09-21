@@ -36,8 +36,8 @@ export class NotificationSchedulerService implements OnModuleInit, OnModuleDestr
           FROM "NotificationDelivery" d
           JOIN "MonitoringAlert" a ON a."id" = d."alertId"
           WHERE a."clusterId" IS NOT NULL AND
-            ((d."status" = 'pending' AND d."nextAttemptAt" <= NOW()) OR
-             (d."status" = 'sending' AND d."leaseUntil" <= NOW()))
+            ((d."status" = 'pending' AND d."nextAttemptAt" <= (NOW() AT TIME ZONE 'UTC')) OR
+             (d."status" = 'sending' AND d."leaseUntil" <= (NOW() AT TIME ZONE 'UTC')))
         ) due
         ORDER BY CASE WHEN due."clusterId" > ${this.cursor} THEN 0 ELSE 1 END, due."clusterId"
         LIMIT 20`;

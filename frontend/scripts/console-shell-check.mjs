@@ -24,11 +24,29 @@ async function check(name) {
 }
 try {
   await mkdir(out, { recursive: true });
+  if (process.env.SHELL_MOCK_AUTH === '1') {
+    await page.addInitScript(() => {
+      for (const [key, value] of Object.entries({ access: 'shell-fixture', refresh: 'fixture-refresh', user: 'fixture-admin', role: 'admin', expires_at: new Date(Date.now() + 3600000).toISOString() })) sessionStorage.setItem(`aiops_auth_session_${key}`, value);
+    });
+    await page.route('**/api/**', route => {
+      const path = new URL(route.request().url()).pathname;
+      // Malformed successful responses must show the dashboard error state, not crash the shell.
+      if (path.includes('/dashboard')) return route.fulfill({ json: { data: { items: [] } } });
+      let data = { items: [], total: 0 };
+      if (path.endsWith('/auth/me')) data = { user: { username: 'fixture-admin', role: 'admin' } };
+      if (path === '/api/capabilities') data = [];
+      if (path === `/api/clusters/${cluster}`) data = { id: cluster, name: 'Fixture cluster', runtimeStatus: 'running', nodeSummary: { items: [], total: 0 }, platform: {}, metadata: {} };
+      return route.fulfill({ json: { data } });
+    });
+    await page.goto(base);
+  } else {
+  assert.ok(process.env.BASELINE_USER && process.env.BASELINE_PASSWORD, 'Explicit test credentials or SHELL_MOCK_AUTH=1 required');
   await page.goto(base);
   await page.locator('input').nth(0).fill(process.env.BASELINE_USER || 'admin@local.dev');
   await page.locator('input[type=password]').fill(process.env.BASELINE_PASSWORD || 'admin123456');
   await page.getByRole('button', { name: /登录控制台/ }).click();
   await page.getByText('进入集群工作区', { exact: true }).waitFor();
+  }
   for (const theme of ['light', 'dark']) {
     await page.evaluate(value => {
       localStorage.setItem('kubenova-theme-mode', value);
@@ -67,6 +85,9 @@ try {
   assert.deepEqual(errors, []);
   await writeFile(resolve(out, 'report.json'), JSON.stringify({ results, errors, reducedMotion: duration }, null, 2));
   console.log(JSON.stringify({ samples: results.length, errors, reducedMotion: duration }));
+} catch (error) {
+  console.error(JSON.stringify({ errors, text: (await page.locator('body').innerText()).slice(0, 1800) }));
+  throw error;
 } finally {
   await browser.close();
 }

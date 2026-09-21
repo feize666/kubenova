@@ -42,10 +42,39 @@ function KubeNovaMark({ isDark }: { isDark: boolean }) {
 function LoginPageV2Content() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isAuthenticated, isInitializing, lastRequestId, login } = useAuth();
+  const { isAuthenticated, isInitializing, lastRequestId, login, mfaPending, verifyMfa, cancelMfa } = useAuth();
+  const [loginForm] = Form.useForm<LoginForm>();
+  const [recovery, setRecovery] = useState(false);
   const { mode } = useThemeMode();
   const { message } = App.useApp();
   const [submitting, setSubmitting] = useState(false);
+  const [oidcEnabled, setOidcEnabled] = useState(false);
+  const [oidcPending, setOidcPending] = useState(false);
+  const [oidcError, setOidcError] = useState(false);
+  const startEnterpriseLogin = async () => {
+    setOidcPending(true);
+    setOidcError(false);
+    try {
+      const response = await fetch('/api/v1/auth/oidc/prepare', { method: 'POST', signal: AbortSignal.timeout(10000), cache: 'no-store' });
+      if (!response.ok) throw new Error('Enterprise login unavailable');
+      const payload = await response.json();
+      const destination = new URL((payload?.data ?? payload)?.url);
+      if (destination.protocol !== 'https:' && !(destination.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(destination.hostname))) throw new Error('Invalid login destination');
+      window.location.assign(destination.href);
+    } catch {
+      setOidcError(true);
+    } finally {
+      setOidcPending(false);
+    }
+  };
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/v1/auth/oidc/status', { signal: controller.signal, cache: 'no-store' })
+      .then(async response => response.ok ? response.json() : null)
+      .then(payload => setOidcEnabled((payload?.data ?? payload)?.enabled === true))
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
   const [apiReachable, setApiReachable] = useState<boolean | null>(null);
   const [apiProbeFailures, setApiProbeFailures] = useState(0);
   const returnTo = useMemo(
@@ -91,6 +120,12 @@ function LoginPageV2Content() {
   const onFinish = async (values: LoginForm) => {
     setSubmitting(true);
     const result = await login(values);
+    loginForm.setFieldValue("password", "");
+    if (result.mfaRequired) {
+      setRecovery(false);
+      setSubmitting(false);
+      return;
+    }
     if (!result.ok) {
       const errorMessage = lastRequestId && !result.message.includes("请求ID:")
         ? `${result.message}（请求ID: ${lastRequestId}）`
@@ -150,7 +185,19 @@ function LoginPageV2Content() {
             />
           ) : null}
 
-          <Form<LoginForm> className="login-v2__form" layout="vertical" onFinish={onFinish} autoComplete="on">
+          {mfaPending ? <Form<{ code: string }> key={recovery ? "recovery" : "totp"} className="login-v2__form" layout="vertical" onFinish={async ({ code }) => {
+            setSubmitting(true);
+            const result = await verifyMfa(code.trim(), recovery ? "recovery" : "totp");
+            setSubmitting(false);
+            if (!result.ok) message.error(result.message);
+          }}>
+            <Form.Item label={recovery ? "恢复码" : "验证码"} name="code" rules={[{ required: true, message: "请输入验证码或恢复码" }, ...(recovery ? [{ max: 128, message: "恢复码过长" }] : [{ pattern: /^\d{6}$/, message: "请输入六位验证码" }])]}>
+              <Input size="large" autoFocus autoComplete="one-time-code" inputMode={recovery ? "text" : "numeric"} maxLength={recovery ? 128 : 6} />
+            </Form.Item>
+            <Button type="primary" htmlType="submit" block size="large" loading={submitting}>验证并登录</Button>
+            <Button type="link" disabled={submitting} onClick={() => setRecovery(!recovery)}>{recovery ? "使用验证码" : "使用恢复码"}</Button>
+            <Button type="text" disabled={submitting} onClick={cancelMfa}>返回登录</Button>
+          </Form> : <Form<LoginForm> form={loginForm} className="login-v2__form" layout="vertical" onFinish={onFinish} autoComplete="on">
             <Form.Item label="账号" name="username" rules={[{ required: true, message: "请输入账号" }]}>
               <Input
                 prefix={<UserOutlined />}
@@ -187,13 +234,13 @@ function LoginPageV2Content() {
             >
               登录控制台
             </Button>
-          </Form>
+          </Form>}
 
-          <div className="login-v2__separator">其他登录方式</div>
+          {oidcEnabled && !mfaPending && <><div className="login-v2__separator">其他登录方式</div>
           <div className="login-v2__alternatives">
-            <Button disabled icon={<SafetyCertificateOutlined />} block size="large">OIDC 单点登录（即将支持）</Button>
-            <Button disabled block size="large">企业 SSO 登录（即将支持）</Button>
-          </div>
+            {oidcError ? <Alert type="error" showIcon title="企业登录暂不可用，请稍后重试或联系管理员。" /> : null}
+            <Button onClick={() => void startEnterpriseLogin()} loading={oidcPending} disabled={submitting} icon={<SafetyCertificateOutlined />} block size="large">企业单点登录</Button>
+          </div></>}
           <div className="login-v2__footer">KubeNova v1.0 · 企业级容器云管理平台</div>
         </section>
       </section>

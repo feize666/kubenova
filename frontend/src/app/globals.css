@@ -6684,6 +6684,13 @@ body {
   width: min(340px, calc(100vw - 48px));
 }
 
+@media (max-width: 480px) {
+  .resource-scope-filter-panel {
+    width: calc(100vw - 80px);
+    min-width: 0;
+  }
+}
+
 .namespace-option-list {
   display: grid;
   gap: 8px;

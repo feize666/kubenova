@@ -26,6 +26,7 @@ export interface NetworkResourceRecord {
 }
 
 export interface NetworkListParams {
+  scopes?: Array<{ clusterId: string; namespace?: string }>;
   clusterId?: string;
   clusterIds?: string[];
   namespace?: string;
@@ -77,6 +78,7 @@ export class NetworkRepository {
       state: { not: 'deleted' },
       cluster: { deletedAt: null, status: { not: 'deleted' } },
     };
+    if (params.scopes) where.AND = [{ OR: params.scopes.map(scope => ({ clusterId: scope.clusterId, ...(scope.namespace ? { namespace: scope.namespace } : {}) })) }];
 
     if (params.clusterId) {
       where.clusterId = params.clusterId;

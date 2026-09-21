@@ -6,6 +6,12 @@ import { PrismaService } from '../platform/database/prisma.service';
 export class AuthRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  findMfaResetTarget(id: string) {
+    return this.prisma.user.findUnique({ where: { id }, select: {
+      id: true, authzVersion: true, mfaEnabled: true, mfaCredential: { select: { version: true } },
+    } });
+  }
+
   findActiveUserByUsername(username: string): Promise<User | null> {
     const normalized = username.trim();
     return this.prisma.user.findFirst({
@@ -17,6 +23,7 @@ export class AuthRepository {
   }
 
   createSession(input: {
+    authzVersion: number;
     userId: string;
     refreshTokenHash: string;
     expiresAt: Date;
@@ -25,6 +32,7 @@ export class AuthRepository {
     return this.prisma.session.create({
       data: {
         userId: input.userId,
+        authzVersion: input.authzVersion,
         refreshTokenHash: input.refreshTokenHash,
         expiresAt: input.expiresAt,
         refreshExpiresAt: input.refreshExpiresAt,
@@ -89,6 +97,7 @@ export class AuthRepository {
   }
 
   async rotateSession(input: {
+    authzVersion: number;
     sessionId: string;
     userId: string;
     currentRefreshTokenHash: string;
@@ -100,6 +109,8 @@ export class AuthRepository {
       const revoked = await tx.session.updateMany({
         where: {
           id: input.sessionId,
+          authzVersion: input.authzVersion,
+          user: { isActive: true, authzVersion: input.authzVersion },
           refreshTokenHash: input.currentRefreshTokenHash,
           revokedAt: null,
           refreshExpiresAt: { gt: new Date() },
@@ -113,8 +124,9 @@ export class AuthRepository {
       return tx.session.create({
         data: {
           userId: input.userId,
+          authzVersion: input.authzVersion,
           refreshTokenHash: input.nextRefreshTokenHash,
-          expiresAt: input.expiresAt,
+          expiresAt: new Date(Math.min(input.expiresAt.getTime(), input.refreshExpiresAt.getTime())),
           refreshExpiresAt: input.refreshExpiresAt,
         },
       });

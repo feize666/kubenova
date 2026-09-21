@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,7 +12,10 @@ import { ClusterEventSyncService } from '../clusters/cluster-event-sync.service'
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
 import { K8sClientService } from '../clusters/k8s-client.service';
-import { appendAudit, type PlatformRole } from '../common/governance';
+import { appendAudit, assertWritePermission, type PlatformRole } from '../common/governance';
+import { ClusterAccessService, type ClusterAccessSubject } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 import {
   NetworkRepository,
   type NetworkCreateData,
@@ -94,13 +98,63 @@ export class NetworkService {
     private readonly clusterSyncService: ClusterSyncService,
     private readonly clusterEventSyncService: ClusterEventSyncService,
     private readonly k8sClientService: K8sClientService,
+    private readonly clusterAccess?: ClusterAccessService,
+    private readonly authorization?: AuthorizationService,
+    private readonly namespaceIdentity?: NamespaceIdentityService,
   ) {}
+
+  private async scopes(actor?: ClusterAccessSubject, mutation = false): Promise<NetworkListParams['scopes']> {
+    // Internal inventory callers omit actor; HTTP controllers always pass an identity object.
+    if (actor === undefined) return undefined;
+    if (!actor.id?.trim() || !this.clusterAccess || !this.authorization || !this.namespaceIdentity) throw new ForbiddenException();
+    if (!this.clusterAccess.isKnownPlatformRole(actor)) throw new ForbiddenException();
+    if (mutation) assertWritePermission(actor as { role?: PlatformRole });
+    if (this.clusterAccess.isPlatformAdmin(actor)) return undefined;
+    const scopes: NonNullable<NetworkListParams['scopes']> = [];
+    for (const clusterId of await this.clusterAccess.listAccessibleClusterIds(actor) ?? []) {
+      if (mutation) {
+        try { await this.clusterAccess.assertCanMutate(actor, clusterId); }
+        catch (error) {
+          if (error instanceof ForbiddenException || error instanceof NotFoundException) continue;
+          throw error;
+        }
+      }
+      scopes.push({ clusterId });
+    }
+    const checked = new Map<string, string | null>();
+    for (const grant of await this.authorization.listEffectiveGrants(actor.id)) {
+      if (mutation && grant.role === 'viewer') continue;
+      for (const scope of grant.namespaces) {
+        if (!scope.namespaceName || !scope.namespaceUid?.trim()) continue;
+        const key = `${grant.clusterId}/${scope.namespaceName}`;
+        if (!checked.has(key)) {
+          try { checked.set(key, await this.namespaceIdentity.resolve(grant.clusterId, scope.namespaceName)); }
+          catch { checked.set(key, null); }
+        }
+        if (checked.get(key) === scope.namespaceUid) scopes.push({ clusterId: grant.clusterId, namespace: scope.namespaceName });
+      }
+    }
+    return scopes;
+  }
+
+  private async assertScope(actor: ClusterAccessSubject | undefined, clusterId: string, namespace: string, mutation = false): Promise<void> {
+    const scopes = await this.scopes(actor, mutation);
+    if (scopes && !scopes.some(scope => scope.clusterId === clusterId && (!scope.namespace || scope.namespace === namespace))) throw new ForbiddenException('Network resource is outside the authorized scope');
+  }
 
   async list(
     query: NetworkListQuery,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: ClusterAccessSubject,
   ): Promise<NetworkListResult> {
     const normalizedClusterId = query.clusterId?.trim();
+    const namespace = query.namespace?.trim();
+    const scopes = await this.scopes(actor);
+    const page = this.parsePositiveInt(query.page, 1);
+    const pageSize = this.parsePositiveInt(query.pageSize, 20);
+    if (scopes && !scopes.some(scope => (!normalizedClusterId || scope.clusterId === normalizedClusterId) && (!namespace || !scope.namespace || scope.namespace === namespace))) {
+      if (normalizedClusterId || namespace) throw new ForbiddenException();
+      return { items: [], total: 0, page, pageSize, timestamp: new Date().toISOString() };
+    }
     let readableClusterIds: string[] | undefined;
     if (normalizedClusterId) {
       await this.clusterHealthService.assertClusterOnlineForRead(
@@ -109,6 +163,7 @@ export class NetworkService {
     } else {
       readableClusterIds =
         await this.clusterHealthService.listReadableClusterIdsForResourceRead();
+      if (scopes) readableClusterIds = readableClusterIds.filter(id => scopes.some(scope => scope.clusterId === id && (!namespace || !scope.namespace || scope.namespace === namespace)));
       if (readableClusterIds.length === 0) {
         return {
           items: [],
@@ -120,8 +175,6 @@ export class NetworkService {
       }
     }
 
-    const page = this.parsePositiveInt(query.page, 1);
-    const pageSize = this.parsePositiveInt(query.pageSize, 20);
     const kind = query.kind?.trim();
     if (
       kind === 'Ingress' ||
@@ -131,7 +184,8 @@ export class NetworkService {
       const liveItems = await this.listLiveIngressResources({
         clusterId: normalizedClusterId,
         clusterIds: readableClusterIds,
-        namespace: query.namespace?.trim(),
+        namespace,
+        scopes,
         keyword: query.keyword?.trim(),
         kind,
       });
@@ -150,7 +204,8 @@ export class NetworkService {
     const params: NetworkListParams = {
       clusterId: normalizedClusterId,
       clusterIds: readableClusterIds,
-      namespace: query.namespace,
+      namespace,
+      scopes,
       kind: query.kind,
       keyword: query.keyword,
       page,
@@ -223,9 +278,10 @@ export class NetworkService {
     return { errors: networkErrors };
   }
 
-  async getById(id: string): Promise<NetworkResourceRecord> {
+  async getById(id: string, actor?: ClusterAccessSubject): Promise<NetworkResourceRecord> {
     const liveRef = this.parseLiveId(id);
     if (liveRef) {
+      await this.assertScope(actor, liveRef.clusterId, liveRef.namespace);
       const item = await this.getLiveNetworkResourceByRef(liveRef);
       if (item) {
         return item;
@@ -236,12 +292,13 @@ export class NetworkService {
     if (!item) {
       throw new NotFoundException(`NetworkResource ${id} 不存在`);
     }
+    await this.assertScope(actor, item.clusterId, item.namespace);
     return item;
   }
 
   async create(
     body: CreateNetworkResourceRequest,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: ClusterAccessSubject,
   ): Promise<NetworkMutationResponse> {
     const clusterId = body.clusterId?.trim();
     const namespace = body.namespace?.trim();
@@ -256,6 +313,7 @@ export class NetworkService {
       );
     }
 
+    await this.assertScope(actor, clusterId, namespace, true);
     const existing = await this.networkRepository.list({
       clusterId,
       namespace,
@@ -280,7 +338,7 @@ export class NetworkService {
       labels: body.labels as Prisma.InputJsonValue,
     };
 
-    await this.createNetworkResourceInCluster(body);
+    await this.createNetworkResourceInCluster({ ...body, clusterId, namespace, name });
 
     const item = await this.networkRepository.create(data);
     this.audit(actor, 'create', item.id, 'success');
@@ -295,7 +353,7 @@ export class NetworkService {
   async update(
     id: string,
     body: UpdateNetworkResourceRequest,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: ClusterAccessSubject,
   ): Promise<NetworkMutationResponse> {
     const existing = await this.networkRepository.findById(id);
     if (!existing) {
@@ -305,10 +363,13 @@ export class NetworkService {
       throw new BadRequestException('已删除的资源不可编辑');
     }
 
+    await this.assertScope(actor, existing.clusterId, existing.namespace, true);
+
     const data: NetworkUpdateData = {};
     if (body.namespace !== undefined) {
       const ns = body.namespace.trim();
       if (!ns) throw new BadRequestException('namespace 不能为空');
+      if (ns !== existing.namespace) throw new BadRequestException('Network resource namespace cannot be changed');
       data.namespace = ns;
     }
     if (body.spec !== undefined) {
@@ -334,15 +395,18 @@ export class NetworkService {
   async applyAction(
     id: string,
     body: NetworkActionRequest,
-    actor?: { username?: string; role?: PlatformRole },
+    actor?: ClusterAccessSubject,
   ): Promise<NetworkMutationResponse> {
     const liveRef = this.parseLiveId(id);
+    if (liveRef) await this.assertScope(actor, liveRef.clusterId, liveRef.namespace, true);
     const existing = liveRef
       ? await this.getLiveNetworkResourceByRef(liveRef)
       : await this.networkRepository.findById(id);
     if (!existing) {
       throw new NotFoundException(`NetworkResource ${id} 不存在`);
     }
+
+    if (!liveRef) await this.assertScope(actor, existing.clusterId, existing.namespace, true);
 
     const { action, reason } = body;
 
@@ -414,7 +478,7 @@ export class NetworkService {
   }
 
   private audit(
-    actor: { username?: string; role?: PlatformRole } | undefined,
+    actor: ClusterAccessSubject | undefined,
     action: 'create' | 'update' | 'delete' | 'disable' | 'enable',
     resourceId: string,
     result: 'success' | 'failure',
@@ -422,7 +486,7 @@ export class NetworkService {
   ): void {
     appendAudit({
       actor: actor?.username ?? 'unknown',
-      role: actor?.role ?? 'read-only',
+      role: (actor?.role ?? 'read-only') as PlatformRole,
       action,
       resourceType: 'network-resource',
       resourceId,
@@ -795,6 +859,7 @@ export class NetworkService {
     clusterId?: string;
     clusterIds?: string[];
     namespace?: string;
+    scopes?: NetworkListParams['scopes'];
     keyword?: string;
     kind: 'Ingress' | 'IngressRoute' | 'NetworkPolicy';
   }): Promise<NetworkResourceRecord[]> {
@@ -806,15 +871,20 @@ export class NetworkService {
     }
 
     const allItems = await Promise.all(
-      targetClusterIds.map((clusterId) =>
+      targetClusterIds.flatMap((clusterId) => {
+        const matching = input.scopes?.filter(scope => scope.clusterId === clusterId && (!input.namespace || !scope.namespace || scope.namespace === input.namespace));
+        const namespaces = matching === undefined || matching.some(scope => !scope.namespace)
+          ? [input.namespace]
+          : [...new Set(matching.map(scope => scope.namespace))];
+        return namespaces.map(namespace =>
         input.kind === 'Ingress'
-          ? this.listLiveIngresses(clusterId, input.namespace)
+          ? this.listLiveIngresses(clusterId, namespace)
           : input.kind === 'IngressRoute'
-            ? this.listLiveIngressRoutes(clusterId, input.namespace)
-            : this.listLiveNetworkPolicies(clusterId, input.namespace),
-      ),
+            ? this.listLiveIngressRoutes(clusterId, namespace)
+            : this.listLiveNetworkPolicies(clusterId, namespace));
+      }),
     );
-    const merged = this.sortNetworkItems(allItems.flat());
+    const merged = this.sortNetworkItems(allItems.flat().filter(item => !input.scopes || input.scopes.some(scope => scope.clusterId === item.clusterId && (!scope.namespace || scope.namespace === item.namespace))));
     const keyword = input.keyword?.toLowerCase();
     if (!keyword) {
       return merged;
@@ -979,6 +1049,6 @@ export class NetworkService {
               input.clusterId,
               input.namespace,
             );
-    return items.find((item) => item.name === input.name) ?? null;
+    return items.find((item) => item.name === input.name && item.namespace === input.namespace) ?? null;
   }
 }

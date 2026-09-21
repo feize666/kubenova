@@ -3,6 +3,11 @@ jest.mock('@kubernetes/client-node', () => ({}));
 import { TopologySummaryService } from './topology-summary.service';
 import type { ClusterHealthService } from '../clusters/cluster-health.service';
 import type { PrismaService } from '../platform/database/prisma.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
+
+const admin = { id: 'admin', role: 'admin' };
 
 describe('TopologySummaryService', () => {
   function build() {
@@ -17,7 +22,7 @@ describe('TopologySummaryService', () => {
       assertClusterOnlineForRead: jest.fn(),
       listReadableClusterIdsForResourceRead: jest.fn(),
     } as unknown as ClusterHealthService;
-    const service = new TopologySummaryService(prisma, clusterHealthService);
+    const service = new TopologySummaryService(prisma, clusterHealthService, new ClusterAccessService(prisma), new AuthorizationService(prisma), {} as NamespaceIdentityService);
     return { service, prisma, clusterHealthService };
   }
 
@@ -35,7 +40,7 @@ describe('TopologySummaryService', () => {
       clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
     ).mockResolvedValue([]);
 
-    const result = await service.listNamespaceSummaries();
+    const result = await service.listNamespaceSummaries({}, admin);
 
     expect(result.items).toEqual([]);
     expect(result.timestamp).toEqual(expect.any(String));
@@ -46,7 +51,7 @@ describe('TopologySummaryService', () => {
     const { service, prisma, clusterHealthService } = build();
     mockEmptyTables(prisma);
 
-    const result = await service.listNamespaceSummaries({ clusterId: ' c-1 ' });
+    const result = await service.listNamespaceSummaries({ clusterId: ' c-1 ' }, admin);
 
     expect(
       clusterHealthService.assertClusterOnlineForRead,
@@ -104,7 +109,7 @@ describe('TopologySummaryService', () => {
     (prisma.storageResource.findMany as jest.Mock).mockResolvedValue([]);
     (prisma.configResource.findMany as jest.Mock).mockResolvedValue([]);
 
-    const result = await service.listNamespaceSummaries();
+    const result = await service.listNamespaceSummaries({}, admin);
 
     expect(result.items).toEqual([
       {

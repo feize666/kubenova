@@ -1,17 +1,45 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { queryLogCenter, eligibleLogSources, canQueryLogCenter, logQueryWindow } from "./log-center";
-import type { ObservabilityDataSource } from "./observability-config";
+import { queryLogCenter, listLogCenterSources, eligibleLogSources, canQueryLogCenter, logQueryWindow } from "./log-center";
+import type { LogCenterSource } from "./log-center";
 
 test("only enabled Elasticsearch sources bound to the exact cluster are selectable", () => {
-  const source = { id: "a", clusterId: "c", enabled: true, kind: "elasticsearch" } as ObservabilityDataSource;
-  assert.deepEqual(eligibleLogSources([source, { ...source, id: "global", clusterId: undefined }, { ...source, id: "other", clusterId: "other" }, { ...source, id: "disabled", enabled: false }, { ...source, id: "kibana", kind: "kibana" }], "c").map((item) => item.id), ["a"]);
+  const source: LogCenterSource = { id: "a", name: "Logs", clusterId: "c", enabled: true, kind: "elasticsearch" };
+  assert.deepEqual(eligibleLogSources([source, { ...source, id: "global", clusterId: "" }, { ...source, id: "other", clusterId: "other" }, { ...source, id: "disabled", enabled: false }, { ...source, id: "kibana", kind: "kibana" }], "c").map((item) => item.id), ["a"]);
 });
 
-test("log query gate accepts only the existing administrator roles", () => {
+test("only administrators can query without an explicit namespace", () => {
   assert.equal(canQueryLogCenter("admin"), true);
   assert.equal(canQueryLogCenter("platform-admin"), true);
   for (const role of ["", "viewer", "operator", "cluster-admin"]) assert.equal(canQueryLogCenter(role), false);
+  for (const role of ["viewer", "operator", "cluster-admin"]) assert.equal(canQueryLogCenter(role, "apps"), true);
+  assert.equal(canQueryLogCenter("viewer", "   "), false);
+});
+
+test("source discovery uses the reader endpoint and preserves cancellation", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const controller = new AbortController();
+  const items = [{ id: "es", name: "Logs", clusterId: "c/a", kind: "elasticsearch", enabled: true }];
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "/api/log-center/sources?clusterId=c%2Fa");
+    assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer session");
+    return new Response(JSON.stringify({ data: { items } }), { headers: { "content-type": "application/json" } });
+  };
+  assert.deepEqual(await listLogCenterSources("c/a", "session", controller.signal), { items });
+  globalThis.fetch = async (_url, init) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+  });
+  const pending = listLogCenterSources("c/a", "session", controller.signal);
+  controller.abort();
+  await assert.rejects(pending, { name: "AbortError" });
+});
+
+test("source discovery denial is not disguised as an unconfigured cluster", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => new Response(JSON.stringify({ message: "Forbidden" }), { status: 403, headers: { "content-type": "application/json" } });
+  await assert.rejects(listLogCenterSources("c", "session"), { status: 403 });
 });
 
 test("relative ranges produce timezone-qualified intervals no longer than 24 hours", () => {

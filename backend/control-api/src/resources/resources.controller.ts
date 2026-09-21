@@ -47,6 +47,16 @@ export class ResourcesController {
     private readonly namespaceIdentity: NamespaceIdentityService,
   ) {}
 
+  private async assertNamespaceGrant(req: ResourcesRequest, clusterId: string, namespace: string | undefined, kind: string): Promise<void> {
+    if (!namespace?.trim()) throw new ForbiddenException('资源不在授权范围内');
+    const namespaceUid = await this.namespaceIdentity.resolve(clusterId, namespace);
+    const decision = await this.authorizationService.authorize({
+      userId: req.user?.user?.id ?? '', clusterId, namespaceUid,
+      ...(['secret', 'secrets'].includes(kind.trim().toLowerCase()) ? { capability: 'secrets' as const } : {}),
+    });
+    if (!decision.allowed) throw new ForbiddenException('资源不在授权范围内');
+  }
+
   private async assertSecretCapability(req: ResourcesRequest, clusterId: string, kind?: string, namespace?: string) {
     if (!['secret', 'secrets'].includes(kind?.trim().toLowerCase() ?? '') || process.env.KUBENOVA_AUTHZ_ENFORCE !== 'true') return;
     if (!this.namespaceIdentity) throw new ForbiddenException({ code: 'AUTHZ_UNAVAILABLE' });
@@ -173,11 +183,15 @@ export class ResourcesController {
       namespace: namespace?.trim() ?? '',
       name: name?.trim() ?? '',
     };
-    await this.clusterAccessService.assertCanRead(
-      req.user?.user,
-      identity.clusterId,
-    );
-    await this.assertSecretCapability(req, identity.clusterId, identity.resource, identity.namespace);
+    const unrestricted = await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+    if (unrestricted === null || unrestricted.includes(identity.clusterId)) {
+      await this.clusterAccessService.assertCanRead(req.user?.user, identity.clusterId);
+      await this.assertSecretCapability(req, identity.clusterId, identity.resource, identity.namespace);
+    } else {
+      await this.clusterAccessService.assertCanDiscover(req.user?.user, identity.clusterId);
+      const scope = await this.resourcesService.resolveDynamicReadScope(identity);
+      await this.assertNamespaceGrant(req, identity.clusterId, scope.namespace, scope.kind);
+    }
     return this.resourcesService.getDynamicResourceDetail(identity);
   }
 
@@ -293,11 +307,14 @@ export class ResourcesController {
     @Query('name') name?: string,
   ) {
     const identity = this.parseIdentity({ clusterId, namespace, kind, name });
-    await this.clusterAccessService.assertCanRead(
-      req.user?.user,
-      identity.clusterId,
-    );
-    await this.assertSecretCapability(req, identity.clusterId, identity.kind, identity.namespace);
+    const unrestricted = await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+    if (unrestricted === null || unrestricted.includes(identity.clusterId)) {
+      await this.clusterAccessService.assertCanRead(req.user?.user, identity.clusterId);
+      await this.assertSecretCapability(req, identity.clusterId, identity.kind, identity.namespace);
+    } else {
+      if (!this.resourcesService.isNamespacedKind(identity.kind)) throw new ForbiddenException('资源不在授权范围内');
+      await this.assertNamespaceGrant(req, identity.clusterId, identity.namespace, identity.kind);
+    }
     return this.resourcesService.getYaml(identity);
   }
 
@@ -311,18 +328,22 @@ export class ResourcesController {
       throw new BadRequestException('id 不能为空');
     }
     const normalizedId = id.trim();
-    const accessibleClusterIds =
+    const unrestrictedClusterIds =
       await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+    const accessibleClusterIds = unrestrictedClusterIds === null ? null :
+      await this.clusterAccessService.listDiscoverableClusterIds(req.user?.user);
     const scope = await this.resourcesService.resolveDetailClusterScope(
       kind,
       normalizedId,
       accessibleClusterIds,
     );
-    await this.clusterAccessService.assertCanRead(
-      req.user?.user,
-      scope.clusterId,
-    );
-    await this.assertSecretCapability(req, scope.clusterId, kind, undefined);
+    if (unrestrictedClusterIds === null || unrestrictedClusterIds.includes(scope.clusterId)) {
+      await this.clusterAccessService.assertCanRead(req.user?.user, scope.clusterId);
+      await this.assertSecretCapability(req, scope.clusterId, kind, scope.namespace);
+    } else {
+      if (scope.scope !== 'namespace' || !scope.namespace) throw new ForbiddenException('资源不在授权范围内');
+      await this.assertNamespaceGrant(req, scope.clusterId, scope.namespace, kind);
+    }
     return this.resourcesService.getDetail(kind, normalizedId);
   }
 

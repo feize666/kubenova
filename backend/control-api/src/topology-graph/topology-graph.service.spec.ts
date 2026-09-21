@@ -4,6 +4,11 @@ import { TopologyGraphService } from './topology-graph.service';
 import type { ClusterHealthService } from '../clusters/cluster-health.service';
 import type { PrismaService } from '../platform/database/prisma.service';
 import type { TopologyGraphCacheService } from './topology-graph-cache.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
+
+const admin = { id: 'admin', role: 'admin' };
 
 describe('TopologyGraphService', () => {
   afterEach(() => {
@@ -33,7 +38,7 @@ describe('TopologyGraphService', () => {
       set: jest.fn().mockResolvedValue(undefined),
     } as unknown as TopologyGraphCacheService;
     return {
-      service: new TopologyGraphService(prisma, clusterHealthService, cache),
+      service: new TopologyGraphService(prisma, clusterHealthService, cache, new ClusterAccessService(prisma), new AuthorizationService(prisma), {} as NamespaceIdentityService),
       prisma,
       clusterHealthService,
       cache,
@@ -108,7 +113,7 @@ describe('TopologyGraphService', () => {
       clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
     ).mockResolvedValue([]);
 
-    const result = await service.getGraph();
+    const result = await service.getGraph({}, admin);
     expect(result.resources).toEqual([]);
     expect(result.relations).toEqual([]);
     expect(result.coverage.warningRecords).toBe(0);
@@ -281,7 +286,7 @@ describe('TopologyGraphService', () => {
       ],
     });
 
-    const result = await service.getGraph();
+    const result = await service.getGraph({}, admin);
 
     expect(result.resources.find((item) => item.recordId === 'pod-1')).toEqual(
       expect.objectContaining({
@@ -481,7 +486,7 @@ describe('TopologyGraphService', () => {
       ],
     });
 
-    const result = await service.getGraph();
+    const result = await service.getGraph({}, admin);
 
     expect(result.relations).toEqual(
       expect.arrayContaining([
@@ -580,7 +585,7 @@ describe('TopologyGraphService', () => {
       ],
     });
 
-    const result = await service.getGraph();
+    const result = await service.getGraph({}, admin);
     const relationPairs = result.relations.map(
       (relation) => `${relation.source}->${relation.target}`,
     );

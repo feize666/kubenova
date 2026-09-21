@@ -1,4 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   RuntimeRepository,
@@ -46,6 +49,7 @@ export type RuntimeSessionValidationCode =
   | 'RUNTIME_TOKEN_PATH_MISMATCH'
   | 'RUNTIME_SESSION_NOT_FOUND'
   | 'RUNTIME_SESSION_CLOSED'
+  | 'RUNTIME_SESSION_ACCESS_REVOKED'
   | 'RUNTIME_SESSION_EXPIRED';
 
 export interface RuntimeSessionValidationResult {
@@ -59,7 +63,12 @@ export class RuntimeSessionService {
   private readonly runtimeTokenSecret =
     process.env.RUNTIME_TOKEN_SECRET ?? 'dev-runtime-token-secret';
 
-  constructor(private readonly runtimeRepository: RuntimeRepository) {}
+  constructor(
+    private readonly runtimeRepository: RuntimeRepository,
+    private readonly clusterAccess: ClusterAccessService,
+    private readonly authorization: AuthorizationService,
+    private readonly namespaceIdentity: NamespaceIdentityService,
+  ) {}
 
   persistSession(input: CreateRuntimeSessionRecordInput): Promise<void> {
     return this.runtimeRepository.createSession(input).then(() => undefined);
@@ -125,6 +134,13 @@ export class RuntimeSessionService {
         message: this.resolveValidationMessage('RUNTIME_SESSION_NOT_FOUND'),
       };
     }
+    if (!session.userId || (['userId', 'type', 'clusterId', 'namespace', 'pod', 'container'] as const).some(key => session[key] !== payload[key])) {
+      return {
+        payload: null,
+        code: 'RUNTIME_TOKEN_SESSION_MISMATCH',
+        message: this.resolveValidationMessage('RUNTIME_TOKEN_SESSION_MISMATCH'),
+      };
+    }
     if (session.closedAt) {
       return {
         payload: null,
@@ -140,7 +156,30 @@ export class RuntimeSessionService {
       };
     }
 
-    return { payload };
+    let effectiveExpiry = Math.min(payload.exp, Math.floor(session.expiresAt.getTime() / 1000));
+    let requiresGrant = process.env.KUBENOVA_AUTHZ_ENFORCE === 'true';
+    try {
+      const access = payload.type === 'logs'
+        ? await this.clusterAccess.assertCanRead(session.subject, payload.clusterId)
+        : await this.clusterAccess.assertCanMutate(session.subject, payload.clusterId);
+      if (access?.source === 'access-grant') requiresGrant = true;
+    } catch (error) {
+      if (!(error instanceof ForbiddenException || error instanceof NotFoundException)) throw error;
+      requiresGrant = true;
+    }
+    if (requiresGrant) {
+      let allowed = false;
+      try {
+        const namespaceUid = await this.namespaceIdentity.resolve(payload.clusterId, payload.namespace);
+        const decision = await this.authorization.authorize({ userId: payload.userId, clusterId: payload.clusterId, namespaceUid, capability: payload.type === 'logs' ? 'logs' : 'exec', mutation: false });
+        allowed = decision.allowed;
+        if (decision.expiresAt) effectiveExpiry = Math.min(effectiveExpiry, Math.floor(decision.expiresAt.getTime() / 1000));
+      } catch (error) {
+        if (!(error instanceof ForbiddenException || error instanceof NotFoundException)) throw error;
+      }
+      if (!allowed) return { payload: null, code: 'RUNTIME_SESSION_ACCESS_REVOKED', message: this.resolveValidationMessage('RUNTIME_SESSION_ACCESS_REVOKED') };
+    }
+    return { payload: { ...payload, exp: effectiveExpiry } };
   }
 
   private verifyRuntimeToken(token: string): {
@@ -195,6 +234,8 @@ export class RuntimeSessionService {
       case 'RUNTIME_SESSION_NOT_FOUND':
       case 'RUNTIME_SESSION_CLOSED':
         return 'runtime 会话不存在或已关闭，请重新进入终端';
+      case 'RUNTIME_SESSION_ACCESS_REVOKED':
+        return '当前资源访问授权已失效，请联系管理员';
       default:
         return 'runtime 会话校验失败';
     }

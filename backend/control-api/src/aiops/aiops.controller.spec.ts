@@ -1,9 +1,16 @@
 jest.mock('@kubernetes/client-node', () => ({}));
 
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AiopsController } from './aiops.controller';
 
 describe('AiopsController', () => {
+  it('rejects unauthenticated and unknown subjects on the summary route', () => {
+    const { controller } = createController();
+    expect(() => controller.getSummary()).toThrow(ForbiddenException);
+    expect(() => controller.getSummary('24h', undefined, undefined, undefined,
+      { user: { user: { id: 'unknown', role: 'unrecognized' } } },
+    )).toThrow(ForbiddenException);
+  });
   function createController() {
     const aiopsService = {
       getSummary: jest.fn().mockResolvedValue({
@@ -62,6 +69,7 @@ describe('AiopsController', () => {
       '2026-01-01T00:00:00.000Z',
       '2026-01-01T01:00:00.000Z',
       ' cluster-a ',
+      { user: { user: { id: 'reader', role: 'read-only' } } },
     );
 
     expect(service.getSummary).toHaveBeenCalledWith({
@@ -69,7 +77,7 @@ describe('AiopsController', () => {
       range: '1h',
       from: new Date('2026-01-01T00:00:00.000Z'),
       to: new Date('2026-01-01T01:00:00.000Z'),
-    });
+    }, { id: 'reader', role: 'read-only', username: undefined });
   });
 
   it('rejects unsupported range', () => {
@@ -93,13 +101,14 @@ describe('AiopsController', () => {
   it('prechecks recommendation with actor context', () => {
     const { controller, service } = createController();
     controller.precheckRecommendation(
-      { user: { user: { username: 'admin@local.dev', role: 'admin' } } },
+      { user: { user: { id: 'admin', username: 'admin@local.dev', role: 'admin' } } },
       { recommendationId: ' rec:alert:a1 ' },
     );
 
     expect(service.precheckRecommendation).toHaveBeenCalledWith(
       'rec:alert:a1',
       {
+        id: 'admin',
         username: 'admin@local.dev',
         role: 'platform-admin',
       },
@@ -111,7 +120,7 @@ describe('AiopsController', () => {
     controller.approveRecommendation(
       {
         user: {
-          user: { username: 'operator@local.dev', role: 'cluster-operator' },
+          user: { id: 'operator', username: 'operator@local.dev', role: 'cluster-operator' },
         },
       },
       { recommendationId: 'rec:inspection:i1' },
@@ -120,6 +129,7 @@ describe('AiopsController', () => {
     expect(service.approveRecommendation).toHaveBeenCalledWith(
       'rec:inspection:i1',
       {
+        id: 'operator',
         username: 'operator@local.dev',
         role: 'cluster-operator',
       },

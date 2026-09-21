@@ -128,8 +128,9 @@ export class ObservabilityController {
   }
 
   @Get('notification-templates')
-  listNotificationTemplates() {
-    return this.observabilityService.listNotificationTemplates();
+  listNotificationTemplates(@Req() req: ActorRequest, @Query('clusterId') clusterId?: string) {
+    this.clusterAccessService.assertPlatformAdmin(req.user?.user);
+    return this.observabilityService.listNotificationTemplates(req.user?.user, clusterId);
   }
 
   @Post('notification-templates')
@@ -139,21 +140,21 @@ export class ObservabilityController {
   }
 
   @Patch('notification-templates/:id')
-  updateNotificationTemplate(@Req() req: ActorRequest, @Param('id') id: string, @Body() body: Partial<NotificationTemplateInput>) {
+  updateNotificationTemplate(@Req() req: ActorRequest, @Param('id') id: string, @Body() body: Partial<NotificationTemplateInput>, @Query('clusterId') clusterId?: string) {
     this.clusterAccessService.assertPlatformAdmin(req.user?.user);
-    return this.observabilityService.updateNotificationTemplate(req.user?.user, id, body);
+    return this.observabilityService.updateNotificationTemplate(req.user?.user, id, body, clusterId);
   }
 
   @Delete('notification-templates/:id')
-  deleteNotificationTemplate(@Req() req: ActorRequest, @Param('id') id: string) {
+  deleteNotificationTemplate(@Req() req: ActorRequest, @Param('id') id: string, @Query('clusterId') clusterId?: string) {
     this.clusterAccessService.assertPlatformAdmin(req.user?.user);
-    return this.observabilityService.deleteNotificationTemplate(req.user?.user, id);
+    return this.observabilityService.deleteNotificationTemplate(req.user?.user, id, clusterId);
   }
 
   @Post('notification-templates/:id/test')
-  testNotificationTemplate(@Req() req: ActorRequest, @Param('id') id: string) {
+  testNotificationTemplate(@Req() req: ActorRequest, @Param('id') id: string, @Query('clusterId') clusterId?: string) {
     this.clusterAccessService.assertPlatformAdmin(req.user?.user);
-    return this.observabilityService.testNotificationTemplate(id);
+    return this.observabilityService.testNotificationTemplate(req.user?.user, id, clusterId);
   }
 
   @Get('catalog')

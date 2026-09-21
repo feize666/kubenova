@@ -82,17 +82,18 @@ describe('ResourcesService detail cluster scope resolution', () => {
     },
   );
 
-  it('resolves an opaque database id with a clusterId-only access-constrained query', async () => {
+  it('resolves opaque workload namespace from the stored identity before resource reads', async () => {
     const h = harness();
     h.prisma.workloadRecord.findFirst.mockResolvedValue({
       clusterId: 'cluster-a',
+      namespace: 'ai',
     });
 
     await expect(
       h.service.resolveDetailClusterScope('deployment', 'opaque-cuid', [
         'cluster-a',
       ]),
-    ).resolves.toEqual({ clusterId: 'cluster-a', scope: 'namespace' });
+    ).resolves.toEqual({ clusterId: 'cluster-a', scope: 'namespace', namespace: 'ai' });
     expect(h.prisma.workloadRecord.findFirst).toHaveBeenCalledWith({
       where: {
         id: 'opaque-cuid',
@@ -100,7 +101,7 @@ describe('ResourcesService detail cluster scope resolution', () => {
         kind: 'Deployment',
         state: { not: 'deleted' },
       },
-      select: { clusterId: true },
+      select: { clusterId: true, namespace: true },
     });
     expect(
       h.clusterHealthService.assertClusterOnlineForRead,

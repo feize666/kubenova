@@ -1,0 +1,18 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const file = path.join(__dirname, '../deploy/keycloak/kubenova-kubectl-client.json');
+assert.ok(fs.existsSync(file), 'Personal kubectl public PKCE client template must exist');
+const client = JSON.parse(fs.readFileSync(file, 'utf8'));
+assert.equal(client.clientId, 'kubenova-kubectl');
+assert.equal(client.protocol, 'openid-connect');
+assert.equal(client.publicClient, true);
+assert.equal(client.standardFlowEnabled, true);
+for (const field of ['implicitFlowEnabled', 'directAccessGrantsEnabled', 'serviceAccountsEnabled', 'fullScopeAllowed']) assert.equal(client[field], false, field);
+assert.equal(client.attributes['pkce.code.challenge.method'], 'S256');
+assert.equal(client.secret, undefined);
+assert.deepEqual(client.redirectUris, ['http://localhost:8000', 'http://localhost:18000']);
+assert.deepEqual(client.webOrigins, []);
+assert.deepEqual(client.defaultClientScopes, ['profile']);
+assert.deepEqual(client.optionalClientScopes, []);
+console.log('PASS public native client: code + S256 only, fixed loopback redirects, no secrets, password grant, implicit flow, service account or provider roles');

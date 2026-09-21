@@ -41,6 +41,7 @@ const VALID_RANGES: readonly MonitoringRange[] = [
 
 interface RequestActor {
   user?: {
+    id?: string;
     username?: string;
     role?: PlatformRole;
   };
@@ -64,11 +65,12 @@ export class MonitoringController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('clusterId') clusterId?: string,
+    @Req() req?: MonitoringPanelRequest,
   ): Promise<MonitoringOverviewResponse> {
     return this.monitoringService.getOverview({
       ...this.parseTimeFilter(range, from, to, '24h'),
       clusterId: this.normalizeClusterId(clusterId),
-    });
+    }, req?.user?.user ?? {});
   }
 
   @Get('observability/summary')
@@ -77,11 +79,12 @@ export class MonitoringController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('clusterId') clusterId?: string,
+    @Req() req?: MonitoringPanelRequest,
   ) {
     return this.monitoringService.getObservabilitySummary({
       ...this.parseTimeFilter(range, from, to, '24h'),
       clusterId: this.normalizeClusterId(clusterId),
-    });
+    }, req?.user?.user ?? {});
   }
 
   @Get('grafana/panels')
@@ -105,6 +108,7 @@ export class MonitoringController {
     const result = await this.monitoringService.getGrafanaPanelConfiguration(
       normalizedClusterId,
       range?.trim() || undefined,
+      req.user?.user ?? {},
     );
     const frameSource = result.origin ? `'self' ${result.origin}` : "'self'";
     response.setHeader(
@@ -122,11 +126,12 @@ export class MonitoringController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('clusterId') clusterId?: string,
+    @Req() req?: MonitoringPanelRequest,
   ): Promise<MonitoringEventsResponse> {
     return this.monitoringService.getEvents({
       ...this.parseTimeFilter(range, from, to, '1h'),
       clusterId: this.normalizeClusterId(clusterId),
-    });
+    }, req?.user?.user ?? {});
   }
 
   @Get('alerts')
@@ -139,6 +144,7 @@ export class MonitoringController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('clusterId') clusterId?: string,
+    @Req() req?: MonitoringPanelRequest,
   ) {
     const query: AlertsQuery = {
       clusterId: this.normalizeClusterId(clusterId),
@@ -148,7 +154,7 @@ export class MonitoringController {
       pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
       ...this.parseTimeFilter(range, from, to, '24h'),
     };
-    return this.monitoringService.getAlerts(query);
+    return this.monitoringService.getAlerts(query, req?.user?.user ?? {});
   }
 
   @Get('inspection')
@@ -158,11 +164,13 @@ export class MonitoringController {
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Req() req?: MonitoringPanelRequest,
   ) {
     return this.monitoringService.getClusterInspection(
       clusterId && clusterId.trim() ? clusterId.trim() : undefined,
       namespace && namespace.trim() ? namespace.trim() : undefined,
       this.parseTimeFilter(range, from, to, '24h'),
+      req?.user?.user ?? {},
     );
   }
 
@@ -175,6 +183,7 @@ export class MonitoringController {
     @Query('range') range?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Req() req?: MonitoringPanelRequest,
   ): Promise<void> {
     const exportFormat = this.parseExportFormat(format);
     const result = await this.monitoringService.exportClusterInspectionReport(
@@ -182,6 +191,7 @@ export class MonitoringController {
       namespace && namespace.trim() ? namespace.trim() : undefined,
       exportFormat,
       this.parseTimeFilter(range, from, to, '24h'),
+      req?.user?.user ?? {},
     );
     response.setHeader('Content-Type', result.contentType);
     const encodedFilename = encodeURIComponent(result.filename);
@@ -202,6 +212,7 @@ export class MonitoringController {
       from?: string;
       to?: string;
     },
+    @Req() req?: MonitoringPanelRequest,
   ) {
     return this.monitoringService.rerunClusterInspection(
       body.clusterId && body.clusterId.trim()
@@ -211,6 +222,7 @@ export class MonitoringController {
         ? body.namespace.trim()
         : undefined,
       this.parseTimeFilter(body.range, body.from, body.to, '24h'),
+      req?.user?.user ?? {},
     );
   }
 
@@ -224,6 +236,7 @@ export class MonitoringController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('clusterId') clusterId?: string,
+    @Req() req?: MonitoringPanelRequest,
   ): Promise<void> {
     const exportFormat = this.parseExportFormat(format);
     const timeFilter = this.parseTimeFilter(range, from, to, '24h');
@@ -235,6 +248,7 @@ export class MonitoringController {
         ...timeFilter,
       },
       exportFormat,
+      req?.user?.user ?? {},
     );
     response.setHeader('Content-Type', result.contentType);
     const encodedFilename = encodeURIComponent(result.filename);
@@ -249,11 +263,13 @@ export class MonitoringController {
   async generateFixYaml(
     @Param('issueId') issueId: string,
     @Body() body: ExecuteInspectionActionRequest,
+    @Req() req?: MonitoringPanelRequest,
   ) {
     return this.monitoringService.executeInspectionAction(
       issueId,
       'generate-yaml',
       body ?? {},
+      req?.user?.user ?? {},
     );
   }
 
@@ -261,22 +277,24 @@ export class MonitoringController {
   async createHpaDraft(
     @Param('issueId') issueId: string,
     @Body() body: ExecuteInspectionActionRequest,
+    @Req() req?: MonitoringPanelRequest,
   ) {
     return this.monitoringService.executeInspectionAction(
       issueId,
       'create-hpa-draft',
       body ?? {},
+      req?.user?.user ?? {},
     );
   }
 
   @Patch('alerts/:id')
-  async resolveAlert(@Param('id') id: string) {
-    return this.monitoringService.resolveAlert(id);
+  async resolveAlert(@Param('id') id: string, @Req() req: MonitoringPanelRequest) {
+    return this.monitoringService.resolveAlert(id, req.user?.user ?? {});
   }
 
   @Get('alert-rules')
-  listAlertRules(): MonitoringAlertRulesResponse {
-    return this.monitoringService.listAlertRules();
+  listAlertRules(@Req() req?: MonitoringPanelRequest): MonitoringAlertRulesResponse {
+    return this.monitoringService.listAlertRules(req?.user?.user ?? {});
   }
 
   @Post('alert-rules')

@@ -47,6 +47,8 @@ spec:
                 secretKeyRef:
                   name: kubenova-platform-secret
                   key: RUNTIME_GATEWAY_INTERNAL_SECRET
+            - name: RUNTIME_PUSH_REVOCATION_ENABLED
+              value: "true"
           readinessProbe:
             httpGet:
               path: /healthz

@@ -20,8 +20,8 @@ function hasValue(value: string | undefined): boolean {
 function repositoryType(repository: string | undefined): BackupRepositoryType {
   const value = repository?.trim();
   if (!value) return 'unconfigured';
-  if (!/^s3:/i.test(value) && !/^oss:/i.test(value)) return 'unknown';
-  if (/^oss:/i.test(value) || /(?:^|[./])aliyuncs\.com(?:\/|$)/i.test(value)) {
+  if (!value.startsWith('s3:')) return 'unknown';
+  if (/(?:^|[./])aliyuncs\.com(?:\/|$)/i.test(value)) {
     return 'oss';
   }
   return 's3';

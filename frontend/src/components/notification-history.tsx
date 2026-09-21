@@ -37,20 +37,20 @@ export function NotificationHistory({ clusterId, token }: { clusterId: string; t
       <Select aria-label="投递状态" placeholder="全部状态" allowClear value={status} style={{ width: 160 }}
         options={Object.entries(statuses).map(([value, [label]]) => ({ value, label }))}
         onChange={value => { setStatus(value); setCursors([undefined]); }} />
-      <OpsIconActionButton label="刷新投递记录" icon={<ReloadOutlined />} loading={query.isFetching} onClick={() => void query.refetch()} />
-      <OpsIconActionButton label="上一页投递记录" icon={<LeftOutlined />} disabled={cursors.length === 1 || query.isFetching} onClick={() => setCursors(previous => previous.slice(0, -1))} />
-      <OpsIconActionButton label="下一页投递记录" icon={<RightOutlined />} disabled={!query.data?.nextCursor || query.isFetching || query.isError} onClick={() => { if (query.data?.nextCursor) setCursors(previous => [...previous, query.data.nextCursor!]); }} />
+      <OpsIconActionButton title="刷新投递记录" icon={<ReloadOutlined />} loading={query.isFetching} onClick={() => void query.refetch()} />
+      <OpsIconActionButton title="上一页投递记录" icon={<LeftOutlined />} disabled={cursors.length === 1 || query.isFetching} onClick={() => setCursors(previous => previous.slice(0, -1))} />
+      <OpsIconActionButton title="下一页投递记录" icon={<RightOutlined />} disabled={!query.data?.nextCursor || query.isFetching || query.isError} onClick={() => { if (query.data?.nextCursor) setCursors(previous => [...previous, query.data.nextCursor!]); }} />
     </Space>
     {query.isError ? <Alert type="error" showIcon title="投递记录加载失败" description="请刷新重试" /> :
       <ResourceTable<Delivery> tableKey="notification-delivery-history" rowKey="id" showToolbar={false} viewportScroll={false} size="small" loading={query.isLoading} dataSource={query.data?.items ?? []} pagination={false} emptyDescription="暂无投递记录"
         columns={[
-          { title: "告警", dataIndex: "alertTitle", ellipsis: true },
-          { title: "渠道 ID", dataIndex: "templateId", ellipsis: true },
-          { title: "事件", dataIndex: "event", width: 90, render: value => value === "resolved" ? "恢复" : "告警" },
-          { title: "状态", dataIndex: "status", width: 130, render: (value: string) => { const item = statuses[value as keyof typeof statuses]; return <OpsStatusTag tone={item?.[1] ?? "neutral"}>{item?.[0] ?? value}</OpsStatusTag>; } },
-          { title: "尝试次数", dataIndex: "attempts", width: 90 },
-          { title: "创建时间", dataIndex: "createdAt", width: 180, render: value => new Date(value).toLocaleString() },
-          { title: "结果说明", dataIndex: "error", ellipsis: true, render: value => value || "-" },
+          { key: "alertTitle", title: "告警", dataIndex: "alertTitle", ellipsis: true },
+          { key: "templateId", title: "渠道 ID", dataIndex: "templateId", ellipsis: true },
+          { key: "event", title: "事件", dataIndex: "event", width: 90, render: value => value === "resolved" ? "恢复" : "告警" },
+          { key: "status", title: "状态", dataIndex: "status", width: 130, render: (value: string) => { const item = statuses[value as keyof typeof statuses]; return <OpsStatusTag tone={item?.[1] ?? "neutral"}>{item?.[0] ?? value}</OpsStatusTag>; } },
+          { key: "attempts", title: "尝试次数", dataIndex: "attempts", width: 90 },
+          { key: "createdAt", title: "创建时间", dataIndex: "createdAt", width: 180, render: value => new Date(value).toLocaleString() },
+          { key: "error", title: "结果说明", dataIndex: "error", ellipsis: true, render: value => value || "-" },
         ]} />}
   </>;
 }
