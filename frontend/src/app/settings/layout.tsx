@@ -1,6 +1,6 @@
 "use client";
 
-import { CloudDownloadOutlined, RobotOutlined } from "@ant-design/icons";
+import { CloudDownloadOutlined, DatabaseOutlined, RobotOutlined } from "@ant-design/icons";
 import { Menu, Space, Typography } from "antd";
 import type { MenuProps } from "antd";
 import Link from "next/link";
@@ -9,6 +9,7 @@ import { usePathname } from "next/navigation";
 const SETTINGS_ITEMS = [
   { key: "/settings/update", label: "更新管理", icon: <CloudDownloadOutlined /> },
   { key: "/settings/ai", label: "AI 助手配置", icon: <RobotOutlined /> },
+  { key: "/settings/backup", label: "备份与恢复", icon: <DatabaseOutlined /> },
 ] as const;
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
