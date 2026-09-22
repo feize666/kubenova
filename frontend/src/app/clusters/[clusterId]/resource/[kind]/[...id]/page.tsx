@@ -48,7 +48,7 @@ export default function ResourceDetailPage() {
 
   const detail = detailQuery.data;
   const displayKind = detail?.overview?.kind ?? kind;
-  const displayName = detail?.overview?.name ?? resourceId;
+  const displayName = detail?.overview?.name ?? resourceName;
   const namespace = detail?.overview?.namespace;
   const state = detail?.overview?.state;
 
