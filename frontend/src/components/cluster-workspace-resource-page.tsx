@@ -45,8 +45,6 @@ const resourcePages: Record<ClusterWorkspaceResourcePath, React.ComponentType> =
   "log-center": dynamic(() => import("@/components/log-center-page"), { loading }),
   inspection: dynamic(() => import("@/app/inspection/page"), { loading }),
   aiops: dynamic(() => import("@/app/aiops/page"), { loading }),
-  logs: dynamic(() => import("@/app/logs/page"), { loading }),
-  terminal: dynamic(() => import("@/app/terminal/page"), { loading }),
 };
 
 export function ClusterWorkspaceResourcePage() {

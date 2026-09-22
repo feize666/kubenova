@@ -61,8 +61,6 @@ export const CLUSTER_WORKSPACE_RESOURCE_PATHS = [
   "log-center",
   "inspection",
   "aiops",
-  "logs",
-  "terminal",
 ] as const;
 
 export type ClusterWorkspaceResourcePath =
