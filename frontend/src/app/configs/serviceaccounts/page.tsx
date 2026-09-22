@@ -12,7 +12,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -184,6 +184,7 @@ function downloadTextFile(content: string, filename: string) {
 
 export default function ServiceAccountsPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -577,7 +578,7 @@ export default function ServiceAccountsPage() {
       render: (name: string, row: ServiceAccountRecord) =>
         row.id ? (
           <Typography.Link
-            onClick={() =>
+            onClick={() => {
               setDetailTarget({
                 kind: "ServiceAccount",
                 id: row.id,
@@ -587,8 +588,9 @@ export default function ServiceAccountsPage() {
                 name: row.name,
                 label: row.name,
                 snapshot: { labels: row.labels },
-              })
-            }
+              });
+              router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/serviceaccount/${encodeURIComponent(row.id)}`);
+            }}
           >
             {name}
           </Typography.Link>

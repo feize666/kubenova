@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Col, Form, Input, InputNumber, Row, Select, Space, Typography, message } from "antd";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
 import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
@@ -249,6 +249,7 @@ interface HttpRouteFormValues {
 
 export default function GatewayApiPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -978,7 +979,7 @@ export default function GatewayApiPage() {
       render: (value: string, row) =>
         row.id ? (
           <Typography.Link
-            onClick={() => setDetailTarget(buildGatewayDynamicDetailTarget(kindMeta, row))}
+            onClick={() => { const dt = buildGatewayDynamicDetailTarget(kindMeta, row); setDetailTarget(dt); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/dynamic/${encodeURIComponent(dt.id)}`); }}
           >
             {value}
           </Typography.Link>

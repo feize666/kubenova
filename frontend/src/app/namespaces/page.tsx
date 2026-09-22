@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
   App,
@@ -117,6 +117,7 @@ export default function NamespacesPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { accessToken, isInitializing } = useAuth();
   const now = useNowTicker();
   const initialFilters = useMemo(
@@ -327,7 +328,7 @@ export default function NamespacesPage() {
         <Button
           type="link"
           className="resource-name-link"
-          onClick={() => setDetailTarget(buildNamespaceDetailTarget(row))}
+          onClick={() => { const dt = buildNamespaceDetailTarget(row); setDetailTarget(dt); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/namespace/${encodeURIComponent(dt.id)}`); }}
         >
           {value}
         </Button>
@@ -400,7 +401,7 @@ export default function NamespacesPage() {
             {
               key: "detail",
               label: "描述",
-              onClick: () => setDetailTarget(buildNamespaceDetailTarget(row)),
+              onClick: () => { const dt = buildNamespaceDetailTarget(row); setDetailTarget(dt); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/namespace/${encodeURIComponent(dt.id)}`); },
             },
           ]}
           onYaml={() =>

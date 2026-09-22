@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Alert, Space, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { OpsEmptyState, OpsFilterChip, OpsSurface } from "@/components/ops";
@@ -168,6 +169,7 @@ export default function ClusterNodesPage() {
   const workspace = useOptionalClusterWorkspace();
   const now = useNowTicker();
   const [clusterId, setClusterId] = useState("");
+  const router = useRouter();
   const [keyword, setKeyword] = useState("");
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
@@ -265,11 +267,11 @@ export default function ClusterNodesPage() {
           <Typography.Link
             strong
             onClick={() =>
-              setDetailTarget({
+              { setDetailTarget({
                 kind: "Node",
                 id: `live-node:${effectiveClusterId}:${row.name}`,
                 label: row.name,
-              })
+              }); router.push(`/clusters/${encodeURIComponent(effectiveClusterId)}/resource/node/${encodeURIComponent("live-node:" + effectiveClusterId + ":" + row.name)}`); }
             }
           >
             {value}
