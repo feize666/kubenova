@@ -16,7 +16,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -140,6 +140,7 @@ function readSecretDetail(raw: unknown): {
 
 export default function SecretsPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -471,7 +472,7 @@ export default function SecretsPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: ConfigResourceItem) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "Secret", id: row.id })}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "Secret", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/secret/${encodeURIComponent(row.id)}`); }}>
             {name}
           </Typography.Link>
         ) : (

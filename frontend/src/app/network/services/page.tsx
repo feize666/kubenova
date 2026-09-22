@@ -12,7 +12,7 @@ import {
 } from "antd";
 import type { TableProps } from "antd";
 import type { SortOrder as AntdSortOrder } from "antd/es/table/interface";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createContext, useCallback, useContext, useDeferredValue, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
@@ -241,6 +241,7 @@ function ServiceTimeProvider({ children }: { children: ReactNode }) {
 
 export default function ServicesPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -583,7 +584,7 @@ export default function ServicesPage() {
         ...getServiceSortableColumnProps("name", sortBy, sortOrder, isTableBusy),
         render: (name: string, row: NetworkResource) =>
           row.id ? (
-            <Typography.Link onClick={() => setDetailTarget({ kind: SERVICE_KIND, id: row.id })}>
+            <Typography.Link onClick={() => { setDetailTarget({ kind: "Service", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/service/${encodeURIComponent(row.id)}`); }}>
               {name}
             </Typography.Link>
           ) : (

@@ -12,7 +12,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -131,6 +131,7 @@ const ACCESS_MODE_OPTIONS = [
 
 export default function PvPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -390,7 +391,7 @@ export default function PvPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: StorageResource) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "PersistentVolume", id: row.id })}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "PersistentVolume", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/persistentvolume/${encodeURIComponent(row.id)}`); }}>
             {name}
           </Typography.Link>
         ) : (

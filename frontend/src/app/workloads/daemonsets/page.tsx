@@ -725,7 +725,7 @@ export default function DaemonSetsPage() {
       render: (name: string, row: WorkloadListItem) =>
         row.id ? (
           <Typography.Link
-            onClick={() => setDetailTarget({ kind: "DaemonSet", id: row.id })}
+            onClick={() => { setDetailTarget({ kind: "DaemonSet", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/daemonset/${encodeURIComponent(row.id)}`); }}
           >
             {name}
           </Typography.Link>

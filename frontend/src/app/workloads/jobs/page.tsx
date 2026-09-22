@@ -23,7 +23,7 @@ import type {
   HeadlampTableFilters,
 } from "@/lib/table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTable } from "@/components/resource-table";
@@ -130,6 +130,7 @@ interface FormValues {
 export default function JobsPage() {
   const { message } = App.useApp();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const {
     clusterId: initialClusterId,
     namespace: initialNamespace,
@@ -495,7 +496,7 @@ export default function JobsPage() {
       render: (name: string, row: WorkloadListItem) =>
         row.id ? (
           <Typography.Link
-            onClick={() => setDetailTarget({ kind: "Job", id: row.id })}
+            onClick={() => { setDetailTarget({ kind: "Job", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/job/${encodeURIComponent(row.id)}`); }}
           >
             {name}
           </Typography.Link>

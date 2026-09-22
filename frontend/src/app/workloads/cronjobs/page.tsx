@@ -22,7 +22,7 @@ import type {
   HeadlampTableFilters,
 } from "@/lib/table";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
 import { ResourceTable } from "@/components/resource-table";
@@ -134,6 +134,7 @@ interface FormValues {
 export default function CronJobsPage() {
   const { message } = App.useApp();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const {
     clusterId: initialClusterId,
     namespace: initialNamespace,
@@ -507,7 +508,7 @@ export default function CronJobsPage() {
       render: (name: string, row: CronJobItem) =>
         row.id ? (
           <Typography.Link
-            onClick={() => setDetailTarget({ kind: "CronJob", id: row.id })}
+            onClick={() => { setDetailTarget({ kind: "CronJob", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/cronjob/${encodeURIComponent(row.id)}`); }}
           >
             {name}
           </Typography.Link>

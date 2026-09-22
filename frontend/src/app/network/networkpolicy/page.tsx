@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Form, Input, Select, Space, Typography, message } from "antd";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -94,6 +94,7 @@ function isSimpleNetworkPolicySpec(spec: NetworkPolicyResource["spec"]) {
 
 export default function NetworkPolicyPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -427,7 +428,7 @@ export default function NetworkPolicyPage() {
       ellipsis: true,
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: NetworkPolicyResource) =>
-        row.id ? <Typography.Link onClick={() => setDetailTarget({ kind: "NetworkPolicy", id: row.id })}>{name}</Typography.Link> : name,
+        row.id ? <Typography.Link onClick={() => { setDetailTarget({ kind: "NetworkPolicy", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/networkpolicy/${encodeURIComponent(row.id)}`); }}>{name}</Typography.Link> : name,
     },
     {
       title: "集群",

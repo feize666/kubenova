@@ -10,7 +10,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -128,6 +128,7 @@ function parsePorts(input?: string): EndpointSlicePort[] {
 
 export default function EndpointSlicesPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -367,7 +368,7 @@ export default function EndpointSlicesPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: EndpointSliceResource) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "EndpointSlice", id: row.id })}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "EndpointSlice", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/endpointslice/${encodeURIComponent(row.id)}`); }}>
             {name}
           </Typography.Link>
         ) : (

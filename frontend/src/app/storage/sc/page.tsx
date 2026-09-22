@@ -16,7 +16,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -108,6 +108,7 @@ function readAllowVolumeExpansion(resource: StorageResource) {
 
 export default function StorageClassPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -330,7 +331,7 @@ export default function StorageClassPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: StorageResource) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "StorageClass", id: row.id })}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "StorageClass", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/storageclass/${encodeURIComponent(row.id)}`); }}>
             {name}
           </Typography.Link>
         ) : (

@@ -798,7 +798,7 @@ export default function StatefulSetsPage() {
       render: (name: string, row: WorkloadListItem) =>
         row.id ? (
           <Typography.Link
-            onClick={() => setDetailTarget({ kind: "StatefulSet", id: row.id })}
+            onClick={() => { setDetailTarget({ kind: "StatefulSet", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/statefulset/${encodeURIComponent(row.id)}`); }}
           >
             {name}
           </Typography.Link>

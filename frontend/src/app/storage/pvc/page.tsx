@@ -18,7 +18,7 @@ import {
   message,
 } from "antd";
 import type { MenuProps } from "antd";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -135,6 +135,7 @@ const ACCESS_MODE_OPTIONS = [
 export default function PvcPage() {
   const workspace = useOptionalClusterWorkspace();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -449,7 +450,7 @@ export default function PvcPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: StorageResource) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "PersistentVolumeClaim", id: row.id })}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "PersistentVolumeClaim", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/persistentvolumeclaim/${encodeURIComponent(row.id)}`); }}>
             {name}
           </Typography.Link>
         ) : (

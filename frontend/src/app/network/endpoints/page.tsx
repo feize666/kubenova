@@ -9,7 +9,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -122,6 +122,7 @@ function parsePorts(input?: string): EndpointPort[] {
 
 export default function EndpointsPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -357,7 +358,7 @@ export default function EndpointsPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: EndpointsResource) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "Endpoints", id: row.id })}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "Endpoints", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/endpoints/${encodeURIComponent(row.id)}`); }}>
             {name}
           </Typography.Link>
         ) : (

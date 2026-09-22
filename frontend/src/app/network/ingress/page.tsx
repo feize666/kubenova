@@ -9,7 +9,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
@@ -82,6 +82,7 @@ function textMatches(value: unknown, filterValue: string) {
 export default function IngressPage() {
   const { accessToken, isInitializing } = useAuth();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const queryClient = useQueryClient();
@@ -435,7 +436,7 @@ export default function IngressPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: IngressResource) =>
         row.id ? (
-          <Typography.Link onClick={() => setDetailTarget({ kind: "Ingress", id: row.id })}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "Ingress", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/ingress/${encodeURIComponent(row.id)}`); }}>
             {name}
           </Typography.Link>
         ) : (

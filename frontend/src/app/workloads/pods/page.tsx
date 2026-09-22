@@ -847,7 +847,7 @@ export default function PodsPage() {
         render: (_name: string, row: PodRow) =>
           row.id ? (
             <Typography.Link
-              onClick={() => setDetailTarget({ kind: POD_KIND, id: row.id })}
+              onClick={() => { setDetailTarget({ kind: "Pod", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/pod/${encodeURIComponent(row.id)}`); }}
               style={{
                 fontFamily: "var(--kn-font-mono)",
                 fontSize: 12,

@@ -554,7 +554,7 @@ export default function ReplicaSetsPage() {
       render: (name: string, row: WorkloadListItem) =>
         row.id ? (
           <Typography.Link
-            onClick={() => setDetailTarget({ kind: "ReplicaSet", id: row.id })}
+            onClick={() => { setDetailTarget({ kind: "ReplicaSet", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/replicaset/${encodeURIComponent(row.id)}`); }}
           >
             {name}
           </Typography.Link>
