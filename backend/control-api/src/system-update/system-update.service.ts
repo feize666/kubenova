@@ -475,9 +475,13 @@ export class SystemUpdateService implements OnModuleInit {
           );
           if (tagsResponse.ok) {
             const tags = (await tagsResponse.json()) as Array<{ name?: unknown }>;
-            tag = tags
+            const versionNames = tags
               .map((item) => (typeof item.name === 'string' ? item.name : null))
-              .find(Boolean) ?? null;
+              .filter(Boolean) as string[];
+            if (versionNames.length > 0) {
+              versionNames.sort((a, b) => isNewerVersion(a, b) ? -1 : isNewerVersion(b, a) ? 1 : 0);
+              tag = versionNames[0];
+            }
             url = tag
               ? `https://github.com/${UPDATE_REPOSITORY}/releases/tag/${encodeURIComponent(tag)}`
               : null;
