@@ -17,7 +17,9 @@ export default function ResourceDetailPage() {
   const clusterId = decodeURIComponent(params.clusterId ?? "");
   const kind = params.kind ?? "";
   const idSegments = params.id ?? [];
-  const resourceId = idSegments.map((s: string) => decodeURIComponent(s)).join("/");
+  const resourceName = idSegments.map((s: string) => decodeURIComponent(s)).join("/");
+  // API expects clusterId/namespace/name or clusterId/name format
+  const resourceId = clusterId + "/" + resourceName;
 
   const backPath = `/clusters/${encodeURIComponent(clusterId)}/overview`;
 

@@ -875,7 +875,10 @@ export default function DeploymentsPage() {
       render: (name: string, row: DeploymentRow) =>
         row.id ? (
           <Typography.Link
-            onClick={() => setDetailTarget({ kind: "Deployment", id: row.id })}
+            onClick={() => {
+              setDetailTarget({ kind: "Deployment", id: row.id });
+              router.push(\`/clusters/\${encodeURIComponent(clusterId)}/resource/deployment/\${encodeURIComponent(row.id)}\`);
+            }}
           >
             {name}
           </Typography.Link>
