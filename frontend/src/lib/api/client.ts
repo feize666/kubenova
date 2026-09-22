@@ -68,7 +68,7 @@ let authExpiredBroadcasted = false;
 let authExpiryController = new AbortController();
 
 export function abortPendingApiRequests() {
-  authExpiryController.abort();
+  authExpiryController.abort(new DOMException("Authentication expired", "AbortError"));
   resetAuthExpiryState();
 }
 
@@ -87,10 +87,23 @@ function mergeSignals(signals: Array<AbortSignal | undefined>): AbortSignal | un
   }
 
   const controller = new AbortController();
-  const abort = () => controller.abort();
+  const abort = () => {
+    try {
+      // Find first aborted signal's reason to propagate
+      for (const s of activeSignals) {
+        if (s.aborted) {
+          controller.abort(s.reason);
+          return;
+        }
+      }
+    } catch {
+      // Fallback if reason access throws
+    }
+    controller.abort(new DOMException("Request was cancelled", "AbortError"));
+  };
   for (const signal of activeSignals) {
     if (signal.aborted) {
-      controller.abort();
+      try { controller.abort(signal.reason); } catch { controller.abort(new DOMException("Request was cancelled", "AbortError")); }
       break;
     }
     signal.addEventListener("abort", abort, { once: true });
@@ -104,7 +117,7 @@ function broadcastAuthExpired(detail: AuthExpiredDetail) {
   }
 
   authExpiredBroadcasted = true;
-  authExpiryController.abort();
+  authExpiryController.abort(new DOMException("Authentication expired", "AbortError"));
 
   if (typeof window === "undefined") {
     return;
