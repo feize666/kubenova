@@ -270,14 +270,6 @@ export function getClusterWorkspaceNavigation(
       items: [item("topology", "资源拓扑", "network/topology")],
     },
     {
-      key: "observability",
-      label: "可观测性中心",
-      items: [
-        item("monitoring", "Prometheus 监控", "monitoring"),
-        item("log-center", "日志中心", "log-center"),
-      ],
-    },
-    {
       key: "base-resources",
       label: "基础资源",
       items: [
@@ -331,10 +323,18 @@ export function getClusterWorkspaceNavigation(
       ],
     },
     {
+      key: "observability",
+      label: "可观测性中心",
+      items: [
+        item("monitoring", "Prometheus 监控", "monitoring"),
+        item("log-center", "日志中心", "log-center"),
+        item("observability", "观测配置", "observability/configuration"),
+      ],
+    },
+    {
       key: "operations",
       label: "运维能力",
       items: [
-        item("observability", "观测配置", "observability/configuration"),
         item("inspection", "资源巡检", "inspection"),
         item("aiops", "AI 助手", "aiops"),
       ],
