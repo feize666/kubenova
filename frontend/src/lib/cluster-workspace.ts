@@ -9,6 +9,7 @@ export type ClusterWorkspaceSection =
   | "storage"
   | "configs"
   | "topology"
+  | "observability"
   | "monitoring"
   | "log-center"
   | "logs";
@@ -269,14 +270,12 @@ export function getClusterWorkspaceNavigation(
       items: [item("topology", "资源拓扑", "network/topology")],
     },
     {
-      key: "monitoring",
-      label: "Prometheus 监控",
-      items: [item("monitoring", "Prometheus 监控", "monitoring")],
-    },
-    {
-      key: "log-center",
-      label: "日志中心",
-      items: [item("log-center", "日志中心", "log-center")],
+      key: "observability",
+      label: "可观测性中心",
+      items: [
+        item("monitoring", "Prometheus 监控", "monitoring"),
+        item("log-center", "日志中心", "log-center"),
+      ],
     },
     {
       key: "base-resources",
