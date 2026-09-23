@@ -7,6 +7,7 @@ import { MonitoringModule } from '../monitoring/monitoring.module';
 import { TopologyGraphModule } from '../topology-graph/topology-graph.module';
 import { AiActionExecutorService } from './ai-action-executor.service';
 import { AiAssistantController } from './ai-assistant.controller';
+import { AiAssistantGateway } from './ai-assistant.gateway';
 import { AiAssistantService } from './ai-assistant.service';
 import { AiContextAggregatorService } from './ai-context-aggregator.service';
 import { AiProviderService } from './ai-provider.service';
@@ -23,6 +24,7 @@ import { AiClusterController } from './ai-cluster.controller';
   controllers: [AiAssistantController, AiClusterController],
   providers: [
     AiAssistantService,
+    AiAssistantGateway,
     AiActionExecutorService,
     AiProviderService,
     AiContextAggregatorService,

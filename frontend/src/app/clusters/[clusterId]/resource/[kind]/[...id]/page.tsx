@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs, Spin, Alert } from "antd";
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { MasterDetailShell } from "@/components/master-detail";
 import { getResourceDetail } from "@/lib/api/resources";
@@ -13,13 +13,12 @@ export default function ResourceDetailPage() {
   const params = useParams<{ clusterId: string; kind: string; id: string[] }>();
   const router = useRouter();
   const { accessToken } = useAuth();
+  const [nestedTarget, setNestedTarget] = useState<{ kind: string; id: string } | null>(null);
 
   const clusterId = decodeURIComponent(params.clusterId ?? "");
   const kind = params.kind ?? "";
   const idSegments = params.id ?? [];
   const resourceName = idSegments.map((s: string) => decodeURIComponent(s)).join("/");
-  // resourceId is the raw identifier from the URL path
-  // Backend handles cuid, clusterId/namespace/name, live-* prefix, and dynamic formats
   const resourceId = decodeURIComponent(idSegments.map((s: string) => decodeURIComponent(s)).join("/"));
 
   const backPath = `/clusters/${encodeURIComponent(clusterId)}/overview`;
@@ -33,19 +32,20 @@ export default function ResourceDetailPage() {
 
   const tabs = useMemo(() => getDetailTabs(kind, detailQuery.data ?? undefined), [kind, detailQuery.data]);
 
+  // Close returns to previous page via native history, falls back to cluster overview
   const handleClose = useCallback(() => {
-    router.push(backPath);
-  }, [router, backPath]);
+    // Use native history.back() — more reliable than router.back() when
+    // the component tree may already be tearing down.
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      window.location.href = backPath;
+    }
+  }, [backPath]);
 
   const handleNavigate = useCallback((request: { kind: string; id: string }) => {
-    const navKind = (request.kind ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
-    const navId = request.id ?? "";
-    if (navKind && navId) {
-      router.push(
-        `/clusters/${encodeURIComponent(clusterId)}/resource/${encodeURIComponent(navKind)}/${encodeURIComponent(navId)}`,
-      );
-    }
-  }, [router, clusterId]);
+    if (request.kind?.trim() && request.id?.trim()) setNestedTarget(request);
+  }, []);
 
   const detail = detailQuery.data;
   const displayKind = detail?.overview?.kind ?? kind;
@@ -54,6 +54,7 @@ export default function ResourceDetailPage() {
   const state = detail?.overview?.state;
 
   return (
+    <>
     <MasterDetailShell
       open
       onClose={handleClose}
@@ -66,8 +67,8 @@ export default function ResourceDetailPage() {
         </span>
       }
       subtitle={detail ? `${namespace ? namespace + " · " : ""}${state ?? ""}` : undefined}
+      width={960}
       backPath={backPath}
-      width={720}
     >
       {detailQuery.isLoading ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 80 }}>
@@ -81,6 +82,63 @@ export default function ResourceDetailPage() {
             key: tab.key,
             label: tab.label,
             children: renderTabContent(tab.key, { detail, onNavigateRequest: handleNavigate }),
+          }))}
+          className="master-detail-tabs"
+          style={{ padding: "0 20px" }}
+        />
+      ) : null}
+    </MasterDetailShell>
+    {nestedTarget ? (
+      <NestedResourceDetail
+        clusterId={clusterId}
+        target={nestedTarget}
+        accessToken={accessToken}
+        onClose={() => setNestedTarget(null)}
+        onNavigate={setNestedTarget}
+      />
+    ) : null}
+    </>
+  );
+}
+
+function NestedResourceDetail({
+  clusterId,
+  target,
+  accessToken,
+  onClose,
+  onNavigate,
+}: {
+  clusterId: string;
+  target: { kind: string; id: string };
+  accessToken: string | null | undefined;
+  onClose: () => void;
+  onNavigate: (target: { kind: string; id: string }) => void;
+}) {
+  const detailQuery = useQuery({
+    queryKey: ["nested-resource-detail", clusterId, target.kind, target.id, accessToken],
+    queryFn: () => getResourceDetail({ kind: target.kind, id: target.id }, accessToken || undefined),
+    enabled: Boolean(accessToken && target.kind && target.id),
+    retry: 1,
+  });
+  const detail = detailQuery.data;
+  const tabs = useMemo(() => getDetailTabs(target.kind, detail), [target.kind, detail]);
+  const title = detail ? `${detail.overview.kind} ${detail.overview.name}` : `${target.kind} ${target.id}`;
+
+  return (
+    <MasterDetailShell open onClose={onClose} title={title} subtitle={detail?.overview.namespace} width={960}>
+      {detailQuery.isLoading ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 80 }}><Spin size="large" /></div>
+      ) : detailQuery.isError ? (
+        <Alert type="error" message="加载失败" description={String(detailQuery.error ?? "未知错误")} style={{ margin: 24 }} />
+      ) : detail ? (
+        <Tabs
+          items={tabs.map((tab) => ({
+            key: tab.key,
+            label: tab.label,
+            children: renderTabContent(tab.key, {
+              detail,
+              onNavigateRequest: onNavigate,
+            }),
           }))}
           className="master-detail-tabs"
           style={{ padding: "0 20px" }}

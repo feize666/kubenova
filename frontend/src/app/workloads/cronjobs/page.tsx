@@ -508,7 +508,7 @@ export default function CronJobsPage() {
       render: (name: string, row: CronJobItem) =>
         row.id ? (
           <Typography.Link
-            onClick={() => { setDetailTarget({ kind: "CronJob", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/cronjob/${encodeURIComponent(row.id)}`); }}
+            onClick={() => { setDetailTarget({ kind: "CronJob", id: row.id }); }}
           >
             {name}
           </Typography.Link>

@@ -9,11 +9,10 @@ import {
   PlusOutlined,
   ReloadOutlined,
   RobotOutlined,
+  MenuUnfoldOutlined,
   SendOutlined,
-  SettingOutlined,
   StopOutlined,
   UserOutlined,
-  WarningOutlined,
 } from "@ant-design/icons";
 import {
   Avatar,
@@ -22,9 +21,7 @@ import {
   Divider,
   Empty,
   Form,
-  Grid,
   Input,
-  InputNumber,
   Layout,
   List,
   Modal,
@@ -62,7 +59,6 @@ import {
   OpsDrawerShell,
   OpsFilterChip,
   OpsIconActionButton,
-  OpsMetricTile,
   OpsStatusTag,
   OpsSurface,
 } from "@/components/ops";
@@ -71,13 +67,13 @@ import {
   createSession,
   executeAction,
   deleteSession,
-  getAiConfig,
   getAiSuggestions,
   getPresetQuestions,
   listSessions,
+  listAiProviders,
+  listAiProviderCatalog,
   getSession,
   pingAiConfig,
-  saveAiConfig,
   sendMessage,
   normalizeAiAssistantActionOperation,
   uploadAttachment,
@@ -88,11 +84,12 @@ import {
   type AiVoiceInputMeta,
   type AiConversationMessage,
   type AiConversationSession,
-  type AiModelConfig,
+  type AiProvider,
+  type AiProviderCatalogItem,
   type PresetQuestion,
-  type SaveAiConfigInput,
   type SendMessageResponse,
 } from "@/lib/api/ai-assistant";
+import { createAiAssistantStreamClient } from "@/lib/ws/ai-assistant";
 import { getClusterIdFromPathname } from "@/lib/cluster-workspace";
 
 const { Sider, Content } = Layout;
@@ -110,7 +107,6 @@ const AI_ASSISTANT_SESSIONS_CACHE_KEY = "kubenova.ai.assistant.sessions";
 const AI_ASSISTANT_MESSAGES_CACHE_PREFIX = "kubenova.ai.assistant.messages.";
 const CHAT_WORKSPACE_DESKTOP_HEIGHT =
   "clamp(520px, calc(100vh - 240px), 720px)";
-const MESSAGE_BUBBLE_MAX_HEIGHT = "min(42vh, 320px)";
 const PAGE_QUERY_GC_TIME_MS = 5 * 60_000;
 const HIGH_RISK_ACTIONS = new Set<AiAssistantCanonicalOperation>([
   "restart-workload",
@@ -277,10 +273,13 @@ function MessageBubble({
   message,
   onAction,
   loadingActionId,
+  streaming = false,
 }: {
   message: AiConversationMessage;
   onAction: (descriptor: AiActionDescriptor) => void;
   loadingActionId: string | null;
+  /** 流式生成中的气泡：显示光标并把新内容滚入视野。 */
+  streaming?: boolean;
 }) {
   const isUser = message.role === "user";
   const displayedContent = message.content;
@@ -334,9 +333,11 @@ function MessageBubble({
               : "var(--ai-chat-assistant-bubble-shadow)",
             maxWidth: "100%",
             overflowX: "hidden",
-            maxHeight: MESSAGE_BUBBLE_MAX_HEIGHT,
-            overflowY: "auto",
-            overscrollBehaviorY: "contain",
+            // 气泡不再自己滚动：长回复随消息流自然铺开，由外层对话区统一滚动，
+            // 避免出现"框内小滚动条"，阅读与流式输出都更连贯。
+            overflowY: "visible",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
           }}
         >
           {isUser ? (
@@ -350,7 +351,9 @@ function MessageBubble({
               {message.content}
             </div>
           ) : (
-            <MarkdownContent content={displayedContent} />
+            <div className={streaming ? "ai-assistant-streaming-body" : undefined}>
+              <MarkdownContent content={displayedContent} />
+            </div>
           )}
           {attachments.length > 0 ? (
             <div
@@ -426,181 +429,32 @@ interface SessionItem {
   messageCount: number;
 }
 
-function ModelSettingsDrawer({
-  open,
-  onClose,
-  token,
-}: {
-  open: boolean;
-  onClose: () => void;
-  token?: string;
-}) {
-  const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    setLoading(true);
-    getAiConfig(token)
-      .then((cfg: AiModelConfig) => {
-        form.setFieldsValue({
-          baseUrl: cfg.baseUrl,
-          apiKey: "",
-          modelName: cfg.modelName,
-          maxTokens: cfg.maxTokens,
-          timeoutMs: cfg.timeoutMs ?? 30000,
-        });
-      })
-      .catch(() => {
-        form.setFieldsValue({
-          baseUrl: "https://api.openai.com/v1",
-          apiKey: "",
-          modelName: "gpt-4o-mini",
-          maxTokens: 2048,
-          timeoutMs: 30000,
-        });
-      })
-      .finally(() => setLoading(false));
-  }, [open, token, form]);
-
-  const handleSave = useCallback(async () => {
-    let values: {
-      baseUrl: string;
-      apiKey?: string;
-      modelName: string;
-      maxTokens: number;
-      timeoutMs: number;
-    };
-    try {
-      values = await form.validateFields();
-    } catch {
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const payload: SaveAiConfigInput = {
-        baseUrl: values.baseUrl,
-        modelName: values.modelName,
-        maxTokens: values.maxTokens,
-        timeoutMs: values.timeoutMs,
-      };
-      if (values.apiKey?.trim()) {
-        payload.apiKey = values.apiKey.trim();
-      }
-      await saveAiConfig(payload, token);
-      message.success("模型中转站配置已保存");
-      onClose();
-    } catch (error) {
-      const text = error instanceof Error ? error.message : "保存失败";
-      message.error(text);
-    } finally {
-      setSaving(false);
-    }
-  }, [form, token, onClose]);
-
-  return (
-    <OpsDrawerShell
-      title="模型中转站设置"
-      open={open}
-      onClose={onClose}
-      variant="business"
-      styles={{ body: { padding: 16, overflowY: "auto" } }}
-      footerActions={
-        <Space style={{ width: "100%", justifyContent: "flex-end" }}>
-          <Button onClick={onClose}>取消</Button>
-          <Button
-            type="primary"
-            loading={saving}
-            onClick={() => void handleSave()}
-          >
-            保存
-          </Button>
-        </Space>
-      }
-    >
-      <Spin spinning={loading}>
-        <Form form={form} layout="vertical">
-          <Form.Item
-            label="Base URL"
-            name="baseUrl"
-            rules={[{ required: true, message: "请输入中转站 Base URL" }]}
-            extra="支持 OpenAI chat/completions 兼容地址，例如 https://xxx/v1"
-          >
-            <Input
-              id="ai-model-base-url"
-              name="ai-model-base-url"
-              placeholder="https://api.openai.com/v1"
-            />
-          </Form.Item>
-
-          <Form.Item
-            label="API Key"
-            name="apiKey"
-            extra="留空表示不修改当前 Key"
-          >
-            <Input.Password
-              id="ai-model-api-key"
-              name="ai-model-api-key"
-              placeholder="sk-..."
-              autoComplete="off"
-            />
-          </Form.Item>
-
-          <Form.Item
-            label="Model"
-            name="modelName"
-            rules={[{ required: true, message: "请输入模型名称" }]}
-          >
-            <Input
-              id="ai-model-name"
-              name="ai-model-name"
-              placeholder="gpt-4o-mini"
-            />
-          </Form.Item>
-
-          <Form.Item
-            label="最大 Tokens"
-            name="maxTokens"
-            rules={[{ required: true, message: "请输入最大 Tokens" }]}
-          >
-            <InputNumber
-              id="ai-model-max-tokens"
-              name="ai-model-max-tokens"
-              min={128}
-              max={131072}
-              step={256}
-              style={{ width: "100%" }}
-            />
-          </Form.Item>
-
-          <Form.Item
-            label="请求超时(ms)"
-            name="timeoutMs"
-            rules={[{ required: true, message: "请输入超时时间" }]}
-          >
-            <InputNumber
-              id="ai-model-timeout"
-              name="ai-model-timeout"
-              min={3000}
-              max={180000}
-              step={1000}
-              style={{ width: "100%" }}
-            />
-          </Form.Item>
-
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            也可在 `.env.ai.local`
-            配置：`AI_MODEL_BASE_URL`、`AI_MODEL_API_KEY`、`AI_MODEL_NAME`、`AI_MODEL_MAX_TOKENS`、`AI_MODEL_TIMEOUT_MS`。
-          </Typography.Text>
-        </Form>
-      </Spin>
-    </OpsDrawerShell>
-  );
+/**
+ * Groups sessions by recency the way mainstream AI consoles do, so a long
+ * history stays scannable instead of turning into one flat list.
+ */
+function groupSessionsByRecency(
+  sessions: SessionItem[],
+): Array<{ label: string; items: SessionItem[] }> {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const buckets: Array<{ label: string; items: SessionItem[] }> = [
+    { label: "今天", items: [] },
+    { label: "昨天", items: [] },
+    { label: "近 7 天", items: [] },
+    { label: "更早", items: [] },
+  ];
+  for (const session of sessions) {
+    const updated = new Date(session.updatedAt).getTime();
+    const age = Number.isFinite(updated) ? now - updated : Number.POSITIVE_INFINITY;
+    if (age < dayMs) buckets[0]!.items.push(session);
+    else if (age < 2 * dayMs) buckets[1]!.items.push(session);
+    else if (age < 7 * dayMs) buckets[2]!.items.push(session);
+    else buckets[3]!.items.push(session);
+  }
+  return buckets.filter((bucket) => bucket.items.length > 0);
 }
+
 
 export default function AiAssistantPage() {
   const router = useRouter();
@@ -608,10 +462,9 @@ export default function AiAssistantPage() {
   const searchParams = useSearchParams();
   const { accessToken, isInitializing, role } = useAuth();
   const isAdmin = role === "admin" || role === "platform-admin";
-  const screens = Grid.useBreakpoint();
-  const showAlertPanelInline = Boolean(screens.xl);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [sessionListCollapsed, setSessionListCollapsed] = useState(false);
   const [messages, setMessages] = useState<AiConversationMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [pendingAttachments, setPendingAttachments] = useState<
@@ -624,7 +477,6 @@ export default function AiAssistantPage() {
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [alertDrawerOpen, setAlertDrawerOpen] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [actionClusterId, setActionClusterId] = useState("");
@@ -633,6 +485,10 @@ export default function AiAssistantPage() {
   const [deleting, setDeleting] = useState(false);
   const [deferredQueryReady, setDeferredQueryReady] = useState(false);
   const [cacheHydrated, setCacheHydrated] = useState(false);
+  // 流式回复：streamingText 为当前正在生成的助手文本，done 后由服务端权威
+  // 消息替换，保证与刷新后看到的内容完全一致。
+  const [streamingText, setStreamingText] = useState("");
+  const [streamReady, setStreamReady] = useState<boolean | null>(null);
 
   const requestedClusterId = searchParams.get("clusterId")?.trim() || getClusterIdFromPathname(pathname) || "";
 
@@ -648,6 +504,7 @@ export default function AiAssistantPage() {
   const inputRef = useRef<TextAreaRef>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const streamClientRef = useRef<ReturnType<typeof createAiAssistantStreamClient> | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const recordStartAtRef = useRef<number>(0);
 
@@ -717,6 +574,74 @@ export default function AiAssistantPage() {
     refetchOnWindowFocus: false,
   });
 
+  const {
+    data: providersData,
+    isFetching: providersLoading,
+    refetch: refetchProviders,
+  } = useQuery({
+    queryKey: ["ai-assistant", "providers"],
+    queryFn: () => listAiProviders(accessToken || undefined),
+    enabled:
+      deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+    retry: false,
+    staleTime: 60_000,
+    gcTime: PAGE_QUERY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
+  });
+
+  // The model pill describes what is actually wired up: the ping result is the
+  // authority for reachability, the provider list supplies vendor and model.
+  const { data: vendorCatalog } = useQuery<AiProviderCatalogItem[]>({
+    queryKey: ["ai-assistant", "provider-catalog"],
+    queryFn: () => listAiProviderCatalog(accessToken || undefined),
+    enabled:
+      deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+    staleTime: 30 * 60_000,
+    gcTime: PAGE_QUERY_GC_TIME_MS,
+    refetchOnWindowFocus: false,
+  });
+
+  const vendorLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of vendorCatalog ?? []) map.set(item.id, item.label);
+    return map;
+  }, [vendorCatalog]);
+
+  const activeProvider = useMemo<AiProvider | undefined>(() => {
+    const providers = providersData ?? [];
+    return (
+      providers.find((item) => item.enabled && item.isDefault) ??
+      providers.find((item) => item.enabled) ??
+      providers[0]
+    );
+  }, [providersData]);
+
+  const modelPill = useMemo(() => {
+    const configured = Boolean(activeProvider);
+    const label = activeProvider
+      ? [
+          vendorLabels.get(activeProvider.vendor) ?? activeProvider.vendor,
+          activeProvider.modelName,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "未配置模型";
+    const tone = !configured
+      ? "neutral"
+      : pingData?.ok
+        ? "success"
+        : "danger";
+    return {
+      label,
+      tone,
+      title: !configured
+        ? "尚未配置 AI 模型，点击前往配置"
+        : pingData?.ok
+          ? `模型可用：${label}`
+          : `模型不可用：${pingData?.message ?? "未检测"}`,
+    };
+  }, [activeProvider, pingData, vendorLabels]);
+
   useEffect(() => {
     if (isInitializing || !accessToken || !isAdmin) {
       setDeferredQueryReady(false);
@@ -730,7 +655,7 @@ export default function AiAssistantPage() {
     messagesEndRef.current?.scrollIntoView({
       behavior: loading ? "smooth" : "auto",
     });
-  }, [messages.length, loading]);
+  }, [messages.length, loading, streamingText]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -778,6 +703,38 @@ export default function AiAssistantPage() {
     },
     [],
   );
+
+  // 建立一次流式连接并长期复用；连接失败时把 streamReady 置为 false，
+  // 发送逻辑会自动回退到原来的非流式 REST 调用。
+  useEffect(() => {
+    if (!cacheHydrated || isInitializing || !isAdmin || !accessToken) {
+      return undefined;
+    }
+    const client = createAiAssistantStreamClient({
+      token: accessToken,
+      handlers: {
+        onStatus: (status) => setStreamReady(status === "connected"),
+        onDelta: (delta) => setStreamingText((prev) => prev + delta),
+        onDone: (payload) => {
+          setStreamingText("");
+          setLoading(false);
+          syncSession(payload.session);
+          updateMessagesWithLatest(payload.session.messages);
+        },
+        onError: (payload) => {
+          setStreamingText("");
+          setLoading(false);
+          void message.error(payload.message);
+        },
+      },
+    });
+    streamClientRef.current = client;
+    return () => {
+      client.dispose();
+      streamClientRef.current = null;
+      setStreamReady(null);
+    };
+  }, [accessToken, cacheHydrated, isAdmin, isInitializing, syncSession, updateMessagesWithLatest]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !cacheHydrated) {
@@ -1183,6 +1140,57 @@ export default function AiAssistantPage() {
       setVoiceInputMeta(null);
 
       if (!currentSessionId) {
+        const canStreamFirstMessage =
+          attachmentsToSend.length === 0 &&
+          !voiceToSend &&
+          streamReady !== false &&
+          Boolean(streamClientRef.current);
+
+        // 流式可用时先只建会话，再把首条消息交给 WebSocket，这样首条回复
+        // 也能在对话区逐步铺开；带附件/语音时仍走 REST（网关暂不处理附件）。
+        if (canStreamFirstMessage) {
+          setLoading(true);
+          try {
+            const created = await createSession(
+              {
+                title: payload.slice(0, 30),
+                surface: "console",
+                clusterId: actionClusterId || undefined,
+                namespace: alertForm.namespace || undefined,
+                resourceKind: alertForm.kind || undefined,
+              },
+              accessToken,
+            );
+            const session =
+              "session" in created
+                ? (created as SendMessageResponse).session
+                : (created as AiConversationSession);
+            syncSession(session);
+            setCurrentSessionId(session.id);
+
+            const optimisticFirst: AiConversationMessage = {
+              id: `optimistic-${Date.now()}`,
+              role: "user",
+              content: payload,
+              createdAt: new Date().toISOString(),
+            };
+            setMessages([...session.messages, optimisticFirst]);
+            streamClientRef.current?.send({
+              requestId: `req-${Date.now()}`,
+              sessionId: session.id,
+              message: payload,
+              clusterId: actionClusterId || undefined,
+              namespace: alertForm.namespace || undefined,
+              resourceKind: alertForm.kind || undefined,
+            });
+          } catch (error) {
+            const text = error instanceof Error ? error.message : "发送失败";
+            message.error(text);
+            setLoading(false);
+          }
+          return;
+        }
+
         setLoading(true);
         try {
           const result = await createSession(
@@ -1227,6 +1235,19 @@ export default function AiAssistantPage() {
       setMessages((prev) => [...prev, optimistic]);
       setLoading(true);
 
+      // 优先走流式通道，让回复在对话区逐步铺开；若通道不可用则回退 REST。
+      const dispatched = streamClientRef.current?.send({
+        requestId: `req-${Date.now()}`,
+        sessionId: currentSessionId,
+        message: payload,
+        clusterId: actionClusterId || undefined,
+        namespace: alertForm.namespace || undefined,
+        resourceKind: alertForm.kind || undefined,
+      });
+      if (dispatched && streamReady !== false) {
+        return;
+      }
+
       try {
         const resp = await sendMessage(
           currentSessionId,
@@ -1260,6 +1281,7 @@ export default function AiAssistantPage() {
       currentSessionId,
       loading,
       pendingAttachments,
+      streamReady,
       syncSession,
       updateMessagesWithLatest,
       voiceInputMeta,
@@ -1607,6 +1629,34 @@ export default function AiAssistantPage() {
     [currentSessionId, sessions],
   );
 
+  const sessionGroups = useMemo(
+    () => groupSessionsByRecency(sessions),
+    [sessions],
+  );
+
+  // Starter cards for an empty conversation. Preset questions come from the
+  // backend so they can track live alerts; the local list is the fallback.
+  const starterPrompts = useMemo<
+    Array<{ key: string; label: string; prompt: string; category: string }>
+  >(() => {
+    const remote = (presets ?? [])
+      .filter((item) => item.question?.trim())
+      .slice(0, 4)
+      .map((item) => ({
+        key: item.id,
+        label: item.title,
+        prompt: item.question,
+        category: item.category,
+      }));
+    if (remote.length > 0) return remote;
+    return QUICK_PROMPTS.map((prompt, index) => ({
+      key: `quick-${index}`,
+      label: prompt,
+      prompt,
+      category: "快捷提问",
+    }));
+  }, [presets]);
+
   const criticalCount = useMemo(
     () =>
       suggestions?.items.filter((item) => item.severity === "critical")
@@ -1782,24 +1832,38 @@ export default function AiAssistantPage() {
           }
           description="通过告警接入、智能诊断、ChatOps 会话和可执行建议形成闭环运维。"
           extra={
-            <Space wrap>
-              {!showAlertPanelInline ? (
-                <OpsIconActionButton
-                  icon={<ApiOutlined />}
-                  onClick={() => setAlertDrawerOpen(true)}
-                  disabled={isInitializing || !accessToken}
-                >
-                  告警接入
-                </OpsIconActionButton>
-              ) : null}
+            <Space wrap size={8}>
               <OpsIconActionButton
-                icon={<ReloadOutlined />}
-                loading={pingLoading}
-                onClick={() => void refetchPing()}
+                icon={<ApiOutlined />}
+                onClick={() => setAlertDrawerOpen(true)}
                 disabled={isInitializing || !accessToken}
               >
-                检测中转站
+                告警接入
               </OpsIconActionButton>
+              <OpsIconActionButton
+                icon={<ReloadOutlined />}
+                loading={pingLoading || providersLoading}
+                onClick={() => {
+                  void refetchPing();
+                  void refetchProviders();
+                }}
+                disabled={isInitializing || !accessToken}
+              >
+                检测模型
+              </OpsIconActionButton>
+              <button
+                type="button"
+                className="ai-assistant-model-pill"
+                data-tone={modelPill.tone}
+                onClick={() => router.push("/settings/ai")}
+                title={modelPill.title}
+              >
+                <span className="ai-assistant-model-pill__dot" aria-hidden="true" />
+                <span className="ai-assistant-model-pill__body">
+                  <strong>AI 模型</strong>
+                  <em>{modelPill.label}</em>
+                </span>
+              </button>
               <OpsIconActionButton
                 opsTone="primary"
                 icon={<RobotOutlined />}
@@ -1814,99 +1878,36 @@ export default function AiAssistantPage() {
               >
                 分析当前集群
               </OpsIconActionButton>
-              <OpsIconActionButton
-                opsTone="primary"
-                icon={<SettingOutlined />}
-                onClick={() => router.push("/settings")}
-                disabled={isInitializing || !accessToken}
-              >
-                AI 设置
-              </OpsIconActionButton>
             </Space>
           }
         />
 
-        <Row gutter={[12, 12]} style={{ marginTop: 8 }}>
-          <Col xs={24} sm={12} lg={6}>
-            <OpsMetricTile
-              className="ai-assistant-metric-card"
-              icon={<WarningOutlined />}
-              label="活跃告警"
-              meta={`严重 ${criticalCount} · 高风险 ${highCount}`}
-              tone="info"
-              value={suggestions?.items.length ?? 0}
-            />
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <OpsMetricTile
-              className="ai-assistant-metric-card"
-              label="严重告警"
-              meta={criticalCount > 0 ? "需优先诊断" : "当前无严重告警"}
-              tone="danger"
-              value={criticalCount}
-            />
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <OpsMetricTile
-              className="ai-assistant-metric-card"
-              label="高风险告警"
-              meta={highCount > 0 ? "建议纳入处置队列" : "当前无高风险告警"}
-              tone="warning"
-              value={highCount}
-            />
-          </Col>
-          <Col xs={24} sm={12} lg={6}>
-            <OpsSurface
-              className="ai-assistant-metric-card"
-              variant="panel"
-              padding="sm"
-            >
-              <Space orientation="vertical" size={4} style={{ width: "100%" }}>
-                <Typography.Text type="secondary">模型中转站</Typography.Text>
-                <OpsStatusTag
-                  tone={pingData?.ok ? "success" : "danger"}
-                  className="ai-assistant-status-chip"
-                >
-                  {pingData?.ok ? "在线" : "不可用"}
-                </OpsStatusTag>
-                <Typography.Text style={{ fontSize: 12 }} ellipsis>
-                  {pingData?.config.modelName ?? "未配置模型"}
-                </Typography.Text>
-              </Space>
-            </OpsSurface>
-          </Col>
-        </Row>
+        <div className="ai-assistant-status-bar">
+          <div className="ai-assistant-status-bar__item" data-tone="info">
+            <span>活跃告警</span>
+            <strong>{suggestions?.items.length ?? 0}</strong>
+            <small>严重 {criticalCount} · 高风险 {highCount}</small>
+          </div>
+          <div className="ai-assistant-status-bar__item" data-tone="danger">
+            <span>严重告警</span>
+            <strong>{criticalCount}</strong>
+            <small>{criticalCount > 0 ? "需优先诊断" : "当前无严重告警"}</small>
+          </div>
+          <div className="ai-assistant-status-bar__item" data-tone="warning">
+            <span>高风险告警</span>
+            <strong>{highCount}</strong>
+            <small>{highCount > 0 ? "建议纳入处置队列" : "当前无高风险告警"}</small>
+          </div>
+        </div>
       </OpsSurface>
 
       <Row
         gutter={[12, 12]}
         style={{ flex: 1, minHeight: 0, minWidth: 0, alignItems: "stretch" }}
       >
-        {showAlertPanelInline ? (
-          <Col
-            xs={24}
-            xl={9}
-            style={{ display: "flex", minHeight: 0, minWidth: 0 }}
-          >
-            <OpsSurface
-              title="告警接入模拟"
-              actions={<OpsFilterChip tone="info">Webhook</OpsFilterChip>}
-              variant="panel"
-              padding="sm"
-              className="ai-assistant-alert-surface"
-              style={{
-                flex: 1,
-                minHeight: 0,
-              }}
-            >
-              {alertSimulator}
-            </OpsSurface>
-          </Col>
-        ) : null}
-
         <Col
           xs={24}
-          xl={showAlertPanelInline ? 15 : 24}
+          xl={24}
           style={{ display: "flex", minHeight: 0, minWidth: 0 }}
         >
           <OpsSurface
@@ -1921,9 +1922,7 @@ export default function AiAssistantPage() {
             className="ai-assistant-chat-surface"
             style={{
               flex: 1,
-              height: screens.xl
-                ? CHAT_WORKSPACE_DESKTOP_HEIGHT
-                : "calc(100vh - 220px)",
+              height: CHAT_WORKSPACE_DESKTOP_HEIGHT,
               minHeight: 0,
               minWidth: 0,
               display: "flex",
@@ -1935,7 +1934,11 @@ export default function AiAssistantPage() {
               style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}
             >
               <Sider
-                width={240}
+                width={260}
+                collapsedWidth={0}
+                collapsed={sessionListCollapsed}
+                collapsible
+                trigger={null}
                 style={{
                   background: "var(--ai-chat-sider-bg)",
                   borderRight: "1px solid var(--ai-chat-sider-border)",
@@ -1946,7 +1949,7 @@ export default function AiAssistantPage() {
                   overflow: "hidden",
                 }}
               >
-                <div style={{ padding: 12 }}>
+                <div className="ai-assistant-session-rail">
                   <OpsIconActionButton
                     opsTone="primary"
                     block
@@ -1957,102 +1960,75 @@ export default function AiAssistantPage() {
                   >
                     新建会话
                   </OpsIconActionButton>
-                </div>
 
-                <Divider style={{ margin: "0 0 6px" }} />
-
-                <div
-                  style={{
-                    padding: "0 8px 8px",
-                    flex: 1,
-                    minHeight: 0,
-                    overflowY: "auto",
-                    overflowX: "hidden",
-                    overscrollBehaviorY: "contain",
-                    scrollbarGutter: "stable",
-                  }}
-                >
-                  {sessions.length === 0 ? (
-                    <Empty
-                      image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      description="暂无会话"
-                      style={{ marginTop: 32 }}
-                    />
-                  ) : (
-                    <List
-                      size="small"
-                      dataSource={sessions}
-                      renderItem={(session) => (
-                        <List.Item
-                          onClick={() => void handleSelectSession(session.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              void handleSelectSession(session.id);
-                            }
-                          }}
-                          role="button"
-                          tabIndex={0}
-                          aria-current={
-                            session.id === currentSessionId ? "true" : undefined
-                          }
-                          style={{
-                            cursor: "pointer",
-                            marginBottom: 4,
-                            borderRadius: 8,
-                            border:
-                              session.id === currentSessionId
-                                ? "1px solid rgba(22,119,255,0.35)"
-                                : "1px solid transparent",
-                            background:
-                              session.id === currentSessionId
-                                ? "rgba(22,119,255,0.06)"
-                                : "transparent",
-                            padding: "8px 10px",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: "100%",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 8,
-                            }}
-                          >
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <Typography.Text
-                                strong={session.id === currentSessionId}
-                                ellipsis
-                                style={{ display: "block" }}
-                              >
-                                {session.title}
-                              </Typography.Text>
-                              <Typography.Text
-                                type="secondary"
-                                style={{ fontSize: 11 }}
-                              >
-                                {session.messageCount} 条 ·{" "}
-                                {formatTime(session.updatedAt)}
-                              </Typography.Text>
-                            </div>
-                            <Tooltip title="删除会话">
-                              <OpsIconActionButton
-                                size="small"
-                                opsTone="danger"
-                                className="resource-table-icon-action-compact"
-                                icon={<DeleteOutlined />}
-                                aria-label="删除会话"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleDeleteSession(session.id);
-                                }}
-                              />
-                            </Tooltip>
+                  <div className="ai-assistant-session-rail__body">
+                    {sessionGroups.length === 0 ? (
+                      <Empty
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        description="暂无会话"
+                        style={{ marginTop: 32 }}
+                      />
+                    ) : (
+                      sessionGroups.map((group) => (
+                        <div key={group.label} className="ai-assistant-session-group">
+                          <div className="ai-assistant-session-group__label">
+                            {group.label}
                           </div>
-                        </List.Item>
-                      )}
-                    />
-                  )}
+                          <List
+                            size="small"
+                            split={false}
+                            dataSource={group.items}
+                            renderItem={(session) => (
+                              <List.Item
+                                className="ai-assistant-session-item"
+                                data-active={
+                                  session.id === currentSessionId ? "true" : undefined
+                                }
+                                onClick={() => void handleSelectSession(session.id)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    void handleSelectSession(session.id);
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                aria-current={
+                                  session.id === currentSessionId ? "true" : undefined
+                                }
+                              >
+                                <div className="ai-assistant-session-item__body">
+                                  <Typography.Text
+                                    strong={session.id === currentSessionId}
+                                    ellipsis
+                                    style={{ display: "block" }}
+                                  >
+                                    {session.title}
+                                  </Typography.Text>
+                                  <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                                    {session.messageCount} 条 · {formatTime(session.updatedAt)}
+                                  </Typography.Text>
+                                </div>
+                                <Tooltip title="删除会话">
+                                  <OpsIconActionButton
+                                    size="small"
+                                    opsTone="danger"
+                                    className="ai-assistant-session-item__delete resource-table-icon-action-compact"
+                                    icon={<DeleteOutlined />}
+                                    aria-label="删除会话"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleDeleteSession(session.id);
+                                    }}
+                                  />
+                                </Tooltip>
+                              </List.Item>
+                            )}
+                          />
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </Sider>
 
@@ -2076,6 +2052,16 @@ export default function AiAssistantPage() {
                   }}
                 >
                   <Space size={8} wrap style={{ width: "100%" }}>
+                    <Tooltip
+                      title={sessionListCollapsed ? "展开会话历史" : "收起会话历史"}
+                    >
+                      <OpsIconActionButton
+                        className="resource-table-icon-action-compact"
+                        aria-label={sessionListCollapsed ? "展开会话历史" : "收起会话历史"}
+                        icon={<MenuUnfoldOutlined />}
+                        onClick={() => setSessionListCollapsed((prev) => !prev)}
+                      />
+                    </Tooltip>
                     <Typography.Text type="secondary">
                       执行上下文集群:
                     </Typography.Text>
@@ -2108,11 +2094,40 @@ export default function AiAssistantPage() {
                   }}
                 >
                   {messages.length === 0 ? (
-                    <div style={{ paddingTop: 48 }}>
-                      <Empty
-                        description="开始一条 ChatOps 会话"
-                        image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      />
+                    <div className="ai-assistant-starter">
+                      <div className="ai-assistant-starter__intro">
+                        <Image
+                          className="ai-assistant-starter__icon"
+                          src="/kubenova-ai-icon.svg"
+                          alt=""
+                          aria-hidden="true"
+                          width={44}
+                          height={44}
+                          priority
+                        />
+                        <h2>开始一条 ChatOps 会话</h2>
+                        <p>
+                          描述你遇到的运维问题，或从下面选择一个典型场景，AI 会结合实时集群上下文给出分析与建议。
+                        </p>
+                      </div>
+                      <div className="ai-assistant-starter__grid">
+                        {starterPrompts.map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            className="ai-assistant-starter__card"
+                            onClick={() => void handleSend(item.prompt)}
+                            disabled={loading || !accessToken}
+                          >
+                            <span className="ai-assistant-starter__card-category">
+                              {item.category}
+                            </span>
+                            <span className="ai-assistant-starter__card-label">
+                              {item.label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   ) : (
                     messages.map((item) => (
@@ -2125,7 +2140,22 @@ export default function AiAssistantPage() {
                     ))
                   )}
 
-                  {loading && (
+                  {streamingText ? (
+                    <MessageBubble
+                      key="assistant-streaming"
+                      message={{
+                        id: "assistant-streaming",
+                        role: "assistant",
+                        content: streamingText,
+                        createdAt: new Date().toISOString(),
+                      }}
+                      onAction={handleExecuteDescriptor}
+                      loadingActionId={actionLoadingId}
+                      streaming
+                    />
+                  ) : null}
+
+                  {loading && !streamingText && (
                     <div
                       style={{
                         display: "flex",
@@ -2154,19 +2184,6 @@ export default function AiAssistantPage() {
                     overflowX: "hidden",
                   }}
                 >
-                  <Space wrap size={[6, 6]} style={{ marginBottom: 8 }}>
-                    {QUICK_PROMPTS.map((prompt) => (
-                      <OpsIconActionButton
-                        key={prompt}
-                        size="small"
-                        onClick={() => void handleSend(prompt)}
-                        disabled={loading || !accessToken}
-                      >
-                        {prompt.slice(0, 14)}...
-                      </OpsIconActionButton>
-                    ))}
-                  </Space>
-
                   <input
                     id="ai-assistant-file-input"
                     name="ai-assistant-file-input"
@@ -2217,41 +2234,32 @@ export default function AiAssistantPage() {
                   ) : null}
 
                   <div
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "flex-end",
-                      minWidth: 0,
-                    }}
+                    className="ai-assistant-composer"
                   >
-                    <Space orientation="vertical" size={6}>
-                      <Tooltip title="上传文件/图片">
-                        <OpsIconActionButton
-                          className="resource-table-icon-action-compact"
-                          icon={<PaperClipOutlined />}
-                          aria-label="上传文件或图片"
-                          onClick={handleFileChoose}
-                          disabled={loading || isInitializing || !accessToken}
-                        />
-                      </Tooltip>
-                      <Tooltip title={recording ? "停止录音" : "语音输入"}>
-                        <OpsIconActionButton
-                          className="resource-table-icon-action-compact"
-                          icon={
-                            recording ? <StopOutlined /> : <AudioOutlined />
-                          }
-                          aria-label={recording ? "停止录音" : "语音输入"}
-                          onClick={toggleRecording}
-                          disabled={
-                            !voiceSupported ||
-                            loading ||
-                            isInitializing ||
-                            !accessToken
-                          }
-                          opsTone={recording ? "danger" : "default"}
-                        />
-                      </Tooltip>
-                    </Space>
+                    <Tooltip title="上传文件/图片">
+                      <OpsIconActionButton
+                        className="resource-table-icon-action-compact ai-assistant-composer__tool"
+                        icon={<PaperClipOutlined />}
+                        aria-label="上传文件或图片"
+                        onClick={handleFileChoose}
+                        disabled={loading || isInitializing || !accessToken}
+                      />
+                    </Tooltip>
+                    <Tooltip title={recording ? "停止录音" : "语音输入"}>
+                      <OpsIconActionButton
+                        className="resource-table-icon-action-compact ai-assistant-composer__tool"
+                        icon={recording ? <StopOutlined /> : <AudioOutlined />}
+                        aria-label={recording ? "停止录音" : "语音输入"}
+                        onClick={toggleRecording}
+                        disabled={
+                          !voiceSupported ||
+                          loading ||
+                          isInitializing ||
+                          !accessToken
+                        }
+                        opsTone={recording ? "danger" : "default"}
+                      />
+                    </Tooltip>
                     <TextArea
                       id="ai-assistant-input"
                       name="ai-assistant-input"
@@ -2262,12 +2270,14 @@ export default function AiAssistantPage() {
                       autoSize={{ minRows: 1, maxRows: 4 }}
                       placeholder="输入运维问题（Enter 发送，Shift+Enter 换行）"
                       disabled={loading || isInitializing || !accessToken}
+                      variant="borderless"
+                      className="ai-assistant-composer__input"
                       style={{ minWidth: 0 }}
                     />
                     <Tooltip title="发送">
                       <OpsIconActionButton
                         opsTone="primary"
-                        className="resource-table-icon-action-compact"
+                        className="resource-table-icon-action-compact ai-assistant-composer__send"
                         icon={<SendOutlined />}
                         aria-label="发送消息"
                         onClick={() => void handleSend(inputText)}
@@ -2288,11 +2298,6 @@ export default function AiAssistantPage() {
         </Col>
       </Row>
 
-      <ModelSettingsDrawer
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        token={accessToken || undefined}
-      />
       <AiDeleteSessionDialog
         open={deleteDialogOpen}
         target={deleteTarget}
@@ -2307,7 +2312,7 @@ export default function AiAssistantPage() {
             告警接入模拟
           </Space>
         }
-        open={!showAlertPanelInline && alertDrawerOpen}
+        open={alertDrawerOpen}
         onClose={() => setAlertDrawerOpen(false)}
         variant="business"
         styles={{ body: { padding: 12, overflowY: "auto" } }}

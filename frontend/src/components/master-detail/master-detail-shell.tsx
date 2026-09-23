@@ -4,7 +4,6 @@ import "./master-detail.css";
 
 import { CloseOutlined } from "@ant-design/icons";
 import { Drawer } from "antd";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -14,7 +13,7 @@ export interface MasterDetailShellProps {
   title?: ReactNode;
   subtitle?: ReactNode;
   children: ReactNode;
-  width?: number;
+  width?: number | string;
   backPath?: string;
   headerExtra?: ReactNode;
 }
@@ -29,7 +28,6 @@ export function MasterDetailShell({
   backPath,
   headerExtra,
 }: MasterDetailShellProps) {
-  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -39,29 +37,24 @@ export function MasterDetailShell({
   }, []);
 
   const handleClose = useCallback(() => {
+    // Only call the parent's onClose. The parent (page.tsx) handles the
+    // actual navigation (window.history.back or fallback). We no longer
+    // push backPath here to avoid a second navigation.
     closeRef.current();
-    if (backPath) {
-      router.push(backPath);
-    }
-  }, [backPath, router]);
-
-  useEffect(() => {
-    if (!open || !backPath) return;
-    const handlePopState = () => {
-      closeRef.current();
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [open, backPath]);
+  }, []);
 
   if (!mounted) return null;
+
+  // Keep wide detail panels readable on large screens without overflowing
+  // narrow viewports, so action rails always stay on a single row.
+  const resolvedWidth = typeof width === "number" ? `min(100vw, ${width}px)` : width;
 
   return (
     <Drawer
       open={open}
       onClose={handleClose}
       placement="right"
-      width={width}
+      width={resolvedWidth}
       closable={false}
       destroyOnClose
       className="master-detail-drawer"

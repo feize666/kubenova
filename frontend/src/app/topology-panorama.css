@@ -716,8 +716,8 @@
 }
 
 .resource-map-shell.resource-map-shell--workbench .resource-map-namespace-filter {
-  flex: 0 1 260px;
-  width: min(260px, 100%);
+  flex: 0 0 auto;
+  width: min(220px, 100%);
 }
 
 .resource-map-shell.resource-map-shell--workbench .resource-map-toolbar__actions {

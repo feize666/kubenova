@@ -1,9 +1,9 @@
 "use client";
 
 import { ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
-import { Space, Typography } from "antd";
+import { Space, Tabs, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
 import type { DynamicResourceIdentity, ResourceIdentity, ResourceDetailResponse } from "@/lib/api/resources";
@@ -12,6 +12,7 @@ import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceDetailContent } from "./renderers";
 import type { ResourceDetailDrawerProps } from "./types";
 import { getKindTitle, getRenderProfile, normalizeKind } from "./utils";
+import { getDetailTabs, renderTabContent } from "@/app/clusters/[clusterId]/resource/[kind]/[...id]/detail-config";
 
 type DetailRequest = NonNullable<ResourceDetailDrawerProps["request"]>;
 
@@ -129,6 +130,7 @@ export function ResourceDetailDrawer({
   const requestKey = getRequestKey(request);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
   const navigationStateActiveKey = getRequestKey(navigationState?.activeRequest);
   const hasActiveNavigationState = Boolean(
     navigationState &&
@@ -147,6 +149,11 @@ export function ResourceDetailDrawer({
   const normalizedKind = activeRequest?.kind ? normalizeKind(activeRequest.kind) : "";
   const rawRequestId = activeRequest?.id ?? "";
 
+  // Workload details use the same tabbed experience as the standalone detail
+  // route while remaining mounted over the originating resource list.
+  const tabbedKinds = new Set(["deployment", "statefulset", "daemonset", "replicaset", "job", "cronjob", "pod"]);
+  const useTabbedDetail = tabbedKinds.has(normalizedKind);
+
   const handleBack = useCallback(() => {
     const previous = navigationStack.at(-1);
     if (!previous) return;
@@ -161,8 +168,20 @@ export function ResourceDetailDrawer({
   const handleClose = useCallback(() => {
     setNavigationState(null);
     setYamlOpen(false);
+    setActiveTab("overview");
     onClose();
   }, [onClose]);
+
+  const handleTabChange = useCallback((key: string) => setActiveTab(key), []);
+
+  // Reset the tab when drilling into a different resource in the same drawer.
+  const previousRequestKey = useRef(activeRequestKey);
+  useEffect(() => {
+    if (previousRequestKey.current !== activeRequestKey) {
+      previousRequestKey.current = activeRequestKey;
+      setActiveTab("overview");
+    }
+  }, [activeRequestKey]);
 
   const clusterQuery = useQuery({
     queryKey: ["resource-detail", "clusters", token],
@@ -266,7 +285,7 @@ export function ResourceDetailDrawer({
           <OpsIconActionButton onClick={() => void query.refetch()} loading={query.isFetching} disabled={!activeRequest}>
             刷新
           </OpsIconActionButton>
-          {yamlTarget ? (
+          {yamlTarget && !useTabbedDetail ? (
             <OpsIconActionButton icon={<FileTextOutlined />} onClick={() => setYamlOpen(true)}>
               YAML
             </OpsIconActionButton>
@@ -323,13 +342,32 @@ export function ResourceDetailDrawer({
           </Space>
         ) : query.data ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-            <ResourceDetailContent
-              key={activeRequestKey}
-              detail={query.data}
-              snapshot={activeRequest?.snapshot}
-              clusterMap={clusterMap}
-              onNavigateRequest={emitNavigateRequest}
-            />
+            {useTabbedDetail ? (
+              <Tabs
+                key={activeRequestKey}
+                destroyOnHidden
+                activeKey={activeTab}
+                onChange={handleTabChange}
+                items={getDetailTabs(normalizedKind, query.data).map((tab) => ({
+                  key: tab.key,
+                  label: tab.label,
+                  children: renderTabContent(tab.key, {
+                    detail: query.data!,
+                    clusterMap,
+                    onNavigateRequest: emitNavigateRequest,
+                  }),
+                }))}
+                className="master-detail-tabs"
+              />
+            ) : (
+              <ResourceDetailContent
+                key={activeRequestKey}
+                detail={query.data}
+                snapshot={activeRequest?.snapshot}
+                clusterMap={clusterMap}
+                onNavigateRequest={emitNavigateRequest}
+              />
+            )}
             {children}
           </Space>
         ) : (

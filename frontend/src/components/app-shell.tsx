@@ -8,6 +8,14 @@ import { getConsoleSurface } from "@/lib/console-routing";
 import { useAuth } from "@/components/auth-context";
 import { MfaRecovery } from "@/components/mfa-recovery";
 
+const FloatingAiAssistant = dynamic(
+  () =>
+    import("@/components/ai-assistant/floating-assistant").then(
+      (mod) => mod.FloatingAiAssistant,
+    ),
+  { ssr: false },
+);
+
 const PortalShell = dynamic(
   () => import("@/components/shell-layout").then((mod) => mod.PortalShell),
   {
@@ -34,17 +42,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
+  // 悬浮助手只在常规控制台页面出现：AI 助手页本身已有完整工作区，
+  // 集群的日志/终端为全屏运行工作台，都不应叠加浮层。
+  const floatingAssistantVisible =
+    !pathname.startsWith("/ai-assistant") &&
+    !/^\/clusters\/[^/]+\/(logs|terminal)\/?$/.test(pathname);
+
+  const withFloatingAssistant = (content: React.ReactNode) =>
+    floatingAssistantVisible ? (
+      <>
+        {content}
+        <FloatingAiAssistant />
+      </>
+    ) : (
+      <>{content}</>
+    );
+
   if (surface === "cluster-workspace") {
-    return (
+    return withFloatingAssistant(
       <Suspense fallback={<BootstrapScreen description="正在加载集群工作区..." />}>
         <ClusterWorkspaceShell>{children}</ClusterWorkspaceShell>
-      </Suspense>
+      </Suspense>,
     );
   }
 
-  return (
+  return withFloatingAssistant(
     <Suspense fallback={<BootstrapScreen description="正在加载控制台布局..." />}>
       <PortalShell>{children}</PortalShell>
-    </Suspense>
+    </Suspense>,
   );
 }

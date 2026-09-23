@@ -50,7 +50,7 @@ import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
 } from "@/components/resource-filter-toolbar";
-import { ResourceFacetFilterButton } from "@/components/resource-facet-filter-button";
+import { ResourceFacetSelect } from "@/components/resource-facet-select";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { TABLE_COL_WIDTH, getAdaptiveNameWidth } from "@/lib/table-column-widths";
@@ -947,11 +947,10 @@ export default function ClustersPage() {
 
           <ResourceFilterToolbar>
             <ResourceFilterToolbarItem width="auto">
-              <ResourceFacetFilterButton
+              <ResourceFacetSelect
                 label="环境"
                 value={environment}
                 allLabel="全部环境"
-                panelTitle="环境范围"
                 options={ENVIRONMENT_OPTIONS}
                 onChange={handleEnvironmentChange}
               />

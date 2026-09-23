@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Col, Form, Input, InputNumber, Row, Select, Space, Typography, message } from "antd";
+import { Alert, Form, Input, InputNumber, Select, Space, Typography, message } from "antd";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
-import { NetworkResourcePageFilters } from "@/components/network-resource-page-filters";
+import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
+import { ResourceFacetSelect } from "@/components/resource-facet-select";
 import { NetworkKindChip } from "@/components/network/network-table-cells";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
@@ -1100,30 +1101,15 @@ export default function GatewayApiPage() {
           style={{ width: "100%" }}
         >
           <div className="network-gateway-toolbar">
-            <Row gutter={[12, 12]}>
-              <Col xs={24} md={8} xl={6}>
-                <Select
-                  value={kind}
-                  options={gatewayKindOptions}
-                  style={{ width: "100%" }}
-                  loading={discoveryQuery.isLoading}
-                  onChange={(value) => {
-                    setKind(value);
-                    resetPage();
-                    setKeyword("");
-                    setKeywordInput("");
-                  }}
-                />
-              </Col>
-            </Row>
-            <NetworkResourcePageFilters
+            <ResourceClusterNamespaceFilters
               clusterId={clusterId}
               namespace={namespace}
               keywordInput={keywordInput}
               clusterOptions={clusterOptions}
               clusterLoading={clustersQuery.isLoading}
               knownNamespaces={knownNamespaces}
-              namespaceDisabled={namespaceDisabled || !kindMeta.namespaced}
+              namespaceVisible={kindMeta.namespaced}
+              namespaceDisabled={namespaceDisabled}
               namespacePlaceholder={!kindMeta.namespaced ? "集群级资源" : namespacePlaceholder}
               onClusterChange={(value) => {
                 onClusterChange(value);
@@ -1137,6 +1123,21 @@ export default function GatewayApiPage() {
               onSearch={handleSearch}
               keywordPlaceholder="按名称/标签搜索"
               marginBottom={0}
+              extraFilters={
+                <ResourceFacetSelect
+                  label="类型"
+                  value={kind}
+                  allLabel="全部类型"
+                  options={gatewayKindOptions}
+                  loading={discoveryQuery.isLoading}
+                  onChange={(value) => {
+                    setKind(value);
+                    resetPage();
+                    setKeyword("");
+                    setKeywordInput("");
+                  }}
+                />
+              }
             />
           </div>
 

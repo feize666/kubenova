@@ -122,6 +122,55 @@ export function ResourceClusterNamespaceFilters({
 
   if (!showScopeControl && !showKeywordSearch && !extraFilters) return null;
 
+  const scopeControl = showScopeControl ? (
+    <ResourceScopeFilterButton
+      clusterId={clusterId}
+      namespace={namespace}
+      clusterOptions={clusterOptions}
+      clusterLoading={clusterLoading}
+      clusterUnavailable={clusterUnavailable}
+      knownNamespaces={knownNamespaces}
+      namespaceLoading={namespaceLoading}
+      namespaceDisabled={resolvedNamespaceDisabled}
+      namespacePlaceholder={resolvedNamespacePlaceholder}
+      namespaceVisible={namespaceVisible}
+      onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+        const nextClusterLabel = nextClusterId
+          ? getClusterDisplayName(Object.fromEntries(clusterNameById), nextClusterId)
+          : "";
+        emitResourceScopeChange({
+          clusterId: nextClusterId,
+          clusterName: nextClusterLabel,
+          namespace: nextNamespace,
+        });
+        if (onScopeChange) {
+          onScopeChange(nextClusterId, nextNamespace);
+        } else {
+          onClusterChange(nextClusterId);
+          onNamespaceChange?.(nextNamespace);
+        }
+      }}
+    />
+  ) : null;
+
+  // Keyword search is the only thing that still needs toolbar chrome (it owns
+  // the query button). Everything else renders flat inside the surrounding
+  // table toolbar, which already provides the container; wrapping the controls
+  // again produced a nested card that diverged from the canonical Deployment
+  // control, especially once a namespace was selected.
+  if (!showKeywordSearch) {
+    return (
+      <div className="resource-cluster-namespace-filters resource-cluster-namespace-filters--flat" style={{ marginBottom }}>
+        {scopeControl ? (
+          <div className="resource-cluster-namespace-filters__field">{scopeControl}</div>
+        ) : null}
+        {extraFilters ? (
+          <div className="resource-cluster-namespace-filters__field">{extraFilters}</div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="resource-cluster-namespace-filters" style={{ marginBottom }}>
       <ResourceFilterToolbar
@@ -135,36 +184,7 @@ export function ResourceClusterNamespaceFilters({
         }
       >
         {showScopeControl ? (
-          <ResourceFilterToolbarItem width="auto">
-            <ResourceScopeFilterButton
-              clusterId={clusterId}
-              namespace={namespace}
-              clusterOptions={clusterOptions}
-              clusterLoading={clusterLoading}
-              clusterUnavailable={clusterUnavailable}
-              knownNamespaces={knownNamespaces}
-              namespaceLoading={namespaceLoading}
-              namespaceDisabled={resolvedNamespaceDisabled}
-              namespacePlaceholder={resolvedNamespacePlaceholder}
-              namespaceVisible={namespaceVisible}
-              onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-                const nextClusterLabel = nextClusterId
-                  ? getClusterDisplayName(Object.fromEntries(clusterNameById), nextClusterId)
-                  : "";
-                emitResourceScopeChange({
-                  clusterId: nextClusterId,
-                  clusterName: nextClusterLabel,
-                  namespace: nextNamespace,
-                });
-                if (onScopeChange) {
-                  onScopeChange(nextClusterId, nextNamespace);
-                } else {
-                  onClusterChange(nextClusterId);
-                  onNamespaceChange?.(nextNamespace);
-                }
-              }}
-            />
-          </ResourceFilterToolbarItem>
+          <ResourceFilterToolbarItem width="auto">{scopeControl}</ResourceFilterToolbarItem>
         ) : null}
         {showKeywordSearch ? (
           <ResourceKeywordSearch

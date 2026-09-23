@@ -2603,6 +2603,9 @@ export class ResourcesService {
 
     if (this.isWorkloadKind(base.kind)) {
       if (base.kind !== 'Pod') {
+        const baseSpec = this.toObject(base.spec);
+        const baseSelector = this.toObject(baseSpec.selector);
+        const selectorLabels = this.toObject(baseSelector.matchLabels);
         for (const pod of context.workloads) {
           if (pod.kind !== 'Pod' || pod.namespace !== namespace) {
             continue;
@@ -2616,7 +2619,13 @@ export class ResourcesService {
               this.toMaybeString(ownerObj.name) === base.name
             );
           });
-          if (owned) {
+          const podLabels = this.toObject(pod.labels);
+          const selectorMatched =
+            Object.keys(selectorLabels).length > 0 &&
+            Object.entries(selectorLabels).every(
+              ([key, value]) => podLabels[key] === value,
+            );
+          if (owned || selectorMatched) {
             add('Pod', pod.name, pod.namespace ?? undefined, 'owned-pod');
           }
         }

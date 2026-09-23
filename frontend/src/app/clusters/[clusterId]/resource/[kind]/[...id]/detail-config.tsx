@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import type { ReactNode } from "react";
-import { Alert, Button, Empty, Input, Space, Spin, Table, Typography } from "antd";
+import { Alert, Button, Empty, Input, Modal, Space, Spin, Table, Tag, Typography } from "antd";
 import {
   CodeOutlined,
   ContainerOutlined,
@@ -15,6 +15,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
+import dynamic from "next/dynamic";
+import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+
+const LogsWorkbench = dynamic(() => import("@/components/runtime-workbench/logs-workbench"), { ssr: false });
+const TerminalWorkbench = dynamic(() => import("@/components/runtime-workbench/terminal-workbench"), { ssr: false });
 import { getResourceYaml } from "@/lib/api/resources";
 import { getWorkloadsByKind, type WorkloadListItem } from "@/lib/api/workloads";
 import { buildLogsRoute } from "@/lib/api/logs";
@@ -41,60 +46,44 @@ const DETAIL_TAB_MAP: Record<string, DetailTab[]> = {
   deployment: [
     { key: "overview", label: "概览" },
     { key: "pods", label: "Pod 列表" },
-    { key: "conditions", label: "Conditions" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   statefulset: [
     { key: "overview", label: "概览" },
     { key: "pods", label: "Pod 列表" },
-    { key: "conditions", label: "Conditions" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   daemonset: [
     { key: "overview", label: "概览" },
     { key: "pods", label: "Pod 列表" },
-    { key: "conditions", label: "Conditions" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   replicaset: [
     { key: "overview", label: "概览" },
     { key: "pods", label: "Pod 列表" },
-    { key: "conditions", label: "Conditions" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   job: [
     { key: "overview", label: "概览" },
     { key: "pods", label: "Pod 列表" },
-    { key: "conditions", label: "Conditions" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   cronjob: [
     { key: "overview", label: "概览" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   pod: [
     { key: "overview", label: "概览" },
-    { key: "containers", label: "容器" },
-    { key: "conditions", label: "Conditions" },
-    { key: "events", label: "Events" },
     { key: "logs", label: "日志" },
     { key: "terminal", label: "终端" },
     { key: "yaml", label: "YAML" },
   ],
   service: [
     { key: "overview", label: "概览" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   ingress: [
     { key: "overview", label: "概览" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   endpoints: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
@@ -106,12 +95,10 @@ const DETAIL_TAB_MAP: Record<string, DetailTab[]> = {
   ingressroute: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
   persistentvolume: [
     { key: "overview", label: "概览" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   persistentvolumeclaim: [
     { key: "overview", label: "概览" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   storageclass: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
@@ -130,26 +117,22 @@ const DETAIL_TAB_MAP: Record<string, DetailTab[]> = {
   resourcequota: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
   horizontalpodautoscaler: [
     { key: "overview", label: "概览" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
   verticalpodautoscaler: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
   node: [
     { key: "overview", label: "概览" },
-    { key: "conditions", label: "Conditions" },
-    { key: "events", label: "Events" },
     { key: "yaml", label: "YAML" },
   ],
-  namespace: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
-  cluster: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
-  helmrelease: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
-  helmrepository: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
-  dynamic: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
+  clusterrole: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
+  clusterrolebinding: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
+  role: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
+  rolebinding: [{ key: "overview", label: "概览" }, { key: "yaml", label: "YAML" }],
 };
 
-export function getDetailTabs(kind: string, _detail?: ResourceDetailResponse): DetailTab[] {
-  const normalized = kind.trim().toLowerCase().replace(/[\s_-]+/g, "");
-  return DETAIL_TAB_MAP[normalized] ?? DETAIL_TAB_MAP.dynamic ?? [
+export function getDetailTabs(kind: string, detail?: ResourceDetailResponse): DetailTab[] {
+  const key = (kind ?? "").trim().toLowerCase();
+  return DETAIL_TAB_MAP[key] ?? [
     { key: "overview", label: "概览" },
     { key: "yaml", label: "YAML" },
   ];
@@ -160,38 +143,40 @@ export function renderTabContent(
   ctx: { detail: ResourceDetailResponse; onNavigateRequest?: NavigateFn; clusterMap?: Record<string, string> },
 ): ReactNode {
   const { detail, onNavigateRequest } = ctx;
-  const clusterMap = ctx.clusterMap ?? {};
-  const clusterId = detail.overview.clusterId;
-  const namespace = detail.overview.namespace;
-  const name = detail.overview.name;
-  const kind = detail.overview.kind;
+  const clusterId = (detail.overview as any)?.clusterId ?? "";
+  const kind = (detail.overview as any)?.kind ?? "";
+  const name = (detail.overview as any)?.name ?? "";
+  const namespace = (detail.overview as any)?.namespace ?? "";
+  const clusterMap = ctx.clusterMap;
 
   switch (tabKey) {
     case "overview":
       return (
         <div style={{ padding: "16px 0" }}>
-          {buildOverviewSection({ detail, clusterMap })}
+          {buildOverviewSection({ detail, clusterMap, onNavigateRequest })}
           {buildMetadataSection({ detail })}
           {buildLabelsSection({ detail })}
           {buildAnnotationsSection({ detail })}
+          {buildSpecSection({ detail })}
           {buildStatusSection({ detail })}
-          {buildSpecSection({ detail, specSnapshot: (detail as any).rawSpec })}
+          {kind.toLowerCase() === "pod" ? <ContainersTabContent detail={detail} /> : null}
+          {buildEventsSection({ detail, clusterMap, onNavigateRequest })}
         </div>
       );
-
+    case "metadata":
+      return buildMetadataSection({ detail });
+    case "labels":
+      return buildLabelsSection({ detail });
+    case "annotations":
+      return buildAnnotationsSection({ detail });
     case "conditions":
-      return <div style={{ padding: "16px 0" }}>{buildStatusSection({ detail })}</div>;
-
+      return buildStatusSection({ detail });
     case "events":
       return (
         <div style={{ padding: "16px 0" }}>
           {buildEventsSection({ detail, clusterMap, onNavigateRequest })}
         </div>
       );
-
-    case "yaml":
-      return <YamlTabContent clusterId={clusterId} namespace={namespace || ""} kind={kind} name={name} />;
-
     case "pods":
       return (
         <PodListTabContent
@@ -199,9 +184,11 @@ export function renderTabContent(
           namespace={namespace || ""}
           ownerKind={kind}
           ownerName={name}
-          onNavigate={(podNs: string, podName: string) => {
-            if (onNavigateRequest) {
-              onNavigateRequest({ kind: "pod", id: podNs + "/" + podName });
+          ownerSelector={readSelector(detail.rawSpec)}
+          onNavigate={(podId: string, _podNs: string, _podName: string) => {
+            if (onNavigateRequest && podId) {
+              // Use pod cuid (same format as workloads list page)
+              onNavigateRequest({ kind: "Pod", id: podId });
             }
           }}
         />
@@ -209,123 +196,233 @@ export function renderTabContent(
 
     case "containers":
       return <ContainersTabContent detail={detail} />;
-
     case "logs":
       return (
         <LogsTabContent
           clusterId={clusterId}
-          namespace={namespace || ""}
+          namespace={namespace}
           podName={name}
-          containers={detail.runtime.containerDetails}
+          containers={detail.runtime.containerDetails ?? []}
         />
       );
-
     case "terminal":
       return (
         <TerminalTabContent
           clusterId={clusterId}
-          namespace={namespace || ""}
+          namespace={namespace}
           podName={name}
-          containers={detail.runtime.containerDetails}
+          containers={detail.runtime.containerDetails ?? []}
         />
       );
-
     case "data":
       return <DataTabContent detail={detail} />;
-
+    case "yaml":
+      return <YamlTabContent clusterId={clusterId} kind={kind} resourceId={name} namespace={namespace} />;
     default:
-      return <PlaceholderTab title={tabKey} />;
+      return null;
   }
 }
 
-function PlaceholderTab({ title }: { title: string }) {
-  return (
-    <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--kn-text-secondary)", fontSize: 14 }}>
-      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={title} />
-    </div>
-  );
-}
-
 // YAML Tab
-function YamlTabContent({
-  clusterId, namespace, kind, name,
-}: { clusterId: string; namespace: string; kind: string; name: string }) {
+function YamlTabContent({ clusterId, kind, resourceId, namespace }: { clusterId: string; kind: string; resourceId: string; namespace: string }) {
   const { accessToken } = useAuth();
-  const yamlQuery = useQuery({
-    queryKey: ["resource-yaml", clusterId, namespace, kind, name, accessToken],
-    queryFn: () => getResourceYaml({ clusterId, namespace, kind, name }, accessToken || undefined),
-    enabled: Boolean(accessToken && clusterId && kind && name),
-    retry: 1,
-  });
-  const yaml = yamlQuery.data?.yaml ?? "";
-
-  if (yamlQuery.isLoading) return <div style={{ display: "flex", justifyContent: "center", padding: 80 }}><Spin size="large" /></div>;
-  if (yamlQuery.isError) return <Alert type="error" message="加载 YAML 失败" description={String(yamlQuery.error ?? "未知错误")} style={{ margin: 24 }} />;
-
-  return (
-    <div style={{ padding: "0 0 16px" }}>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "8px 0", position: "sticky", top: 0, background: "var(--kn-bg-elevated, #fff)", zIndex: 1 }}>
-        <Button size="small" icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(yaml).catch(() => {})}>复制</Button>
-        <Button size="small" icon={<DownloadOutlined />} onClick={() => {
-          const blob = new Blob([yaml], { type: "application/x-yaml;charset=utf-8" });
-          const a = document.createElement("a");
-          a.href = window.URL.createObjectURL(blob);
-          a.download = (namespace || "cluster") + "-" + kind + "-" + name + ".yaml";
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        }}>下载</Button>
-      </div>
-      <pre style={{ background: "var(--kn-fill-secondary, #f7f8fa)", padding: 16, borderRadius: 8, fontSize: 12, lineHeight: 1.6, overflow: "auto", maxHeight: "calc(100vh - 280px)", fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, color: "var(--kn-text-primary, #1a1a1a)" }}>{yaml || "(空)"}</pre>
-    </div>
-  );
+  return <ResourceYamlDrawer embedded open onClose={() => {}} token={accessToken || undefined} identity={{ clusterId, kind, name: resourceId, namespace }} />;
 }
 
-// Pod List Tab
+// --- Pod helper functions ---
+
+function formatAge(createdAt?: string): string {
+  if (!createdAt) return "-";
+  const created = new Date(createdAt);
+  if (isNaN(created.getTime())) return "-";
+  const now = new Date();
+  const diffMs = now.getTime() - created.getTime();
+  const diffSeconds = Math.floor(diffMs / 1000);
+  if (diffSeconds < 60) return `${diffSeconds}s`;
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 365) return `${diffDays}d`;
+  const diffYears = Math.floor(diffDays / 365);
+  return `${diffYears}y`;
+}
+
+function getPodPhase(pod: WorkloadListItem): string {
+  const statusJson = (pod as any).statusJson ?? {};
+  const podPhase = (pod as any).podPhase;
+  if (podPhase && typeof podPhase === "string" && podPhase !== "Unknown") return podPhase;
+  if (statusJson.phase && typeof statusJson.phase === "string") return statusJson.phase;
+  const containerStatuses = statusJson.containerStatuses ?? [];
+  if (containerStatuses.length > 0) {
+    const hasWaiting = containerStatuses.some((c: any) => c.state?.waiting);
+    const allTerminated = containerStatuses.every((c: any) => c.state?.terminated);
+    const waitingReason = containerStatuses.find((c: any) => c.state?.waiting)?.state?.waiting?.reason;
+    if (allTerminated) {
+      const succeeded = containerStatuses.every((c: any) => c.state?.terminated?.exitCode === 0);
+      return succeeded ? "Succeeded" : "Failed";
+    }
+    if (waitingReason) return waitingReason;
+    if (hasWaiting) return "Pending";
+    const allRunning = containerStatuses.every((c: any) => c.ready !== false);
+    return allRunning ? "Running" : "Pending";
+  }
+  return pod.status || "Unknown";
+}
+
+function getPodReady(pod: WorkloadListItem): string {
+  const statusJson = (pod as any).statusJson ?? {};
+  const containerStatuses = statusJson.containerStatuses ?? [];
+  if (containerStatuses.length > 0) {
+    const ready = containerStatuses.filter((c: any) => c.ready).length;
+    return `${ready}/${containerStatuses.length}`;
+  }
+  if (pod.readyReplicas !== undefined && pod.readyReplicas !== null) return String(pod.readyReplicas);
+  return "-";
+}
+
+function getPodRestarts(pod: WorkloadListItem): number {
+  const statusJson = (pod as any).statusJson ?? {};
+  const containerStatuses = statusJson.containerStatuses ?? [];
+  if (containerStatuses.length > 0) {
+    return containerStatuses.reduce((sum: number, c: any) => sum + (c.restartCount || 0), 0);
+  }
+  return (pod as any).restarts ?? 0;
+}
+
+function getPodNode(pod: WorkloadListItem): string {
+  const spec = (pod as any).spec ?? {};
+  if (spec.nodeName && typeof spec.nodeName === "string") return spec.nodeName;
+  return (pod as any).nodeName ?? "-";
+}
+
+function getPodIP(pod: WorkloadListItem): string {
+  const statusJson = (pod as any).statusJson ?? {};
+  if (statusJson.podIP && typeof statusJson.podIP === "string") return statusJson.podIP;
+  return (pod as any).podIP ?? "-";
+}
+
+const POD_PHASE_COLORS: Record<string, string> = {
+  Running: "#22c55e", Pending: "#f59e0b", Failed: "#ef4444", Succeeded: "#3b82f6",
+  Unknown: "#94a3b8", Terminating: "#f59e0b", Terminated: "#94a3b8",
+  ContainerCreating: "#3b82f6", CrashLoopBackOff: "#ef4444", ImagePullBackOff: "#ef4444",
+  ErrImagePull: "#ef4444", Error: "#ef4444", Completed: "#22c55e",
+  OOMKilled: "#ef4444", Evicted: "#f59e0b", InitError: "#ef4444", NodeShutdown: "#f59e0b",
+};
+
+// --- PodListTabContent ---
+
+function readSelector(rawSpec: Record<string, unknown> | undefined): Record<string, string> {
+  const selector = rawSpec?.selector;
+  if (!selector || typeof selector !== "object" || Array.isArray(selector)) return {};
+  const matchLabels = (selector as Record<string, unknown>).matchLabels;
+  if (!matchLabels || typeof matchLabels !== "object" || Array.isArray(matchLabels)) return {};
+  return Object.fromEntries(Object.entries(matchLabels).filter(([, value]) => typeof value === "string")) as Record<string, string>;
+}
+
 function PodListTabContent({
-  clusterId, namespace, ownerKind, ownerName, onNavigate,
-}: { clusterId: string; namespace: string; ownerKind: string; ownerName: string; onNavigate: (ns: string, name: string) => void }) {
+  clusterId, namespace, ownerKind, ownerName, ownerSelector, onNavigate,
+}: { clusterId: string; namespace: string; ownerKind: string; ownerName: string; ownerSelector: Record<string, string>; onNavigate: (podId: string, podNs: string, podName: string) => void }) {
   const { accessToken } = useAuth();
   const [keyword, setKeyword] = useState("");
   const podsQuery = useQuery({
-    queryKey: ["detail-pod-list", clusterId, namespace, ownerKind, ownerName, accessToken],
-    queryFn: () => getWorkloadsByKind("Pod", { clusterId, namespace, keyword: keyword || undefined, pageSize: 100 }, accessToken || undefined),
+    queryKey: ["detail-pod-list", clusterId, namespace, ownerKind, ownerName, keyword, accessToken],
+    queryFn: () => getWorkloadsByKind("Pod", { clusterId, namespace, keyword: keyword || undefined, pageSize: 200 }, accessToken || undefined),
     enabled: Boolean(accessToken && clusterId),
     retry: 1,
   });
   const allPods = podsQuery.data?.items ?? [];
-  const filtered = useMemo(() => allPods.filter((pod: WorkloadListItem) => {
-    const metadata = (pod as any).metadata ?? (pod as any).raw ?? {};
-    const ownerRefs = metadata.ownerReferences ?? [];
-    if (ownerRefs.length === 0) {
-      const labels = metadata.labels ?? {};
-      const app = labels["app"] || labels["app.kubernetes.io/name"] || labels["name"] || "";
-      return app === ownerName;
-    }
-    return ownerRefs.some((ref: any) => ref.name === ownerName && ref.kind?.toLowerCase() === ownerKind.toLowerCase());
-  }), [allPods, ownerKind, ownerName]);
+
+  const filtered = useMemo(() => {
+    const keywordLower = keyword?.trim().toLowerCase() || "";
+    const kindLower = ownerKind.toLowerCase();
+    return allPods.filter((pod: WorkloadListItem) => {
+      const statusJson = (pod as any).statusJson && typeof (pod as any).statusJson === "object"
+        ? (pod as any).statusJson : {};
+      // The list endpoint stores Kubernetes ownerReferences in statusJson.
+      const ownerRefs: any[] = (pod as any).ownerRefs ?? statusJson.ownerRefs ?? statusJson.ownerReferences ?? statusJson.metadata?.ownerReferences ?? [];
+
+      let matchesOwner = false;
+      if (ownerRefs.length > 0) {
+        matchesOwner = ownerRefs.some(
+          (ref: any) => ref.name === ownerName && (ref.kind || "").toLowerCase() === kindLower
+        );
+      }
+      if (!matchesOwner && Object.keys(ownerSelector).length > 0) {
+        const labels: Record<string, string> = (pod as any).labels ?? {};
+        matchesOwner = Object.entries(ownerSelector).every(([key, value]) => labels[key] === value);
+      }
+      if (!matchesOwner) {
+        const labels: Record<string, string> = (pod as any).labels ?? {};
+        const app = labels["app"] || labels["app.kubernetes.io/name"] || labels["name"] || "";
+        matchesOwner = app === ownerName;
+      }
+      if (!matchesOwner) return false;
+      if (keywordLower) {
+        return (pod.name || "").toLowerCase().includes(keywordLower);
+      }
+      return true;
+    });
+  }, [allPods, ownerKind, ownerName, ownerSelector, keyword]);
 
   if (podsQuery.isLoading) return <div style={{ display: "flex", justifyContent: "center", padding: 80 }}><Spin size="large" /></div>;
   if (podsQuery.isError) return <Alert type="error" message="加载 Pod 列表失败" description={String(podsQuery.error ?? "未知错误")} style={{ margin: 24 }} />;
 
   const columns = [
-    { title: "Pod 名称", dataIndex: "name", key: "name", render: (text: string, record: WorkloadListItem) => <a onClick={(e) => { e.preventDefault(); onNavigate((record as any).namespace || namespace, text); }} style={{ cursor: "pointer" }}>{text}</a> },
-    { title: "状态", dataIndex: "state", key: "state", width: 100, render: (state: string) => <Typography.Text style={{ color: { Running: "#52c41a", Pending: "#faad14", Failed: "#ff4d4f", Succeeded: "#1890ff", Unknown: "#8c8c8c" }[state] || "#8c8c8c", fontWeight: 500 }}>{state || "-"}</Typography.Text> },
-    { title: "就绪", dataIndex: "ready", key: "ready", width: 80 },
-    { title: "重启", dataIndex: "restarts", key: "restarts", width: 60 },
-    { title: "节点", dataIndex: "node", key: "node", width: 140 },
-    { title: "IP", dataIndex: "podIP", key: "podIP", width: 130 },
-    { title: "创建时间", dataIndex: "createdAt", key: "createdAt", width: 160 },
+    {
+      title: "名称", dataIndex: "name", key: "name",
+      render: (text: string, record: WorkloadListItem) => (
+        <a onClick={(e) => { e.preventDefault(); e.stopPropagation(); onNavigate((record as any).id || record.id || "", record.namespace || namespace, text); }}
+           style={{ cursor: "pointer", fontWeight: 500, fontSize: 13 }}>{text}</a>
+      ),
+    },
+    {
+      title: "状态", key: "status", width: 130,
+      render: (_: unknown, record: WorkloadListItem) => {
+        const phase = getPodPhase(record);
+        return <Typography.Text style={{ color: POD_PHASE_COLORS[phase] || POD_PHASE_COLORS.Unknown, fontWeight: 500, fontSize: 13 }}>{phase}</Typography.Text>;
+      },
+    },
+    {
+      title: "就绪", key: "ready", width: 70,
+      render: (_: unknown, record: WorkloadListItem) => <Typography.Text style={{ fontSize: 13 }}>{getPodReady(record)}</Typography.Text>,
+    },
+    {
+      title: "重启", key: "restarts", width: 70,
+      render: (_: unknown, record: WorkloadListItem) => {
+        const count = getPodRestarts(record);
+        return <Typography.Text style={{ fontSize: 13, color: count > 5 ? "#ef4444" : undefined }}>{count}</Typography.Text>;
+      },
+    },
+    {
+      title: "节点", key: "node", width: 160, ellipsis: true,
+      render: (_: unknown, record: WorkloadListItem) => <Typography.Text style={{ fontSize: 12 }} type="secondary">{getPodNode(record)}</Typography.Text>,
+    },
+    {
+      title: "IP", key: "podIP", width: 130,
+      render: (_: unknown, record: WorkloadListItem) => <Typography.Text code style={{ fontSize: 12 }}>{getPodIP(record)}</Typography.Text>,
+    },
+    {
+      title: "创建时间", key: "age", width: 90,
+      render: (_: unknown, record: WorkloadListItem) => <Typography.Text type="secondary" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{formatAge(record.createdAt)}</Typography.Text>,
+    },
   ];
+
+  const dataSource = filtered.map((pod: WorkloadListItem) => ({ ...pod, key: pod.id || pod.name || Math.random().toString() }));
 
   return (
     <div style={{ padding: "8px 0" }}>
-      <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-        <Input prefix={<SearchOutlined />} placeholder="搜索 Pod..." size="small" style={{ width: 240 }} value={keyword} onChange={(e) => setKeyword(e.target.value)} allowClear />
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{filtered.length} 个 Pod</Typography.Text>
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Input prefix={<SearchOutlined />} placeholder="搜索 Pod 名称..." size="small" style={{ width: 260 }} value={keyword}
+            onChange={(e) => setKeyword(e.target.value)} allowClear />
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>{filtered.length} 个 Pod</Typography.Text>
+        </div>
       </div>
-      <Table columns={columns} dataSource={filtered} rowKey={(r: WorkloadListItem) => r.name || Math.random().toString()} size="small" pagination={false} scroll={{ x: 700 }}
-        onRow={(record: WorkloadListItem) => ({ onClick: () => onNavigate((record as any).namespace || namespace, record.name), style: { cursor: "pointer" } })}
-        locale={{ emptyText: "暂无关联 Pod" }}
-      />
+      <Table columns={columns} dataSource={dataSource} rowKey="key" size="small" pagination={false} scroll={{ x: 800 }}
+        onRow={(record) => ({ onClick: () => onNavigate((record as any).id || record.id || "", record.namespace || namespace, record.name), style: { cursor: "pointer" } })}
+        locale={{ emptyText: "暂无关联 Pod" }} />
     </div>
   );
 }
@@ -345,7 +442,7 @@ function ContainersTabContent({ detail }: { detail: ResourceDetailResponse }) {
           </Space>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             {(container.ports ?? []).length > 0 && <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>端口</Typography.Text><div style={{ marginTop: 4 }}>{(container.ports ?? []).map((p: any, i: number) => <Typography.Text key={i} code style={{ fontSize: 12, marginRight: 8 }}>{p.containerPort}{p.protocol ? "/" + p.protocol : ""}{p.name ? " (" + p.name + ")" : ""}</Typography.Text>)}</div></div>}
-            {Object.keys(container.resources ?? {}).length > 0 && <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>资源限制</Typography.Text><div style={{ marginTop: 4 }}>{container.resources?.requests && <div><Typography.Text style={{ fontSize: 12 }}>requests: </Typography.Text>{Object.entries(container.resources.requests as Record<string, string>).map(([k, v], i) => <Typography.Text key={i} code style={{ fontSize: 12, marginRight: 8 }}>{k}: {v}</Typography.Text>)}</div>}{container.resources?.limits && <div><Typography.Text style={{ fontSize: 12 }}>limits: </Typography.Text>{Object.entries(container.resources.limits as Record<string, string>).map(([k, v], i) => <Typography.Text key={i} code style={{ fontSize: 12, marginRight: 8 }}>{k}: {v}</Typography.Text>)}</div>}</div></div>}
+            {Object.keys(container.resources ?? {}).length > 0 && <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>资源限制</Typography.Text><div style={{ marginTop: 4 }}>{Object.entries(container.resources).map(([key, value]: [string, any]) => <Typography.Text key={key} code style={{ fontSize: 12, marginRight: 8 }}>{key}: {typeof value === "object" ? JSON.stringify(value) : String(value)}</Typography.Text>)}</div></div>}
           </div>
           {(container.env ?? []).length > 0 && <div style={{ marginTop: 12 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>环境变量 ({(container.env ?? []).length})</Typography.Text><div style={{ marginTop: 4, background: "var(--kn-fill-secondary, #f7f8fa)", borderRadius: 4, padding: "4px 8px", maxHeight: 160, overflow: "auto" }}>{(container.env ?? []).map((e: any, i: number) => <div key={i} style={{ fontSize: 12, fontFamily: "monospace", lineHeight: 1.8 }}><Typography.Text>{e.name ?? "-"}</Typography.Text>{e.value !== undefined ? <Typography.Text code style={{ marginLeft: 8 }}>{e.value}</Typography.Text> : e.valueFrom ? <Typography.Text type="secondary" style={{ marginLeft: 8 }}>(from: {Object.keys(e.valueFrom).join(", ")})</Typography.Text> : null}</div>)}</div></div>}
           {(container.volumeMounts ?? []).length > 0 && <div style={{ marginTop: 12 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>挂载卷 ({(container.volumeMounts ?? []).length})</Typography.Text><div style={{ marginTop: 4 }}>{(container.volumeMounts ?? []).map((vm: any, i: number) => <Typography.Text key={i} code style={{ fontSize: 12, marginRight: 12 }}>{vm.name}: {vm.mountPath}{vm.readOnly ? " (ro)" : ""}</Typography.Text>)}</div></div>}
@@ -355,32 +452,32 @@ function ContainersTabContent({ detail }: { detail: ResourceDetailResponse }) {
   );
 }
 
-// Logs Tab
-function LogsTabContent({ clusterId, namespace, podName, containers }: { clusterId: string; namespace: string; podName: string; containers?: any[] }) {
-  const router = useRouter();
-  const containerNames = containers?.map((c: any) => c.name).filter(Boolean) ?? [];
-  return (
-    <div style={{ padding: "40px 24px", textAlign: "center" }}>
-      <FileTextOutlined style={{ fontSize: 48, color: "var(--kn-text-secondary)", marginBottom: 16 }} />
-      <Typography.Title level={5}>查看 Pod 日志</Typography.Title>
-      <Typography.Paragraph type="secondary">点击下方按钮在新窗口中打开日志查看器，支持实时跟踪、搜索和过滤。</Typography.Paragraph>
-      <Button type="primary" icon={<EyeOutlined />} onClick={() => router.push(buildLogsRoute({ clusterId, namespace, pod: podName, containerNames, resourceKind: "Pod", resourceName: podName }))}>打开日志查看器</Button>
-    </div>
-  );
+function RuntimeTabContent({ mode, clusterId, namespace, podName, containers }: { mode: "logs" | "terminal"; clusterId: string; namespace: string; podName: string; containers?: any[] }) {
+  const [open, setOpen] = useState(true);
+  const close = useCallback(() => setOpen(false), []);
+  const query = useMemo(() => {
+    const target = { clusterId, namespace, pod: podName, containerNames: containers?.map(c => c.name).filter(Boolean) ?? [] };
+    const url = mode === "logs" ? buildLogsRoute(target) : buildTerminalRoute(target);
+    return new URLSearchParams(url.split("?")[1]);
+  }, [mode, clusterId, namespace, podName, containers]);
+  const label = mode === "logs" ? "日志" : "终端";
+  return <>
+    <Button onClick={() => setOpen(true)}>打开{label}</Button>
+    <Modal open={open} title={podName + " · " + label} onCancel={close} footer={null}
+      width="100vw" style={{ top: 0, maxWidth: "100vw", margin: 0, paddingBottom: 0 }}
+      styles={{ container: { height: "100dvh", borderRadius: 0, display: "flex", flexDirection: "column" }, body: { flex: 1, minHeight: 0, overflow: "auto" } }}
+      destroyOnHidden>
+      {open ? mode === "logs" ? <LogsWorkbench query={query} onClose={close} /> : <TerminalWorkbench query={query} onClose={close} /> : null}
+    </Modal>
+  </>;
 }
 
-// Terminal Tab
-function TerminalTabContent({ clusterId, namespace, podName, containers }: { clusterId: string; namespace: string; podName: string; containers?: any[] }) {
-  const router = useRouter();
-  const containerNames = containers?.map((c: any) => c.name).filter(Boolean) ?? [];
-  return (
-    <div style={{ padding: "40px 24px", textAlign: "center" }}>
-      <CodeOutlined style={{ fontSize: 48, color: "var(--kn-text-secondary)", marginBottom: 16 }} />
-      <Typography.Title level={5}>打开终端</Typography.Title>
-      <Typography.Paragraph type="secondary">点击下方按钮在新窗口中打开 Web 终端，连接到 Pod 容器。</Typography.Paragraph>
-      <Button type="primary" icon={<CodeOutlined />} onClick={() => router.push(buildTerminalRoute({ clusterId, namespace, pod: podName, containerNames }))}>打开终端</Button>
-    </div>
-  );
+function LogsTabContent(props: Omit<Parameters<typeof RuntimeTabContent>[0], "mode">) {
+  return <RuntimeTabContent {...props} mode="logs" />;
+}
+
+function TerminalTabContent(props: Omit<Parameters<typeof RuntimeTabContent>[0], "mode">) {
+  return <RuntimeTabContent {...props} mode="terminal" />;
 }
 
 // Data Tab
@@ -401,8 +498,7 @@ function DataTabContent({ detail }: { detail: ResourceDetailResponse }) {
             <div style={{ padding: "8px 16px", background: "var(--kn-fill-secondary, #f7f8fa)", borderBottom: "1px solid var(--kn-border, #e8e8e8)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <Typography.Text strong style={{ fontSize: 13 }}>{key}</Typography.Text>
               <Space size={4}><Typography.Text type="secondary" style={{ fontSize: 11 }}>{displayValue.length} 字符</Typography.Text>
-                <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(displayValue).catch(() => {})} />
-              </Space>
+                <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(displayValue).catch(() => {})} /></Space>
             </div>
             <pre style={{ margin: 0, padding: "12px 16px", fontSize: 12, lineHeight: 1.6, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: isBinary ? 256 : undefined, overflow: "auto", color: "var(--kn-text-primary, #1a1a1a)" }}>{truncated}</pre>
           </div>

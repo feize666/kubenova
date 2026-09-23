@@ -22,8 +22,7 @@ import type { UploadProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ResourceFilterToolbar, ResourceFilterToolbarItem } from "@/components/resource-filter-toolbar";
-import { ResourceFacetFilterButton } from "@/components/resource-facet-filter-button";
+import { ResourceFacetSelect } from "@/components/resource-facet-select";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -887,21 +886,54 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     { title: "原因", dataIndex: "reason", key: "reason", width: 180 },
     { title: "消息", dataIndex: "message", key: "message" },
   ];
+  // Scope + facets share one flat row so the autoscaling list matches the
+  // canonical Deployment toolbar instead of stacking a second filter card.
   const scopeFilterControl = (
-    <div className="resource-workbench__scope">
-      <ResourceScopeFilterButton
-        clusterId={clusterId}
-        namespace={namespace}
-        clusterOptions={clusterOptions}
-        clusterLoading={clustersQuery.isLoading}
-        knownNamespaces={knownNamespaces}
-        namespaceDisabled={namespaceDisabled}
-        namespacePlaceholder={namespacePlaceholder}
-        onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
-          onScopeChange(nextClusterId, nextNamespace);
-          resetPage();
-        }}
-      />
+    <div className="resource-facet-row">
+      <div className="resource-facet-row__field">
+        <ResourceScopeFilterButton
+          clusterId={clusterId}
+          namespace={namespace}
+          clusterOptions={clusterOptions}
+          clusterLoading={clustersQuery.isLoading}
+          knownNamespaces={knownNamespaces}
+          namespaceDisabled={namespaceDisabled}
+          namespacePlaceholder={namespacePlaceholder}
+          onApply={({ clusterId: nextClusterId, namespace: nextNamespace }) => {
+            onScopeChange(nextClusterId, nextNamespace);
+            resetPage();
+          }}
+        />
+      </div>
+      <div className="resource-facet-row__field">
+        <ResourceFacetSelect
+          label="类型"
+          value={kind}
+          allLabel="全部类型"
+          options={kindOptions}
+          onChange={(value) => {
+            setKind(value);
+            resetPage();
+          }}
+        />
+      </div>
+      {!defaultType ? (
+        <div className="resource-facet-row__field">
+          <ResourceFacetSelect
+            label="策略"
+            value={typeFilter}
+            allLabel="全部策略"
+            options={[
+              { label: "HPA", value: "HPA" },
+              { label: "VPA", value: "VPA" },
+            ]}
+            onChange={(value) => {
+              setTypeFilter(value as AutoscalingType | "");
+              resetPage();
+            }}
+          />
+        </div>
+      ) : null}
     </div>
   );
   const titleKind = defaultType === "VPA" ? "VerticalPodAutoscaler" : "HorizontalPodAutoscaler";
@@ -928,39 +960,6 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
         />
 
         <Space className="resource-workbench__content delivery-workbench__autoscaling-content" orientation="vertical" size={12} style={{ width: "100%" }}>
-          <ResourceFilterToolbar>
-            <ResourceFilterToolbarItem width="sm">
-              <ResourceFacetFilterButton
-                label="类型"
-                value={kind}
-                allLabel="全部类型"
-                options={[{ label: "全部类型", value: "" }, ...kindOptions]}
-                onChange={(value) => {
-                  setKind(value);
-                  resetPage();
-                }}
-              />
-            </ResourceFilterToolbarItem>
-            {!defaultType ? (
-              <ResourceFilterToolbarItem width="sm">
-                <ResourceFacetFilterButton
-                  label="策略"
-                  value={typeFilter}
-                  allLabel="全部策略"
-                  options={[
-                    { label: "全部策略", value: "" },
-                    { label: "HPA", value: "HPA" },
-                    { label: "VPA", value: "VPA" },
-                  ]}
-                  onChange={(value) => {
-                    setTypeFilter(value as AutoscalingType | "");
-                    resetPage();
-                  }}
-                />
-              </ResourceFilterToolbarItem>
-            ) : null}
-          </ResourceFilterToolbar>
-
           <Row gutter={[12, 12]}>
             <Col xs={12} md={6}>
               <OpsMetricTile label="策略总数" meta="按当前筛选范围统计" tone="neutral" value={policyTotal} />

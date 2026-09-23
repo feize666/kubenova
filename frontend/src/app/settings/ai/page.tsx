@@ -10,7 +10,7 @@ export default function SettingsAiPage() {
     <main className="portal-settings">
       <OpsSurface variant="panel" padding="sm">
         <ResourcePageHeader
-          title={<span><RobotOutlined style={{ marginRight: 8 }} />AI 助手配置</span>}
+          title={<span><RobotOutlined style={{ marginRight: 8 }} />AI 模型</span>}
           path="/settings/ai"
           embedded
           description="管理 AI Provider 连接与模型能力"

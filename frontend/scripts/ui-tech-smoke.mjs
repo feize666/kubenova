@@ -40,7 +40,7 @@ const allRoutes = [
   {
     id: "overview",
     path: "/",
-    texts: ["总览", "当前风险态势", "服务影响", "运维入口"],
+    texts: ["集群概览", "集群资源概览", "工作负载", "最近异常事件"],
     shellSelector: ".ops-overview-shell",
     toolbarSelector: ".ops-overview-header",
     chipSelector: ".ops-filter-chip",
@@ -49,7 +49,7 @@ const allRoutes = [
   {
     id: "overview-scoped",
     path: "/?clusterId=local",
-    texts: ["总览", "Cluster local", "单集群"],
+    texts: ["集群概览", "集群资源概览", "单集群视图"],
     shellSelector: ".ops-overview-shell",
     toolbarSelector: ".ops-overview-header",
     chipSelector: ".ops-filter-chip",

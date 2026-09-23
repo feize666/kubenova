@@ -15,6 +15,8 @@ import {
   LineChartOutlined,
   NodeIndexOutlined,
   RadarChartOutlined,
+  PlusOutlined,
+  FileTextOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Skeleton, Space } from "antd";
@@ -31,6 +33,7 @@ import {
 } from "@/components/ops";
 import { MetricUnitFormatter } from "@/components/visual-system";
 import { getClusters } from "@/lib/api/clusters";
+import { getClusterHealthList, type ClusterHealthListItem } from "@/lib/api/cluster-health";
 import {
   formatDashboardCount,
   getDashboardStats,
@@ -164,6 +167,33 @@ function buildUsageTrendPoints(
 function clampPercent(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, value));
+}
+
+function ClusterOverviewCard({ cluster, health }: { cluster: NonNullable<Awaited<ReturnType<typeof getClusters>>>["items"][number]; health?: ClusterHealthListItem }) {
+  const cpu = Number.isFinite(cluster.cpuUsage) ? cluster.cpuUsage : null;
+  const memory = Number.isFinite(cluster.memoryUsage) ? cluster.memoryUsage : null;
+  const status = health?.runtimeStatus === "running" ? "运行中" : health?.runtimeStatus === "checking" ? "探测中" : health?.runtimeStatus === "disabled" || cluster.state === "disabled" ? "已停用" : health?.runtimeStatus === "offline-mode" ? "未接入" : "离线";
+  return (
+    <Link href={`/clusters/${encodeURIComponent(cluster.id)}/overview`} prefetch={false} className="ops-overview-cluster-card">
+      <div className="ops-overview-cluster-card__head">
+        <div>
+          <span className="ops-overview-cluster-card__eyebrow">{cluster.provider || "Kubernetes"} · {cluster.environment || "未标注环境"}</span>
+          <strong>{cluster.name}</strong>
+        </div>
+        <OpsStatusTag tone={status === "运行中" ? "success" : status === "离线" ? "danger" : "warning"}>{status}</OpsStatusTag>
+      </div>
+      <div className="ops-overview-cluster-card__metrics">
+        <div><span>节点</span><b>{cluster.nodeCount ?? "--"}</b></div>
+        <div><span>版本</span><b>{cluster.kubernetesVersion || "--"}</b></div>
+        <div><span>接入状态</span><b>{cluster.hasKubeconfig === false ? "未接入" : "已接入"}</b></div>
+      </div>
+      <div className="ops-overview-cluster-card__usage">
+        <div><span>CPU</span><b>{cpu === null ? "--" : `${Math.round(cpu)}%`}</b><i><em style={{ width: `${clampPercent(cpu ?? 0)}%` }} /></i></div>
+        <div><span>内存</span><b>{memory === null ? "--" : `${Math.round(memory)}%`}</b><i><em style={{ width: `${clampPercent(memory ?? 0)}%` }} /></i></div>
+      </div>
+      <span className="ops-overview-cluster-card__link">进入集群信息 <ArrowRightOutlined /></span>
+    </Link>
+  );
 }
 
 type TrendPoint = {
@@ -537,15 +567,27 @@ export default function HomePage() {
     queryKey: ["clusters", "overview-scope", accessToken],
     queryFn: () =>
       getClusters(
-        { state: "active", selectableOnly: true, pageSize: 500 },
+        { state: "active", selectableOnly: false, pageSize: 500 },
         accessToken!,
       ),
     enabled: !isInitializing && Boolean(accessToken),
     staleTime: 60_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
+    refetchInterval: 30_000,
   });
-
+  const healthQuery = useQuery({
+    queryKey: ["cluster-health", "overview", accessToken],
+    queryFn: () => getClusterHealthList({ lifecycleState: "active", page: 1, pageSize: 500 }, accessToken || undefined),
+    enabled: !isInitializing && Boolean(accessToken),
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
+  const clusterHealth = useMemo(() => Object.fromEntries((healthQuery.data?.items ?? []).map((item) => [item.clusterId, item])), [healthQuery.data?.items]);
+  const latestProbeAt = useMemo(() => {
+    const values = (healthQuery.data?.items ?? []).map((item) => item.checkedAt).filter((value): value is string => Boolean(value));
+    return values.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+  }, [healthQuery.data?.items]);
   const scopeOptions = useMemo<OpsScopeSelectorOption[]>(
     () =>
       (clustersQuery.data?.items ?? []).map((item) => ({
@@ -563,6 +605,12 @@ export default function HomePage() {
       (clustersQuery.data?.items ?? []).find((item) => item.id === clusterId),
     [clusterId, clustersQuery.data?.items],
   );
+  const clusterNodes = useMemo(() => {
+    const items = clusterId ? [selectedCluster].filter(Boolean) : clustersQuery.data?.items ?? [];
+    if (!items.length || items.some((item) => typeof item?.nodeCount !== "number")) return null;
+    return items.reduce((total, item) => total + (item?.nodeCount ?? 0), 0);
+  }, [clusterId, clustersQuery.data?.items, selectedCluster]);
+  const clusterCards = clusterId ? (selectedCluster ? [selectedCluster] : []) : clustersQuery.data?.items ?? [];
 
   const updateClusterScope = useCallback(
     (nextClusterId?: string) => {
@@ -599,7 +647,11 @@ export default function HomePage() {
     staleTime: 60_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
+    refetchInterval: 60_000,
   });
+  const refreshOverview = useCallback(() => {
+    void Promise.all([statsQuery.refetch(), clustersQuery.refetch(), healthQuery.refetch()]);
+  }, [clustersQuery, healthQuery, statsQuery]);
 
   const stats = statsQuery.data?.stats;
   const alerts = isDashboardMetricAvailable(stats?.metrics?.alerts)
@@ -765,12 +817,10 @@ export default function HomePage() {
         <OverviewCommandCenter
           scopeLabel={scopeLabel}
           clusterId={clusterId}
-          clusterCount={isDashboardMetricAvailable(stats?.metrics?.clusters) ? stats?.clusters.total : undefined}
-          alertCount={alerts?.total}
           riskLevel={riskSummary.riskLevel}
           generatedAt={stats?.scope?.generatedAt}
           isFetching={statsQuery.isFetching}
-          onRefresh={() => void statsQuery.refetch()}
+          onRefresh={refreshOverview}
         />
       </div>
 
@@ -835,15 +885,9 @@ export default function HomePage() {
         />
       ) : null}
 
-      <section className="ops-overview-scope-strip" aria-label="范围和当前态势">
-        <div className="ops-overview-scope-cell">
-          <span>集群范围</span>
-          <strong>
-            <GlobalOutlined /> {clusterId ? "单集群" : "全部集群"}
-          </strong>
-        </div>
-        <div className="ops-overview-scope-cell ops-overview-scope-cell--selector">
-          <span>或选择集群</span>
+      <section className="ops-overview-context-bar" aria-label="集群范围">
+        <div className="ops-overview-context-bar__selector">
+          <span>数据范围</span>
           <OpsScopeSelector
             value={clusterId || undefined}
             options={scopeOptions}
@@ -854,396 +898,50 @@ export default function HomePage() {
             allDescription="全局态势"
           />
         </div>
-        <div
-          className={`ops-overview-scope-cell ops-overview-scope-cell--risk ops-overview-scope-cell--${riskSummary.riskLevel}`}
-        >
-          <span>当前风险态势</span>
-          <strong>
-            <FireOutlined />{" "}
-            {riskSummary.riskLevel === "critical"
-              ? "高风险"
-              : riskSummary.riskLevel === "warning"
-                ? "需关注"
-                : riskSummary.riskLevel === "unknown" ? "数据不足" : "稳定"}
-          </strong>
-          <em>
-            风险分{" "}
-            {typeof riskSummary.healthScore === "number"
-              ? `${100 - riskSummary.healthScore} / 100`
-              : "--"}
-          </em>
+        <div className="ops-overview-context-bar__meta">
+          <OpsStatusTag tone={riskSummary.riskLevel}>{riskSummary.riskLevel === "critical" ? "高风险" : riskSummary.riskLevel === "warning" ? "需关注" : riskSummary.riskLevel === "unknown" ? "数据不足" : "运行稳定"}</OpsStatusTag>
+          <span>{latestProbeAt ? `最近探测 ${formatAge(latestProbeAt)}` : "等待首次数据采集"}</span>
+          <span>{clusterId ? "单集群视图" : "多集群全局视图"}</span>
+          <button type="button" onClick={refreshOverview} disabled={statsQuery.isFetching || clustersQuery.isFetching || healthQuery.isFetching}>刷新数据</button>
         </div>
-        <div className="ops-overview-scope-cell ops-overview-scope-cell--status">
-          <span>集群运行状态</span>
-          <div className="ops-overview-status-inline">
-            <b className="is-ok">正常 {formatMetricCount(stats?.clusters.healthy, stats?.metrics?.clusters)}</b>
-            <b className="is-warn">
-              警告 {formatMetricCount(stats?.clusters.warning, stats?.metrics?.clusters)}
-            </b>
-            <b className="is-danger">
-              严重 {formatCount(alerts?.critical)}
-            </b>
+      </section>
+
+      <section className="ops-overview-cluster-board" aria-label="集群资源总览">
+        <div className="ops-overview-cluster-board__main">
+          <div className="ops-overview-section-heading">
+            <div><span>资源工作区</span><h2>集群资源概览</h2></div>
+            <Link href="/clusters" prefetch={false}>管理全部集群 <ArrowRightOutlined /></Link>
           </div>
+          {clustersQuery.isLoading ? <div className="ops-overview-cluster-grid"><Skeleton active paragraph={{ rows: 4 }} /></div> : clusterCards.length ? (
+            <div className="ops-overview-cluster-grid">
+              {clusterCards.map((cluster) => <ClusterOverviewCard key={cluster.id} cluster={cluster} health={clusterHealth[cluster.id]} />)}
+            </div>
+          ) : <div className="ops-overview-empty ops-overview-empty--panel">暂无已接入集群，<Link href="/clusters">立即接入第一个集群</Link></div>}
         </div>
-        <div className="ops-overview-scope-cell ops-overview-scope-cell--summary">
-          <span>概览摘要（{scopeLabel}）</span>
-          <div className="ops-overview-summary-row">
-            <SummaryMetric
-              label="集群数"
-              value={formatMetricCount(stats?.clusters.total, stats?.metrics?.clusters)}
-              meta={stats?.metrics?.clusters}
-            />
-            <SummaryMetric
-              label="命名空间"
-              value={formatMetricCount(stats?.namespaces, stats?.metrics?.namespaces)}
-              meta={stats?.metrics?.namespaces}
-            />
-            <SummaryMetric
-              label="工作负载"
-              value={formatMetricCount(stats?.workloads.total, stats?.metrics?.workloads)}
-              meta={stats?.metrics?.workloads}
-            />
-            <SummaryMetric
-              label="Pod 数"
-              value={formatMetricCount(topology?.pods, stats?.metrics?.pods)}
-              meta={stats?.metrics?.pods}
-            />
-            <SummaryMetric
-              label="告警数"
-              value={formatCount(alerts?.total)}
-              meta={stats?.metrics?.alerts}
-            />
+        <aside className="ops-overview-quick-rail">
+          <div className="ops-overview-section-heading"><div><span>快速入口</span><h2>常用操作</h2></div></div>
+          <div className="ops-overview-quick-links">
+            <Link href="/clusters" prefetch={false}><PlusOutlined /><span>创建集群<small>接入新的 Kubernetes 集群</small></span><ArrowRightOutlined /></Link>
+            <Link href={formatScopedHref("/network/topology", clusterId)} prefetch={false}><NodeIndexOutlined /><span>资源拓扑<small>查看服务访问链路</small></span><ArrowRightOutlined /></Link>
+            <Link href={formatScopedHref("/monitoring", clusterId)} prefetch={false}><LineChartOutlined /><span>监控中心<small>查看指标与告警</small></span><ArrowRightOutlined /></Link>
+            <Link href={formatScopedHref("/logs", clusterId)} prefetch={false}><FileTextOutlined /><span>日志中心<small>检索集群运行日志</small></span><ArrowRightOutlined /></Link>
           </div>
-        </div>
-      </section>
-
-      {stats?.resourceUsage ? (
-        <OverviewMetricStrip
-          metrics={[
-            { label: "CPU 使用率", metric: stats.resourceUsage.cpu },
-            { label: "内存使用率", metric: stats.resourceUsage.memory },
-          ]}
-        />
-      ) : null}
-
-      <section className="ops-overview-grid" aria-label="风险卡片">
-        <div className="ops-overview-span-3">
-          <OverviewCard
-            title="健康评分"
-            scope={scopeLabel}
-            action={<CheckCircleOutlined />}
-          >
-            <div className="ops-overview-health">
-              <HealthGauge score={riskSummary.healthScore} />
-              <div
-                className="ops-overview-trend ops-overview-trend--empty"
-                role="status"
-              >
-                暂无健康评分趋势数据
-              </div>
-            </div>
-            <MetricProvenance meta={stats?.metrics?.healthScore} />
-            <div className="ops-overview-delta">
-              较昨日 <span className="is-flat">暂无对比数据</span>
-            </div>
-          </OverviewCard>
-        </div>
-        <div className="ops-overview-span-3">
-          <OverviewCard
-            title="严重告警"
-            scope={scopeLabel}
-            action={<AlertOutlined />}
-          >
-            <div className="ops-overview-big-number is-danger">
-              {formatCount(alerts?.critical)}
-            </div>
-            <MetricProvenance meta={stats?.metrics?.alerts} />
-            <div className="ops-overview-list">
-              <BarRow
-                label="严重"
-                value={formatCount(alerts?.critical)}
-                percent={countShare(alerts?.critical, alerts?.total)}
-                tone="red"
-              />
-              <BarRow
-                label="警告"
-                value={formatCount(alerts?.warning)}
-                percent={countShare(alerts?.warning, alerts?.total)}
-                tone="orange"
-              />
-              <BarRow
-                label="告警总数"
-                value={formatCount(alerts?.total)}
-                percent={countShare(alerts?.total, alerts?.total)}
-                tone="blue"
-              />
-            </div>
-          </OverviewCard>
-        </div>
-        <div className="ops-overview-span-3">
-          <OverviewCard
-            title="异常工作负载"
-            scope={scopeLabel}
-            action={<DeploymentUnitOutlined />}
-          >
-            <div className="ops-overview-big-number is-warning">
-              {formatMetricCount(stats?.workloads.unhealthy, stats?.metrics?.workloads)}
-            </div>
-            <MetricProvenance meta={stats?.metrics?.workloads} />
-            <div className="ops-overview-list">
-              <BarRow
-                label="异常负载"
-                value={formatMetricCount(stats?.workloads.unhealthy, stats?.metrics?.workloads)}
-                percent={metricCountShare(stats?.workloads.unhealthy, stats?.workloads.total, stats?.metrics?.workloads)}
-                tone="orange"
-              />
-              <BarRow
-                label="健康负载"
-                value={formatMetricCount(stats?.workloads.healthy, stats?.metrics?.workloads)}
-                percent={metricCountShare(stats?.workloads.healthy, stats?.workloads.total, stats?.metrics?.workloads)}
-                tone="green"
-              />
-              <BarRow
-                label="全部负载"
-                value={formatMetricCount(stats?.workloads.total, stats?.metrics?.workloads)}
-                percent={metricCountShare(stats?.workloads.total, stats?.workloads.total, stats?.metrics?.workloads)}
-                tone="blue"
-              />
-            </div>
-          </OverviewCard>
-        </div>
-        <div className="ops-overview-span-3">
-          <OverviewCard
-            title="风险集群"
-            scope="风险分排序"
-            action={<ClusterOutlined />}
-          >
-            <MetricProvenance meta={stats?.metrics?.clusters} />
-            <div className="ops-overview-list ops-overview-list--bars">
-              <BarRow
-                label="风险集群"
-                value={formatMetricCount(stats?.clusters.warning, stats?.metrics?.clusters)}
-                percent={metricCountShare(stats?.clusters.warning, stats?.clusters.total, stats?.metrics?.clusters)}
-                tone="red"
-              />
-              <BarRow
-                label="健康集群"
-                value={formatMetricCount(stats?.clusters.healthy, stats?.metrics?.clusters)}
-                percent={metricCountShare(stats?.clusters.healthy, stats?.clusters.total, stats?.metrics?.clusters)}
-                tone="green"
-              />
-              <BarRow
-                label="全部集群"
-                value={formatMetricCount(stats?.clusters.total, stats?.metrics?.clusters)}
-                percent={metricCountShare(stats?.clusters.total, stats?.clusters.total, stats?.metrics?.clusters)}
-                tone="blue"
-              />
-            </div>
-          </OverviewCard>
-        </div>
-      </section>
-
-      <section className="ops-overview-grid" aria-label="运行态势">
-        <div className="ops-overview-span-4">
-          <OverviewCard
-            title="CPU 使用率"
-            scope={resourceUsageSummary.dataSource}
-            action={<LineChartOutlined />}
-          >
-            <div className="ops-overview-chart-card">
-              <div className="ops-overview-chart-value">
-                <strong>
-                  {liveSnapshot?.available
-                    ? formatLiveCpu(liveSnapshot.cpuUsage)
-                    : formatPercent(resourceUsageSummary.cpuUsagePercent)}
-                </strong>
-                <span>
-                  {getUsageSubtitle({
-                    dataSource: resourceUsageSummary.dataSource,
-                    degraded: resourceUsageSummary.degraded,
-                    note: resourceUsageSummary.note,
-                  })}
-                </span>
-              </div>
-              <OverviewTrendPanel
-                title="CPU 趋势"
-                source={resourceUsageSummary.dataSource}
-                capturedAt={stats?.resourceUsage?.cpu.capturedAt}
-                freshness={stats?.resourceUsage?.cpu.freshness ?? "不可用"}
-              >
-                <MiniTrendChart
-                  tone="blue"
-                  points={cpuTrendPoints}
-                  height={136}
-                  valueLabel="CPU"
-                />
-              </OverviewTrendPanel>
-            </div>
-          </OverviewCard>
-        </div>
-        <div className="ops-overview-span-4">
-          <OverviewCard
-            title="内存使用率"
-            scope={resourceUsageSummary.dataSource}
-            action={<LineChartOutlined />}
-          >
-            <div className="ops-overview-chart-card">
-              <div className="ops-overview-chart-value">
-                <strong>
-                  {liveSnapshot?.available
-                    ? formatLiveMemory(liveSnapshot.memoryUsage)
-                    : formatPercent(resourceUsageSummary.memoryUsagePercent)}
-                </strong>
-                <span>
-                  {getUsageSubtitle({
-                    dataSource: resourceUsageSummary.dataSource,
-                    degraded: resourceUsageSummary.degraded,
-                    note: resourceUsageSummary.note,
-                  })}
-                </span>
-              </div>
-              <OverviewTrendPanel
-                title="内存趋势"
-                source={resourceUsageSummary.dataSource}
-                capturedAt={stats?.resourceUsage?.memory.capturedAt}
-                freshness={stats?.resourceUsage?.memory.freshness ?? "不可用"}
-              >
-                <MiniTrendChart
-                  tone="green"
-                  points={memoryTrendPoints}
-                  height={136}
-                  valueLabel="内存"
-                />
-              </OverviewTrendPanel>
-            </div>
-          </OverviewCard>
-        </div>
-        <div className="ops-overview-span-4">
-          <OverviewCard
-            title="服务影响拓扑"
-            scope="6 小时"
-            action={<NodeIndexOutlined />}
-          >
-            <div className="ops-overview-impact-layout">
-              <ImpactMap impact={stats?.serviceImpact} />
-              <div className="ops-overview-impact-services-list">
-                {serviceImpactRows.length > 0 ? (
-                  serviceImpactRows.map((item) => (
-                    <BarRow
-                      key={item.id}
-                      label={item.label}
-                      value={item.value}
-                      percent={item.percent}
-                      tone={item.tone}
-                    />
-                  ))
-                ) : (
-                  <div className="ops-overview-empty">
-                    {stats?.serviceImpact?.note ?? "暂无服务影响数据"}
-                  </div>
-                )}
-              </div>
-            </div>
-          </OverviewCard>
-        </div>
-      </section>
-
-      <section className="ops-overview-grid" aria-label="运维流">
-        <div className="ops-overview-span-5">
-          <OverviewCard title="最近告警事件" action={<BellOutlined />}>
-            {timelineItems.length > 0 ? (
-              <div className="ops-overview-event-table">
-                {timelineItems.map((item) => (
-                  <div key={item.id} className="ops-overview-event-row">
-                    <span
-                      className={`ops-overview-event-dot ops-overview-event-dot--${item.level}`}
-                    />
-                    <strong>{item.title}</strong>
-                    <span>{item.source}</span>
-                    <time>{item.time}</time>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="ops-overview-empty">暂无告警事件</div>
-            )}
-            <Link
-              className="ops-overview-card-link"
-              href={formatScopedHref("/observability", clusterId)}
-              prefetch={false}
-            >
-              查看全部告警 <ArrowRightOutlined />
-            </Link>
-          </OverviewCard>
-        </div>
-        <div className="ops-overview-span-4">
-          <OverviewCard title="最近运维操作" action={<CloudServerOutlined />}>
-            {recentOperationItems.length > 0 ? (
-              <div className="ops-overview-operation-list">
-                {recentOperationItems.map((item) => (
-                  <div key={item.id} className="ops-overview-operation-row">
-                    {item.result === "failure" ? (
-                      <AlertOutlined />
-                    ) : (
-                      <CheckCircleOutlined />
-                    )}
-                    <div>
-                      <strong>{item.action}</strong>
-                      <span>{item.detail}</span>
-                    </div>
-                    <OpsStatusTag tone={item.status.tone}>
-                      {item.status.label}
-                    </OpsStatusTag>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="ops-overview-empty">暂无运维操作</div>
-            )}
-          </OverviewCard>
-        </div>
-        <div className="ops-overview-span-3">
-          <OverviewCard title="常用运维入口" action={<AppstoreOutlined />}>
-            <div className="ops-overview-shortcuts">
-              {actions.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  prefetch={false}
-                  className="ops-overview-shortcut"
-                >
-                  {item.icon}
-                  <span>{item.label}</span>
-                </Link>
-              ))}
-              <Link
-                href={formatScopedHref("/namespaces", clusterId)}
-                prefetch={false}
-                className="ops-overview-shortcut"
-              >
-                <DatabaseOutlined />
-                <span>命名空间</span>
-              </Link>
-              <Link
-                href={formatScopedHref("/aiops", clusterId)}
-                prefetch={false}
-                className="ops-overview-shortcut"
-              >
-                <RadarChartOutlined />
-                <span>智能巡检</span>
-              </Link>
-            </div>
-          </OverviewCard>
-        </div>
-      </section>
-
-      {isLoading ? (
-        <div className="ops-overview-card">
-          <div className="ops-overview-card__body">
-            <Skeleton active paragraph={{ rows: 6 }} />
+          <div className="ops-overview-quick-rail__status"><span>数据状态</span><strong>{stats?.scope?.generatedAt ? "已同步" : "等待采集"}</strong><small>{stats?.scope?.generatedAt ? `最近采集 ${formatAge(stats.scope.generatedAt)}` : "首次采集完成后显示实时状态"}</small></div>
+          <div className="ops-overview-quick-rail__events">
+            <div className="ops-overview-section-heading"><div><span>近况</span><h2>最近异常事件</h2></div></div>
+            {timelineItems.length ? timelineItems.slice(0, 5).map((item) => <Link href={formatScopedHref("/observability", clusterId)} prefetch={false} key={item.id} data-level={item.level}><i /><span><strong>{item.title}</strong><small>{item.source} · {item.time}</small></span><ArrowRightOutlined /></Link>) : <div className="ops-overview-empty">当前无异常事件</div>}
+            {timelineItems.length ? <Link className="ops-overview-quick-rail__all" href={formatScopedHref("/observability", clusterId)} prefetch={false}>查看全部事件 <ArrowRightOutlined /></Link> : null}
           </div>
-        </div>
-      ) : null}
+        </aside>
+      </section>
+
+      <section className="ops-overview-metric-grid" aria-label="平台核心指标">
+        <article><span>集群总数</span><strong>{clusterCards.length}</strong><small>{healthQuery.data?.items.filter((item) => item.runtimeStatus === "running" && (!clusterId || item.clusterId === clusterId)).length ?? "--"} 个运行中 · {healthQuery.data?.items.filter((item) => item.runtimeStatus !== "running" && (!clusterId || item.clusterId === clusterId)).length ?? "--"} 个需关注</small></article>
+        <article><span>节点总数</span><strong>{clusterNodes === null ? "--" : clusterNodes}</strong><small>来自集群最近一次同步</small></article>
+        <article><span>工作负载</span><strong>{formatMetricCount(stats?.workloads.total, stats?.metrics?.workloads)}</strong><small>{formatMetricCount(stats?.workloads.healthy, stats?.metrics?.workloads)} 个健康</small></article>
+        <article data-tone={Number(stats?.workloads.unhealthy ?? 0) > 0 ? "warning" : "success"}><span>异常资源</span><strong>{formatMetricCount(stats?.workloads.unhealthy, stats?.metrics?.workloads)}</strong><small>异常工作负载</small></article>
+      </section>
+
     </div>
   );
 }

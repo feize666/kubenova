@@ -52,7 +52,9 @@ export function OpsDrawerShell({
   const resolvedWrapperWidth =
     variant === "inspector"
       ? `min(100vw, clamp(384px, 32vw, ${inspectorMaxWidth}px))`
-      : `min(100vw, ${resolvedWidth}px, max(50vw, 720px))`;
+      : variant === "resource"
+        ? `min(100vw, ${resolvedWidth}px)`
+        : `min(100vw, ${resolvedWidth}px, max(50vw, 720px))`;
 
   return (
     <Drawer

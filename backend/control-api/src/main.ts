@@ -5,10 +5,6 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { URL } from 'node:url';
 import type { AppConfig } from './platform/config/env.schema';
 import { AppModule } from './app.module';
-import { loadAiEnvFile } from './ai-assistant/ai-config.util';
-
-// 在应用初始化前加载 AI 配置文件（.env.ai.local）
-loadAiEnvFile();
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);

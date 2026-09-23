@@ -496,7 +496,7 @@ export default function JobsPage() {
       render: (name: string, row: WorkloadListItem) =>
         row.id ? (
           <Typography.Link
-            onClick={() => { setDetailTarget({ kind: "Job", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/job/${encodeURIComponent(row.id)}`); }}
+            onClick={() => { setDetailTarget({ kind: "Job", id: row.id }); }}
           >
             {name}
           </Typography.Link>

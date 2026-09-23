@@ -29,7 +29,6 @@ import {
   CreateSessionInput,
   PresetQuestion,
 } from './types';
-import { readAiConfigFromFile } from './ai-config.util';
 import { AiProviderService } from './ai-provider.service';
 
 @Injectable()
@@ -211,6 +210,56 @@ export class AiAssistantService {
     ownerUserId: string | undefined,
     sessionId: string,
   ): Promise<AiConversationMessage> {
+    const turn = await this.prepareAssistantTurn(ownerUserId, sessionId);
+    let { content, structured, actionDescriptors } = turn.ai;
+
+    try {
+      content = await this.callLLM(turn.messageHistory, {
+        systemAppend: turn.systemAppend,
+      });
+    } catch (error) {
+      const fallback = this.buildProviderFailureFallback({
+        error,
+        systemAppend: turn.systemAppend,
+        latestUserPrompt: turn.latestUserPrompt,
+      });
+      content = fallback.content;
+      if (!structured || actionDescriptors.length === 0) {
+        structured = fallback.structured;
+        actionDescriptors = fallback.actionDescriptors;
+      }
+      if (structured) {
+        content = `${content}\n\n${this.buildAssistantText(structured)}`;
+      }
+    }
+
+    return this.persistAssistantMessage(
+      sessionId,
+      content,
+      structured,
+      actionDescriptors,
+    );
+  }
+
+  /**
+   * 会话轮次的准备阶段：读取历史、推断集群上下文、生成结构化摘要与动作建议。
+   * 阻塞式回复与 WebSocket 流式回复共用该阶段，保证两条链路的语义一致。
+   */
+  private async prepareAssistantTurn(
+    ownerUserId: string | undefined,
+    sessionId: string,
+  ): Promise<{
+    sessionRecord: AiConversationSessionRecord;
+    messageHistory: AiConversationMessage[];
+    latestUserPrompt: string | undefined;
+    clusterContext: Record<string, string> | undefined;
+    systemAppend: string | undefined;
+    ai: {
+      content: string;
+      structured: AssistantStructuredResponse | undefined;
+      actionDescriptors: AiActionDescriptor[];
+    };
+  }> {
     const sessionRecord = await this.requireSession(ownerUserId, sessionId);
     const messageRecords = await this.prisma.aiConversationMessage.findMany({
       where: { sessionId },
@@ -231,51 +280,68 @@ export class AiAssistantService {
       clusterContext,
       latestUserPrompt,
     );
-    let content = '';
-    let structured: AssistantStructuredResponse | undefined = latestUserPrompt
+    const structured: AssistantStructuredResponse | undefined = latestUserPrompt
       ? this.buildStructuredResponse(latestUserPrompt)
       : undefined;
-    let actionDescriptors: AiActionDescriptor[] = latestUserPrompt
-      ? this.buildActionDescriptors(
-          latestUserPrompt,
-          structured!,
-          clusterContext,
-        )
-      : [];
+    const actionDescriptors: AiActionDescriptor[] =
+      latestUserPrompt && structured
+        ? this.buildActionDescriptors(latestUserPrompt, structured, clusterContext)
+        : [];
 
-    try {
-      content = await this.callLLM(session.messages, { systemAppend });
-    } catch (error) {
-      const reason =
-        error instanceof Error ? error.message : '模型中转站调用失败';
-      content = [
-        '⚠️ KubeNova 中台模型调用失败',
-        '',
-        reason,
-        '',
-        '请检查模型中转站配置（Base URL / API Key / Model）和网络连通性。',
-      ].join('\n');
-      if (systemAppend?.includes('## 集群实时查询结果')) {
-        content = `${content}\n\n${systemAppend}`;
-      }
-      if (!structured || actionDescriptors.length === 0) {
-        structured = latestUserPrompt
-          ? this.buildStructuredResponse(latestUserPrompt)
-          : undefined;
-        actionDescriptors =
-          latestUserPrompt && structured
-            ? this.buildActionDescriptors(
-                latestUserPrompt,
-                structured,
-                clusterContext,
-              )
-            : [];
-      }
-      if (structured) {
-        content = `${content}\n\n${this.buildAssistantText(structured)}`;
-      }
+    return {
+      sessionRecord,
+      messageHistory: session.messages,
+      latestUserPrompt,
+      clusterContext,
+      systemAppend,
+      ai: { content: '', structured, actionDescriptors },
+    };
+  }
+
+  /**
+   * Provider 调用失败时的兜底文案与结构化结果，供阻塞/流式两条链路复用。
+   */
+  private buildProviderFailureFallback(input: {
+    error: unknown;
+    systemAppend?: string;
+    latestUserPrompt?: string;
+  }): {
+    content: string;
+    structured: AssistantStructuredResponse | undefined;
+    actionDescriptors: AiActionDescriptor[];
+  } {
+    const reason =
+      input.error instanceof Error ? input.error.message : 'AI 模型调用失败';
+    let content = [
+      '⚠️ KubeNova 中台模型调用失败',
+      '',
+      reason,
+      '',
+      '请检查「AI 模型」页的 Base URL / API Key / Model 配置和网络连通性。',
+    ].join('\n');
+    if (input.systemAppend?.includes('## 集群实时查询结果')) {
+      content = `${content}\n\n${input.systemAppend}`;
     }
+    const structured = input.latestUserPrompt
+      ? this.buildStructuredResponse(input.latestUserPrompt)
+      : undefined;
+    const actionDescriptors =
+      input.latestUserPrompt && structured
+        ? this.buildActionDescriptors(input.latestUserPrompt, structured)
+        : [];
+    return { content, structured, actionDescriptors };
+  }
 
+  /**
+   * 落库助手消息并回写会话更新时间。流式与非流式共用，确保前端拿到的
+   * 权威消息体格式完全一致（含 structured / actionDescriptors）。
+   */
+  private async persistAssistantMessage(
+    sessionId: string,
+    content: string,
+    structured: AssistantStructuredResponse | undefined,
+    actionDescriptors: AiActionDescriptor[],
+  ): Promise<AiConversationMessage> {
     const createdAt = new Date();
     const message = await this.prisma.aiConversationMessage.create({
       data: {
@@ -336,6 +402,100 @@ export class AiAssistantService {
     return { user, assistant, session, actionDescriptors };
   }
 
+  /**
+   * 流式版本的用户消息 + 助手回复：先落库用户消息，再通过 onDelta 实时推送
+   * Provider 增量，最后落库助手消息并返回权威结果。WebSocket 网关直接使用。
+   */
+  async appendUserAndReplyStream(
+    ownerUserId: string | undefined,
+    sessionId: string,
+    content: string,
+    handlers: {
+      onDelta: (delta: string) => void;
+      signal?: AbortSignal;
+    },
+    attachments?: AiMessageAttachment[],
+    voiceInput?: AiVoiceInputMeta,
+    context?: Pick<
+      CreateSessionInput,
+      'clusterId' | 'namespace' | 'resourceKind' | 'resourceName'
+    >,
+  ): Promise<{
+    user: AiConversationMessage;
+    assistant: AiConversationMessage;
+    session: AiConversationSession;
+    actionDescriptors: AiActionDescriptor[];
+  }> {
+    if (context) {
+      const nextContext = this.buildClusterContext(context);
+      if (nextContext) {
+        await this.prisma.aiConversationSession.update({
+          where: { id: sessionId },
+          data: { clusterContextJson: nextContext },
+        });
+      }
+    }
+
+    const user = await this.appendUserMessage(
+      ownerUserId,
+      sessionId,
+      content,
+      attachments,
+      voiceInput,
+    );
+
+    const turn = await this.prepareAssistantTurn(ownerUserId, sessionId);
+    let { structured, actionDescriptors } = turn.ai;
+    let reply = '';
+    // Track whether the provider already streamed partial text. When it did, the
+    // fallback message must not be appended on top; the client replaces its
+    // optimistic bubble with the authoritative content delivered by chat.done.
+    let streamedChars = 0;
+
+    try {
+      reply = await this.callLLMStream(turn.messageHistory, {
+        systemAppend: turn.systemAppend,
+        signal: handlers.signal,
+        onDelta: (delta) => {
+          streamedChars += delta.length;
+          handlers.onDelta(delta);
+        },
+      });
+    } catch (error) {
+      if (handlers.signal?.aborted) {
+        throw error;
+      }
+      const fallback = this.buildProviderFailureFallback({
+        error,
+        systemAppend: turn.systemAppend,
+        latestUserPrompt: turn.latestUserPrompt,
+      });
+      reply = fallback.content;
+      structured = fallback.structured ?? structured;
+      actionDescriptors = fallback.actionDescriptors;
+      if (structured) {
+        reply = `${reply}\n\n${this.buildAssistantText(structured)}`;
+      }
+      if (streamedChars === 0) {
+        handlers.onDelta(reply);
+      }
+    }
+
+    const assistant = await this.persistAssistantMessage(
+      sessionId,
+      reply,
+      structured,
+      actionDescriptors,
+    );
+    const session = await this.getSession(ownerUserId, sessionId);
+    return {
+      user,
+      assistant,
+      session,
+      actionDescriptors: assistant.actionDescriptors ?? [],
+    };
+  }
+
   async sendMessage(
     ownerUserId: string | undefined,
     sessionId: string,
@@ -383,45 +543,17 @@ export class AiAssistantService {
   }
 
   /**
-   * 调用 LLM API（OpenAI 兼容格式）。
-   * 每次调用时从文件直接读取最新配置，支持热更新（无需重启进程）。
-   * 调用失败时抛出明确异常，禁止静默回退到本地 mock。
+   * 调用 LLM。唯一配置源是数据库中加密存储的 AI Provider，由系统设置的
+   * 「AI 模型」页维护，因此不存在磁盘密钥文件，也不再有环境变量回退。
    */
-  private async callLLM(
+  /**
+   * 构造发送给 Provider 的消息体。system 提示词与集群上下文注入在此统一处理，
+   * 阻塞式与流式调用共用，避免两条链路的提示词漂移。
+   */
+  private buildLlmMessages(
     history: AiConversationMessage[],
-    opts?: { systemAppend?: string },
-  ): Promise<string> {
-    // Prefer the encrypted, database-backed provider configured from 系统设置.
-    // Keep the legacy .env path as a compatibility fallback for existing installs.
-    if (this.aiProviderService) {
-      try {
-        const providerReply = await this.aiProviderService.chat(
-          undefined,
-          history.map((msg) => ({ role: msg.role, content: msg.content })),
-        );
-        if (providerReply.content?.trim()) return providerReply.content.trim();
-      } catch (error) {
-        this.logger.warn(
-          `database AI provider unavailable, falling back to environment config: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
-    // 每次调用重新从文件读取，确保配置热更新无需重启
-    const config = readAiConfigFromFile();
-    const { baseUrl, apiKey, modelName: model } = config;
-    const effectiveMaxTokens = Math.max(
-      512,
-      Number.isFinite(Number(config.maxTokens)) ? Number(config.maxTokens) : 0,
-    );
-    const timeoutMs = Math.max(20000, config.timeoutMs || 30000);
-
-    if (!apiKey) {
-      throw new BadRequestException(
-        'AI_MODEL_API_KEY 未配置，请在 KubeNova 中台模型设置中填写 API Key。',
-      );
-    }
-
+    systemAppend?: string,
+  ): Array<{ role: string; content: string }> {
     const systemPrompt = [
       '你是一位专业的 Kubernetes 智能运维助手，运行于企业级 K8s 管理平台。',
       '',
@@ -439,337 +571,94 @@ export class AiAssistantService {
       '3. 涉及集群变更操作时，在操作前明确标注风险等级（低/中/高/严重）。',
       '4. 若用户描述不完整，主动询问：名称空间、工作负载名、错误日志、集群版本等关键上下文。',
       '5. 对于超出 K8s 运维范围的问题，礼貌说明并引导回运维相关话题。',
-      ...(opts?.systemAppend?.trim() ? ['', opts.systemAppend.trim()] : []),
+      ...(systemAppend?.trim() ? ['', systemAppend.trim()] : []),
     ].join('\n');
 
-    const messages: Array<{ role: string; content: string }> = [
+    return [
       { role: 'system', content: systemPrompt },
       ...history.map((msg) => ({
         role: msg.role,
         content: msg.content,
       })),
     ];
-
-    const attempts = this.resolveModelEndpoints(baseUrl);
-    const errors: string[] = [];
-
-    for (const attempt of attempts) {
-      const maxAttemptRetry = 1;
-      let stopAfterAttempt = false;
-      for (let retryIndex = 0; retryIndex < maxAttemptRetry; retryIndex += 1) {
-        const abortController = new AbortController();
-        const timer = setTimeout(() => abortController.abort(), timeoutMs);
-        try {
-          const response = await fetch(attempt.url, {
-            method: 'POST',
-            signal: abortController.signal,
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify(
-              attempt.kind === 'chat'
-                ? {
-                    model,
-                    messages,
-                    max_tokens: effectiveMaxTokens,
-                    temperature: 0.7,
-                  }
-                : {
-                    model,
-                    input: messages.map((msg) => ({
-                      role: msg.role,
-                      content: [
-                        {
-                          type:
-                            msg.role === 'assistant'
-                              ? 'output_text'
-                              : 'input_text',
-                          text: msg.content,
-                        },
-                      ],
-                    })),
-                    max_output_tokens: effectiveMaxTokens,
-                  },
-            ),
-          });
-
-          const parsed = await this.parseModelResponse(response);
-          if (!response.ok) {
-            const errorText = this.extractErrorText(parsed);
-            errors.push(
-              `[${attempt.kind}] ${attempt.url} -> ${response.status} ${response.statusText}${
-                errorText ? ` (${errorText})` : ''
-              }`,
-            );
-            continue;
-          }
-
-          if (attempt.kind === 'chat') {
-            if (parsed.format !== 'json') {
-              errors.push(
-                `[chat] ${attempt.url} -> unexpected content-type ${parsed.contentType} (${parsed.preview})`,
-              );
-              continue;
-            }
-            const data = parsed.data as {
-              choices?: Array<{ message?: { content?: string } }>;
-            };
-            const content = data.choices?.[0]?.message?.content?.trim();
-            if (content) {
-              return content;
-            }
-            errors.push(`[chat] ${attempt.url} -> empty content`);
-            break;
-          }
-
-          if (parsed.format !== 'json') {
-            errors.push(
-              `[responses] ${attempt.url} -> unexpected content-type ${parsed.contentType} (${parsed.preview})`,
-            );
-            continue;
-          }
-
-          const data = parsed.data as {
-            output_text?: string;
-            output?: Array<{
-              content?: Array<{ type?: string; text?: string }>;
-            }>;
-          };
-          const outputText =
-            data.output_text?.trim() ||
-            data.output
-              ?.flatMap((item) => item.content ?? [])
-              .map((item) => item.text ?? '')
-              .join('\n')
-              .trim();
-          if (outputText) {
-            return outputText;
-          }
-          errors.push(`[responses] ${attempt.url} -> empty content`);
-          break;
-        } catch (err) {
-          if (
-            err instanceof Error &&
-            (err.name === 'AbortError' || err.message.includes('aborted'))
-          ) {
-            errors.push(
-              `[${attempt.kind}] ${attempt.url} -> timeout>${timeoutMs}ms`,
-            );
-            stopAfterAttempt = true;
-            break;
-          }
-          errors.push(
-            `[${attempt.kind}] ${attempt.url} -> ${(err as Error).message}`,
-          );
-          break;
-        } finally {
-          clearTimeout(timer);
-        }
-      }
-      if (stopAfterAttempt) {
-        break;
-      }
-    }
-
-    const detail = errors.join(' | ');
-    this.logger.error(`callLLM failed: ${detail}`);
-    throw new ServiceUnavailableException(
-      `模型中转站调用失败，请检查 Base URL / API Key / Model。详情：${detail}`,
-    );
   }
 
-  private resolveChatCompletionsEndpoint(baseUrl: string): string {
-    const normalizedBaseUrl = this.normalizeBaseUrl(baseUrl);
-    return normalizedBaseUrl.endsWith('/chat/completions')
-      ? normalizedBaseUrl
-      : `${normalizedBaseUrl}/chat/completions`;
+  private normalizeProviderError(error: unknown, prefix: string): Error {
+    if (error instanceof ServiceUnavailableException) return error;
+    const reason = error instanceof Error ? error.message : String(error);
+    this.logger.error(`${prefix} failed: ${reason}`);
+    return new ServiceUnavailableException(`模型调用失败：${reason}`);
   }
 
-  private resolveResponsesEndpoint(baseUrl: string): string {
-    const normalizedBaseUrl = this.normalizeBaseUrl(baseUrl);
-    return normalizedBaseUrl.endsWith('/responses')
-      ? normalizedBaseUrl
-      : `${normalizedBaseUrl}/responses`;
+  private async callLLM(
+    history: AiConversationMessage[],
+    opts?: { systemAppend?: string },
+  ): Promise<string> {
+    const messages = this.buildLlmMessages(history, opts?.systemAppend);
+
+    if (!this.aiProviderService) {
+      throw new ServiceUnavailableException('AI 模型服务不可用，请稍后重试。');
+    }
+
+    try {
+      const reply = await this.aiProviderService.chat(undefined, messages);
+      const content = reply.content?.trim();
+      if (!content) {
+        throw new ServiceUnavailableException('模型返回空内容');
+      }
+      return content;
+    } catch (error) {
+      throw this.normalizeProviderError(error, 'callLLM');
+    }
   }
 
-  private resolveModelEndpoints(
-    baseUrl: string,
-  ): Array<{ kind: 'chat' | 'responses'; url: string }> {
-    const baseCandidates = this.resolveBaseUrlCandidates(baseUrl);
-    const dedup = new Set<string>();
-    const endpoints: Array<{ kind: 'chat' | 'responses'; url: string }> = [];
+  /**
+   * 流式调用 LLM：每个增量片段通过 onDelta 回调交给调用方（通常是 WebSocket
+   * 网关）。没有任何可用 Provider 时立即抛出，由网关转成 chat.error 帧。
+   */
+  private async callLLMStream(
+    history: AiConversationMessage[],
+    opts: { systemAppend?: string; onDelta: (delta: string) => void; signal?: AbortSignal },
+  ): Promise<string> {
+    const messages = this.buildLlmMessages(history, opts.systemAppend);
 
-    for (const candidate of baseCandidates) {
-      if (candidate.endsWith('/chat/completions')) {
-        if (!dedup.has(candidate)) {
-          dedup.add(candidate);
-          endpoints.push({ kind: 'chat', url: candidate });
-        }
-        continue;
-      }
-      if (candidate.endsWith('/responses')) {
-        if (!dedup.has(candidate)) {
-          dedup.add(candidate);
-          endpoints.push({ kind: 'responses', url: candidate });
-        }
-        continue;
-      }
-
-      const chatUrl = this.resolveChatCompletionsEndpoint(candidate);
-      if (!dedup.has(chatUrl)) {
-        dedup.add(chatUrl);
-        endpoints.push({ kind: 'chat', url: chatUrl });
-      }
-      const responsesUrl = this.resolveResponsesEndpoint(candidate);
-      if (!dedup.has(responsesUrl)) {
-        dedup.add(responsesUrl);
-        endpoints.push({ kind: 'responses', url: responsesUrl });
-      }
+    if (!this.aiProviderService) {
+      throw new ServiceUnavailableException('AI 模型服务不可用，请稍后重试。');
     }
 
-    return endpoints;
-  }
-
-  private normalizeBaseUrl(baseUrl: string): string {
-    return baseUrl.replace(/\/+$/, '');
-  }
-
-  private resolveBaseUrlCandidates(baseUrl: string): string[] {
-    const normalized = this.normalizeBaseUrl(baseUrl);
-    if (
-      normalized.endsWith('/chat/completions') ||
-      normalized.endsWith('/responses')
-    ) {
-      const root = normalized
-        .replace(/\/chat\/completions$/, '')
-        .replace(/\/responses$/, '');
-      return [normalized, root];
-    }
-
-    if (normalized.endsWith('/v1')) {
-      return [normalized];
-    }
-
-    return [`${normalized}/v1`];
-  }
-
-  private async parseModelResponse(response: Response): Promise<{
-    format: 'json' | 'text';
-    data: unknown;
-    contentType: string;
-    preview: string;
-  }> {
-    const contentType =
-      response.headers.get('content-type')?.toLowerCase() ?? '';
-    if (contentType.includes('application/json')) {
-      try {
-        const data: unknown = await response.json();
-        return {
-          format: 'json',
-          data,
-          contentType,
-          preview: '',
-        };
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : 'invalid json';
-        return {
-          format: 'text',
-          data: null,
-          contentType,
-          preview: `invalid-json: ${reason}`,
-        };
+    try {
+      const reply = await this.aiProviderService.chatStream(
+        undefined,
+        messages,
+        opts.onDelta,
+        opts.signal,
+      );
+      const content = reply.content?.trim();
+      if (!content) {
+        throw new ServiceUnavailableException('模型返回空内容');
       }
+      return content;
+    } catch (error) {
+      throw this.normalizeProviderError(error, 'callLLMStream');
     }
-
-    const text = await response.text().catch(() => '');
-    return {
-      format: 'text',
-      data: text,
-      contentType: contentType || 'unknown',
-      preview: this.limitErrorSnippet(text),
-    };
-  }
-
-  private extractErrorText(parsed: {
-    format: 'json' | 'text';
-    data: unknown;
-    preview: string;
-  }): string {
-    if (
-      parsed.format === 'json' &&
-      parsed.data &&
-      typeof parsed.data === 'object'
-    ) {
-      const errorRecord = parsed.data as {
-        message?: string;
-        error?: { message?: string } | string;
-      };
-      if (
-        typeof errorRecord.message === 'string' &&
-        errorRecord.message.trim()
-      ) {
-        return this.limitErrorSnippet(errorRecord.message);
-      }
-      if (typeof errorRecord.error === 'string' && errorRecord.error.trim()) {
-        return this.limitErrorSnippet(errorRecord.error);
-      }
-      if (
-        errorRecord.error &&
-        typeof errorRecord.error === 'object' &&
-        typeof errorRecord.error.message === 'string'
-      ) {
-        return this.limitErrorSnippet(errorRecord.error.message);
-      }
-      return this.limitErrorSnippet(JSON.stringify(parsed.data));
-    }
-    if (
-      typeof parsed.data === 'string' ||
-      typeof parsed.data === 'number' ||
-      typeof parsed.data === 'boolean'
-    ) {
-      return this.limitErrorSnippet(String(parsed.data));
-    }
-    return this.limitErrorSnippet(parsed.preview || '');
-  }
-
-  private limitErrorSnippet(value: string): string {
-    const compact = value.replace(/\s+/g, ' ').trim();
-    if (!compact) {
-      return '';
-    }
-    return compact.length > 280 ? `${compact.slice(0, 280)}...` : compact;
   }
 
   /**
    * 测试 LLM 连通性：发送一条简单消息并返回响应内容。
-   * 如果未配置 apiKey，抛出错误。
-   * 如果调用失败，返回包含错误信息的字符串。
+   * 未配置任何可用 Provider 时给出可执行提示，由前端引导到「AI 模型」页。
    */
   async testLlmConnection(): Promise<string> {
-    if (this.aiProviderService) {
-      try {
-        const providerReply = await this.aiProviderService.chat(undefined, [
-          { role: 'user', content: '请用一句话介绍你自己。' },
-        ]);
-        if (providerReply.content?.trim()) return providerReply.content.trim();
-      } catch {
-        // Fall through to the legacy environment-backed configuration.
-      }
+    if (!this.aiProviderService) {
+      throw new Error('AI 模型服务不可用，请稍后重试。');
     }
-    const { apiKey } = readAiConfigFromFile();
-    if (!apiKey) {
-      throw new Error('AI_MODEL_API_KEY 未配置，请先在配置页面填写 API Key。');
+    const providerReply = await this.aiProviderService.chat(undefined, [
+      { role: 'user', content: '请用一句话介绍你自己。' },
+    ]);
+    const content = providerReply.content?.trim();
+    if (!content) {
+      throw new Error('模型返回空内容');
     }
-    const testHistory: AiConversationMessage[] = [
-      {
-        id: 'ping-test',
-        role: 'user',
-        content: '请用一句话介绍你自己。',
-        createdAt: new Date().toISOString(),
-      },
-    ];
-    return this.callLLM(testHistory);
+    return content;
   }
 
   private buildStructuredResponse(prompt: string): AssistantStructuredResponse {
@@ -2401,13 +2290,13 @@ export class AiAssistantService {
       reply = await this.callLLM(history);
     } catch (error) {
       const reason =
-        error instanceof Error ? error.message : '模型中转站调用失败';
+        error instanceof Error ? error.message : 'AI 模型调用失败';
       reply = [
         '⚠️ KubeNova 中台模型调用失败',
         '',
         reason,
         '',
-        '请检查模型中转站配置（Base URL / API Key / Model）和网络连通性。',
+        '请检查「AI 模型」页的 Base URL / API Key / Model 配置和网络连通性。',
       ].join('\n');
     }
     return {

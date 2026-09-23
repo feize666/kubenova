@@ -1,7 +1,7 @@
 "use client";
 
 import { CodeOutlined, CopyOutlined, DownloadOutlined, EyeInvisibleOutlined, EyeOutlined, UndoOutlined } from "@ant-design/icons";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import { Input, Space, Typography } from "antd";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -27,6 +27,11 @@ interface ResourceYamlDrawerProps {
   onUpdated?: () => void;
   readOnly?: boolean;
   maskSensitive?: boolean;
+  embedded?: boolean;
+}
+
+function InlineYamlShell({ children, extra, footerActions }: ComponentProps<typeof OpsDrawerShell>) {
+  return <Space orientation="vertical" size={16} style={{ width: "100%" }}>{extra}{children}{footerActions}</Space>;
 }
 
 function sanitizeFilenameSegment(value: string, fallback: string): string {
@@ -104,7 +109,9 @@ export function ResourceYamlDrawer({
   onUpdated,
   readOnly = false,
   maskSensitive = true,
+  embedded = false,
 }: ResourceYamlDrawerProps) {
+  const Shell = embedded ? InlineYamlShell : OpsDrawerShell;
   const [yamlText, setYamlText] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const [sensitiveVisible, setSensitiveVisible] = useState(false);
@@ -237,7 +244,7 @@ export function ResourceYamlDrawer({
   const drawerState = mutation.isPending || (query.isFetching && Boolean(yamlText)) ? "loading" : "idle";
 
   return (
-    <OpsDrawerShell
+    <Shell
       title={title}
       size="large"
       open={open}
@@ -270,7 +277,7 @@ export function ResourceYamlDrawer({
         onClose();
       }}
       footerActions={
-        <Space wrap>
+        <Space wrap={false} className="resource-yaml-drawer__actions" size={8}>
           <OpsIconActionButton
             icon={<DownloadOutlined />}
             disabled={downloadDisabled}
@@ -372,6 +379,6 @@ export function ResourceYamlDrawer({
           disabled={query.isLoading}
         />
       </Space>
-    </OpsDrawerShell>
+    </Shell>
   );
 }

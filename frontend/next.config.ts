@@ -44,6 +44,18 @@ const nextConfig: NextConfig = {
         destination: `${runtimeGatewayBase}/ws/:path*`,
       },
       {
+        // AI 助手流式对话使用 control-api 的 socket.io（命名空间 /ws/ai-assistant）。
+        // socket.io 的握手路径固定为 /socket.io，与指向 runtime gateway 的
+        // /ws/* 重写冲突，因此单独使用 /ai-ws/socketio 前缀做转发。
+        // 目标保留尾部斜杠：socket.io 的引擎路径必须以 / 结尾，否则握手 404。
+        source: "/ai-ws/socketio/:path*",
+        destination: `${backendBase}/socket.io/`,
+      },
+      {
+        source: "/ai-ws/socketio",
+        destination: `${backendBase}/socket.io/`,
+      },
+      {
         source: "/api/:path*",
         destination: `${backendBase}/api/:path*`,
       },

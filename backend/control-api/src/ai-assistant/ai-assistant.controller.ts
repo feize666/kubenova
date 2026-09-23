@@ -28,11 +28,6 @@ import type {
   CreateSessionInput,
 } from './types';
 import { AiProviderService } from './ai-provider.service';
-import {
-  readAiConfig,
-  saveAiConfig,
-  type AiModelConfig,
-} from './ai-config.util';
 
 export interface CreateAiAssistantSessionRequest extends CreateSessionInput {
   message?: string;
@@ -55,14 +50,6 @@ export interface ExecuteAiActionRequest {
 export interface ChatRequest {
   message: string;
   context?: string;
-}
-
-export interface SaveAiConfigRequest {
-  baseUrl?: string;
-  apiKey?: string;
-  modelName?: string;
-  maxTokens?: number;
-  timeoutMs?: number;
 }
 
 type AiAssistantRequestUser = {
@@ -442,82 +429,62 @@ export class AiAssistantController {
 
   /**
    * GET /api/ai-assistant/config/ping
-   * 实际调用 LLM 发送测试消息，验证配置的连通性。
-   * 返回 ok=true 时 message 为模型响应内容，ok=false 时为错误信息。
+   * 实际调用 LLM 发送测试消息，验证当前默认 Provider 的连通性。
+   * 返回的 config 来自数据库 Provider，是本平台唯一的模型配置源。
    */
   @Get('config/ping')
   async pingLlm(@Req() req: AiAssistantRequest): Promise<{
     ok: boolean;
     message: string;
-    config: { baseUrl: string; modelName: string; isConfigured: boolean };
+    config: {
+      providerName: string;
+      vendor: string;
+      baseUrl: string;
+      modelName: string;
+      isConfigured: boolean;
+    };
   }> {
     requireAiAssistantAdmin(req);
-    const configInfo = readAiConfig();
+    const configInfo = await this.resolveActiveProviderConfig();
     try {
       const result = await this.aiAssistantService.testLlmConnection();
-      return {
-        ok: true,
-        message: result,
-        config: {
-          baseUrl: configInfo.baseUrl,
-          modelName: configInfo.modelName,
-          isConfigured: configInfo.isConfigured,
-        },
-      };
+      return { ok: true, message: result, config: configInfo };
     } catch (e) {
-      return {
-        ok: false,
-        message: (e as Error).message,
-        config: {
-          baseUrl: configInfo.baseUrl,
-          modelName: configInfo.modelName,
-          isConfigured: configInfo.isConfigured,
-        },
-      };
+      return { ok: false, message: (e as Error).message, config: configInfo };
     }
   }
 
   /**
-   * GET /api/ai-assistant/config
-   * 返回当前 AI 模型配置；apiKey 做脱敏处理，仅返回是否已配置。
+   * 读取当前生效的 Provider 摘要（默认且启用的 Provider，其次任一启用的 Provider）。
+   * AI 配置只存于数据库并加密保存，不再读取任何环境变量或磁盘密钥文件。
    */
-  @Get('config')
-  getConfig(
-    @Req() req: AiAssistantRequest,
-  ): Omit<AiModelConfig, 'apiKey'> & { apiKeyMasked: string } {
-    requireAiAssistantAdmin(req);
-    const config = readAiConfig();
-    const { apiKey, ...rest } = config;
-    const apiKeyMasked = apiKey
-      ? `${apiKey.slice(0, 4)}${'*'.repeat(Math.max(0, apiKey.length - 8))}${apiKey.slice(-4)}`
-      : '';
-    return { ...rest, apiKeyMasked };
-  }
-
-  /**
-   * PUT /api/ai-assistant/config
-   * 保存 AI 模型配置到内存（process.env）并持久化到 .env.ai.local。
-   */
-  @Put('config')
-  saveConfig(
-    @Req() req: AiAssistantRequest,
-    @Body() body: SaveAiConfigRequest,
-  ): Omit<AiModelConfig, 'apiKey'> & { apiKeyMasked: string } {
-    requireAiAssistantAdmin(req);
-    const updated = saveAiConfig({
-      baseUrl: body.baseUrl,
-      apiKey: body.apiKey,
-      modelName: body.modelName,
-      maxTokens:
-        body.maxTokens !== undefined ? Number(body.maxTokens) : undefined,
-      timeoutMs:
-        body.timeoutMs !== undefined ? Number(body.timeoutMs) : undefined,
-    });
-    const { apiKey, ...rest } = updated;
-    const apiKeyMasked = apiKey
-      ? `${apiKey.slice(0, 4)}${'*'.repeat(Math.max(0, apiKey.length - 8))}${apiKey.slice(-4)}`
-      : '';
-    return { ...rest, apiKeyMasked };
+  private async resolveActiveProviderConfig(): Promise<{
+    providerName: string;
+    vendor: string;
+    baseUrl: string;
+    modelName: string;
+    isConfigured: boolean;
+  }> {
+    const providers = await this.aiProviderService.listProviders();
+    const active =
+      providers.find((item) => item.enabled && item.isDefault) ??
+      providers.find((item) => item.enabled);
+    if (!active) {
+      return {
+        providerName: '',
+        vendor: '',
+        baseUrl: '',
+        modelName: '',
+        isConfigured: false,
+      };
+    }
+    return {
+      providerName: active.name,
+      vendor: active.vendor,
+      baseUrl: active.baseUrl,
+      modelName: active.modelName,
+      isConfigured: Boolean(active.apiKeyConfigured),
+    };
   }
 
   @Post('sessions')

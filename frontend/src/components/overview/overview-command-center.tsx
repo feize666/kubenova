@@ -1,20 +1,18 @@
-import { ReloadOutlined, ClusterOutlined } from "@ant-design/icons";
+import { ReloadOutlined } from "@ant-design/icons";
 import Link from "next/link";
 import { Space } from "antd";
 import { OpsFilterChip, OpsIconActionButton, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
 
-export function OverviewCommandCenter({ scopeLabel, clusterId, clusterCount, alertCount, riskLevel, generatedAt, isFetching, onRefresh }: { scopeLabel: string; clusterId: string; clusterCount?: number; alertCount?: number; riskLevel: "critical" | "warning" | "success" | "unknown"; generatedAt?: string; isFetching?: boolean; onRefresh?: () => void }) {
+export function OverviewCommandCenter({ scopeLabel, clusterId, riskLevel, generatedAt, isFetching, onRefresh }: { scopeLabel: string; clusterId: string; riskLevel: "critical" | "warning" | "success" | "unknown"; generatedAt?: string; isFetching?: boolean; onRefresh?: () => void }) {
   const freshness = generatedAt ? new Date(generatedAt).toLocaleString("zh-CN") : "等待采集";
   const riskLabel = { critical: "高风险", warning: "需关注", success: "稳定", unknown: "数据不足" }[riskLevel];
   return <OpsSurface variant="panel" padding="sm">
     <ResourcePageHeader path="/" embedded className="ops-overview-header resource-workbench__header dashboard-workbench__page-header"
-      title={<span className="resource-workbench__title-row"><span className="resource-workbench__title">Overview</span><OpsFilterChip tone="info" className="resource-workbench__kind-chip" style={{ margin: 0 }}>总览</OpsFilterChip></span>}
-      description={`${scopeLabel} 的风险态势、资源容量、服务影响与运维入口`}
+      title={<span className="resource-workbench__title-row"><span className="resource-workbench__title">集群概览</span></span>}
+      description={`${scopeLabel} 的集群健康与资源运行态势`}
       actions={<Space size={8} wrap className="ops-overview-header__chips">
         <OpsStatusTag tone={riskLevel}>{riskLabel}</OpsStatusTag>
-        <OpsFilterChip tone="info" icon={<ClusterOutlined />}>集群 {typeof clusterCount === "number" ? clusterCount : "--"}</OpsFilterChip>
-        <OpsFilterChip tone="warning">活跃告警 {typeof alertCount === "number" ? alertCount : "--"}</OpsFilterChip>
         <OpsFilterChip tone="neutral">{clusterId ? "单集群" : "全部集群"}</OpsFilterChip>
         <OpsIconActionButton aria-label="刷新仪表盘" title="刷新仪表盘" icon={<ReloadOutlined />} onClick={onRefresh} disabled={isFetching} />
       </Space>} />

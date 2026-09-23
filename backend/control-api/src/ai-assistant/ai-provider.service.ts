@@ -20,6 +20,17 @@ export const AI_PROVIDER_VENDORS = [
 ] as const;
 export type AiProviderVendor = (typeof AI_PROVIDER_VENDORS)[number];
 
+/** Vendors that implement the OpenAI /chat/completions SSE streaming dialect. */
+const OPENAI_SSE_VENDORS = new Set<string>([
+  'openai',
+  'azure-openai',
+  'qwen',
+  'volcengine',
+  'deepseek',
+  'openai-compatible',
+  'ollama',
+]);
+
 export const AI_AGENT_TOOLS = [
   'query_prometheus',
   'query_elasticsearch',
@@ -252,11 +263,7 @@ export class AiProviderService {
   }
 
   async chat(agentId: string | undefined, messages: Array<{ role: string; content: string }>) {
-    const agent = agentId
-      ? await this.prisma.aiAgentProfile.findUnique({ where: { id: agentId }, include: { provider: true } })
-      : await this.prisma.aiAgentProfile.findFirst({ where: { enabled: true, isDefault: true }, include: { provider: true } });
-    const provider = agent?.provider ?? await this.prisma.aiProvider.findFirst({ where: { enabled: true, isDefault: true } });
-    if (!provider) throw new BadRequestException('未配置可用的 AI Provider');
+    const { provider, agent } = await this.resolveActiveProvider(agentId);
     const config = provider.configJson && typeof provider.configJson === 'object' && !Array.isArray(provider.configJson)
       ? provider.configJson as Record<string, unknown>
       : {};
@@ -264,6 +271,111 @@ export class AiProviderService {
     const maxTokens = Number.isFinite(Number(config.maxTokens)) ? Math.max(128, Number(config.maxTokens)) : 2_048;
     const content = await this.requestProvider(provider, messages, timeoutMs, maxTokens);
     return { content, providerId: provider.id, agentId: agent?.id };
+  }
+
+  /**
+   * Resolves which provider should serve a request: an explicit agent, the
+   * default enabled agent, or the default enabled provider.
+   */
+  private async resolveActiveProvider(agentId?: string) {
+    const agent = agentId
+      ? await this.prisma.aiAgentProfile.findUnique({ where: { id: agentId }, include: { provider: true } })
+      : await this.prisma.aiAgentProfile.findFirst({ where: { enabled: true, isDefault: true }, include: { provider: true } });
+    const provider = agent?.provider ?? await this.prisma.aiProvider.findFirst({ where: { enabled: true, isDefault: true } });
+    if (!provider) throw new BadRequestException('未配置可用的 AI Provider');
+    return { provider, agent };
+  }
+
+  /**
+   * Streams a completion, invoking onDelta for each incremental text chunk.
+   * Vendors that speak the OpenAI SSE dialect stream token by token; the
+   * remaining vendors fall back to a single delta so callers see one shape.
+   */
+  async chatStream(
+    agentId: string | undefined,
+    messages: Array<{ role: string; content: string }>,
+    onDelta: (delta: string) => void,
+    signal?: AbortSignal,
+  ): Promise<{ content: string; providerId: string; agentId?: string }> {
+    const { provider, agent } = await this.resolveActiveProvider(agentId);
+    const config = provider.configJson && typeof provider.configJson === 'object' && !Array.isArray(provider.configJson)
+      ? provider.configJson as Record<string, unknown>
+      : {};
+    const timeoutMs = Number.isFinite(Number(config.timeoutMs)) ? Math.max(3_000, Number(config.timeoutMs)) : 30_000;
+    const maxTokens = Number.isFinite(Number(config.maxTokens)) ? Math.max(128, Number(config.maxTokens)) : 2_048;
+    const vendor = provider.vendor as string;
+
+    if (!OPENAI_SSE_VENDORS.has(vendor)) {
+      const content = await this.requestProvider(provider, messages, timeoutMs, maxTokens);
+      if (content) onDelta(content);
+      return { content, providerId: provider.id, agentId: agent?.id };
+    }
+
+    const key = provider.apiKeyCiphertext ? this.decrypt(provider.apiKeyCiphertext) : '';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const abortRelay = () => controller.abort();
+    signal?.addEventListener('abort', abortRelay, { once: true });
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (key) headers.Authorization = `Bearer ${key}`;
+      const response = await fetch(`${this.normalizeUrl(provider.baseUrl)}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: provider.modelName,
+          messages,
+          max_tokens: maxTokens,
+          temperature: 0.2,
+          stream: true,
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        const raw = await response.text().catch(() => '');
+        throw new Error(`Provider 返回 ${response.status}: ${raw.slice(0, 240)}`);
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let content = '';
+      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const payload = trimmed.slice('data:'.length).trim();
+          if (!payload || payload === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(payload);
+            const delta =
+              parsed?.choices?.[0]?.delta?.content ??
+              parsed?.choices?.[0]?.message?.content ??
+              '';
+            if (typeof delta === 'string' && delta) {
+              content += delta;
+              onDelta(delta);
+            }
+          } catch {
+            // Ignore keep-alive or malformed frames; the stream stays usable.
+          }
+        }
+      }
+
+      if (!content.trim()) throw new Error('Provider 返回空内容');
+      return { content, providerId: provider.id, agentId: agent?.id };
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        if (signal?.aborted) throw error;
+        throw new ServiceUnavailableException('AI Provider 请求超时');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abortRelay);
+    }
   }
 
   private async requestProvider(provider: any, messages: Array<{ role: string; content: string }>, timeoutMs: number, maxTokens = 2_048): Promise<string> {

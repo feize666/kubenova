@@ -16,25 +16,6 @@ const envSchema = z.object({
   DEFAULT_ADMIN_EMAIL: z.string().email().default('admin@local.dev'),
   DEFAULT_ADMIN_PASSWORD: z.string().min(6).default('admin123456'),
   SUPERADMIN_USER_ID: z.string().min(1).max(256).regex(/^\S+$/, 'Must be an exact user ID without whitespace').optional(),
-  AI_MODEL_BASE_URL: z
-    .string()
-    .url()
-    .optional()
-    .default('https://api.openai.com/v1'),
-  AI_MODEL_API_KEY: z.string().optional().default(''),
-  AI_MODEL_NAME: z.string().optional().default('gpt-4o-mini'),
-  AI_MODEL_MAX_TOKENS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .default(2048),
-  AI_MODEL_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .default(30000),
   AI_CREDENTIAL_ENCRYPTION_KEY: z.string().optional(),
   MFA_ENCRYPTION_KEY: z.string().optional(),
   OIDC_ENABLED: z.preprocess(value => {
@@ -82,11 +63,6 @@ export type AppConfig = {
   defaultAdminEmail: string;
   defaultAdminPassword: string;
   superadminUserId?: string;
-  aiModelBaseUrl: string;
-  aiModelApiKey: string;
-  aiModelName: string;
-  aiModelMaxTokens: number;
-  aiModelTimeoutMs: number;
   aiCredentialEncryptionKey?: string;
   mfaEncryptionKey?: string;
   oidcEnabled: boolean;
@@ -119,11 +95,6 @@ export function parseEnv(env: Record<string, unknown>): AppConfig {
     defaultAdminEmail: parsed.data.DEFAULT_ADMIN_EMAIL,
     defaultAdminPassword: parsed.data.DEFAULT_ADMIN_PASSWORD,
     superadminUserId: parsed.data.SUPERADMIN_USER_ID,
-    aiModelBaseUrl: parsed.data.AI_MODEL_BASE_URL,
-    aiModelApiKey: parsed.data.AI_MODEL_API_KEY,
-    aiModelName: parsed.data.AI_MODEL_NAME,
-    aiModelMaxTokens: parsed.data.AI_MODEL_MAX_TOKENS,
-    aiModelTimeoutMs: parsed.data.AI_MODEL_TIMEOUT_MS,
     aiCredentialEncryptionKey: parsed.data.AI_CREDENTIAL_ENCRYPTION_KEY,
     mfaEncryptionKey: parsed.data.MFA_ENCRYPTION_KEY,
     oidcEnabled: parsed.data.OIDC_ENABLED,
