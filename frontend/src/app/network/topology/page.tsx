@@ -450,19 +450,33 @@ export default function NetworkTopologyPage() {
     ),
     [errorsOnly, graphQuery.data, queryText, selectedSources],
   );
+  // The workload picker is searchable, but the graph the operator has already
+  // opened must not disappear when the query stops matching its root. Root
+  // resolution therefore reads the source-filtered inventory, and the search is
+  // applied afterwards, inside the selected workload's own chain.
+  const scopeGraph = useMemo(
+    () => filterGraph(
+      graphQuery.data?.resources ?? [],
+      graphQuery.data?.relations ?? [],
+      selectedSources,
+      "",
+      false,
+    ),
+    [graphQuery.data, selectedSources],
+  );
   const requestedTopologyRoot = useMemo(
     () => resolveTopologyRoot(
-      filteredGraph.resources,
+      scopeGraph.resources,
       requestedRoot.kind,
       requestedRoot.name,
       requestedRoot.namespace,
     ),
-    [filteredGraph.resources, requestedRoot.kind, requestedRoot.name, requestedRoot.namespace],
+    [scopeGraph.resources, requestedRoot.kind, requestedRoot.name, requestedRoot.namespace],
   );
   const topologyRoot = useMemo(
-    () => filteredGraph.resources.find((resource) => resource.id === topologyRootId)
+    () => scopeGraph.resources.find((resource) => resource.id === topologyRootId)
       ?? (useRequestedRoot ? requestedTopologyRoot : null),
-    [filteredGraph.resources, requestedTopologyRoot, topologyRootId, useRequestedRoot],
+    [scopeGraph.resources, requestedTopologyRoot, topologyRootId, useRequestedRoot],
   );
   const workloadRoots = useMemo(
     () => filteredGraph.resources
@@ -477,12 +491,18 @@ export default function NetworkTopologyPage() {
   const graph = useMemo<FilteredGraph>(() => {
     if (!topologyRoot) return { resources: [], relations: [] };
     const projected = projectTopologyRoot(
-      filteredGraph.resources,
-      filteredGraph.relations,
+      scopeGraph.resources,
+      scopeGraph.relations,
       topologyRoot.id,
     );
-    return { resources: projected.resources, relations: projected.relations };
-  }, [filteredGraph, topologyRoot]);
+    return filterGraph(
+      projected.resources,
+      projected.relations,
+      selectedSources,
+      queryText,
+      errorsOnly,
+    );
+  }, [errorsOnly, queryText, scopeGraph, selectedSources, topologyRoot]);
   const canvasResources = useMemo(
     () => graph.resources.map(toCanvasResource),
     [graph.resources],
@@ -548,7 +568,10 @@ export default function NetworkTopologyPage() {
     || namespaceQuery.isFetching;
   const error = clusterQuery.error ?? graphQuery.error;
   const noClusters = !clusterQuery.isLoading && !clusterQuery.error && clusters.length === 0;
-  const rawResourceCount = filteredGraph.resources.length;
+  // "Are there resources at all?" must read the unfiltered inventory; using the
+  // filtered graph told operators the snapshot was empty whenever a filter
+  // matched nothing.
+  const rawResourceCount = scopeGraph.resources.length;
   const canExpandAll = graph.resources.length > 0 && graph.resources.length <= GLOBAL_EXPAND_LIMIT;
   const effectiveExpandAll = expandAll && canExpandAll;
   // Opening a workload root starts expanded, but the toolbar toggle owns the
@@ -584,10 +607,13 @@ export default function NetworkTopologyPage() {
     if (queryInput === queryText) return;
     const timeout = window.setTimeout(() => {
       setQueryText(queryInput);
-      resetFocus();
+      // Narrowing the search rewrites the visible graph, but the operator is
+      // still inspecting the same workload. Clearing the root here bounced
+      // them back to the picker mid-search.
+      resetCanvasFocus();
     }, 200);
     return () => window.clearTimeout(timeout);
-  }, [queryInput, queryText, resetFocus]);
+  }, [queryInput, queryText, resetCanvasFocus]);
 
   const refresh = useCallback(() => {
     void clusterQuery.refetch();
@@ -603,16 +629,21 @@ export default function NetworkTopologyPage() {
       else next.add(source);
       return next;
     });
-    resetFocus();
-  }, [resetFocus]);
+    // The selected workload is derived from the source-filtered inventory, so
+    // dropping a source the workload does not need keeps the operator in place;
+    // removing the workload domain itself falls back to the picker on its own.
+    resetCanvasFocus();
+  }, [resetCanvasFocus]);
 
   const resetFilters = useCallback(() => {
     setSelectedSources(new Set(SOURCE_KEYS));
     setErrorsOnly(false);
     setQueryInput("");
     setQueryText("");
-    resetFocus();
-  }, [resetFocus]);
+    // Clearing filters restores visibility; it should not eject the operator
+    // from the workload they were reading.
+    resetCanvasFocus();
+  }, [resetCanvasFocus]);
 
   const selectCluster = useCallback((clusterId: string) => {
     const nextNamespace = readStoredResourceNamespace(clusterId) || ALL_NAMESPACE;
@@ -765,7 +796,9 @@ export default function NetworkTopologyPage() {
               aria-label={errorsOnly ? "关闭仅异常筛选" : "仅显示异常资源"}
               onClick={() => {
                 setErrorsOnly((value) => !value);
-                resetFocus();
+                // Health filtering narrows the graph inside the workload the
+                // operator opened; it must not eject them to the picker.
+                resetCanvasFocus();
               }}
             >
               仅异常

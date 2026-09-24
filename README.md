@@ -8,7 +8,7 @@ KubeNova 是一套面向 Kubernetes 的集群运维控制台。它把集群接�
 
 - **集群接入**：支持阿里云 ACK、腾讯云 TKE、华为云 CCE、AWS EKS、Google GKE、火山引擎 VKE 等主流托管 Kubernetes，上传 kubeconfig 后自动识别供应商与集群状态。
 - **资源管理**：覆盖工作负载（Pod、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job、CronJob、弹性伸缩）、网络（Service、Ingress、Endpoint、EndpointSlice、NetworkPolicy、Gateway API）、存储（PV、PVC、StorageClass）、配置（ConfigMap、Secret、ServiceAccount、LimitRange、ResourceQuota）与集群基础资源（Node、Namespace）。
-- **资源拓扑**：参考 Headlamp 资源全景图重构。以工作负载为起点，按 `Deployment → ReplicaSet → Pod → Service → Endpoint / EndpointSlice → Ingress` 的横向分层访问链路呈现资源关系，列序由节点权重表决定；连线采用三次贝塞尔曲线并沿访问路径从左到右布设，默认灰色、异常链路染橙／红、选中链路高亮流动；折叠分组保留成员与关系计数并以叠层卡片区分。选中资源只占一条紧凑信息条，画布不再被宽抽屉挤压；适配视图为顶部浮层预留高度，资源路径与分组标签互不遮挡；折叠卡片的「进入」与面包屑逐级返回均可用；分组切换、展开／收起保留当前工作负载上下文。支持资源域多选、命名空间筛选、仅异常筛选。
+- **资源拓扑**：参考 Headlamp 资源全景图重构。以工作负载为起点，按 `Deployment → ReplicaSet → Pod → Service → Endpoint / EndpointSlice → Ingress` 的横向分层访问链路呈现资源关系，列序由节点权重表决定；连线采用三次贝塞尔曲线并沿访问路径从左到右布设，默认灰色、异常链路染橙／红、选中链路高亮流动；折叠分组保留成员与关系计数并以叠层卡片区分。选中资源只占一条紧凑信息条，画布不再被宽抽屉挤压；适配视图为顶部浮层预留高度，资源路径与分组标签互不遮挡；折叠卡片的「进入」与面包屑逐级返回均可用；分组切换、展开／收起、搜索与仅异常筛选都在当前工作负载内收敛，不会退出到工作负载选择页。支持资源域多选与命名空间筛选。
 - **资源详情**：点击任意资源名称以抽屉形式打开详情，包含概览、YAML、容器列表、关联 Pod 列表、事件与日志／终端入口，详情内的关联资源可继续跳转。Pod 的日志与终端以全屏工作台形式打开，关闭后回到原详情；`/clusters/{id}/logs` 与 `/clusters/{id}/terminal` 均在集群工作区内可直接访问，集群上下文从工作区自动继承。
 - **可观测性中心**：Prometheus 监控、日志中心与观测配置，支持告警接入、通知渠道与自定义模板。
 - **访问控制**：用户管理、集群访问授权、细致到命名空间与资源类型的权限范围，支持 MFA 与 OIDC 对接。
