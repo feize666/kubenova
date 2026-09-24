@@ -8,7 +8,7 @@ import type {
   TopologyRendererEdgeData,
   TopologyViewState,
 } from "./contracts";
-import { buildBezierRelationshipPath, bezierPathMidpoint } from "./path-geometry";
+import { buildRelationshipPath, relationshipPathMidpoint } from "./path-geometry";
 
 const MAIN_RELATION_TYPES = new Set([
   "OWNS",
@@ -86,18 +86,19 @@ function edgeStyle(
 function EdgeRenderer({
   id,
   data,
+  markerEnd,
 }: EdgeProps<Edge<TopologyRendererEdgeData>>) {
   const edgeData = data;
   const sections = edgeData?.sections ?? [];
   if (!sections.length) return null;
 
   const offset = edgeData?.parentOffset ?? { x: 0, y: 0 };
-  const path = buildBezierRelationshipPath(sections, offset);
+  const path = buildRelationshipPath(sections, offset);
   const layer = topologyEdgeLayer(edgeData?.relationType, edgeData?.dashed);
   const viewState = edgeData?.viewState ?? "default";
   const status = edgeData?.status ?? "unknown";
   const style = edgeStyle(viewState, edgeData?.stroke, edgeData?.dashed, edgeData?.confidence, layer, status);
-  const labelPosition = edgeData?.labelPosition ?? bezierPathMidpoint(sections, offset);
+  const labelPosition = edgeData?.labelPosition ?? relationshipPathMidpoint(sections, offset);
   const showLabel = Boolean(edgeData?.label && (edgeData.labelVisible || edgeData.viewState === "focused"));
   return (
     <>
@@ -105,6 +106,9 @@ function EdgeRenderer({
         id={id}
         path={path}
         interactionWidth={24}
+        // The layout attaches Headlamp's closed arrowhead to every rail, so the
+        // arrow always points along the access path.
+        markerEnd={markerEnd}
         className={`topology-kubejojo__edge-path is-${layer} is-${viewState} is-status-${status} is-domain-${edgeData?.relationDomain ?? "scope"}`}
         style={style}
       />

@@ -123,7 +123,6 @@ function projectCanvasCapacity(
   expandAll: boolean,
   displayMode: "core" | "full",
 ) {
-  const includeOverlays = displayMode === "full";
   const mode = expandAll || Boolean(focusedId) ? "expanded" : "defaultCanvas";
   const renderedNodeLimit = TOPOLOGY_CAPACITY_LIMITS[mode].nodes;
   const visible = projectTopologyDisplayMode(resources, relations, displayMode);
@@ -137,7 +136,6 @@ function projectCanvasCapacity(
       projected.resources,
       projected.relations,
       groupBy,
-      includeOverlays,
     );
     groupedGraph.capacity = projected.capacity;
     const focusedGroup = findKubejojoNode(groupedGraph, focusedId);

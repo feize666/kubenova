@@ -23,10 +23,28 @@ test("topology canvas fills the remaining workbench without a fixed height floor
 });
 
 test("topology layout keeps the Headlamp-style horizontal spine", () => {
+  const layoutSource = readFileSync(new URL("./engine/elk-layout.ts", import.meta.url), "utf8");
+  const engineSourceText = readFileSync(new URL("./engine/elk-engine.ts", import.meta.url), "utf8");
   assert.match(topologyCss, /stroke-linecap:\s*round/);
-  assert.match(engineSource, /import dagre from "@dagrejs\/dagre"/);
-  assert.match(engineSource, /rankdir:\s*"LR"/);
-  assert.match(engineSource, /algorithm:\s*hasEdges \? "dagre"/);
+  // Headlamp's spine comes from negated node weights handed to ELK's layered
+  // algorithm, not from a dagre rank table.
+  assert.match(engineSource, /return getKubejojoWeight\(node\)/);
+  assert.match(engineSource, /return getKubejojoPartitionLayer\(node\)/);
+  assert.match(layoutSource, /return -getKubejojoWeight\(node\)/);
+  assert.match(layoutSource, /"elk\.algorithm": "layered"/);
+  assert.match(layoutSource, /"partitioning\.activate": "true"/);
+  assert.match(layoutSource, /"elk\.direction": "UNDEFINED"/);
+  // Cross-container dependencies are projected onto the owning child instead of
+  // asking ELK to lay out a nested hierarchy, which would overlap the columns.
+  assert.match(layoutSource, /export function containerRelations\(node: KubejojoGraphNode\): ContainerRelation\[\]/);
+  assert.match(layoutSource, /function directChildId\(node: KubejojoGraphNode, leafId: string\)/);
+  assert.doesNotMatch(layoutSource, /hierarchyHandling/);
+  assert.match(layoutSource, /"elk\.algorithm": "rectpacking"/);
+  assert.doesNotMatch(engineSource, /dagre/);
+  // Layout runs in ELK's worker with the bundled engine as the offline fallback.
+  assert.match(engineSourceText, /import ELKWorkerApi from "elkjs\/lib\/elk-api\.js"/);
+  assert.match(engineSourceText, /import ELKBundled from "elkjs\/lib\/elk\.bundled\.js"/);
+  assert.match(engineSourceText, /export const ELK_WORKER_URL = "\/vendor\/elk-worker\.min\.js"/);
 });
 
 test("focused scenes use theme tokens and keep relationship paths visually smooth", () => {
@@ -128,4 +146,35 @@ test("legacy topology chips keep readable dark-theme surfaces", () => {
   assert.match(globalCss, /\[data-theme="dark"\] \.topology-mode-card__chip/);
   assert.match(globalCss, /\[data-theme="dark"\] \.topology-name-trigger/);
   assert.match(globalCss, /\[data-theme="dark"\] \.topology-risk-chip--high/);
+});
+
+test("canvas resources defer to the Headlamp weight table instead of re-ranking kinds", () => {
+  // An explicit `weight` on a canvas resource wins over the shared Headlamp
+  // table inside `getKubejojoWeight`, so a page-level weight table would silently
+  // re-order the columns. That is exactly how Pod once landed after Service and
+  // EndpointSlice; the access path must come from the engine table alone.
+  assert.doesNotMatch(pageSource, /KIND_WEIGHT/);
+  const toCanvasResource = pageSource.match(
+    /function toCanvasResource\([\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(toCanvasResource, "page must map graph resources onto the canvas");
+  // Any weight here becomes an explicit override, so the mapper must stay free
+  // of one and let `getKubejojoWeight` read the kind from the shared table.
+  assert.doesNotMatch(toCanvasResource, /\bweight\s*:/);
+  const graphModelSource = readFileSync(
+    new URL("./engine/graph-model.ts", import.meta.url),
+    "utf8",
+  );
+  const weight = (kind: string) => {
+    const match = graphModelSource.match(new RegExp(`\\b${kind}:\\s*(\\d+)`));
+    assert.ok(match, `${kind} must stay in the Headlamp weight table`);
+    return Number(match![1]);
+  };
+  // The canonical access path reads left to right: a higher weight sits further
+  // left, so every right-hand step must strictly decrease.
+  assert.ok(weight("Deployment") > weight("ReplicaSet"));
+  assert.ok(weight("ReplicaSet") > weight("Pod"));
+  assert.ok(weight("Pod") > weight("Service"));
+  assert.ok(weight("Service") > weight("EndpointSlice"));
+  assert.ok(weight("Service") > weight("Ingress"));
 });

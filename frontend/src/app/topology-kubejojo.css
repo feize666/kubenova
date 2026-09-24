@@ -330,9 +330,13 @@
 }
 
 .topology-kubejojo__zoom {
-  top: 14px;
+  /* A vertical capsule in the bottom-right corner keeps the top edge free for
+     the resource path and mirrors the console-style zoom rail operators expect. */
+  bottom: 14px;
+  top: auto;
   right: 14px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   overflow: hidden;
   padding: 3px;
@@ -342,11 +346,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
   min-width: 30px;
   padding: 0 8px;
 }
-.topology-kubejojo__zoom button + button { border-left-color: var(--tk-border); }
-.topology-kubejojo__zoom button:last-child { min-width: 76px; }
+.topology-kubejojo__zoom button + button { border-top-color: var(--tk-border); }
 
 .topology-kubejojo__node {
   position: relative;
@@ -403,7 +407,7 @@
   display: grid;
   min-width: 0;
   height: 100%;
-  grid-template-rows: 18px 24px 20px;
+  grid-template-rows: 15px 20px 16px;
   gap: 1px;
 }
 .topology-kubejojo__summary-header,
@@ -458,7 +462,7 @@
   color: var(--tk-text);
   font-size: 14px;
   font-weight: 700;
-  line-height: 22px;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -467,7 +471,7 @@
   overflow: hidden;
   color: var(--tk-muted);
   font-size: 10px;
-  line-height: 18px;
+  line-height: 16px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -825,7 +829,7 @@
   .topology-kubejojo__canvas { min-height: 840px; }
   .topology-kubejojo { border-radius: 0; }
   .topology-kubejojo__focus { top: 64px; right: 10px; left: 10px; }
-  .topology-kubejojo__zoom { top: 10px; right: 10px; }
+  .topology-kubejojo__zoom { top: auto; bottom: 10px; right: 10px; }
   .topology-kubejojo__zoom button,
   .topology-kubejojo__zoom button:last-child { width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
   .topology-kubejojo__zoom button > span:not(.anticon) { display: none; }
@@ -1334,40 +1338,48 @@
 
 .topology-kubejojo__canvas .react-flow__background { opacity: .72; }
 
+/* One card size, shared with the layout engine (KUBEJOJO_LAYOUT_METRICS).
+ * The card carries the kind and the name; everything else lives in the hover
+ * glance or the health badge, so a busy map stays readable. */
 .topology-kubejojo__node,
 .topology-kubejojo__node.is-collapsed {
-  width: 350px;
-  height: 110px;
+  width: 220px;
+  height: 72px;
 }
 
 .topology-kubejojo__node-card {
-  width: 350px;
-  height: 110px;
-  gap: 18px;
-  border-radius: 12px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  width: 220px;
+  height: 72px;
+  gap: 10px;
+  border-radius: 10px;
   box-shadow: none;
   isolation: isolate;
   overflow: hidden;
   opacity: 1;
-  padding: 18px 20px;
+  padding: 9px 11px;
 }
 
 .topology-kubejojo__node-card::before { display: none; }
 
 .topology-kubejojo__node-icon {
-  width: 64px;
-  height: 64px;
-  flex-basis: 64px;
-  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+  border-radius: 10px;
   box-shadow: none;
-  font-size: 28px;
+  font-size: 15px;
 }
 
+/* Kind and health badge share the first row so the name gets the full width. */
 .topology-kubejojo__node-copy {
   display: grid;
-  grid-template-rows: 20px minmax(25px, auto) 18px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 16px minmax(0, auto);
   align-content: center;
-  gap: 1px;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
   position: relative;
   z-index: 2;
   overflow: hidden;
@@ -1375,23 +1387,31 @@
 }
 
 .topology-kubejojo__node-kind {
-  min-height: 20px;
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 16px;
+  overflow: hidden;
   color: var(--tk-muted);
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topology-kubejojo__node-title,
 .topology-kubejojo__node-title-button {
-  min-height: 25px;
-  max-height: 50px;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-height: 18px;
+  max-height: 36px;
   display: -webkit-box;
   overflow: hidden;
   color: var(--tk-text);
-  font-size: 20px;
+  font-size: 14px;
   font-weight: 650;
-  line-height: 25px;
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: normal !important;
   overflow-wrap: anywhere;
@@ -1400,7 +1420,14 @@
   margin: 0;
 }
 
-.topology-kubejojo__node-meta { margin-top: 3px; }
+.topology-kubejojo__node-meta {
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+  justify-self: end;
+}
+
+.topology-kubejojo__node-status-label { display: none; }
 
 .topology-kubejojo__node:hover { transform: translateY(-1px); filter: none; }
 

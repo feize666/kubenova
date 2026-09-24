@@ -2,35 +2,42 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
-import { buildOrthogonalRelationshipPath, orthogonalPathMidpoint } from "./path-geometry.ts";
+import { buildRelationshipPath, relationshipPathMidpoint } from "./path-geometry.ts";
 
-test("Dagre relationship geometry renders a smooth cubic route", () => {
-  const path = buildOrthogonalRelationshipPath([{
+test("an ELK spline is painted as one cubic curve", () => {
+  const path = buildRelationshipPath([{
     startPoint: { x: 0, y: 44 },
     bendPoints: [{ x: 96, y: 44 }, { x: 96, y: 132 }],
     endPoint: { x: 192, y: 132 },
   }], { x: 12, y: 8 });
 
-  assert.match(path, /^M 12,52 C /);
-  assert.match(path, /C /);
-  assert.doesNotMatch(path, /NaN|undefined/);
+  // Headlamp's exact command shape: one move, then one cubic through both
+  // ELK control points.
+  assert.equal(path, "M 12,52 C 108,52 108,140 204,140");
   assert.doesNotMatch(path, /NaN|undefined/);
 });
 
-test("non-orthogonal legacy points are normalized to a smooth route", () => {
-  const path = buildOrthogonalRelationshipPath([{
+test("a spline without control points still renders as the same curve family", () => {
+  const path = buildRelationshipPath([{
     startPoint: { x: 0, y: 0 },
-    bendPoints: [{ x: 54, y: 12 }, { x: 96, y: 54 }],
-    endPoint: { x: 192, y: 88 },
+    endPoint: { x: 300, y: 60 },
   }], { x: 0, y: 0 });
 
-  assert.match(path, /C\s/);
-  assert.match(path, /^M 0,0 C /);
+  assert.equal(path, "M 0,0 C 100,0 200,60 300,60");
   assert.doesNotMatch(path, /NaN|undefined/);
 });
 
-test("orthogonal label midpoint follows the route length", () => {
-  const midpoint = orthogonalPathMidpoint([{
+test("consecutive sections sharing an endpoint stay one stroke", () => {
+  const path = buildRelationshipPath([
+    { startPoint: { x: 0, y: 0 }, bendPoints: [{ x: 50, y: 0 }, { x: 100, y: 0 }], endPoint: { x: 100, y: 0 } },
+    { startPoint: { x: 100, y: 0 }, bendPoints: [{ x: 150, y: 0 }, { x: 200, y: 0 }], endPoint: { x: 200, y: 0 } },
+  ], { x: 0, y: 0 });
+
+  assert.equal(path.match(/M /g)?.length, 1, "a continuous rail must not restart");
+});
+
+test("the label anchor follows the cubic curve", () => {
+  const midpoint = relationshipPathMidpoint([{
     startPoint: { x: 0, y: 0 },
     bendPoints: [{ x: 100, y: 0 }, { x: 100, y: 100 }],
     endPoint: { x: 200, y: 100 },
@@ -40,6 +47,6 @@ test("orthogonal label midpoint follows the route length", () => {
 });
 
 test("empty relationship geometry is safe", () => {
-  assert.equal(buildOrthogonalRelationshipPath([], { x: 0, y: 0 }), "");
-  assert.deepEqual(orthogonalPathMidpoint([], { x: 4, y: 6 }), { x: 4, y: 6 });
+  assert.equal(buildRelationshipPath([], { x: 0, y: 0 }), "");
+  assert.deepEqual(relationshipPathMidpoint([], { x: 4, y: 6 }), { x: 4, y: 6 });
 });

@@ -98,28 +98,6 @@ const KIND_LABEL: Record<string, string> = {
   ServiceAccount: "ServiceAccount",
 };
 
-const KIND_WEIGHT: Record<string, number> = {
-  Ingress: 1040,
-  Gateway: 1030,
-  Deployment: 980,
-  StatefulSet: 960,
-  DaemonSet: 960,
-  CronJob: 950,
-  ReplicaSet: 940,
-  Job: 920,
-  Service: 880,
-  EndpointSlice: 850,
-  Endpoints: 840,
-  Pod: 820,
-  NetworkPolicy: 810,
-  PersistentVolumeClaim: 780,
-  PersistentVolume: 770,
-  StorageClass: 760,
-  ConfigMap: 750,
-  Secret: 750,
-  ServiceAccount: 740,
-};
-
 type DetailRequest = NonNullable<ResourceDetailDrawerProps["request"]>;
 
 interface YamlTarget {
@@ -234,7 +212,6 @@ function toCanvasResource(resource: TopologyGraphResource): KubejojoResource {
     detailLines: resource.detailLines,
     tags: resource.tags,
     warnings: resource.warnings > 0 ? [`${resource.warnings} 条活动告警`] : [],
-    weight: KIND_WEIGHT[kind] ?? 500,
     identity: resource.identity,
     identityKey: resource.identityKey,
   };

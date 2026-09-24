@@ -9,7 +9,7 @@ import { applyTopologyCapacity, projectTopologyNeighborhood, TOPOLOGY_CAPACITY_L
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
 import { getKubejojoRelationSemantics, makeKubejojoRelationId, makeKubejojoStableId } from "./relations.ts";
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
-import { collapseKubejojoGraph, getKubejojoAccessPathOrder, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, groupKubejojoGraph, isTopologyRootKind, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, projectTopologyDisplayMode, projectTopologyRoot, resolveTopologyRoot, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
+import { clearKubejojoLayoutCache, collapseKubejojoGraph, getKubejojoAccessPathOrder, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, getKubejojoWeight, groupKubejojoGraph, isTopologyRootKind, KUBEJOJO_COLLAPSE_THRESHOLD, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, projectTopologyDisplayMode, projectTopologyRoot, resolveTopologyRoot, containerRelations, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
 
 test("only workload resources can start a topology scene", () => {
   assert.equal(isTopologyRootKind("Deployment"), true);
@@ -103,6 +103,10 @@ const progressiveDisclosureRelations: KubejojoRelation[] = [
   { id: "uses-config", source: "pod", target: "config", type: "USES_CONFIG" },
 ];
 
+function collectNodeIds(root: KubejojoGraphNode): string[] {
+  return [root.id, ...(root.nodes ?? []).flatMap(collectNodeIds)];
+}
+
 function findGraphNode(root: KubejojoGraphNode, id: string): KubejojoGraphNode | undefined {
   if (root.id === id) return root;
   for (const child of root.nodes ?? []) {
@@ -193,71 +197,121 @@ test("typed relation semantics cover the four initial topology domains", () => {
 });
 
 test("canonical access path has stable visual ordering", () => {
-  const order = (kind: string) => getKubejojoAccessPathOrder({
+  /**
+   * The access-path order is the Headlamp node weight, where a *higher* value is
+   * placed further left. `leftOf` reads the way an operator reads the canvas.
+   */
+  const weight = (kind: string) => getKubejojoAccessPathOrder({
     id: kind,
     resource: { id: kind, kind, name: kind },
   });
-  assert.ok(order("Deployment") < order("ReplicaSet"));
-  assert.ok(order("ReplicaSet") < order("Pod"));
-  assert.ok(order("Pod") < order("Service"));
-  assert.ok(order("Service") < order("EndpointSlice"));
-  assert.ok(order("EndpointSlice") < order("Ingress"));
-  assert.equal(order("Gateway"), order("HTTPRoute"));
-  assert.ok(order("HTTPRoute") === order("Ingress"));
-  assert.equal(order("TCPRoute"), order("HTTPRoute"));
-  assert.equal(order("TLSRoute"), order("HTTPRoute"));
-  assert.equal(order("UDPRoute"), order("HTTPRoute"));
-  assert.equal(order("EndpointSlice"), order("Endpoints"));
-  assert.ok(order("Pod") < order("PersistentVolumeClaim"));
-  assert.ok(order("Ingress") < order("PersistentVolumeClaim"));
+  const leftOf = (left: string, right: string) =>
+    assert.ok(weight(left) > weight(right), `${left} must be drawn left of ${right}`);
+  const sameColumn = (left: string, right: string) =>
+    assert.equal(weight(left), weight(right), `${left} and ${right} share one column`);
+
+  leftOf("Deployment", "ReplicaSet");
+  leftOf("ReplicaSet", "Pod");
+  leftOf("Pod", "Service");
+  leftOf("Service", "EndpointSlice");
+  leftOf("Service", "Ingress");
+  // Network edge resources all cascade off a Service, so they share the last column.
+  sameColumn("EndpointSlice", "Endpoints");
+  sameColumn("EndpointSlice", "Ingress");
+  sameColumn("Gateway", "HTTPRoute");
+  sameColumn("HTTPRoute", "Ingress");
+  sameColumn("TCPRoute", "HTTPRoute");
+  sameColumn("TLSRoute", "HTTPRoute");
+  sameColumn("UDPRoute", "HTTPRoute");
+  // GatewayClass precedes the Gateway it names.
+  leftOf("GatewayClass", "Gateway");
+  // Storage dependencies hang off the workload, after the Pod and its Service.
+  leftOf("Pod", "PersistentVolumeClaim");
+  // The volume chain runs backwards from the Pod: the claim is bound to a volume,
+  // and the volume is provisioned by a class.
+  leftOf("Pod", "PersistentVolumeClaim");
+  leftOf("PersistentVolumeClaim", "StorageClass");
+  leftOf("StorageClass", "PersistentVolume");
+  // Autoscaling sits ahead of the workload it scales.
+  leftOf("HorizontalPodAutoscaler", "Deployment");
 });
 
-test("progressive disclosure folds scope, then opens the complete resource scene", () => {
+test("groups collapse above the Headlamp threshold and reveal their chain on focus", () => {
   const grouped = groupKubejojoGraph(
     progressiveDisclosureResources,
     progressiveDisclosureRelations,
     "namespace",
   );
-  const scopeId = "scope:namespace:demo";
-  const componentId = "component:deployment";
-  const isolatedId = `isolated:${scopeId}:ConfigMap`;
+  const demoGroupId = "group:namespace:demo";
+  const opsGroupId = "group:namespace:ops";
 
+  // demo holds 4 resources with internal relationships, so it starts collapsed.
   const global = collapseKubejojoGraph(grouped);
   assert.deepEqual(global.nodes?.map((node) => [node.id, node.collapsed]), [
-    [scopeId, true],
-    ["scope:namespace:ops", true],
+    [demoGroupId, true],
+    [opsGroupId, false],
   ]);
 
-  const focusedScope = collapseKubejojoGraph(grouped, scopeId);
-  assert.deepEqual(focusedScope.nodes?.map((node) => node.id), [componentId, isolatedId]);
-  assert.equal(findGraphNode(focusedScope, componentId)?.collapsed, false);
-  assert.equal(findGraphNode(focusedScope, isolatedId)?.collapsed, false);
-  assert.equal(findGraphNode(focusedScope, "config")?.collapsed, false);
-
-  const focusedComponent = collapseKubejojoGraph(grouped, componentId);
-  assert.deepEqual(
-    focusedComponent.nodes?.map((node) => [node.id, node.collapsed]),
-    [["deployment", false], ["service", false], ["pod", false]],
-  );
-  assert.equal(
-    focusedComponent.nodes?.some((node) => node.id === componentId),
-    false,
-    "a focused component is a viewport scene, not another framed graph node",
-  );
-
-  const focusedIsolated = collapseKubejojoGraph(grouped, isolatedId);
-  assert.deepEqual(focusedIsolated.nodes?.map((node) => node.id), ["config"]);
+  const focused = collapseKubejojoGraph(grouped, demoGroupId);
+  // Focusing a group promotes its children to the canvas root, so the members are
+  // reachable one level down inside their component rather than as a flat row.
+  const demoIds = new Set(collectNodeIds(focused));
+  assert.ok(demoIds.has("deployment"));
+  assert.ok(demoIds.has("service"));
+  assert.ok(demoIds.has("pod"));
+  assert.ok(demoIds.has("config"));
+  assert.equal(demoIds.has(demoGroupId), false);
 
   const expanded = collapseKubejojoGraph(grouped, null, true);
-  assert.equal(findGraphNode(expanded, scopeId)?.collapsed, false);
-  assert.equal(findGraphNode(expanded, componentId)?.collapsed, false);
-  assert.equal(findGraphNode(expanded, isolatedId)?.collapsed, false);
-
-  const globalFromRootSelection = collapseKubejojoGraph(grouped, "root");
-  assert.equal(findGraphNode(globalFromRootSelection, scopeId)?.collapsed, true);
+  assert.equal(findGraphNode(expanded, demoGroupId)?.collapsed, false);
 });
 
-test("scope focus opens component resources and relationship edges", async () => {
+test("collapse threshold is Headlamp's ten children or any inner relationship", () => {
+  assert.equal(KUBEJOJO_COLLAPSE_THRESHOLD, 10);
+
+  const small = Array.from({ length: KUBEJOJO_COLLAPSE_THRESHOLD }, (_, index) => ({
+    id: `pod-${String(index).padStart(2, "0")}`,
+    kind: "Pod",
+    name: `api-${index}`,
+    namespace: "prod",
+    instanceName: "api",
+  }));
+  const atThreshold = collapseKubejojoGraph(groupKubejojoGraph(small, [], "namespace"));
+  assert.equal(
+    atThreshold.nodes?.[0]?.collapsed,
+    false,
+    "ten children is still within the threshold",
+  );
+
+  const overThreshold = collapseKubejojoGraph(groupKubejojoGraph([
+    ...small,
+    { id: "pod-extra", kind: "Pod", name: "api-extra", namespace: "prod", instanceName: "api" },
+  ], [], "namespace"));
+  assert.equal(overThreshold.nodes?.[0]?.collapsed, true);
+
+  const withRelation = collapseKubejojoGraph(groupKubejojoGraph(
+    [
+      { id: "deploy", kind: "Deployment", name: "api", namespace: "prod", instanceName: "api" },
+      { id: "pod-a", kind: "Pod", name: "api-0", namespace: "prod", instanceName: "api" },
+    ],
+    [{ id: "owns", source: "deploy", target: "pod-a", type: "OWNS" }],
+    "namespace",
+  ));
+  assert.equal(withRelation.nodes?.[0]?.collapsed, true);
+});
+
+test("unscheduled Pods stay visible under a sentinel group and never vanish", () => {
+  const grouped = groupKubejojoGraph([
+    { id: "pending", kind: "Pod", name: "api-pending", namespace: "prod", instanceName: "api" },
+    { id: "running", kind: "Pod", name: "api-running", namespace: "prod", instanceName: "api", nodeName: "worker-1" },
+  ], [], "node");
+
+  const labels = (grouped.nodes ?? []).map((node) => node.label ?? "");
+  assert.equal(labels.length, 2);
+  assert.deepEqual([...labels].sort(), ["worker-1", "未调度"].sort());
+});
+
+test("over-limit groups reveal their scene instead of adding another summary row", async () => {
   const connectedResources: KubejojoResource[] = Array.from({ length: 130 }, (_, index) => ({
     id: `connected-${String(index).padStart(3, "0")}`,
     kind: index === 0 ? "Deployment" : "Pod",
@@ -265,63 +319,26 @@ test("scope focus opens component resources and relationship edges", async () =>
     namespace: "prod",
     instanceName: "api",
   }));
-  const isolatedReplicaSets: KubejojoResource[] = Array.from({ length: 122 }, (_, index) => ({
-    id: `isolated-rs-${String(index).padStart(3, "0")}`,
-    kind: "ReplicaSet",
-    name: `api-${String(index).padStart(3, "0")}`,
-    namespace: "prod",
-    instanceName: "api",
-  }));
-  const isolatedConfigMaps: KubejojoResource[] = Array.from({ length: 35 }, (_, index) => ({
-    id: `isolated-config-${String(index).padStart(3, "0")}`,
-    kind: "ConfigMap",
-    name: `config-${String(index).padStart(3, "0")}`,
-    namespace: "prod",
-    instanceName: "api",
-  }));
-  const relations: KubejojoRelation[] = Array.from({ length: 339 }, (_, index) => ({
+  const relations: KubejojoRelation[] = Array.from({ length: 129 }, (_, index) => ({
     id: `relation-${String(index).padStart(3, "0")}`,
-    source: connectedResources[index % connectedResources.length].id,
-    target: connectedResources[(index + 1) % connectedResources.length].id,
+    source: index === 128 ? connectedResources[0].id : connectedResources[index].id,
+    target: index === 128 ? connectedResources[129].id : connectedResources[index + 1].id,
     type: "OWNS",
   }));
-  const scopeId = "scope:namespace:prod";
-  const grouped = groupKubejojoGraph(
-    [...connectedResources, ...isolatedReplicaSets, ...isolatedConfigMaps],
-    relations,
-    "namespace",
+  const grouped = groupKubejojoGraph(connectedResources, relations, "namespace");
+  const groupId = "group:namespace:prod";
+  const focused = collapseKubejojoGraph(grouped, groupId, false);
+
+  assert.ok(
+    focused.nodes?.some((node) => node.id.startsWith("component:")),
+    "an opened group renders its component scene",
   );
-
-  assert.deepEqual(collapseKubejojoGraph(grouped).nodes?.map((node) => [node.id, node.collapsed]), [
-    [scopeId, true],
-  ]);
-
-  const focusedScope = collapseKubejojoGraph(grouped, scopeId);
-  const connectedComponent = focusedScope.nodes?.find((node) => node.groupKind === "component");
-  const isolatedGroups = focusedScope.nodes?.filter((node) => node.groupKind === "isolated") ?? [];
-
-  assert.equal(connectedComponent?.nodes?.length, 130);
-  assert.equal(connectedComponent?.collapsed, false);
-  assert.deepEqual(
-    isolatedGroups.map((node) => [node.label, node.nodes?.length, node.collapsed]),
-    [
-      ["ReplicaSet（无关联）", 122, false],
-      ["ConfigMap（无关联）", 35, false],
-    ],
-  );
-
-  const layout = await layoutKubejojoGraph(focusedScope, 1.6);
-  assert.ok(layout.edges.length > 0, "scope focus should render the resource relationship graph");
-  assert.ok(layout.nodes.some((node) => node.id === `isolated:${scopeId}:ReplicaSet`));
-  assert.ok(layout.nodes.some((node) => node.id === isolatedReplicaSets[0].id));
-
-  const focusedComponent = collapseKubejojoGraph(grouped, connectedComponent!.id);
-  const componentLayout = await layoutKubejojoGraph(focusedComponent, 1.6);
-  assert.ok(componentLayout.edges.length > 0, "component focus must reveal the resource relationship graph");
-  assert.ok(componentLayout.nodes.some((node) => node.id === connectedResources[0].id));
+  const layout = await layoutKubejojoGraph(focused, 1.6);
+  assert.ok(layout.edges.length > 0, "an opened group draws its relationships");
+  assert.ok(layout.nodes.length > 1);
 });
 
-test("configuration relations stay as overlays and do not merge backbone components", () => {
+test("configuration relationships stay on one side and never merge workloads", () => {
   const resources: KubejojoResource[] = [
     { id: "deploy-a", kind: "Deployment", name: "api-a", namespace: "prod" },
     { id: "pod-a", kind: "Pod", name: "api-a-0", namespace: "prod" },
@@ -342,37 +359,32 @@ test("configuration relations stay as overlays and do not merge backbone compone
 
   const partitioned = partitionKubejojoRelations(relations);
   assert.deepEqual(partitioned.backbone.map((edge) => edge.id), ["owns-a", "owns-b"]);
-  assert.deepEqual(partitioned.overlays.map((edge) => edge.id), ["config-a", "config-b", "sa-a", "sa-b", "scope-only"]);
+  assert.deepEqual(
+    partitioned.overlays.map((edge) => edge.id),
+    ["config-a", "config-b", "sa-a", "sa-b", "scope-only"],
+  );
 
   const grouped = groupKubejojoGraph(resources, relations, "namespace");
-  const scope = grouped.nodes?.[0];
-  const components = scope?.nodes?.filter((node) => node.groupKind === "component") ?? [];
-  assert.equal(components.length, 2);
+  const group = grouped.nodes?.[0];
+  const components = group?.nodes?.filter((node) => node.groupKind === "component") ?? [];
+  assert.equal(components.length, 2, "each workload keeps its own component");
   assert.deepEqual(components.map((component) => component.nodes?.map((node) => node.id).sort()), [
     ["deploy-a", "pod-a"],
     ["deploy-b", "pod-b"],
   ]);
-  assert.deepEqual(scope?.overlayEdges?.map((edge) => edge.id), ["config-a", "config-b", "sa-a", "sa-b", "scope-only"]);
+  // The configuration and service-account relationships still travel with the
+  // group, so opening it shows the complete dependency picture.
   assert.deepEqual(
-    scope?.nodes?.filter((node) => node.groupKind === "isolated").map((node) => node.label),
-    ["ConfigMap（无关联）", "ServiceAccount（无关联）"],
-  );
-
-  const neighborhood = groupKubejojoGraph(resources, relations, "namespace", true);
-  const neighborhoodScope = neighborhood.nodes?.[0];
-  const neighborhoodComponents = neighborhoodScope?.nodes?.filter((node) => node.groupKind === "component") ?? [];
-  assert.equal(neighborhoodComponents.length, 1);
-  assert.deepEqual(
-    neighborhoodComponents[0]?.edges?.map((edge) => edge.id),
+    group?.edges?.map((edge) => edge.id),
     ["config-a", "config-b", "owns-a", "owns-b", "sa-a", "sa-b", "scope-only"],
   );
 });
 
-test("full association mode renders overlay relations while core mode keeps the access backbone", async () => {
+test("full association mode renders configuration edges while core mode keeps the access path", async () => {
   const resources: KubejojoResource[] = [
-    { id: "deploy", kind: "Deployment", name: "api", namespace: "prod" },
-    { id: "pod", kind: "Pod", name: "api-0", namespace: "prod" },
-    { id: "config", kind: "ConfigMap", name: "api-config", namespace: "prod" },
+    { id: "deploy", kind: "Deployment", name: "api", namespace: "prod", instanceName: "api" },
+    { id: "pod", kind: "Pod", name: "api-0", namespace: "prod", instanceName: "api" },
+    { id: "config", kind: "ConfigMap", name: "api-config", namespace: "prod", instanceName: "api" },
   ];
   const relations: KubejojoRelation[] = [
     { id: "owns", source: "deploy", target: "pod", type: "OWNS" },
@@ -381,9 +393,19 @@ test("full association mode renders overlay relations while core mode keeps the 
 
   const coreProjection = projectTopologyDisplayMode(resources, relations, "core");
   const fullProjection = projectTopologyDisplayMode(resources, relations, "full");
-  const coreGraph = collapseKubejojoGraph(groupKubejojoGraph(coreProjection.resources, coreProjection.relations, "namespace", false), undefined, true);
-  const fullGraph = collapseKubejojoGraph(groupKubejojoGraph(fullProjection.resources, fullProjection.relations, "namespace", true), undefined, true);
+  const coreGraph = collapseKubejojoGraph(
+    groupKubejojoGraph(coreProjection.resources, coreProjection.relations, "namespace"),
+    "group:namespace:prod",
+    false,
+  );
+  const fullGraph = collapseKubejojoGraph(
+    groupKubejojoGraph(fullProjection.resources, fullProjection.relations, "namespace"),
+    "group:namespace:prod",
+    false,
+  );
+  clearKubejojoLayoutCache();
   const coreLayout = await layoutKubejojoGraph(coreGraph, 1.6);
+  clearKubejojoLayoutCache();
   const fullLayout = await layoutKubejojoGraph(fullGraph, 1.6);
 
   assert.deepEqual(coreLayout.edges.map((edge) => edge.id), ["owns"]);
@@ -392,7 +414,7 @@ test("full association mode renders overlay relations while core mode keeps the 
   assert.equal(fullLayout.nodes.some((node) => node.id === "config"), true);
 });
 
-test("selection paths and grouped identities remain deterministic", () => {
+test("selection paths follow the grouping tree and stay deterministic", () => {
   const forward = groupKubejojoGraph(
     progressiveDisclosureResources,
     progressiveDisclosureRelations,
@@ -404,64 +426,117 @@ test("selection paths and grouped identities remain deterministic", () => {
     "namespace",
   );
 
-  assert.deepEqual(forward, reversed);
+  assert.deepEqual(forward, reversed, "input order must not change the graph");
   assert.deepEqual(
     getKubejojoSelectionPath(forward, "pod").map(({ id, kind, resourceCount }) => ({ id, kind, resourceCount })),
     [
       { id: "root", kind: "root", resourceCount: 5 },
-      { id: "scope:namespace:demo", kind: "scope", resourceCount: 4 },
+      { id: "group:namespace:demo", kind: "scope", resourceCount: 4 },
       { id: "component:deployment", kind: "component", resourceCount: 3 },
       { id: "pod", kind: "resource", resourceCount: 1 },
     ],
   );
+  // A ConfigMap reached through USES_CONFIG is an overlay, not a structural
+  // member, so it stays a sibling of the component instead of joining it.
   assert.deepEqual(
-    getKubejojoSelectionPath(forward, "config").map(({ id, kind, resourceCount }) => ({ id, kind, resourceCount })),
+    getKubejojoSelectionPath(forward, "config").map(({ id, kind }) => ({ id, kind })),
     [
-      { id: "root", kind: "root", resourceCount: 5 },
-      { id: "scope:namespace:demo", kind: "scope", resourceCount: 4 },
-      { id: "isolated:scope:namespace:demo:ConfigMap", kind: "isolated", resourceCount: 1 },
-      { id: "config", kind: "resource", resourceCount: 1 },
+      { id: "root", kind: "root" },
+      { id: "group:namespace:demo", kind: "scope" },
+      { id: "config", kind: "resource" },
     ],
   );
   assert.deepEqual(getKubejojoSelectionPath(forward, "missing").map((item) => item.id), ["root"]);
 });
 
-test("layout policy uses real aspect ratio, edge presence, semantic stages, and stable compact metrics", () => {
+test("layout policy uses ELK layered for connected graphs and rect packing otherwise", () => {
   assert.deepEqual(getKubejojoLayoutPolicy(true, 1.8), {
-    algorithm: "dagre",
-    direction: "RIGHT",
+    algorithm: "layered",
+    direction: "UNDEFINED",
     aspectRatio: 1.8,
   });
   assert.deepEqual(getKubejojoLayoutPolicy(true, 0.72), {
-    algorithm: "dagre",
-    direction: "RIGHT",
+    algorithm: "layered",
+    direction: "UNDEFINED",
     aspectRatio: 0.72,
   });
   assert.deepEqual(getKubejojoLayoutPolicy(false, 0.72), {
     algorithm: "rectpacking",
-    direction: "RIGHT",
+    direction: "UNDEFINED",
     aspectRatio: 0.72,
   });
   assert.deepEqual(getKubejojoLayoutPolicy(false, 0), {
     algorithm: "rectpacking",
-    direction: "RIGHT",
+    direction: "UNDEFINED",
     aspectRatio: 1.6,
   });
-  assert.equal(getKubejojoPartition({ id: "weighted", weight: 73 }), 70);
-  assert.equal(getKubejojoPartition({ id: "deployment", resource: progressiveDisclosureResources[0] }), 10);
-  assert.equal(getKubejojoPartition({ id: "pod-a", resource: { id: "pod-a", kind: "Pod", name: "a" } }), 30);
-  assert.equal(getKubejojoPartition({ id: "pod-b", resource: { id: "pod-b", kind: "Pod", name: "b" } }), 30);
+});
+
+test("ELK partitions are the negated Headlamp weights", () => {
+  assert.equal(getKubejojoPartition({ id: "hpa", resource: { id: "hpa", kind: "HorizontalPodAutoscaler", name: "hpa" } }), -1000);
+  assert.equal(getKubejojoPartition({ id: "deployment", resource: { id: "deployment", kind: "Deployment", name: "api" } }), -980);
+  assert.equal(getKubejojoPartition({ id: "replicaset", resource: { id: "replicaset", kind: "ReplicaSet", name: "api-rs" } }), -960);
+  assert.equal(getKubejojoPartition({ id: "pod", resource: { id: "pod", kind: "Pod", name: "api-0" } }), -800);
+  assert.equal(getKubejojoPartition({ id: "service", resource: { id: "service", kind: "Service", name: "api" } }), -790);
+  assert.equal(getKubejojoPartition({ id: "ingress", resource: { id: "ingress", kind: "Ingress", name: "api" } }), -780);
+  assert.equal(getKubejojoPartition({ id: "pvc", resource: { id: "pvc", kind: "PersistentVolumeClaim", name: "data" } }), -790);
+  assert.equal(getKubejojoPartition({ id: "pv", resource: { id: "pv", kind: "PersistentVolume", name: "pv-1" } }), -750);
+  // An unrecognised CRD falls back to the shared default column.
+  assert.equal(getKubejojoPartition({ id: "crd", resource: { id: "crd", kind: "Widget", name: "w" } }), -500);
+  // An explicit weight always wins, which is how a pinned resource is placed.
+  assert.equal(getKubejojoPartition({ id: "pinned", weight: 73 }), -73);
+});
+
+test("one card size is shared by layout, CSS and the renderer", () => {
   assert.deepEqual(KUBEJOJO_LAYOUT_METRICS, {
-    nodeWidth: 350,
-    nodeHeight: 110,
-    groupWidth: 390,
-    groupHeight: 154,
-    layeredNodeSpacing: 78,
-    layeredLayerSpacing: 96,
-    layeredEdgeNodeSpacing: 56,
-    layeredEdgeSpacing: 28,
-    packedNodeSpacing: 28,
+    nodeWidth: 220,
+    nodeHeight: 72,
+    layeredNodeSpacing: 60,
+    layeredLayerSpacing: 60,
+    groupPadding: 16,
+    packedNodeSpacing: 20,
+    packedPaddingTop: 48,
+    packedPaddingSide: 24,
   });
+});
+
+test("container relationships are only laid out at the level that owns both endpoints", () => {
+  const graph: KubejojoGraphNode = {
+    id: "root",
+    nodes: [
+      {
+        id: "component:a",
+        groupKind: "component",
+        nodes: [
+          { id: "a", resource: { id: "a", kind: "Deployment", name: "a" } },
+          { id: "a-pod", resource: { id: "a-pod", kind: "Pod", name: "a-0" } },
+        ],
+        edges: [
+          { id: "inner", source: "a", target: "a-pod", type: "OWNS" },
+          { id: "shared", source: "a-pod", target: "config", type: "USES_CONFIG" },
+        ],
+      },
+      { id: "config", resource: { id: "config", kind: "ConfigMap", name: "cfg" } },
+    ],
+    edges: [
+      { id: "inner", source: "a", target: "a-pod", type: "OWNS" },
+      { id: "shared", source: "a-pod", target: "config", type: "USES_CONFIG" },
+    ],
+  };
+
+  // The component owns the relationship between its own two children, so it is
+  // laid out (and drawn) there rather than duplicated at the root.
+  const component = graph.nodes![0];
+  assert.deepEqual(
+    containerRelations(component).map((drawn) => [drawn.relation.id, drawn.source, drawn.target]),
+    [["inner", "a", "a-pod"]],
+  );
+  // At the root the same edge belongs to that one child, while the dependency on
+  // the sibling ConfigMap is projected onto it so ELK can route it.
+  assert.deepEqual(
+    containerRelations(graph).map((drawn) => [drawn.relation.id, drawn.source, drawn.target]),
+    [["shared", "component:a", "config"]],
+  );
 });
 
 test("workload access paths stay ordered and stable across input order", async () => {
@@ -508,7 +583,8 @@ test("workload access paths stay ordered and stable across input order", async (
   assert.equal(x("pod-a"), x("pod-b"), "fan-out Pods must share one semantic stage");
   assert.ok(x("pod-a") < x("service"));
   assert.ok(x("service") < x("endpoints"));
-  assert.ok(x("endpoints") < x("ingress"));
+  // EndpointSlice and Ingress cascade off the Service, so they share the last column.
+  assert.ok(x("endpoints") <= x("ingress"));
   const serviceEdge = (await layoutKubejojoGraph(graph(resources, relations), 1.6)).edges
     .find((edge) => edge.id === "ingress-service");
   assert.equal(serviceEdge?.source, "service");
@@ -587,8 +663,14 @@ test("capacity aggregates preserve the dominant resource stage", async () => {
 
   assert.ok(serviceAggregate?.aggregation);
   assert.ok(podAggregate?.aggregation);
-  assert.equal(getKubejojoAccessPathOrder({ id: serviceAggregate!.id, resource: serviceAggregate! }), 40);
-  assert.equal(getKubejojoAccessPathOrder({ id: podAggregate!.id, resource: podAggregate! }), 30);
+  // An aggregate inherits the weighted average of the kinds it folds together, so
+  // a Service bucket stays in the Service column rather than drifting to Pod.
+  const serviceWeight = getKubejojoAccessPathOrder({ id: serviceAggregate!.id, resource: serviceAggregate! });
+  const podWeight = getKubejojoAccessPathOrder({ id: podAggregate!.id, resource: podAggregate! });
+  assert.equal(serviceWeight, getKubejojoWeight({ id: "svc", resource: { id: "svc", kind: "Service", name: "svc" } }));
+  assert.equal(podWeight, getKubejojoWeight({ id: "pod", resource: { id: "pod", kind: "Pod", name: "pod" } }));
+  assert.ok(serviceWeight < podWeight, "the Service bucket sits to the right of the Pod bucket");
+  assert.equal(getKubejojoAccessPathOrder({ id: podAggregate!.id, resource: podAggregate! }) > getKubejojoAccessPathOrder({ id: serviceAggregate!.id, resource: serviceAggregate! }), true);
   const layout = await layoutKubejojoGraph({
     id: "root",
     nodes: projectedResources.map((resource) => ({ id: resource.id, resource })),

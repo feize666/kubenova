@@ -2,13 +2,13 @@
 
 KubeNova 是一套面向 Kubernetes 的集群运维控制台。它把集群接入、资源管理、资源拓扑、可观测性、访问控制和 AI 运维助手收敛到一个 Web 界面，可直接在浏览器中完成日常巡检与操作。
 
-当前版本：**v1.7**
+当前版本：**v1.8**
 
 ## 核心能力
 
 - **集群接入**：支持阿里云 ACK、腾讯云 TKE、华为云 CCE、AWS EKS、Google GKE、火山引擎 VKE 等主流托管 Kubernetes，上传 kubeconfig 后自动识别供应商与集群状态。
 - **资源管理**：覆盖工作负载（Pod、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job、CronJob、弹性伸缩）、网络（Service、Ingress、Endpoint、EndpointSlice、NetworkPolicy、Gateway API）、存储（PV、PVC、StorageClass）、配置（ConfigMap、Secret、ServiceAccount、LimitRange、ResourceQuota）与集群基础资源（Node、Namespace）。
-- **资源拓扑**：以工作负载为起点，按 `Deployment → ReplicaSet → Pod → Service → Endpoint / EndpointSlice → Ingress` 的访问链路呈现资源关系，支持多域切换、命名空间筛选与链路状态标记。
+- **资源拓扑**：参考 Headlamp 资源全景图重构。以工作负载为起点，按 `Deployment → ReplicaSet → Pod → Service → Endpoint / EndpointSlice → Ingress` 的横向分层访问链路呈现资源关系，列序由节点权重表决定；连线采用三次贝塞尔曲线并沿访问路径从左到右布设，默认灰色、异常链路染橙／红、选中链路高亮流动；支持资源域多选、命名空间筛选、分组切换、仅异常筛选、展开／收起与面包屑返回。
 - **资源详情**：点击任意资源名称以抽屉形式打开详情，包含概览、YAML、容器列表、关联 Pod 列表、事件与日志／终端入口，详情内的关联资源可继续跳转。
 - **可观测性中心**：Prometheus 监控、日志中心与观测配置，支持告警接入、通知渠道与自定义模板。
 - **访问控制**：用户管理、集群访问授权、细致到命名空间与资源类型的权限范围，支持 MFA 与 OIDC 对接。

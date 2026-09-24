@@ -127,6 +127,22 @@ function compareResources(left: CapacityResource, right: CapacityResource): numb
   return weightDelta || compareIds(left, right);
 }
 
+/**
+ * Highest explicit weight among the members, or undefined when none of them
+ * carries one.
+ *
+ * Aggregates must not invent a weight. Most resources rely on the kind table,
+ * and writing `Math.max(...) === 0` onto the aggregate would make the layout
+ * treat the bucket as the shared default column instead of inheriting the
+ * weighted average of its members.
+ */
+function aggregateExplicitWeight(members: readonly CapacityResource[]): number | undefined {
+  return members.reduce<number | undefined>((current, resource) => {
+    if (typeof resource.weight !== "number" || !Number.isFinite(resource.weight)) return current;
+    return current === undefined ? resource.weight : Math.max(current, resource.weight);
+  }, undefined);
+}
+
 function normalizedValue(value: string | null | undefined, fallback: string): string {
   return value?.trim() || fallback;
 }
@@ -311,6 +327,7 @@ function buildCandidate<
       membersByKind: countByKind(group.members),
       semanticKey: group.semanticKey,
     };
+    const explicitWeight = aggregateExplicitWeight(group.members);
     const aggregate = {
       ...representative,
       ...aggregateHealth,
@@ -319,7 +336,7 @@ function buildCandidate<
       name: aggregateLabel(definition.level, group.semanticKey, memberCount),
       namespace: definition.fields.includes("namespace") ? representative.namespace : null,
       instanceName: definition.fields.includes("instance") ? representative.instanceName : null,
-      weight: Math.max(...group.members.map((resource) => resource.weight ?? 0)),
+      ...(explicitWeight === undefined ? {} : { weight: explicitWeight }),
       aggregation,
     } as unknown as TResource;
     group.members.forEach((resource) => visibleByOriginalId.set(resource.id, id));
