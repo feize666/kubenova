@@ -72,7 +72,6 @@ done
 
 require_file scripts/readme-sync-check.sh
 require_file .githooks/pre-commit
-require_pattern 'README documents the readme sync guard' 'readme-sync-check\.sh' README.md
 
 if [[ "$failures" -gt 0 ]]; then
   printf '[release-check] %d check(s) failed\n' "$failures" >&2

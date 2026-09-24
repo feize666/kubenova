@@ -222,40 +222,6 @@ bash scripts/service.sh test topology
 bash scripts/service.sh test release
 ```
 
-## 维护约定
-
-### README 与代码同步
-
-每次提交涉及功能、配置、接口、部署方式或目录结构变更时，必须在该次提交中一并更新本文件。
-
-仓库已内置校验，无需依赖人工记忆：
-
-```bash
-# 启用钩子（每个克隆只需执行一次）
-git config core.hooksPath .githooks
-```
-
-启用后，`.githooks/pre-commit` 会调用 `scripts/readme-sync-check.sh` 检查暂存内容。若改动命中 `frontend/src`、`backend/`、`scripts/`、`deploy/`、`k8s/` 或构建配置，却没有同时修改 `README.md`，提交会被拒绝并列出具体文件。
-
-确有不需要文档改动的场景（例如纯格式化），可显式跳过：
-
-```bash
-KUBENOVA_SKIP_README_CHECK=1 git commit -m "..."
-git commit --no-verify -m "..."
-```
-
-CI 或发布前可用提交区间复核：
-
-```bash
-bash scripts/service.sh test readme-sync
-bash scripts/service.sh test readme-sync --range v1.7..HEAD
-```
-
-### 其他约定
-
-- **临时产物**：测试截图、trace、临时 Markdown 等放到 `tmp/`，不要写入仓库根目录或业务源码目录。
-- **提交范围**：不提交与当前改动无关的文件，不提交 `.env.ai.local` 等本地密钥文件。
-
 ## 文档索引
 
 | 文档 | 内容 |
