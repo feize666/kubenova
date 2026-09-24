@@ -169,7 +169,12 @@ export function collapseKubejojoGraph(
     );
     return {
       ...node,
-      nodes: collapsed ? undefined : node.nodes?.map(clone),
+      // Headlamp keeps the children on a collapsed group and treats `collapsed`
+      // purely as a flag: the layout and the renderer skip them, but the
+      // resource count, the health roll-up and the stacked-card cue still need
+      // them. Dropping the array here silently turned every folded group into a
+      // single-resource card.
+      nodes: node.nodes?.map(clone),
       collapsed,
     };
   };
