@@ -1,9 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-test("日志中心为独立一级入口，保留 Pod 日志和终端上下文路由", () => {
-  const section = getClusterWorkspaceNavigation("cluster-a").find((item) => item.key === "log-center");
-  assert.deepEqual(section?.items, [{ key: "log-center", label: "日志中心", href: "/clusters/cluster-a/log-center" }]);
+test("日志中心归入可观测性中心，并保留 Pod 日志和终端上下文路由", () => {
+  const sections = getClusterWorkspaceNavigation("cluster-a");
+  // The observability hub groups monitoring, logs and observability config, so
+  // the log centre is an item inside it rather than its own top-level entry.
+  const section = sections.find((item) => item.key === "observability");
+  assert.deepEqual(
+    section?.items.map((item) => item.key),
+    ["monitoring", "log-center", "observability"],
+  );
+  assert.ok(
+    section?.items.find((item) => item.key === "log-center")?.href
+      .endsWith("/clusters/cluster-a/log-center"),
+  );
+  assert.deepEqual(
+    sections.slice(0, 2).map((item) => item.key),
+    ["overview", "topology"],
+  );
   assert.equal(isSupportedClusterWorkspaceResource("log-center"), true);
   assert.equal(isSupportedClusterWorkspaceResource("logs"), true);
   assert.equal(isSupportedClusterWorkspaceResource("terminal"), true);
@@ -90,9 +104,13 @@ test("单集群工作区只保留当前集群资源菜单", () => {
   assert.equal(labels.includes("日志"), false);
   assert.equal(labels.includes("终端"), false);
   assert.equal(labels.includes("Prometheus 监控"), true);
+  // Monitoring and the log centre now live under the observability section.
   assert.deepEqual(
-    sections.filter((section) => ["logs", "monitoring"].includes(section.key)).map((section) => section.items[0]?.href),
-    ["/clusters/ack-prod/monitoring"],
+    sections
+      .find((section) => section.key === "observability")
+      ?.items.filter((item) => ["monitoring", "log-center"].includes(item.key))
+      .map((item) => item.href),
+    ["/clusters/ack-prod/monitoring", "/clusters/ack-prod/log-center"],
   );
   assert.ok(
     sections

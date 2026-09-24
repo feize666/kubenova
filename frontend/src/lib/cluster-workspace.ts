@@ -59,6 +59,10 @@ export const CLUSTER_WORKSPACE_RESOURCE_PATHS = [
   "observability/configuration",
   "monitoring",
   "log-center",
+  // Pod log and terminal workbenches open inside the cluster workspace as
+  // full-screen surfaces, so they are addressable workspace resources.
+  "logs",
+  "terminal",
   "inspection",
   "aiops",
 ] as const;

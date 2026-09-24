@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import {
   Alert,
   Button,
@@ -577,8 +578,11 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
   const routeParams = useSearchParams();
   const searchParams = query ?? routeParams;
   const { accessToken, isInitializing } = useAuth();
+  // The workspace knows which cluster the operator is inside, so a full-screen
+  // log surface opened from a resource page never falls back to "未知集群".
+  const workspace = useOptionalClusterWorkspace();
 
-  const clusterId = searchParams.get("clusterId")?.trim() || "";
+  const clusterId = searchParams.get("clusterId")?.trim() || workspace?.clusterId || "";
   const namespace = searchParams.get("namespace")?.trim() || "";
   const pod = searchParams.get("pod")?.trim() || "";
   const routeContainer = searchParams.get("container")?.trim() || "";
