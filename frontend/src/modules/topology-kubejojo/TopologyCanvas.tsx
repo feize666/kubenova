@@ -351,10 +351,9 @@ function Canvas({
     setSelectedEdgeId(null);
     const graphNode = node.data.graphNode;
     if (graphNode.nodes?.length) {
-      if (graphNode.groupKind === "scope" || graphNode.groupKind === "isolated") {
-        onSelectResource(null);
-        return;
-      }
+      // Every folded card advertises 进入, so every folded card must enter.
+      // Headlamp selects the group and promotes it to the root of the scene;
+      // refusing scope/isolated groups left the affordance dead.
       setViewMode("fit");
       onFocus(graphNode.id);
       onSelectResource(null);
@@ -451,7 +450,7 @@ function Canvas({
             {selectionPath.filter((item) => item.id !== "root").map((item, index, path) => (
               <Fragment key={item.id}>
                 <span aria-hidden="true">/</span>
-                {index === path.length - 1 || item.kind === "scope" ? (
+                {index === path.length - 1 ? (
                   <span className="topology-kubejojo__focus-label" aria-current={index === path.length - 1 ? "page" : undefined}>
                     <strong>{item.label}</strong>
                   </span>
@@ -478,7 +477,7 @@ function Canvas({
             {selectionPath.map((item, index) => (
               <Fragment key={item.id}>
                 {index > 0 ? <span aria-hidden="true">/</span> : null}
-                {index === selectionPath.length - 1 || item.kind === "scope" ? (
+                {index === selectionPath.length - 1 ? (
                   <span className="topology-kubejojo__focus-label" aria-current={index === selectionPath.length - 1 ? "page" : undefined}>
                     <strong>{item.label}</strong>
                   </span>
@@ -520,7 +519,14 @@ function Canvas({
           zoomOnPinch
           zoomOnDoubleClick={false}
           onMoveStart={(event) => {
-            if (event) setViewMode("custom");
+            // A plain press on a node also opens a d3-zoom gesture, but it does
+            // not move the viewport. Treating it as a manual move flips the view
+            // out of fit mode, and the selection strip's resize then re-layouts
+            // straight to 100% and clips the graph.
+            if (!event) return;
+            const target = event.target as HTMLElement | null;
+            if (target?.closest?.(".react-flow__node")) return;
+            setViewMode("custom");
           }}
           onNodeClick={(_, node) => handleNodeClick(node as Node<TopologyRendererNodeData>)}
           onNodeDoubleClick={(_, node) => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
-import { getCenteredTopologyViewport, getTopologyViewportFrame } from "./viewport.ts";
+import { getCenteredTopologyViewport, getTopologyViewportFrame, TOPOLOGY_CHROME_TOP } from "./viewport.ts";
 
 test("fit viewport centers a short graph horizontally and vertically", () => {
   const viewport = getCenteredTopologyViewport(
@@ -46,9 +46,16 @@ test("invalid empty bounds do not produce a viewport", () => {
   );
 });
 
-test("focused topology keeps the entire canvas available for true centering", () => {
+test("focused topology reserves the floating top chrome so nothing is covered", () => {
   assert.deepEqual(
     getTopologyViewportFrame(1600, 820),
-    { size: { width: 1600, height: 820 }, offsetY: 0 },
+    { size: { width: 1600, height: 820 - TOPOLOGY_CHROME_TOP }, offsetY: TOPOLOGY_CHROME_TOP },
   );
+});
+
+test("a canvas shorter than the chrome never produces an unusable frame", () => {
+  const frame = getTopologyViewportFrame(800, TOPOLOGY_CHROME_TOP - 10);
+  assert.ok(frame.size.height >= 1);
+  assert.ok(frame.offsetY < TOPOLOGY_CHROME_TOP);
+  assert.equal(frame.size.height + frame.offsetY, TOPOLOGY_CHROME_TOP - 10);
 });

@@ -807,6 +807,78 @@
 }
 .resource-map-detail-drawer .topology-detail-relations button:focus-visible { outline: 2px solid var(--ops-accent, #0b6db6); outline-offset: 2px; }
 
+/* One selected node needs one compact row, not a 440px panel: the canvas keeps
+ * its width and the details still open in the shared resource drawer. */
+.topology-selection-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--tk-primary) 20%, var(--tk-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tk-surface) 92%, var(--tk-primary-weak));
+  padding: 4px 8px 4px 12px;
+}
+.topology-selection-strip[hidden] { display: none; }
+.topology-selection-strip__kind {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--tk-primary-weak);
+  color: var(--tk-primary);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 20px;
+  padding: 0 8px;
+}
+.topology-selection-strip__name {
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--tk-text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+}
+.topology-selection-strip__name:hover,
+.topology-selection-strip__name:focus-visible { color: var(--tk-primary); text-decoration: underline; text-underline-offset: 3px; }
+.topology-selection-strip__meta {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  color: var(--tk-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topology-selection-strip__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The strip lives in the shell flex column, so it must never absorb the canvas
+ * height. Keep every control on one line and let the name ellipsize instead. */
+.topology-selection-strip .ant-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .topology-selection-strip {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .topology-selection-strip__meta { flex-basis: 100%; white-space: normal; }
+}
+
 @media (max-width: 760px) {
   .resource-map-shell--workbench .resource-map-toolbar {
     grid-template-columns: 1fr;
@@ -1067,6 +1139,13 @@
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
+}
+
+/* The selection strip is a fixed row above the canvas, so the canvas keeps the
+ * remaining height instead of being pushed out of the viewport. Shell gap
+ * already spaces it from the toolbar and the workbench. */
+.resource-map-shell--workbench .topology-selection-strip {
+  flex: 0 0 auto;
 }
 
 .resource-map-shell--workbench .resource-map-canvas,

@@ -55,9 +55,20 @@ test("focused scenes use theme tokens and keep relationship paths visually smoot
   assert.match(topologyCss, /--tk-highlight/);
 });
 
-test("topology detail drawer uses the current Ant Design sizing API", () => {
-  assert.match(pageSource, /<Drawer[\s\S]*size=\{440\}/);
-  assert.doesNotMatch(pageSource, /<Drawer[\s\S]*width=\{440\}/);
+test("selected topology node collapses into a compact strip instead of a wide drawer", () => {
+  // A single selected node only needs one row; details still open in the shared
+  // resource drawer, so the canvas keeps its full width.
+  assert.match(pageSource, /topology-selection-strip/);
+  assert.doesNotMatch(pageSource, /<Drawer/);
+  assert.doesNotMatch(pageSource, /size=\{440\}/);
+  // The strip is a direct child of the shell flex column: inside the workbench
+  // grid it would absorb the canvas row height.
+  assert.match(
+    topologyCss,
+    /\.resource-map-shell--workbench \.topology-selection-strip\s*\{[^}]*flex:\s*0 0 auto/,
+  );
+  assert.match(topologyCss, /\.topology-selection-strip\s*\{[^}]*flex-wrap:\s*nowrap/);
+  assert.match(topologyCss, /\.topology-selection-strip \.ant-btn\s*\{[^}]*white-space:\s*nowrap/);
 });
 
 test("namespace is a filter context and workload resources are the only topology entry points", () => {
@@ -70,8 +81,11 @@ test("namespace is a filter context and workload resources are the only topology
   assert.match(topologyCss, /resource-map-canvas-state\.topology-root-picker-state\s*\{[^}]*max-width:\s*none/);
 });
 
-test("canvas does not turn scope or isolated aggregates into topology scenes", () => {
-  assert.match(canvasSource, /graphNode\.groupKind === "scope" \|\| graphNode\.groupKind === "isolated"/);
+test("canvas keeps workload-root entry while folded cards stay navigable", () => {
+  // Scope/isolated aggregates now behave like Headlamp containers: a folded
+  // card that advertises 进入 must enter, and every breadcrumb above the
+  // current level returns to that level.
+  assert.doesNotMatch(canvasSource, /graphNode\.groupKind === "scope" \|\| graphNode\.groupKind === "isolated"/);
   assert.match(canvasSource, /onOpenTopologyRoot\?:/);
   assert.match(canvasSource, /isTopologyRootKind\(resource\.kind\)/);
   assert.match(pageSource, /displayMode=\{topologyDisplayMode\}/);
@@ -79,7 +93,7 @@ test("canvas does not turn scope or isolated aggregates into topology scenes", (
   assert.match(pageSource, /完整关联/);
   assert.doesNotMatch(pageSource, /链路中/);
   assert.doesNotMatch(pageSource, /完整链路/);
-  assert.match(canvasSource, /item\.kind === "scope"/);
+  assert.doesNotMatch(canvasSource, /item\.kind === "scope"/);
 });
 
 test("namespace scope control uses a direct option list instead of a nested select", () => {

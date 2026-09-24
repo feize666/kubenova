@@ -28,11 +28,29 @@ export type TopologyViewportFrame = {
   offsetY: number;
 };
 
-/** The canvas chrome overlays the graph, so the full surface remains available for centering. */
-export function getTopologyViewportFrame(width: number, height: number): TopologyViewportFrame {
+/**
+ * Height of the canvas chrome that floats over the top edge: the resource path
+ * bar and the breadcrumb rail. Framing must reserve it, otherwise fit-view
+ * parks the first rank underneath the overlay and the group label disappears
+ * behind the breadcrumbs.
+ */
+export const TOPOLOGY_CHROME_TOP = 56;
+
+/**
+ * Reserves the floating chrome so centered graphs cannot slide under it. The
+ * usable height shrinks by the chrome height while the offset pushes the graph
+ * down by the same amount, keeping equal padding above and below.
+ */
+export function getTopologyViewportFrame(
+  width: number,
+  height: number,
+  topChrome: number = TOPOLOGY_CHROME_TOP,
+): TopologyViewportFrame {
+  const safeHeight = Math.max(1, height);
+  const reserved = Math.min(Math.max(0, topChrome), Math.max(0, safeHeight - 1));
   return {
-    size: { width: Math.max(1, width), height: Math.max(1, height) },
-    offsetY: 0,
+    size: { width: Math.max(1, width), height: Math.max(1, safeHeight - reserved) },
+    offsetY: reserved,
   };
 }
 

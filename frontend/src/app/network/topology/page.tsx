@@ -14,7 +14,7 @@ import {
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Alert, Button, Descriptions, Drawer, Input, Segmented, Select, Space, Tag, Tooltip } from "antd";
+import { Alert, Button, Input, Segmented, Select, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { useAuth } from "@/components/auth-context";
@@ -55,7 +55,6 @@ import { getIncompleteTopologySources } from "@/modules/topology-kubejojo/covera
 const ALL_NAMESPACE = "__all__";
 const QUERY_STALE_MS = 30_000;
 const GLOBAL_EXPAND_LIMIT = 80;
-const SELECTED_RELATION_PREVIEW_LIMIT = 50;
 const SOURCE_KEYS: TopologyGraphSource[] = ["workloads", "network", "storage", "configuration"];
 
 const SOURCE_META: Record<
@@ -369,7 +368,11 @@ export default function NetworkTopologyPage() {
   // dimensions Headlamp exposes for a resource map.
   const [groupBy, setGroupBy] = useState<Exclude<KubejojoGroupBy, "namespace">>("instance");
   const [errorsOnly, setErrorsOnly] = useState(false);
-  const [expandAll, setExpandAll] = useState(false);
+  // A workload opened straight from the URL starts expanded, matching the
+  // picker entry. The toolbar toggle owns the state from then on.
+  const [expandAll, setExpandAll] = useState(
+    () => Boolean(searchParams.get("rootKind") && searchParams.get("rootName")),
+  );
   const [queryInput, setQueryInput] = useState("");
   const [queryText, setQueryText] = useState("");
   const [topologyRootId, setTopologyRootId] = useState<string | null>(null);
@@ -493,19 +496,11 @@ export default function NetworkTopologyPage() {
     () => graphQuery.data?.resources.find((resource) => resource.id === selectedResourceId) ?? null,
     [graphQuery.data?.resources, selectedResourceId],
   );
-  const selectedRelations = useMemo(
+  const selectedRelationCount = useMemo(
     () => (graphQuery.data?.relations ?? []).filter(
       (relation) => relation.source === selectedResourceId || relation.target === selectedResourceId,
-    ),
+    ).length,
     [graphQuery.data?.relations, selectedResourceId],
-  );
-  const visibleSelectedRelations = useMemo(
-    () => selectedRelations.slice(0, SELECTED_RELATION_PREVIEW_LIMIT),
-    [selectedRelations],
-  );
-  const resourcesById = useMemo(
-    () => new Map((graphQuery.data?.resources ?? []).map((resource) => [resource.id, resource])),
-    [graphQuery.data?.resources],
   );
   const sourceCounts = useMemo(
     () => Object.fromEntries(
@@ -556,7 +551,10 @@ export default function NetworkTopologyPage() {
   const rawResourceCount = filteredGraph.resources.length;
   const canExpandAll = graph.resources.length > 0 && graph.resources.length <= GLOBAL_EXPAND_LIMIT;
   const effectiveExpandAll = expandAll && canExpandAll;
-  const canvasExpandAll = effectiveExpandAll || Boolean(topologyRootId);
+  // Opening a workload root starts expanded, but the toolbar toggle owns the
+  // state afterwards. Forcing this true while a root was set made the
+  // 收起/展开 button relabel itself without changing the graph.
+  const canvasExpandAll = effectiveExpandAll;
   const filtersActive = Boolean(
     queryInput.trim() || errorsOnly || selectedSources.size < SOURCE_KEYS.length,
   );
@@ -572,6 +570,14 @@ export default function NetworkTopologyPage() {
 
   const selectTopologyResource = useCallback((selection: KubejojoTopologySelection | null) => {
     setTopologySelection(selection);
+  }, []);
+
+  // Switching the grouping dimension rewrites the whole canvas, but it must not
+  // throw away the workload the operator is inspecting. Only the canvas-local
+  // focus (opened group, selected node) is dropped.
+  const resetCanvasFocus = useCallback(() => {
+    setFocusedGroupId(null);
+    setTopologySelection(null);
   }, []);
 
   useEffect(() => {
@@ -822,7 +828,8 @@ export default function NetworkTopologyPage() {
               options={GROUP_OPTIONS}
               onChange={(value) => {
                 setGroupBy(value);
-                resetFocus();
+                resetCanvasFocus();
+                setFitVersion(String(Date.now()));
               }}
             />
           </div>
@@ -857,6 +864,46 @@ export default function NetworkTopologyPage() {
           description={`当前快照关联 ${graphQuery.data.coverage.warningRecords} 条活动告警。`}
         />
       ) : null}
+
+      <div
+        className="topology-selection-strip"
+        role="status"
+        aria-live="polite"
+        hidden={!selectedResource}
+      >
+        {selectedResource ? (
+          <>
+            <span className="topology-selection-strip__kind">
+              {KIND_LABEL[normalizeKind(selectedResource.kind)] ?? normalizeKind(selectedResource.kind)}
+            </span>
+            <button
+              type="button"
+              className="topology-selection-strip__name"
+              title="在资源管理页中筛选该资源"
+              onClick={() => navigateToResource(selectedResource)}
+            >
+              {selectedResource.name}
+            </button>
+            <span className="topology-selection-strip__meta">
+              {selectedResource.namespace ?? "集群级"} · {selectedResource.status} · {selectedRelationCount} 条关系
+            </span>
+            <span className="topology-selection-strip__actions">
+              <Button size="small" type="primary" onClick={() => setDetail(detailRequest(selectedResource))}>
+                详情
+              </Button>
+              <Button size="small" onClick={() => setYaml(yamlTarget(selectedResource))}>YAML</Button>
+              {isTopologyRootKind(normalizeKind(selectedResource.kind)) ? (
+                <Button size="small" onClick={() => openTopologyRoot(selectedResource)}>
+                  工作负载拓扑
+                </Button>
+              ) : null}
+              <Button size="small" type="text" onClick={() => selectTopologyResource(null)}>
+                关闭
+              </Button>
+            </span>
+          </>
+        ) : null}
+      </div>
 
       <div className="resource-map-workbench">
         <div className="resource-map-canvas">
@@ -948,96 +995,6 @@ export default function NetworkTopologyPage() {
           )}
         </div>
       </div>
-
-      <Drawer
-        title={selectedResource ? `${KIND_LABEL[normalizeKind(selectedResource.kind)] ?? normalizeKind(selectedResource.kind)} / ${selectedResource.name}` : "资源详情"}
-        placement="right"
-        size={440}
-        open={Boolean(selectedResource)}
-        onClose={() => selectTopologyResource(null)}
-        destroyOnClose
-        rootClassName="resource-map-detail-drawer"
-      >
-        {selectedResource ? (
-          <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            {topologySelection?.aggregation ? (
-              <Alert
-                type="info"
-                showIcon
-                title="当前选择为聚合节点"
-                description={(
-                  <div className="topology-aggregation-summary">
-                    <span>
-                      该节点代表 {topologySelection.aggregation.memberCount} 个资源，以下详情为代表资源
-                      <strong>{selectedResource.name}</strong>。
-                    </span>
-                    <div className="topology-aggregation-summary__kinds" aria-label="聚合成员构成">
-                      {Object.entries(topologySelection.aggregation.membersByKind)
-                        .sort(([left], [right]) => left.localeCompare(right, "en"))
-                        .map(([kind, count]) => <Tag key={kind}>{kind} {count}</Tag>)}
-                    </div>
-                  </div>
-                )}
-              />
-            ) : null}
-            <Descriptions column={1} size="small" bordered>
-              <Descriptions.Item label="状态">
-                <Tag color={resourceStatus(selectedResource) === "critical"
-                  ? "error"
-                  : resourceStatus(selectedResource) === "warning"
-                    ? "warning"
-                    : resourceStatus(selectedResource) === "healthy"
-                      ? "success"
-                      : "default"}>
-                  {selectedResource.status}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="集群">{selectedCluster?.name ?? selectedResource.clusterId}</Descriptions.Item>
-              <Descriptions.Item label="命名空间">{selectedResource.namespace ?? "集群级"}</Descriptions.Item>
-              <Descriptions.Item label="资源域">{SOURCE_META[selectedResource.source].label}</Descriptions.Item>
-              <Descriptions.Item label="数据时间">{formatTimestamp(selectedResource.observedAt)}</Descriptions.Item>
-              <Descriptions.Item label="摘要">{selectedResource.summary || "-"}</Descriptions.Item>
-            </Descriptions>
-
-            <div className="topology-detail-relations">
-              <strong>关联资源</strong>
-              {selectedRelations.length ? visibleSelectedRelations.map((relation) => {
-                const peerId = relation.source === selectedResource.id ? relation.target : relation.source;
-                const peer = resourcesById.get(peerId);
-                return (
-                  <button
-                    key={relation.id}
-                    type="button"
-                    onClick={() => {
-                      if (peer) navigateToResource(peer);
-                    }}
-                  >
-                    <span>{relation.label}</span>
-                    <strong>{peer ? `${KIND_LABEL[normalizeKind(peer.kind)] ?? normalizeKind(peer.kind)} / ${peer.name}` : peerId}</strong>
-                  </button>
-                );
-              }) : <span className="topology-detail-relations__empty">暂无关联资源</span>}
-              {selectedRelations.length > SELECTED_RELATION_PREVIEW_LIMIT ? (
-                <span className="topology-detail-relations__empty">
-                  另有 {selectedRelations.length - SELECTED_RELATION_PREVIEW_LIMIT} 条关系，请通过关联图逐级查看。
-                </span>
-              ) : null}
-            </div>
-
-            <Space wrap>
-              <Button type="primary" onClick={() => setDetail(detailRequest(selectedResource))}>
-                完整详情
-              </Button>
-              <Button onClick={() => setYaml(yamlTarget(selectedResource))}>YAML</Button>
-              {isTopologyRootKind(normalizeKind(selectedResource.kind)) ? (
-                <Button onClick={() => openTopologyRoot(selectedResource)}>
-                  查看工作负载拓扑
-                </Button>
-              ) : null}
-            </Space>
-          </Space>
-        ) : null}
-      </Drawer>
 
       <ResourceDetailDrawer
         open={Boolean(detail)}
