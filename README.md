@@ -1,174 +1,96 @@
 # KubeNova
 
-KubeNova 是一个面向 Kubernetes 多集群场景的 AI 运维管理平台。
+KubeNova 是一套面向 Kubernetes 的集群运维控制台。它把集群接入、资源管理、资源拓扑、可观测性、访问控制和 AI 运维助手收敛到一个 Web 界面，可直接在浏览器中完成日常巡检与操作。
 
-它把集群接入、工作负载、网络、存储、配置、监控、KubeNova 智能分析和实时操作集中到一个 Web 控制台中，适合在内网或自建 Ubuntu 主机上长期运行。
+当前版本：**v1.7**
 
-## 功能概览
+## 核心能力
 
-- 多集群接入与集群状态管理
-- 工作负载管理：Deployment、StatefulSet、DaemonSet、Job、CronJob、Pod
-- 网络资源管理：Service、Ingress、IngressRoute、NetworkPolicy、Gateway API
-- 存储与配置管理：PV、PVC、StorageClass、ConfigMap、Secret、ServiceAccount
-- 可观测性视图：集群健康、事件、告警、巡检、资源关系
-- KubeNova 智能运维中台：异常概览、事故队列、根因候选、推荐动作、审批和审计
-- 实时操作：日志、终端、端口转发、WebSocket 网关
-- AI 助手：兼容 OpenAI `chat/completions` 风格接口
+- **集群接入**：支持阿里云 ACK、腾讯云 TKE、华为云 CCE、AWS EKS、Google GKE、火山引擎 VKE 等主流托管 Kubernetes，上传 kubeconfig 后自动识别供应商与集群状态。
+- **资源管理**：覆盖工作负载（Pod、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job、CronJob、弹性伸缩）、网络（Service、Ingress、Endpoint、EndpointSlice、NetworkPolicy、Gateway API）、存储（PV、PVC、StorageClass）、配置（ConfigMap、Secret、ServiceAccount、LimitRange、ResourceQuota）与集群基础资源（Node、Namespace）。
+- **资源拓扑**：以工作负载为起点，按 `Deployment → ReplicaSet → Pod → Service → Endpoint / EndpointSlice → Ingress` 的访问链路呈现资源关系，支持多域切换、命名空间筛选与链路状态标记。
+- **资源详情**：点击任意资源名称以抽屉形式打开详情，包含概览、YAML、容器列表、关联 Pod 列表、事件与日志／终端入口，详情内的关联资源可继续跳转。
+- **可观测性中心**：Prometheus 监控、日志中心与观测配置，支持告警接入、通知渠道与自定义模板。
+- **访问控制**：用户管理、集群访问授权、细致到命名空间与资源类型的权限范围，支持 MFA 与 OIDC 对接。
+- **AI 助手**：支持 OpenAI、Azure OpenAI、Anthropic、Gemini、通义千问、火山引擎、DeepSeek、OpenAI 兼容接口与 Ollama，可在对话中查询集群状态并执行受控操作。
+- **更新管理**：内置版本检测，从 GitHub 读取最新版本并在通知中心与系统设置提示可用升级。
 
 ## 架构
 
 ```mermaid
 flowchart LR
-  U[浏览器] --> F[frontend]
-  F --> A[control-api]
-  F <--> G[runtime-gateway]
+  U[浏览器] -->|3000| F[frontend]
+  F -->|/api 反向代理| A[control-api :4000]
+  F <-->|/ws WebSocket| G[runtime-gateway :4100]
   A --> P[(PostgreSQL)]
   A --> R[(Redis)]
-  G --> K[(Kubernetes Cluster)]
+  G --> K[(Kubernetes 集群)]
+  A --> K
 ```
 
-| 模块 | 目录 | 说明 |
+| 模块 | 目录 | 技术栈 | 端口 |
+| --- | --- | --- | --- |
+| 前端控制台 | `frontend` | Next.js 16、React 19、Ant Design 6、TanStack Query | 3000 |
+| 控制面 API | `backend/control-api` | NestJS 11、Prisma 6、PostgreSQL、Redis | 4000 |
+| 实时网关 | `backend/runtime-gateway` | Go 1.25、client-go、WebSocket | 4100 |
+| 运维脚本 | `scripts`、`deploy` | Bash、systemd、Docker Compose、Kustomize | — |
+
+前端通过 Next.js 的 `rewrites` 把 `/api` 与 `/ws` 反代到后端，浏览器只需访问前端端口，无需感知后端地址。
+
+## 功能布局
+
+登录后首页为平台级导航，进入某个集群后切换到该集群的工作区导航。
+
+**平台首页**
+
+| 菜单 | 路径 | 说明 |
 | --- | --- | --- |
-| 前端控制台 | `frontend` | Next.js 16、React 19、Ant Design 6 |
-| 控制面 API | `backend/control-api` | NestJS、Prisma、PostgreSQL、Redis |
-| 实时网关 | `backend/runtime-gateway` | Go、WebSocket、Kubernetes client-go |
-| 部署脚本 | `scripts`、`deploy/systemd` | Ubuntu、systemd、二进制发布包 |
+| 概览 | `/` | 集群总览与关键指标 |
+| 集群 | `/clusters` | 集群列表，点击进入对应集群工作区 |
+| 访问控制 | `/authorization` | 用户管理、集群访问授权 |
+| 应用中心 | `/applications` | 应用与 Helm 能力 |
+| 系统设置 | `/settings` | 更新管理、AI 助手配置、备份与恢复 |
 
-## 快速部署
+**集群工作区**（`/clusters/{clusterId}/...`）
 
-当前 README 只保留 Ubuntu 二进制部署方式。目标主机建议使用 Ubuntu 22.04 或 24.04。统一脚本入口是 `bash scripts/service.sh`。
+| 分组 | 内容 |
+| --- | --- |
+| 集群信息 | 集群基本信息和指标 |
+| 资源拓扑 | 资源关系拓扑图 |
+| 基础资源 | Node、Namespace |
+| 工作负载 | Deployment、StatefulSet、DaemonSet、Pod、Job、CronJob、弹性伸缩 |
+| 网络 | Service、Ingress、Endpoint、EndpointSlice、NetworkPolicy、Gateway API |
+| 存储 | PersistentVolume、PersistentVolumeClaim、StorageClass |
+| 配置 | ConfigMap、Secret、ServiceAccount、LimitRange、ResourceQuota |
+| 可观测性中心 | Prometheus 监控、日志中心、观测配置 |
+| 运维能力 | 资源巡检、AI 助手 |
 
-### 1. 安装依赖
+## 快速开始（本地）
+
+### 先决条件
+
+- Node.js 20 或更高版本，且 `node`、`npm`、`npx` 来自同一目录
+- Go 1.25（仅在需要构建或运行 runtime-gateway 时）
+- PostgreSQL 14+ 与 Redis 6+
+
+macOS 本地安装依赖：
+
+```bash
+brew install postgresql@16 redis go
+brew services start postgresql@16
+brew services start redis
+```
+
+Ubuntu 本地安装依赖：
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y bash curl tar gzip psmisc postgresql postgresql-client redis-server redis-tools
-
+sudo apt-get install -y postgresql redis-server
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
-
-GO_VERSION=1.25.0
-curl -fsSLO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
-sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
-echo 'export PATH=/usr/local/go/bin:$PATH' | sudo tee /etc/profile.d/go.sh
-export PATH=/usr/local/go/bin:$PATH
-
-sudo systemctl enable --now postgresql redis-server
-node -v
-npm -v
-go version
-psql --version
-redis-cli --version
 ```
 
-Helm 是可选依赖。未安装 Helm 时服务仍可启动，但 Helm 应用和仓库管理能力不可用。需要该能力时再安装：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm version --short
-```
-
-### 2. 初始化数据库
-
-密码需要和后续 `DATABASE_URL` 保持一致。
-
-```bash
-sudo -u postgres psql <<'SQL'
-CREATE USER kubenova WITH PASSWORD 'change-me';
-CREATE DATABASE kubenova OWNER kubenova;
-SQL
-```
-
-### 3. 编译打包
-
-在项目根目录执行：
-
-```bash
-bash scripts/service.sh package release
-```
-
-输出：
-
-```text
-tmp/release/kubenova-ubuntu.tar.gz
-tmp/release/metadata.json
-```
-
-### 4. 安装发布包
-
-```bash
-sudo mkdir -p /opt/kubenova/current
-sudo tar -xzf tmp/release/kubenova-ubuntu.tar.gz \
-  -C /opt/kubenova/current \
-  --strip-components=1
-
-sudo mkdir -p /etc/kubenova
-sudo bash scripts/service.sh prod install
-```
-
-### 5. 配置环境
-
-编辑环境文件：
-
-```bash
-sudo vi /etc/kubenova/control-api.env
-sudo vi /etc/kubenova/runtime-gateway.env
-```
-
-至少确认这些值：
-
-```bash
-DATABASE_URL=postgresql://kubenova:change-me@127.0.0.1:5432/kubenova
-REDIS_URL=redis://127.0.0.1:6379/0
-JWT_SECRET=replace-with-long-random-jwt-secret
-RUNTIME_TOKEN_SECRET=replace-with-runtime-token-secret
-RUNTIME_GATEWAY_INTERNAL_SECRET=replace-with-internal-shared-secret
-DEFAULT_ADMIN_EMAIL=admin@local.dev
-DEFAULT_ADMIN_PASSWORD=change-me-now
-AI_MODEL_BASE_URL=https://api.openai.com/v1
-AI_MODEL_API_KEY=
-AI_MODEL_NAME=gpt-4o-mini
-```
-
-Helm 仓库管理依赖 control-api 运行环境里的 `helm` 命令。若需要自动导入宿主 `helm repo list`，可在 `/etc/kubenova/control-api.env` 配置：
-
-```bash
-KUBENOVA_HELM_REPOSITORY_CONFIGS=/root/.config/helm/repositories.yaml:/etc/kubenova/helm/repositories.yaml
-```
-
-### 6. 启动
-
-```bash
-sudo bash scripts/service.sh prod up
-```
-
-### 7. 验证访问
-
-```bash
-sudo bash scripts/service.sh prod status
-curl -fsS http://127.0.0.1:3000/ >/dev/null
-curl -fsS http://127.0.0.1:4000/api/capabilities >/dev/null
-curl -fsS http://127.0.0.1:4100/healthz
-```
-
-浏览器访问：
-
-```text
-http://<服务器IP>:3000
-```
-
-## 运维命令
-
-```bash
-sudo bash scripts/service.sh prod status
-sudo bash scripts/service.sh prod logs
-sudo bash scripts/service.sh prod restart
-sudo bash scripts/service.sh prod down
-sudo bash scripts/service.sh prod uninstall
-```
-
-## 本地开发
+### 启动
 
 ```bash
 bash scripts/service.sh install-deps
@@ -176,67 +98,188 @@ bash scripts/service.sh db-init
 bash scripts/service.sh dev up
 ```
 
-`dev up` 默认使用前端 stable 包启动，避免 Next dev/Turbopack 在新环境首次访问各模块时按需编译导致高内存和菜单切换卡顿。需要前端热更新开发时再显式执行：
+启动后访问 `http://127.0.0.1:3000`。
+
+首次启动会自动创建管理员账号，默认凭据：
+
+```text
+admin@local.dev / admin123456
+```
+
+生产环境务必在环境文件中修改 `DEFAULT_ADMIN_PASSWORD`。
+
+### 本地服务管理
+
+```bash
+bash scripts/service.sh dev status
+bash scripts/service.sh dev logs [frontend|control-api|runtime-gateway]
+bash scripts/service.sh dev restart [frontend|control-api|runtime-gateway|all]
+bash scripts/service.sh dev down [frontend|control-api|runtime-gateway|all]
+```
+
+`dev up` 默认以 stable 模式启动前端（预构建产物），避免 Next dev 首次访问各模块时按需编译造成的内存占用与菜单切换卡顿。需要热更新时：
 
 ```bash
 bash scripts/service.sh dev up --dev-frontend
 ```
 
-常用入口：
+## 部署
+
+三种交付方式，按环境选择：
+
+| 方式 | 适用场景 | 文档 |
+| --- | --- | --- |
+| 二进制 + systemd | 单台 Ubuntu 主机直装 | [deploy/docs/binary-systemd.md](deploy/docs/binary-systemd.md) |
+| Docker Compose | 容器化编排，含 PostgreSQL 与 Redis | [deploy/docs/docker-compose.md](deploy/docs/docker-compose.md) |
+| Kubernetes | 已有集群，用 Kustomize 部署 | [deploy/docs/k8s-kustomize.md](deploy/docs/k8s-kustomize.md) |
+
+### 二进制发布包（推荐）
 
 ```bash
-bash scripts/service.sh dev status
-bash scripts/service.sh dev logs
-bash scripts/service.sh dev down
+bash scripts/service.sh package release
+
+sudo mkdir -p /opt/kubenova/current
+sudo tar -xzf tmp/release/kubenova-ubuntu.tar.gz -C /opt/kubenova/current --strip-components=1
+
+sudo mkdir -p /etc/kubenova
+sudo bash scripts/service.sh prod install
+sudo vi /etc/kubenova/control-api.env
+sudo vi /etc/kubenova/runtime-gateway.env
+sudo bash scripts/service.sh prod up
 ```
 
-开发默认数据库是 PostgreSQL 里的 `k8s_aiops`，不会写入项目目录，也不会进入 Git。若需要导出测试库或临时备份，放到 `/case/temp/kubenova-db/` 或仓库 `tmp/` 下；仓库已忽略 `*.dump`、`*.sql`、`*.sqlite*`、`tmp/`、`data/`、`db/`。
-
-前端开发缓存可能快速变大，尤其 Next/Turbopack 的隐藏目录 `frontend/.next/dev/cache`。`du frontend/*` 不显示隐藏目录，可用下面命令查看和清理：
+生产环境至少确认这些配置：
 
 ```bash
-du -ah --max-depth=1 frontend | sort -h
-bash scripts/service.sh clean dev-cache
+DATABASE_URL=postgresql://kubenova:change-me@127.0.0.1:5432/k8s_aiops
+REDIS_URL=redis://127.0.0.1:6379
+JWT_SECRET=replace-with-long-random-secret
+RUNTIME_TOKEN_SECRET=replace-with-runtime-token-secret
+DEFAULT_ADMIN_EMAIL=admin@local.dev
+DEFAULT_ADMIN_PASSWORD=change-me-now
+AI_CREDENTIAL_ENCRYPTION_KEY=replace-with-32-char-random-secret
 ```
 
-脚本已精简为少量入口：
+`AI_CREDENTIAL_ENCRYPTION_KEY` 用于加密存储 AI 厂商密钥，生产环境必须设置且保持稳定，否则已保存的密钥将无法解密。
+
+### 生产服务管理
+
+```bash
+sudo bash scripts/service.sh prod status
+sudo bash scripts/service.sh prod logs
+sudo bash scripts/service.sh prod restart
+sudo bash scripts/service.sh prod switch <version>
+sudo bash scripts/service.sh prod rollback <version>
+```
+
+## 更新机制
+
+control-api 每 5 分钟读取一次 GitHub 仓库 `feize666/kubenova` 的最新版本，优先取 GitHub Releases，没有 Release 时回退到最新 tag。检测到新版本后会在通知中心和系统设置的更新管理页面提示。
+
+运行版本来自发布包元数据，可通过环境变量调整检查行为：
+
+```bash
+KUBENOVA_UPDATE_REPOSITORY=owner/repo
+UPDATE_CHECK_INTERVAL_MS=300000
+```
+
+升级与回滚流程见 [deploy/docs/upgrade-rollback.md](deploy/docs/upgrade-rollback.md)。
+
+## 项目结构
 
 ```text
-scripts/service.sh                 # 统一入口
-scripts/dev.sh                     # 开发服务生命周期，由 service.sh 调用
-scripts/prod.sh                    # 生产服务生命周期，由 service.sh 调用
-scripts/_service-lib.sh            # 进程、端口、健康检查共享库
-scripts/_dev-env.sh                # 开发环境默认值
-scripts/package-release.sh         # 发布包构建
-scripts/dev-supervise.sh           # 前端 dev 监护
-scripts/topology-verify.sh         # 拓扑静态校验
+kubenova/
+├── frontend/                     # Next.js 控制台
+│   └── src/
+│       ├── app/                  # 路由与页面
+│       ├── components/           # 通用组件、详情抽屉、拓扑渲染
+│       ├── config/navigation.ts  # 导航结构定义
+│       └── lib/                  # API 客户端与工具
+├── backend/
+│   ├── control-api/              # NestJS 控制面
+│   │   ├── prisma/               # 数据模型与迁移
+│   │   └── src/                  # 业务模块
+│   └── runtime-gateway/          # Go 实时网关
+├── scripts/                      # 统一运维脚本
+├── deploy/                       # systemd / Docker / K8s 部署资产
+├── docs/                         # 设计与实施文档
+└── k8s/                          # Kubernetes 清单
 ```
-
-依赖安装、数据库初始化、拓扑清理已合入 `service.sh`。旧的 `dev-up.sh`、`dev-down.sh`、`prod-up.sh`、`prod-switch.sh` 等重复入口已移除。使用 `service.sh` 子命令替代。
 
 ## 质量检查
 
 ```bash
-cd frontend && npm run lint -- --max-warnings=0
-cd frontend && npx tsc --noEmit --pretty false --incremental false
+cd frontend && npm run lint
+cd frontend && npx tsc --noEmit
 cd frontend && npm run build
 
 cd backend/control-api && npm test -- --runInBand --passWithNoTests
 cd backend/control-api && npm run build
 
 cd backend/runtime-gateway && go test ./...
-git diff --check
+
+bash scripts/service.sh test topology
+bash scripts/service.sh test release
 ```
 
-## 发布目录
+## 维护约定
 
-```text
-/opt/kubenova/current
-/etc/kubenova/control-api.env
-/etc/kubenova/runtime-gateway.env
+### README 与代码同步
+
+每次提交涉及功能、配置、接口、部署方式或目录结构变更时，必须在该次提交中一并更新本文件。
+
+仓库已内置校验，无需依赖人工记忆：
+
+```bash
+# 启用钩子（每个克隆只需执行一次）
+git config core.hooksPath .githooks
 ```
 
-## 文档
+启用后，`.githooks/pre-commit` 会调用 `scripts/readme-sync-check.sh` 检查暂存内容。若改动命中 `frontend/src`、`backend/`、`scripts/`、`deploy/`、`k8s/` 或构建配置，却没有同时修改 `README.md`，提交会被拒绝并列出具体文件。
 
-- [Ubuntu 部署与打包设计](docs/deployment-build-redesign.md)
-- [运行模式与日志规划](docs/runtime.md)
+确有不需要文档改动的场景（例如纯格式化），可显式跳过：
+
+```bash
+KUBENOVA_SKIP_README_CHECK=1 git commit -m "..."
+git commit --no-verify -m "..."
+```
+
+CI 或发布前可用提交区间复核：
+
+```bash
+bash scripts/service.sh test readme-sync
+bash scripts/service.sh test readme-sync --range v1.7..HEAD
+```
+
+### 其他约定
+
+- **临时产物**：测试截图、trace、临时 Markdown 等放到 `tmp/`，不要写入仓库根目录或业务源码目录。
+- **提交范围**：不提交与当前改动无关的文件，不提交 `.env.ai.local` 等本地密钥文件。
+
+## 文档索引
+
+| 文档 | 内容 |
+| --- | --- |
+| [docs/ops-console-usage.md](docs/ops-console-usage.md) | 运维控制台使用手册 |
+| [docs/runtime.md](docs/runtime.md) | 运行模式与日志规划 |
+| [docs/deployment-build-redesign.md](docs/deployment-build-redesign.md) | 构建与部署设计 |
+| [docs/ops-console-docker-compose.md](docs/ops-console-docker-compose.md) | Docker Compose 部署 |
+| [docs/ops-console-kubernetes-deployment.md](docs/ops-console-kubernetes-deployment.md) | Kubernetes 部署 |
+| [docs/ops-console-binary-deployment.md](docs/ops-console-binary-deployment.md) | 二进制部署 |
+| [deploy/docs/linux-quick-start.md](deploy/docs/linux-quick-start.md) | Linux 快速开始 |
+| [deploy/docs/upgrade-rollback.md](deploy/docs/upgrade-rollback.md) | 升级与回滚 |
+| [deploy/docs/backup-restore.md](deploy/docs/backup-restore.md) | 备份与恢复 |
+| [deploy/docs/keycloak-integration.md](deploy/docs/keycloak-integration.md) | Keycloak / OIDC 对接 |
+| [docs/kubenova-regression-matrix.md](docs/kubenova-regression-matrix.md) | 回归测试矩阵 |
+
+## 版本历史
+
+| 版本 | 主要内容 |
+| --- | --- |
+| v1.7 | 统一筛选控件、Headlamp 风格资源详情页、AI 助手与实时工作台 |
+| v1.6 | 企业控制台版本，统一 UI、OIDC 与细粒度授权 |
+| v1.5 | 可观测性与运行时工作台完善 |
+| v1.4 | 资源操作基线 |
+| v1.3 | 资源详情与拓扑能力增强 |
+| v1.2 | 品牌图标与界面一致性 |
+| v1.1 | 拓扑与运维能力刷新 |

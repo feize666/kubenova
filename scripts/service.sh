@@ -42,6 +42,7 @@ Commands:
   package release              Build and package Ubuntu binary release tarball
   test topology                Run topology verification
   test release                 Run production release contract checks
+  test readme-sync [--range R] Check code changes update README.md
   clean topology-artifacts     Clean topology artifacts
   clean dev-cache              Clean local frontend development build cache
   help                         Show this help
@@ -402,6 +403,7 @@ case "$cmd" in
     case "$sub" in
       topology) run_script topology-verify.sh "$@" ;;
       release) run_script release-check.sh "$@" ;;
+      readme-sync) run_script readme-sync-check.sh "$@" ;;
       help|-h|--help) usage ;;
       *) die "未知 test 命令: $sub" ;;
     esac

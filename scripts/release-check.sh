@@ -66,9 +66,13 @@ if rg -n --hidden --glob '!**/.git/**' --glob '!**/node_modules/**' --glob '!**/
   fi
 fi
 
-for script in scripts/package-release.sh scripts/prod.sh scripts/service.sh scripts/_service-lib.sh; do
+for script in scripts/package-release.sh scripts/prod.sh scripts/service.sh scripts/_service-lib.sh scripts/readme-sync-check.sh .githooks/pre-commit; do
   if bash -n "$ROOT_DIR/$script"; then pass "$script shell syntax"; else fail "$script shell syntax"; fi
 done
+
+require_file scripts/readme-sync-check.sh
+require_file .githooks/pre-commit
+require_pattern 'README documents the readme sync guard' 'readme-sync-check\.sh' README.md
 
 if [[ "$failures" -gt 0 ]]; then
   printf '[release-check] %d check(s) failed\n' "$failures" >&2

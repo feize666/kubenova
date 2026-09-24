@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# pre-commit — 强制代码与 README.md 同步
+# 如确需跳过: KUBENOVA_SKIP_README_CHECK=1 git commit ... 或 git commit --no-verify
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+if [[ -x "$ROOT_DIR/scripts/readme-sync-check.sh" ]] || [[ -f "$ROOT_DIR/scripts/readme-sync-check.sh" ]]; then
+  bash "$ROOT_DIR/scripts/readme-sync-check.sh"
+fi
