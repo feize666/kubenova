@@ -107,11 +107,18 @@ function EdgeRenderer({
       <BaseEdge
         id={id}
         path={path}
-        interactionWidth={24}
+        interactionWidth={0}
         // Relationship rails are intentionally undirected; direction is carried
         // by the relation label and status, not an arrowhead.
         className={`topology-kubejojo__edge-path is-${layer} is-${viewState} is-status-${status} is-domain-${edgeData?.relationDomain ?? "scope"}`}
         style={style}
+      />
+      <path
+        d={path}
+        className="topology-kubejojo__edge-hit-area"
+        fill="none"
+        stroke="transparent"
+        strokeWidth={24}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       />
