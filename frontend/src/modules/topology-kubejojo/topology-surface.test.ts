@@ -55,6 +55,12 @@ test("focused scenes use theme tokens and keep relationship paths visually smoot
   assert.match(topologyCss, /--tk-highlight/);
 });
 
+test("group containers stay visually lightweight while retaining their heading", () => {
+  assert.match(topologyCss, /\.topology-kubejojo__group\s*\{[\s\S]*?border:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/);
+  assert.match(topologyCss, /\.topology-kubejojo__group-label\s*\{[\s\S]*?min-height:\s*36px;[\s\S]*?box-shadow:/);
+  assert.match(topologyCss, /\.topology-kubejojo__group > \.topology-kubejojo__node-glance\s*\{\s*top:\s*42px/);
+});
+
 test("selected topology node collapses into a compact strip instead of a wide drawer", () => {
   // A single selected node only needs one row; details still open in the shared
   // resource drawer, so the canvas keeps its full width.

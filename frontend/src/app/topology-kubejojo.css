@@ -1559,3 +1559,36 @@
   stroke-width: 2.25px;
   filter: drop-shadow(0 0 4px color-mix(in srgb, var(--tk-primary) 28%, transparent));
 }
+
+/* Groups provide context for their children; the children remain the visual
+ * surfaces. Keep only a compact heading so scope/component bounds do not
+ * compete with resource cards or relationship paths. */
+.topology-kubejojo__group {
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.topology-kubejojo__group.is-scope,
+.topology-kubejojo__group.is-component,
+.topology-kubejojo__group.is-isolated {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.topology-kubejojo__group.is-focused,
+.topology-kubejojo__group.is-selected {
+  border: 0;
+  box-shadow: none;
+}
+.topology-kubejojo__group-label {
+  min-height: 36px;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--tk-surface) 88%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--tk-primary) 16%, transparent);
+  padding: 4px 8px;
+}
+.topology-kubejojo__group > .topology-kubejojo__node-glance { top: 42px; left: 8px; }
