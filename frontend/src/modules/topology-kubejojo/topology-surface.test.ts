@@ -33,7 +33,7 @@ test("topology layout keeps the Headlamp-style horizontal spine", () => {
   assert.match(layoutSource, /return -getKubejojoWeight\(node\)/);
   assert.match(layoutSource, /"elk\.algorithm": "layered"/);
   assert.match(layoutSource, /"partitioning\.activate": "true"/);
-  assert.match(layoutSource, /"elk\.direction": "UNDEFINED"/);
+  assert.match(layoutSource, /"elk\.direction": "RIGHT"/);
   // Cross-container dependencies are projected onto the owning child instead of
   // asking ELK to lay out a nested hierarchy, which would overlap the columns.
   assert.match(layoutSource, /export function containerRelations\(node: KubejojoGraphNode\): ContainerRelation\[\]/);

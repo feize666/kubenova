@@ -9,7 +9,7 @@ import { applyTopologyCapacity, projectTopologyNeighborhood, TOPOLOGY_CAPACITY_L
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
 import { getKubejojoRelationSemantics, makeKubejojoRelationId, makeKubejojoStableId } from "./relations.ts";
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
-import { clearKubejojoLayoutCache, collapseKubejojoGraph, getKubejojoAccessPathOrder, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, getKubejojoWeight, groupKubejojoGraph, isTopologyRootKind, KUBEJOJO_COLLAPSE_THRESHOLD, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, projectTopologyDisplayMode, projectTopologyRoot, resolveTopologyRoot, containerRelations, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
+import { clearKubejojoLayoutCache, collapseKubejojoGraph, containerLayoutOptions, getKubejojoAccessPathOrder, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, getKubejojoWeight, groupKubejojoGraph, isTopologyRootKind, KUBEJOJO_COLLAPSE_THRESHOLD, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, projectTopologyDisplayMode, projectTopologyRoot, resolveTopologyRoot, containerRelations, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
 
 test("only workload resources can start a topology scene", () => {
   assert.equal(isTopologyRootKind("Deployment"), true);
@@ -470,6 +470,17 @@ test("layout policy uses ELK layered for connected graphs and rect packing other
     direction: "UNDEFINED",
     aspectRatio: 1.6,
   });
+});
+
+test("connected containers pin ELK to a deterministic left-to-right spine", () => {
+  const layered = containerLayoutOptions(true);
+  assert.equal(layered["elk.algorithm"], "layered");
+  assert.equal(layered["elk.direction"], "RIGHT");
+  assert.equal(layered["partitioning.activate"], "true");
+
+  const packed = containerLayoutOptions(false);
+  assert.equal(packed["elk.algorithm"], "rectpacking");
+  assert.equal(packed["elk.direction"], undefined);
 });
 
 test("ELK partitions are the negated Headlamp weights", () => {

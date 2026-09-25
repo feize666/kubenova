@@ -142,8 +142,9 @@ export function containerLayoutOptions(hasEdges: boolean): Record<string, string
   }
   return {
     "partitioning.activate": "true",
-    // ELK chooses the direction; the partition order is what pins the columns.
-    "elk.direction": "UNDEFINED",
+    // Keep the operator-facing access path horizontal. Partitions still decide
+    // the columns; RIGHT makes that contract deterministic across ELK versions.
+    "elk.direction": "RIGHT",
     "elk.edgeRouting": "SPLINES",
     "elk.algorithm": "layered",
     "elk.nodeSize.minimum": `(${NODE_WIDTH}.0,${NODE_HEIGHT}.0)`,
