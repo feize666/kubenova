@@ -611,7 +611,11 @@
   visibility: visible;
   opacity: 1;
   transform: translateY(0);
-  transition-delay: 400ms;
+  transition-delay: 450ms;
+}
+[data-theme="dark"] .topology-kubejojo__node:hover .topology-kubejojo__node-card {
+  border-color: var(--tk-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tk-primary) 20%, transparent), 0 6px 14px rgba(0, 0, 0, 0.28);
 }
 .topology-kubejojo__node-glance-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .topology-kubejojo__node-glance-title strong { font-size: 12px; line-height: 18px; }

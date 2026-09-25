@@ -1,7 +1,7 @@
 "use client";
 
 import { BaseEdge, EdgeLabelRenderer, type Edge, type EdgeProps } from "@xyflow/react";
-import { memo } from "react";
+import { memo, useState } from "react";
 
 import type {
   TopologyNodeStatus,
@@ -86,8 +86,8 @@ function edgeStyle(
 function EdgeRenderer({
   id,
   data,
-  markerEnd,
 }: EdgeProps<Edge<TopologyRendererEdgeData>>) {
+  const [hovered, setHovered] = useState(false);
   const edgeData = data;
   const sections = edgeData?.sections ?? [];
   if (!sections.length) return null;
@@ -99,18 +99,21 @@ function EdgeRenderer({
   const status = edgeData?.status ?? "unknown";
   const style = edgeStyle(viewState, edgeData?.stroke, edgeData?.dashed, edgeData?.confidence, layer, status);
   const labelPosition = edgeData?.labelPosition ?? relationshipPathMidpoint(sections, offset);
-  const showLabel = Boolean(edgeData?.label && (edgeData.labelVisible || edgeData.viewState === "focused"));
+  // Labels are a detail affordance, not a second graph layer: keep the canvas
+  // quiet until the rail is focused or hovered.
+  const showLabel = Boolean(edgeData?.label && (hovered || edgeData.viewState === "focused"));
   return (
     <>
       <BaseEdge
         id={id}
         path={path}
         interactionWidth={24}
-        // The layout attaches Headlamp's closed arrowhead to every rail, so the
-        // arrow always points along the access path.
-        markerEnd={markerEnd}
+        // Relationship rails are intentionally undirected; direction is carried
+        // by the relation label and status, not an arrowhead.
         className={`topology-kubejojo__edge-path is-${layer} is-${viewState} is-status-${status} is-domain-${edgeData?.relationDomain ?? "scope"}`}
         style={style}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       />
       {showLabel ? (
         <EdgeLabelRenderer>
