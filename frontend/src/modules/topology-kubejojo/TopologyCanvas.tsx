@@ -400,7 +400,7 @@ function Canvas({
             </button>
           </div>
         ) : null}
-        <div className="topology-kubejojo__zoom" role="group" aria-label="视图缩放">
+        <div className="topology-kubejojo__zoom topology-kubejojo__controls" role="toolbar" aria-label="拓扑视图工具栏">
           <button type="button" aria-label="缩小" onClick={() => { setViewMode("custom"); void flow.zoomOut({ duration: 180 }); }}>
             <ZoomOutOutlined />
           </button>

@@ -203,6 +203,19 @@
   backdrop-filter: blur(8px);
 }
 
+/* Headlamp-style control rail: compact, keyboard reachable, and visually
+ * subordinate to the graph. Keep it isolated from the navigation strip so
+ * opening a resource detail never changes the viewport controls. */
+.topology-kubejojo__controls {
+  gap: 2px;
+  padding: 3px;
+}
+.topology-kubejojo__controls button:focus-visible,
+.topology-kubejojo__focus button:focus-visible {
+  outline: 2px solid var(--tk-focus);
+  outline-offset: -2px;
+}
+
 .topology-kubejojo__capacity,
 .topology-kubejojo__layout-error {
   position: absolute;

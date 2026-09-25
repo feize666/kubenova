@@ -743,6 +743,7 @@ export default function NetworkTopologyPage() {
 
       <div
         className="resource-map-toolbar resource-filter-toolbar topology-control-toolbar"
+        role="toolbar"
         aria-label="拓扑控制栏"
         aria-busy={loading}
       >
