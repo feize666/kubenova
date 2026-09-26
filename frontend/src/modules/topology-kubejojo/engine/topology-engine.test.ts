@@ -9,7 +9,25 @@ import { applyTopologyCapacity, projectTopologyNeighborhood, TOPOLOGY_CAPACITY_L
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
 import { getKubejojoRelationSemantics, makeKubejojoRelationId, makeKubejojoStableId } from "./relations.ts";
 // @ts-expect-error TypeScript source extensions are only used by the Node test command.
-import { clearKubejojoLayoutCache, collapseKubejojoGraph, containerLayoutOptions, getKubejojoAccessPathOrder, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, getKubejojoWeight, groupKubejojoGraph, isTopologyRootKind, KUBEJOJO_COLLAPSE_THRESHOLD, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, projectTopologyDisplayMode, projectTopologyRoot, resolveTopologyRoot, containerRelations, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
+import { clearKubejojoLayoutCache, collapseKubejojoGraph, containerLayoutOptions, getKubejojoAccessPathOrder, getKubejojoLayoutPolicy, getKubejojoPartition, getKubejojoSelectionPath, getKubejojoWeight, groupKubejojoGraph, isTopologyRootKind, KUBEJOJO_COLLAPSE_THRESHOLD, KUBEJOJO_LAYOUT_METRICS, layoutKubejojoGraph, partitionKubejojoRelations, projectTopologyDisplayMode, projectTopologyRoot, resolveTopologyRoot, containerRelations, filterTopologyGraph, parseTopologyUrlState, serializeTopologyUrlState, type KubejojoGraphNode, type KubejojoRelation, type KubejojoResource } from "./index.ts";
+
+test("domain filtering removes dangling edges and restores them", () => {
+  const resources = [
+    { id: "pod", kind: "Pod", source: "workloads" },
+    { id: "svc", kind: "Service", source: "network" },
+  ];
+  const relations = [{ id: "r", source: "pod", target: "svc", type: "ROUTES_TO" as const }];
+  const hidden = filterTopologyGraph(resources, relations, new Set(["workloads"]));
+  assert.deepEqual(hidden.resources.map((r) => r.id), ["pod"]);
+  assert.equal(hidden.relations.length, 0);
+  const restored = filterTopologyGraph(resources, relations, new Set(["workloads", "network"]));
+  assert.equal(restored.relations.length, 1);
+});
+
+test("topology URL state round-trips namespace, domains, search and groupBy", () => {
+  const state = parseTopologyUrlState("?namespace=prod&domains=workloads,network&search=api%20v1&groupBy=node");
+  assert.deepEqual(serializeTopologyUrlState(state), "namespace=prod&domains=workloads%2Cnetwork&search=api+v1&groupBy=node");
+});
 
 test("only workload resources can start a topology scene", () => {
   assert.equal(isTopologyRootKind("Deployment"), true);
@@ -615,6 +633,60 @@ test("workload access paths stay ordered and stable across input order", async (
   assert.equal(ownershipEdge?.data?.label, "拥有");
   assert.ok(ownershipEdge?.data?.labelPosition, "ELK must provide a collision-aware label position");
   assert.deepEqual(reversed, forward, "API result order must not change the rendered layout");
+});
+
+test("focused access path keeps singleton stages on one horizontal reading line", async () => {
+  const kinds = ["Deployment", "ReplicaSet", "Pod", "Pod", "Service", "EndpointSlice", "Ingress"];
+  const ids = ["deploy", "rs", "pod-a", "pod-b", "svc", "slice", "ingress"];
+  const edges: KubejojoRelation[] = [
+    { id: "d-r", source: "deploy", target: "rs", type: "OWNS" },
+    { id: "r-a", source: "rs", target: "pod-a", type: "OWNS" },
+    { id: "r-b", source: "rs", target: "pod-b", type: "OWNS" },
+    { id: "s-a", source: "svc", target: "pod-a", type: "SELECTS" },
+    { id: "s-b", source: "svc", target: "pod-b", type: "SELECTS" },
+    { id: "s-e", source: "svc", target: "slice", type: "PUBLISHES" },
+    { id: "e-a", source: "slice", target: "pod-a", type: "RESOLVES" },
+    { id: "e-b", source: "slice", target: "pod-b", type: "RESOLVES" },
+    { id: "i-s", source: "ingress", target: "svc", type: "ROUTES_TO" },
+  ];
+  const graph: KubejojoGraphNode = {
+    id: "root",
+    nodes: ids.map((id, index) => ({ id, resource: { id, kind: kinds[index], name: id } })),
+    edges,
+  };
+  const layout = await layoutKubejojoGraph(graph, 1.6);
+  const byId = new Map(layout.nodes.map((node) => [node.id, node]));
+  const center = (id: string) => byId.get(id)!.position.y + (byId.get(id)!.style!.height as number) / 2;
+  for (const id of ["deploy", "rs", "svc", "slice", "ingress"]) {
+    assert.ok(Math.abs(center(id) - center("svc")) <= 1, `${id} should share the access-path centerline`);
+  }
+  assert.ok(byId.get("pod-a")!.position.x < byId.get("svc")!.position.x);
+  assert.ok(byId.get("svc")!.position.x < byId.get("slice")!.position.x);
+  assert.ok(byId.get("slice")!.position.x < byId.get("ingress")!.position.x);
+  const ingressRoute = layout.edges.find((edge) => edge.id === "i-s")!;
+  assert.equal(ingressRoute.source, "svc", "Ingress still routes to Service in Kubernetes");
+  const slice = byId.get("slice")!;
+  const bypass = ingressRoute.data?.sections ?? [];
+  assert.equal(bypass.length, 3, "Service-to-Ingress route has a separate rail around EndpointSlice");
+  assert.ok(bypass[1].startPoint.x < slice.position.x && bypass[1].endPoint.x > slice.position.x + (slice.style!.width as number));
+  assert.ok(bypass[1].startPoint.y < slice.position.y || bypass[1].startPoint.y > slice.position.y + (slice.style!.height as number));
+  const upperPod = ["pod-a", "pod-b"].map((id) => byId.get(id)!).sort((a, b) => a.position.y - b.position.y)[0];
+  const upperPodRoute = layout.edges.find((edge) => edge.id === (upperPod.id === "pod-a" ? "e-a" : "e-b"))!;
+  const routeY = upperPodRoute.data?.sections?.[1]?.startPoint.y ?? Number.NaN;
+  assert.ok(routeY >= center(upperPod.id) && routeY <= center("slice"),
+    "upper Pod-to-EndpointSlice route stays within its natural vertical band");
+  assert.equal(layout.edges.length, edges.length);
+  for (const edge of layout.edges) {
+    const sections = edge.data?.sections ?? [];
+    assert.ok(sections.length, `${edge.id} keeps its route`);
+    const first = sections[0].startPoint;
+    const last = sections.at(-1)!.endPoint;
+    for (const [id, point] of [[edge.source, first], [edge.target, last]] as const) {
+      const node = byId.get(id)!;
+      assert.ok(point.y >= node.position.y - 1 && point.y <= node.position.y + (node.style!.height as number) + 1,
+        `${edge.id} remains attached to ${id}`);
+    }
+  }
 });
 
 test("storage and configuration dependencies continue after workload controllers", async () => {

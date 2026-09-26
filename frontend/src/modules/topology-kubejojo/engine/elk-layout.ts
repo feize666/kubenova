@@ -1,4 +1,4 @@
-import { MarkerType, type Edge, type Node } from "@xyflow/react";
+import { type Edge, type Node } from "@xyflow/react";
 
 import type {
   TopologyElkPoint,
@@ -49,9 +49,6 @@ export type KubejojoLayout = {
 
 const NODE_WIDTH = KUBEJOJO_LAYOUT_METRICS.nodeWidth;
 const NODE_HEIGHT = KUBEJOJO_LAYOUT_METRICS.nodeHeight;
-
-/** Closed arrowhead shared by every relationship rail. */
-const ARROW_MARKER = { type: MarkerType.ArrowClosed, width: 12, height: 12 } as const;
 
 /**
  * Headlamp derives the layout partition from the node weight and negates it,
@@ -137,23 +134,21 @@ export function containerLayoutOptions(hasEdges: boolean): Record<string, string
       "elk.rectpacking.packing.compaction.rowHeightReevaluation": "true",
       "elk.edgeRouting": "SPLINES",
       "elk.spacing.nodeNode": String(KUBEJOJO_LAYOUT_METRICS.packedNodeSpacing),
-      "elk.padding": `[left=${KUBEJOJO_LAYOUT_METRICS.packedPaddingSide}, top=${KUBEJOJO_LAYOUT_METRICS.packedPaddingTop}, right=${KUBEJOJO_LAYOUT_METRICS.packedPaddingSide}, bottom=${KUBEJOJO_LAYOUT_METRICS.packedPaddingSide}]`,
+      "elk.padding": `[left=${KUBEJOJO_LAYOUT_METRICS.packedPaddingSide}, top=12, right=${KUBEJOJO_LAYOUT_METRICS.packedPaddingSide}, bottom=12]`,
     };
   }
   return {
     "partitioning.activate": "true",
     // Keep the operator-facing access path horizontal. Partitions still decide
     // the columns; RIGHT makes that contract deterministic across ELK versions.
-    "elk.direction": "RIGHT",
+    "elk.direction": "UNDEFINED",
     "elk.edgeRouting": "SPLINES",
     "elk.algorithm": "layered",
-    "elk.nodeSize.minimum": `(${NODE_WIDTH}.0,${NODE_HEIGHT}.0)`,
+    "elk.nodeSize.minimum": "(220.0,70.0)",
     "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
-    "elk.spacing.nodeNode": String(KUBEJOJO_LAYOUT_METRICS.layeredNodeSpacing),
-    "elk.layered.spacing.nodeNodeBetweenLayers": String(KUBEJOJO_LAYOUT_METRICS.layeredLayerSpacing),
-    "org.eclipse.elk.stress.desiredEdgeLength": "250",
-    "org.eclipse.elk.stress.epsilon": "0.1",
-    "elk.padding": `[left=${KUBEJOJO_LAYOUT_METRICS.groupPadding}, top=${KUBEJOJO_LAYOUT_METRICS.groupPadding}, right=${KUBEJOJO_LAYOUT_METRICS.groupPadding}, bottom=${KUBEJOJO_LAYOUT_METRICS.groupPadding}]`,
+    "elk.spacing.nodeNode": "60",
+    "elk.layered.spacing.nodeNodeBetweenLayers": "60",
+    "elk.padding": "[left=16, top=16, right=16, bottom=16]",
   };
 }
 
@@ -206,6 +201,85 @@ export function toElkGraph(node: KubejojoGraphNode): ElkGraph {
   };
 }
 
+/** Center each resource rank on the same rail after ELK has separated fan-out. */
+function alignFlatAccessPath(root: KubejojoGraphNode, layout: ElkGraph): void {
+  if ((root.nodes ?? []).some(isContainer) || !layout.edges?.length || !layout.children?.length) return;
+  const columns = new Map<number, ElkGraph[]>();
+  layout.children.forEach((child) => {
+    const column = columns.get(child.x ?? 0) ?? [];
+    column.push(child);
+    columns.set(child.x ?? 0, column);
+  });
+  if (columns.size < 2) return;
+
+  const center = (column: ElkGraph[]) => {
+    const top = Math.min(...column.map((child) => child.y ?? 0));
+    const bottom = Math.max(...column.map((child) => (child.y ?? 0) + (child.height ?? NODE_HEIGHT)));
+    return (top + bottom) / 2;
+  };
+  const rail = Math.max(...[...columns.values()].map(center));
+  const shifts = new Map<string, number>();
+  columns.forEach((column) => {
+    const shift = rail - center(column);
+    column.forEach((child) => {
+      child.y = (child.y ?? 0) + shift;
+      shifts.set(child.id, shift);
+    });
+  });
+
+  layout.edges?.forEach((edge) => {
+    const sourceShift = shifts.get(edge.sources[0]) ?? 0;
+    const targetShift = shifts.get(edge.targets[0]) ?? 0;
+    edge.sections?.forEach((section) => {
+      const startX = section.startPoint.x;
+      const distance = section.endPoint.x - startX;
+      const shiftAt = (x: number) => distance === 0
+        ? (sourceShift + targetShift) / 2
+        : sourceShift + (targetShift - sourceShift) * Math.max(0, Math.min(1, (x - startX) / distance));
+      section.startPoint.y += sourceShift;
+      section.endPoint.y += targetShift;
+      section.bendPoints?.forEach((point) => { point.y += shiftAt(point.x); });
+    });
+
+    const source = layout.children?.find((child) => child.id === edge.sources[0]);
+    const target = layout.children?.find((child) => child.id === edge.targets[0]);
+    if (!source || !target || (source.x ?? 0) >= (target.x ?? 0)) return;
+    const startX = (source.x ?? 0) + (source.width ?? NODE_WIDTH);
+    const endX = target.x ?? 0;
+    const intervening = layout.children!.filter((child) =>
+      child.id !== source.id && child.id !== target.id
+      && (child.x ?? 0) > (source.x ?? 0)
+      && (child.x ?? 0) < endX,
+    );
+    if (!intervening.length) return;
+    const startY = (source.y ?? 0) + (source.height ?? NODE_HEIGHT) / 2;
+    const endY = (target.y ?? 0) + (target.height ?? NODE_HEIGHT) / 2;
+    const collision = intervening.filter((child) => {
+      const left = child.x ?? 0;
+      const right = left + (child.width ?? NODE_WIDTH);
+      const projected = (x: number) => startY + (endY - startY) * (x - startX) / (endX - startX);
+      const low = Math.min(projected(left), projected(right));
+      const high = Math.max(projected(left), projected(right));
+      const top = child.y ?? 0;
+      return high >= top - 8 && low <= top + (child.height ?? NODE_HEIGHT) + 8;
+    });
+    if (!collision.length) return;
+    const top = Math.min(...collision.map((child) => child.y ?? 0));
+    const bottom = Math.max(...collision.map((child) => (child.y ?? 0) + (child.height ?? NODE_HEIGHT)));
+    const upper = top - 24;
+    const lower = bottom + 24;
+    const detourY = Math.abs((startY + endY) / 2 - upper) <= Math.abs((startY + endY) / 2 - lower) ? upper : lower;
+    const enterX = (startX + Math.min(...collision.map((child) => child.x ?? 0))) / 2;
+    const exitX = (endX + Math.max(...collision.map((child) => (child.x ?? 0) + (child.width ?? NODE_WIDTH)))) / 2;
+    edge.sections = [
+      { startPoint: { x: startX, y: startY }, endPoint: { x: enterX, y: detourY } },
+      { startPoint: { x: enterX, y: detourY }, endPoint: { x: exitX, y: detourY } },
+      { startPoint: { x: exitX, y: detourY }, endPoint: { x: endX, y: endY } },
+    ];
+  });
+  layout.height = Math.max(layout.height ?? 0, ...layout.children.map((child) => (child.y ?? 0) + (child.height ?? NODE_HEIGHT) + 16));
+}
+
 function offsetPoint(point: TopologyElkPoint, offset: TopologyElkPoint): TopologyElkPoint {
   return { x: point.x + offset.x, y: point.y + offset.y };
 }
@@ -254,10 +328,6 @@ function relationEdge(
     source: endpoints.source,
     target: endpoints.target,
     type: "topologyEdge",
-    // Every rail carries Headlamp's closed arrowhead. React Flow turns this
-    // object into a `url(#...)` marker definition, so the arrow inherits the
-    // themed stroke instead of hard-coding a colour.
-    markerEnd: ARROW_MARKER,
     data: {
       sections,
       // Sections are already in canvas coordinates; the renderer must not add
@@ -351,6 +421,7 @@ function emit(
 
 /** Converts an ELK layout result into renderer-ready nodes and edges. */
 export function toKubejojoLayout(root: KubejojoGraphNode, laidOut: ElkGraph): KubejojoLayout {
+  alignFlatAccessPath(root, laidOut);
   const nodes: Node<TopologyRendererNodeData>[] = [];
   const edges: Edge<TopologyRendererEdgeData>[] = [];
   const weightById = new Map<string, number>();

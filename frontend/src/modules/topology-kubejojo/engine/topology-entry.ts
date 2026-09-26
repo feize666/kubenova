@@ -1,5 +1,42 @@
 import { applyTopologyCapacity, type CapacityRelation, type CapacityResource, type TopologyCapacityProjection } from "./capacity";
 
+export type ResourceDomain = "workloads" | "storage" | "cluster" | "network" | "security" | "configuration" | "custom";
+export const RESOURCE_DOMAINS: readonly ResourceDomain[] = ["workloads", "storage", "cluster", "network", "security", "configuration", "custom"];
+const DOMAIN_BY_SOURCE: Record<string, ResourceDomain> = { workloads: "workloads", storage: "storage", cluster: "cluster", network: "network", security: "security", configuration: "configuration" };
+export function classifyResourceDomain(resource: { source?: string | null; kind?: string | null }): ResourceDomain {
+  return DOMAIN_BY_SOURCE[resource.source ?? ""] ?? (resource.kind === "Namespace" || resource.kind === "Node" ? "cluster" : "custom");
+}
+
+export function filterTopologyGraph<
+  T extends { id: string; source?: string | null; kind?: string | null },
+  R extends { source: string; target: string },
+>(resources: readonly T[], relations: readonly R[], domains: ReadonlySet<ResourceDomain>) {
+  const visible = resources.filter((resource) => domains.has(classifyResourceDomain(resource)));
+  const ids = new Set(visible.map((resource) => resource.id));
+  return { resources: visible, relations: relations.filter((relation) => ids.has(relation.source) && ids.has(relation.target)) };
+}
+
+export type TopologyUrlState = { namespace?: string; domains: ResourceDomain[]; search?: string; groupBy: "namespace" | "instance" | "node" };
+export function parseTopologyUrlState(input: string | URLSearchParams): TopologyUrlState {
+  const params = typeof input === "string" ? new URLSearchParams(input.startsWith("?") ? input.slice(1) : input) : input;
+  const domains = (params.get("domains") ?? "").split(",").filter((domain): domain is ResourceDomain => (RESOURCE_DOMAINS as readonly string[]).includes(domain));
+  const groupBy = params.get("groupBy");
+  return {
+    namespace: params.get("namespace") || undefined,
+    domains: domains.length ? domains : [...RESOURCE_DOMAINS],
+    search: params.get("search") || undefined,
+    groupBy: groupBy === "instance" || groupBy === "node" ? groupBy : "namespace",
+  };
+}
+export function serializeTopologyUrlState(state: TopologyUrlState): string {
+  const params = new URLSearchParams();
+  if (state.namespace) params.set("namespace", state.namespace);
+  if (state.domains.length && state.domains.length < RESOURCE_DOMAINS.length) params.set("domains", state.domains.join(","));
+  if (state.search) params.set("search", state.search);
+  if (state.groupBy !== "namespace") params.set("groupBy", state.groupBy);
+  return params.toString();
+}
+
 /** Resources that can start an operator-facing topology scene. */
 export const TOPOLOGY_ROOT_KINDS = Object.freeze([
   "Deployment",
