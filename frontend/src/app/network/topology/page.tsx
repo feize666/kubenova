@@ -15,12 +15,11 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Alert, Button, Input, Segmented, Select, Tooltip } from "antd";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useAuth } from "@/components/auth-context";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { NamespaceFilterSelect } from "@/components/namespace-select";
-import { TopologySourceFilter } from "@/components/topology-source-filter";
 import { OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState } from "@/components/ops";
 import { ResourceDetailDrawer, type ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -67,7 +66,8 @@ const SOURCE_META: Record<
   configuration: { label: "配置", lightColor: "#9a6700", darkColor: "#f5c451", icon: <FileTextOutlined /> },
 };
 
-const GROUP_OPTIONS: Array<{ value: Exclude<KubejojoGroupBy, "namespace">; label: string }> = [
+const GROUP_OPTIONS: Array<{ value: KubejojoGroupBy; label: string }> = [
+  { value: "namespace", label: "命名空间" },
   { value: "instance", label: "实例" },
   { value: "node", label: "节点" },
 ];
@@ -366,7 +366,7 @@ export default function NetworkTopologyPage() {
   );
   // Namespace is a request scope only; visual grouping is limited to the two
   // dimensions Headlamp exposes for a resource map.
-  const [groupBy, setGroupBy] = useState<Exclude<KubejojoGroupBy, "namespace">>("instance");
+  const [groupBy, setGroupBy] = useState<KubejojoGroupBy>("namespace");
   const [errorsOnly, setErrorsOnly] = useState(false);
   // A workload opened straight from the URL starts expanded, matching the
   // picker entry. The toolbar toggle owns the state from then on.
@@ -383,6 +383,17 @@ export default function NetworkTopologyPage() {
   const [yaml, setYaml] = useState<YamlTarget | null>(null);
   const [fitVersion, setFitVersion] = useState("initial");
   const [topologyDisplayMode, setTopologyDisplayMode] = useState<"core" | "full">("core");
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
+  const sourceMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!sourceMenuOpen) return;
+    const close = (event: MouseEvent) => {
+      if (!sourceMenuRef.current?.contains(event.target as Node)) setSourceMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [sourceMenuOpen]);
 
   const clusterQuery = useQuery({
     queryKey: ["topology-v2", "clusters", token],
@@ -489,20 +500,14 @@ export default function NetworkTopologyPage() {
     [filteredGraph.resources],
   );
   const graph = useMemo<FilteredGraph>(() => {
-    if (!topologyRoot) return { resources: [], relations: [] };
-    const projected = projectTopologyRoot(
+    return filterGraph(
       scopeGraph.resources,
       scopeGraph.relations,
-      topologyRoot.id,
-    );
-    return filterGraph(
-      projected.resources,
-      projected.relations,
-      selectedSources,
+      new Set(SOURCE_KEYS),
       queryText,
       errorsOnly,
     );
-  }, [errorsOnly, queryText, scopeGraph, selectedSources, topologyRoot]);
+  }, [errorsOnly, queryText, scopeGraph]);
   const canvasResources = useMemo(
     () => graph.resources.map(toCanvasResource),
     [graph.resources],
@@ -547,11 +552,21 @@ export default function NetworkTopologyPage() {
       .map((item) => item.namespace)
       .filter((item): item is string => Boolean(item));
     const fromGraph = (graphQuery.data?.resources ?? [])
-      .map((resource) => resource.namespace)
+      .flatMap((resource) => {
+        // Use both the explicit namespace and any namespace-derived fields
+        const names: string[] = [];
+        if (resource.namespace) names.push(resource.namespace);
+        // Some resources carry namespace in their identity
+        if (resource.identity?.namespace) names.push(resource.identity.namespace);
+        return names;
+      })
       .filter((item): item is string => Boolean(item));
-    return Array.from(new Set([...fromSummary, ...fromGraph])).sort((left, right) =>
+    const merged = Array.from(new Set([...fromSummary, ...fromGraph])).sort((left, right) =>
       left.localeCompare(right, "zh-CN"),
     );
+    // Always include at least the summary namespaces; if both sources are empty
+    // we still show the "all" option via the NamespaceFilterSelect default.
+    return merged;
   }, [graphQuery.data?.resources, namespaceQuery.data?.items]);
 
   const incompleteSources = graphQuery.data
@@ -719,7 +734,6 @@ export default function NetworkTopologyPage() {
     <section className={[
       "resource-map-shell",
       "resource-map-shell--workbench",
-      focusedGroupId ? "resource-map-shell--focused" : "",
     ].filter(Boolean).join(" ")}>
       <ResourcePageHeader
         path="/network/topology"
@@ -729,8 +743,8 @@ export default function NetworkTopologyPage() {
         description="单集群工作负载、网络、存储与配置关系"
         actions={(
           <div className="resource-map-header__stats" aria-label="拓扑摘要">
-            <span><strong>{topologyRoot ? graph.resources.length : workloadRoots.length}</strong> {topologyRoot ? "资源" : "工作负载"}</span>
-            <span><strong>{topologyRoot ? graph.relations.length : "-"}</strong> {topologyRoot ? "关系" : "待查看关系"}</span>
+            <span><strong>{graph.resources.length}</strong> 资源</span>
+            <span><strong>{graph.relations.length}</strong> 关系</span>
             <span><strong>{warningCount}</strong> 异常</span>
             {graphQuery.data ? (
               <span title={`revision ${graphQuery.data.revision}`}>
@@ -742,135 +756,119 @@ export default function NetworkTopologyPage() {
       />
 
       <div
-        className="resource-map-toolbar resource-filter-toolbar topology-control-toolbar"
+        className="topology-headlamp-toolbar"
         role="toolbar"
         aria-label="拓扑控制栏"
-        aria-busy={loading}
       >
-        <div className="resource-map-toolbar__primary">
-          <div className="resource-map-toolbar__scope">
-            {!workspace ? (
-              <div className="resource-map-context-field">
-                <span className="resource-map-context-field__label">集群:</span>
-                <Select
-                  aria-label="选择集群"
-                  value={selectedCluster?.id}
-                  placeholder="选择集群"
-                  disabled={clusters.length === 0}
-                  options={clusters.map((cluster) => ({ value: cluster.id, label: cluster.name }))}
-                  onChange={selectCluster}
-                />
-              </div>
-            ) : null}
-            <NamespaceFilterSelect
-              className="resource-map-namespace-filter"
-              value={selectedNamespace}
-              namespaces={namespaceOptions}
-              allValue={ALL_NAMESPACE}
-              disabled={!effectiveClusterId}
-              loading={namespaceQuery.isLoading}
-              onChange={selectNamespace}
-            />
-          </div>
+        <NamespaceFilterSelect
+          value={selectedNamespace}
+          namespaces={namespaceOptions}
+          allValue={ALL_NAMESPACE}
+          disabled={!effectiveClusterId}
+          loading={namespaceQuery.isLoading}
+          onChange={selectNamespace}
+        />
 
-          <div className="resource-map-toolbar__actions">
-            {topologyRoot ? (
-              <Segmented<"core" | "full">
-                className="resource-map-view-mode"
-                aria-label="拓扑视图模式"
-                value={topologyDisplayMode}
-                options={[
-                  { value: "core", label: "核心链路" },
-                  { value: "full", label: "完整关联" },
-                ]}
-                onChange={(value) => {
-                  setTopologyDisplayMode(value);
-                  setFitVersion(String(Date.now()));
-                }}
-              />
-            ) : null}
-            <Button
-              className={errorsOnly ? "is-active" : undefined}
-              type={errorsOnly ? "primary" : "default"}
-              icon={<WarningOutlined />}
-              aria-pressed={errorsOnly}
-              aria-label={errorsOnly ? "关闭仅异常筛选" : "仅显示异常资源"}
-              onClick={() => {
-                setErrorsOnly((value) => !value);
-                // Health filtering narrows the graph inside the workload the
-                // operator opened; it must not eject them to the picker.
-                resetCanvasFocus();
-              }}
-            >
-              仅异常
-            </Button>
-            <Input
-              allowClear
-              aria-label="搜索拓扑资源"
-              prefix={<SearchOutlined />}
-              placeholder="搜索名称、类型或命名空间"
-              value={queryInput}
-              onChange={(event) => setQueryInput(event.target.value)}
-            />
-            {topologyRoot ? (
-              <Tooltip
-                title={canExpandAll
-                  ? "展开当前工作负载的全部关联资源"
-                  : `当前关联资源超过 ${GLOBAL_EXPAND_LIMIT} 个，请缩小范围或使用资源卡片逐级查看`}
-              >
-                <Button
-                  icon={effectiveExpandAll ? <CompressOutlined /> : <ExpandOutlined />}
-                  aria-pressed={effectiveExpandAll}
-                  disabled={!canExpandAll}
-                  onClick={() => {
-                    setExpandAll((value) => !value);
-                    setFocusedGroupId(null);
-                    setFitVersion(String(Date.now()));
-                  }}
-                >
-                  {effectiveExpandAll ? "收起" : "展开"}
-                </Button>
-              </Tooltip>
-            ) : null}
-            <Tooltip title="刷新">
-              <OpsIconActionButton aria-label="刷新拓扑" size="small" loading={graphQuery.isFetching || clusterQuery.isFetching} onClick={refresh}>
-                <ReloadOutlined />
-              </OpsIconActionButton>
-            </Tooltip>
-          </div>
+        <div className="topology-domain-menu" ref={sourceMenuRef}>
+          <Button
+            size="small"
+            className={sourceMenuOpen ? "is-active" : undefined}
+            aria-haspopup="menu"
+            aria-expanded={sourceMenuOpen}
+            onClick={() => setSourceMenuOpen((open) => !open)}
+          >
+            <BranchesOutlined /> 资源域 <span className="topology-domain-menu__count">{selectedSources.size}/{SOURCE_KEYS.length}</span>
+          </Button>
+          {sourceMenuOpen ? (
+            <div className="topology-domain-menu__popup" role="menu" aria-label="资源域筛选">
+              {SOURCE_KEYS.map((source) => {
+                const active = selectedSources.has(source);
+                return (
+                  <button
+                    key={source}
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={active}
+                    className={`topology-domain-menu__item ${active ? "is-active" : ""}`}
+                    onClick={() => toggleSource(source)}
+                  >
+                    <span className="topology-domain-menu__swatch" style={{ background: SOURCE_META[source].lightColor }} />
+                    <span>{SOURCE_META[source].label}</span>
+                    <small>{sourceCounts[source]} 资源{sourceWarningCounts[source] ? ` · ${sourceWarningCounts[source]} 异常` : ""}</small>
+                    <span aria-hidden="true">{active ? "✓" : ""}</span>
+                  </button>
+                );
+              })}
+              <div className="topology-domain-menu__footer">
+                <button type="button" onClick={() => { setSelectedSources(new Set(SOURCE_KEYS)); resetCanvasFocus(); }}>全选</button>
+                <button type="button" onClick={() => { setSelectedSources(new Set([SOURCE_KEYS[0]])); resetCanvasFocus(); }}>仅工作负载</button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
-        <div className="resource-map-toolbar__secondary">
-          <TopologySourceFilter
-            items={SOURCE_KEYS.map((source) => ({
-              id: source,
-              label: SOURCE_META[source].label,
-              icon: SOURCE_META[source].icon,
-              count: sourceCounts[source],
-              warningCount: sourceWarningCounts[source],
-              color: SOURCE_META[source].lightColor,
-              darkColor: SOURCE_META[source].darkColor,
-            }))}
-            selected={selectedSources}
-            onToggle={toggleSource}
-          />
-          <div className="resource-map-toolbar__grouping">
-            <span className="resource-map-toolbar__section-label">分组</span>
-            <Segmented<Exclude<KubejojoGroupBy, "namespace">>
-              aria-label="拓扑分组"
-              value={groupBy}
-              options={GROUP_OPTIONS}
-              onChange={(value) => {
-                setGroupBy(value);
+        <span className="topology-toolbar-label">分组</span>
+        <div className="topology-group-chips" role="group" aria-label="分组方式">
+          {GROUP_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`topology-group-chip ${groupBy === option.value ? "is-active" : ""}`}
+              aria-pressed={groupBy === option.value}
+              onClick={() => {
+                setGroupBy(option.value);
                 resetCanvasFocus();
                 setFitVersion(String(Date.now()));
               }}
-            />
-          </div>
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
-      </div>
 
-      {graphQuery.data && graphQuery.data.freshness.status !== "fresh" ? (
+        <Button
+          className={errorsOnly ? "is-active" : undefined}
+          type={errorsOnly ? "primary" : "default"}
+          icon={<WarningOutlined />}
+          aria-pressed={errorsOnly}
+          size="small"
+          onClick={() => {
+            setErrorsOnly((value) => !value);
+            resetCanvasFocus();
+          }}
+        >
+          仅异常
+        </Button>
+
+        <Input
+          allowClear
+          size="small"
+          aria-label="搜索拓扑资源"
+          prefix={<SearchOutlined />}
+          placeholder="搜索…"
+          value={queryInput}
+          onChange={(event) => setQueryInput(event.target.value)}
+        />
+
+        <div className="topology-toolbar-actions">
+          <Tooltip title={canExpandAll ? "展开全部" : `超过 ${GLOBAL_EXPAND_LIMIT} 个资源`}>
+            <Button
+              size="small"
+              icon={effectiveExpandAll ? <CompressOutlined /> : <ExpandOutlined />}
+              disabled={!canExpandAll}
+              onClick={() => {
+                setExpandAll((value) => !value);
+                setFocusedGroupId(null);
+                setFitVersion(String(Date.now()));
+              }}
+            />
+          </Tooltip>
+
+          <OpsIconActionButton aria-label="刷新拓扑" size="small" loading={graphQuery.isFetching || clusterQuery.isFetching} onClick={refresh}>
+            <ReloadOutlined />
+          </OpsIconActionButton>
+        </div>
+      </div>{graphQuery.data && graphQuery.data.freshness.status !== "fresh" ? (
         <Alert
           className="resource-map-status-alert"
           type={graphQuery.data.freshness.status === "unavailable" ? "error" : "warning"}
@@ -926,11 +924,6 @@ export default function NetworkTopologyPage() {
                 详情
               </Button>
               <Button size="small" onClick={() => setYaml(yamlTarget(selectedResource))}>YAML</Button>
-              {isTopologyRootKind(normalizeKind(selectedResource.kind)) ? (
-                <Button size="small" onClick={() => openTopologyRoot(selectedResource)}>
-                  工作负载拓扑
-                </Button>
-              ) : null}
               <Button size="small" type="text" onClick={() => selectTopologyResource(null)}>
                 关闭
               </Button>
@@ -957,41 +950,6 @@ export default function NetworkTopologyPage() {
             <div className="resource-map-canvas-state">
               <OpsEmptyState title="暂无集群" description="连接集群后即可查看资源拓扑。" />
             </div>
-          ) : !topologyRoot ? (
-            <div className="resource-map-canvas-state topology-root-picker-state">
-              <div className="topology-root-picker">
-                <div className="topology-root-picker__intro">
-                  <DeploymentUnitOutlined aria-hidden="true" />
-                  <div>
-                    <h3>选择工作负载查看资源拓扑</h3>
-                    <p>命名空间仅用于筛选。选择 Deployment、StatefulSet、DaemonSet、Job 或 CronJob 后，展示完整的网络、存储与配置关联链路。</p>
-                  </div>
-                </div>
-                {workloadRoots.length ? (
-                  <div className="topology-root-picker__grid" role="list" aria-label="可查看拓扑的工作负载">
-                    {workloadRoots.map((resource) => (
-                      <button
-                        key={resource.id}
-                        type="button"
-                        className="topology-root-picker__item"
-                        onClick={() => openTopologyRoot(resource)}
-                      >
-                        <span className="topology-root-picker__kind">{KIND_LABEL[normalizeKind(resource.kind)] ?? normalizeKind(resource.kind)}</span>
-                        <strong>{resource.name}</strong>
-                        <small>{resource.namespace ?? "集群级"} · {resource.summary || "可查看关联拓扑"}</small>
-                        <span className="topology-root-picker__action">查看拓扑</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <OpsEmptyState
-                    title={rawResourceCount === 0 ? "暂无工作负载" : "没有可用的工作负载根节点"}
-                    description={rawResourceCount === 0 ? "当前库存快照中没有可展示的资源。" : "当前筛选范围内没有 Deployment、StatefulSet、DaemonSet、Job 或 CronJob。"}
-                    action={filtersActive ? <Button onClick={resetFilters}>清除筛选</Button> : undefined}
-                  />
-                )}
-              </div>
-            </div>
           ) : graph.resources.length === 0 ? (
             <div className="resource-map-canvas-state">
               <OpsEmptyState
@@ -1010,20 +968,12 @@ export default function NetworkTopologyPage() {
               focusedId={focusedGroupId}
               selectedNodeId={topologySelection?.canvasId ?? null}
               expandAll={canvasExpandAll}
-              displayMode={topologyDisplayMode}
               onFocus={setFocusedGroupId}
               onSelectResource={selectTopologyResource}
               onOpen={(id) => {
                 const resource = graphQuery.data?.resources.find((item) => item.id === id);
                 if (resource) navigateToResource(resource);
               }}
-              onOpenTopologyRoot={(id) => {
-                const resource = graphQuery.data?.resources.find((item) => item.id === id);
-                if (resource) openTopologyRoot(resource);
-              }}
-              topologyRootLabel={topologyRoot.name}
-              topologyRootKind={KIND_LABEL[normalizeKind(topologyRoot.kind)] ?? normalizeKind(topologyRoot.kind)}
-              onExitTopology={resetFocus}
               fitVersion={fitVersion}
             />
           )}
