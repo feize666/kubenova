@@ -65,13 +65,13 @@ export function getKubejojoPartition(node: KubejojoGraphNode): number {
 
 export function getKubejojoLayoutPolicy(hasEdges: boolean, aspectRatio: number): {
   algorithm: "layered" | "rectpacking";
-  direction: "UNDEFINED";
+  direction: "RIGHT";
   aspectRatio: number;
 } {
   const ratio = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : DEFAULT_ASPECT_RATIO;
   return {
     algorithm: hasEdges ? "layered" : "rectpacking",
-    direction: "UNDEFINED",
+    direction: "RIGHT",
     aspectRatio: ratio,
   };
 }
@@ -154,7 +154,14 @@ export function collapseKubejojoGraph(
   const ancestorIds = new Set(
     (findNodePath(root, selected?.id) ?? []).map((node) => node.id),
   );
-  const revealedIds = new Set((selected?.nodes ?? []).map((node) => node.id));
+
+  // Only auto-reveal children when the selected node is a component-level
+  // group (not a scope like namespace). Scopes should show collapsed
+  // summaries so the operator can choose which workload to inspect.
+  const isScope = selected?.groupKind === "scope";
+  const revealedIds = isScope
+    ? new Set<string>()
+    : new Set((selected?.nodes ?? []).map((node) => node.id));
 
   const clone = (node: KubejojoGraphNode): KubejojoGraphNode => {
     const isGroup = node.id !== "root" && Boolean(node.groupKind);

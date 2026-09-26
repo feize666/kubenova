@@ -233,9 +233,9 @@ test("canonical access path has stable visual ordering", () => {
   leftOf("Pod", "Service");
   leftOf("Service", "EndpointSlice");
   leftOf("Service", "Ingress");
-  // Network edge resources all cascade off a Service, so they share the last column.
+  // Endpoint resources share a stage; Ingress is the final stage to their right.
   sameColumn("EndpointSlice", "Endpoints");
-  sameColumn("EndpointSlice", "Ingress");
+  leftOf("EndpointSlice", "Ingress");
   sameColumn("Gateway", "HTTPRoute");
   sameColumn("HTTPRoute", "Ingress");
   sameColumn("TCPRoute", "HTTPRoute");
@@ -470,22 +470,22 @@ test("selection paths follow the grouping tree and stay deterministic", () => {
 test("layout policy uses ELK layered for connected graphs and rect packing otherwise", () => {
   assert.deepEqual(getKubejojoLayoutPolicy(true, 1.8), {
     algorithm: "layered",
-    direction: "UNDEFINED",
+    direction: "RIGHT",
     aspectRatio: 1.8,
   });
   assert.deepEqual(getKubejojoLayoutPolicy(true, 0.72), {
     algorithm: "layered",
-    direction: "UNDEFINED",
+    direction: "RIGHT",
     aspectRatio: 0.72,
   });
   assert.deepEqual(getKubejojoLayoutPolicy(false, 0.72), {
     algorithm: "rectpacking",
-    direction: "UNDEFINED",
+    direction: "RIGHT",
     aspectRatio: 0.72,
   });
   assert.deepEqual(getKubejojoLayoutPolicy(false, 0), {
     algorithm: "rectpacking",
-    direction: "UNDEFINED",
+    direction: "RIGHT",
     aspectRatio: 1.6,
   });
 });
@@ -507,8 +507,8 @@ test("ELK partitions are the negated Headlamp weights", () => {
   assert.equal(getKubejojoPartition({ id: "replicaset", resource: { id: "replicaset", kind: "ReplicaSet", name: "api-rs" } }), -960);
   assert.equal(getKubejojoPartition({ id: "pod", resource: { id: "pod", kind: "Pod", name: "api-0" } }), -800);
   assert.equal(getKubejojoPartition({ id: "service", resource: { id: "service", kind: "Service", name: "api" } }), -790);
-  assert.equal(getKubejojoPartition({ id: "ingress", resource: { id: "ingress", kind: "Ingress", name: "api" } }), -780);
-  assert.equal(getKubejojoPartition({ id: "pvc", resource: { id: "pvc", kind: "PersistentVolumeClaim", name: "data" } }), -790);
+  assert.equal(getKubejojoPartition({ id: "ingress", resource: { id: "ingress", kind: "Ingress", name: "api" } }), -770);
+  assert.equal(getKubejojoPartition({ id: "pvc", resource: { id: "pvc", kind: "PersistentVolumeClaim", name: "data" } }), -780);
   assert.equal(getKubejojoPartition({ id: "pv", resource: { id: "pv", kind: "PersistentVolume", name: "pv-1" } }), -750);
   // An unrecognised CRD falls back to the shared default column.
   assert.equal(getKubejojoPartition({ id: "crd", resource: { id: "crd", kind: "Widget", name: "w" } }), -500);
@@ -519,7 +519,7 @@ test("ELK partitions are the negated Headlamp weights", () => {
 test("one card size is shared by layout, CSS and the renderer", () => {
   assert.deepEqual(KUBEJOJO_LAYOUT_METRICS, {
     nodeWidth: 220,
-    nodeHeight: 72,
+      nodeHeight: 70,
     layeredNodeSpacing: 60,
     layeredLayerSpacing: 60,
     groupPadding: 16,

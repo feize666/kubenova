@@ -57,7 +57,7 @@ export type KubejojoSelectionPathItem = {
 
 export type KubejojoLayoutPolicy = {
   algorithm: "layered" | "rectpacking";
-  direction: "UNDEFINED";
+  direction: "RIGHT";
   aspectRatio: number;
 };
 
@@ -98,7 +98,7 @@ export const KUBEJOJO_NODE_WEIGHTS: Readonly<Record<string, number>> = Object.fr
   ClusterRole: 730,
   Service: 790,
   NetworkPolicy: 730,
-  PersistentVolumeClaim: 720,
+  PersistentVolumeClaim: 780,
   ConfigMap: 740,
   Secret: 740,
   Endpoints: 780,
@@ -129,13 +129,13 @@ export const KUBEJOJO_NODE_WEIGHT_OVERRIDES: Readonly<Record<string, number>> = 
   RuntimeClass: 780,
   PriorityClass: 780,
   GatewayClass: 785,
-  Gateway: 780,
-  HTTPRoute: 780,
-  GRPCRoute: 780,
-  TCPRoute: 780,
-  TLSRoute: 780,
-  UDPRoute: 780,
-  IngressRoute: 780,
+  Gateway: 770,
+  HTTPRoute: 770,
+  GRPCRoute: 770,
+  TCPRoute: 770,
+  TLSRoute: 770,
+  UDPRoute: 770,
+  IngressRoute: 770,
   Lease: 600,
 });
 
