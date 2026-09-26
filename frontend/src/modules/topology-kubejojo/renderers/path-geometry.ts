@@ -73,7 +73,7 @@ function toCurve(section: TopologyElkSection, offset: TopologyElkPoint): Relatio
   const isVertical = absDy > absDx * 2;
   const horizontalWeight = isVertical
     ? Math.min(absDx * 0.25, 32)
-    : Math.min(absDx * 0.42, 140);
+    : Math.min(absDx / 3, 140);
 
   // Vertical offset: for purely vertical edges, add a slight lateral sway
   // so the curve is visible and doesn't overlap the straight line.
@@ -95,13 +95,25 @@ function toCurve(section: TopologyElkSection, offset: TopologyElkPoint): Relatio
 
 function toSectionCurves(section: TopologyElkSection, offset: TopologyElkPoint): RelationshipCurve[] {
   if ((section.bendPoints?.length ?? 0) <= 2) return [toCurve(section, offset)];
-  const points = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((point) => offsetPoint(point, offset));
-  return points.slice(0, -1).map((startPoint, index) => {
-    const endPoint = points[index + 1];
-    const dx = (endPoint.x - startPoint.x) / 3;
-    const dy = (endPoint.y - startPoint.y) / 3;
-    return { startPoint, controlPointA: { x: startPoint.x + dx, y: startPoint.y + dy }, controlPointB: { x: endPoint.x - dx, y: endPoint.y - dy }, endPoint };
-  });
+
+  // ELK can emit a long obstacle-by-obstacle spline for a fan-out edge
+  // (Pod -> EndpointSlice is the common case). Replaying every bend produces
+  // the giant zig-zags visible in the old canvas. Collapse that route to one
+  // calm Headlamp-style rail above/below the intervening cards while keeping
+  // the real endpoints intact.
+  const startPoint = offsetPoint(section.startPoint, offset);
+  const endPoint = offsetPoint(section.endPoint, offset);
+  const bends = (section.bendPoints ?? []).map((point) => offsetPoint(point, offset));
+  const minY = Math.min(...bends.map((point) => point.y));
+  const maxY = Math.max(...bends.map((point) => point.y));
+  const channelY = startPoint.y <= endPoint.y ? minY - 24 : maxY + 24;
+  const entryX = startPoint.x + Math.min(32, Math.max(16, (endPoint.x - startPoint.x) * 0.12));
+  const exitX = endPoint.x - Math.min(32, Math.max(16, (endPoint.x - startPoint.x) * 0.12));
+  return [
+    { startPoint, endPoint: { x: entryX, y: channelY } },
+    { startPoint: { x: entryX, y: channelY }, endPoint: { x: exitX, y: channelY } },
+    { startPoint: { x: exitX, y: channelY }, endPoint },
+  ].map((rail) => toCurve(rail, { x: 0, y: 0 }));
 }
 
 function cubicCommand(curve: RelationshipCurve): string {

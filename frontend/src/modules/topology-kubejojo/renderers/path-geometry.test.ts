@@ -36,6 +36,20 @@ test("consecutive sections sharing an endpoint stay one stroke", () => {
   assert.equal(path.match(/M /g)?.length, 1, "a continuous rail must not restart");
 });
 
+test("long ELK obstacle routes collapse to one separated rail", () => {
+  const path = buildRelationshipPath([{
+    startPoint: { x: 0, y: 40 },
+    bendPoints: [
+      { x: 40, y: 42 }, { x: 80, y: 44 }, { x: 120, y: 46 },
+      { x: 160, y: 48 }, { x: 200, y: 50 },
+    ],
+    endPoint: { x: 320, y: 260 },
+  }], { x: 0, y: 0 });
+
+  assert.equal(path.match(/C /g)?.length, 3);
+  assert.doesNotMatch(path, /NaN|undefined/);
+});
+
 test("the label anchor follows the cubic curve", () => {
   const midpoint = relationshipPathMidpoint([{
     startPoint: { x: 0, y: 0 },
