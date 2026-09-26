@@ -538,7 +538,12 @@ export default function NetworkTopologyPage() {
     [graph.resources],
   );
   const canvasRelations = useMemo(
-    () => graph.relations.map(toCanvasRelation),
+    () => graph.relations
+      // Headlamp's panorama shows the operator-facing access chain. Endpoint
+      // address resolution is still available in resource details, but drawing
+      // every EndpointSlice -> Pod address edge turns a fan-out into a web.
+      .filter((relation) => relation.type !== "RESOLVES")
+      .map(toCanvasRelation),
     [graph.relations],
   );
   const selectedResourceId = topologySelection?.resourceId ?? null;
