@@ -13,7 +13,7 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Alert, Button, Input, Segmented, Select, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -44,6 +44,8 @@ import {
   isTopologyRootKind,
   projectTopologyRoot,
   resolveTopologyRoot,
+  parseTopologyUrlState,
+  serializeTopologyUrlState,
   type KubejojoGroupBy,
   type KubejojoRelation,
   type KubejojoResource,
@@ -355,26 +357,32 @@ export default function NetworkTopologyPage() {
   const { accessToken: token } = useAuth();
   const workspace = useOptionalClusterWorkspace();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
+  const initialUrlState = useMemo(() => parseTopologyUrlState(searchParams), [searchParams]);
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [selectedNamespace, setSelectedNamespace] = useState(() => {
+    if (initialUrlState.namespace) return initialUrlState.namespace;
     const storedNamespace = readStoredResourceNamespace(workspace?.clusterId ?? "");
     return storedNamespace || ALL_NAMESPACE;
   });
   const [selectedSources, setSelectedSources] = useState<Set<TopologyGraphSource>>(
-    () => new Set(SOURCE_KEYS),
+    () => {
+      const sources = SOURCE_KEYS.filter((source) => initialUrlState.domains.includes(source));
+      return new Set(sources.length ? sources : SOURCE_KEYS);
+    },
   );
   // Namespace is a request scope only; visual grouping is limited to the two
   // dimensions Headlamp exposes for a resource map.
-  const [groupBy, setGroupBy] = useState<KubejojoGroupBy>("namespace");
+  const [groupBy, setGroupBy] = useState<KubejojoGroupBy>(() => initialUrlState.groupBy);
   const [errorsOnly, setErrorsOnly] = useState(false);
   // A workload opened straight from the URL starts expanded, matching the
   // picker entry. The toolbar toggle owns the state from then on.
   const [expandAll, setExpandAll] = useState(
     () => Boolean(searchParams.get("rootKind") && searchParams.get("rootName")),
   );
-  const [queryInput, setQueryInput] = useState("");
-  const [queryText, setQueryText] = useState("");
+  const [queryInput, setQueryInput] = useState(() => initialUrlState.search ?? "");
+  const [queryText, setQueryText] = useState(() => initialUrlState.search ?? "");
   const [topologyRootId, setTopologyRootId] = useState<string | null>(null);
   const [useRequestedRoot, setUseRequestedRoot] = useState(true);
   const [focusedGroupId, setFocusedGroupId] = useState<string | null>(null);
@@ -385,6 +393,23 @@ export default function NetworkTopologyPage() {
   const [topologyDisplayMode, setTopologyDisplayMode] = useState<"core" | "full">("core");
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const sourceMenuRef = useRef<HTMLDivElement>(null);
+
+  // Keep the map state shareable without disturbing unrelated route state
+  // (cluster/root/detail parameters are preserved by copying the current URL).
+  useEffect(() => {
+    const state = serializeTopologyUrlState({
+      namespace: selectedNamespace === ALL_NAMESPACE ? undefined : selectedNamespace,
+      domains: SOURCE_KEYS.filter((source) => selectedSources.has(source)),
+      search: queryText.trim() || undefined,
+      groupBy,
+    });
+    const next = new URLSearchParams(searchParams.toString());
+    for (const key of ["namespace", "domains", "search", "groupBy"]) next.delete(key);
+    const mapped = new URLSearchParams(state);
+    mapped.forEach((value, key) => next.set(key, value));
+    const current = searchParams.toString();
+    if (next.toString() !== current) router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }, [groupBy, pathname, queryText, router, searchParams, selectedNamespace, selectedSources]);
 
   useEffect(() => {
     if (!sourceMenuOpen) return;
@@ -503,11 +528,11 @@ export default function NetworkTopologyPage() {
     return filterGraph(
       scopeGraph.resources,
       scopeGraph.relations,
-      new Set(SOURCE_KEYS),
+      selectedSources,
       queryText,
       errorsOnly,
     );
-  }, [errorsOnly, queryText, scopeGraph]);
+  }, [errorsOnly, queryText, scopeGraph, selectedSources]);
   const canvasResources = useMemo(
     () => graph.resources.map(toCanvasResource),
     [graph.resources],
