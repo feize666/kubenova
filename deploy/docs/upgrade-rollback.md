@@ -1,59 +1,42 @@
-# Upgrade and Rollback Playbook
+# 升级与回滚
 
-## 通用升级流程
+## 发布契约
 
-1. 预检：配置、依赖、备份、容量。
-2. 灰度：先在低风险环境验证。
-3. 执行升级：按部署文档步骤执行。
-4. 健康检查：API、网关、关键业务路径。
-5. 观察窗口：确认无异常再清理旧版本。
+GitHub tag 触发构建，发布包和三个镜像均验证通过后才公布正式 Release。更新管理只展示真实版本、检测结果和下载入口，不执行宿主机部署。发布新版本不会自动升级现有服务。
 
-## 回滚矩阵
+升级前：备份 PostgreSQL、/etc/kubenova 或 Compose 环境文件，保留原 AI 加密密钥；确认数据库迁移兼容性、磁盘容量和维护窗口。应用回滚不等于数据库回滚。
 
-| 方式 | 回滚动作 | RTO 级别 | 关键风险 |
-|---|---|---|---|
-| Binary + systemd | `current` 软链回切 + 重启服务 | 秒级 | 新旧 env 不兼容 |
-| Docker Compose | 回退镜像 Tag 并 `compose up -d` | 分钟级 | DB schema 已变更 |
-| Kustomize | 回退 manifest 版本并 `kubectl apply -k` | 分钟级 | 资源不可逆变更 |
-| DEB/RPM | 安装旧版本包 | 分钟级 | 生命周期脚本副作用 |
+## Docker Compose
 
-## 升级后核对清单
-
-- 控制面就绪接口：`/api/health/ready` 可访问（该进程已在启动阶段执行 `prisma migrate deploy`）
-- 运行网关健康：`/healthz` 返回 2xx
-- 关键页面加载正常
-- 日志无连续 error
-- 监控指标无异常抖动
-
-## 推荐命令
-
-### Docker Compose 原子 tag 发布/回滚
+使用 v1.9 中的新脚本与 Compose 文件；旧镜像仓库 feize1995 已改为 feize666。三个镜像必须使用同一个 tag。若 GHCR 包为私有，先 docker login ghcr.io，或将三个包设为公开。
 
 ```bash
-# 不启动服务，只校验必需密钥、Compose 插值和发布契约
-bash scripts/service.sh compose-release preflight --env-file deploy/docker/.env
-
-# 发布（或升级）统一版本 tag，等待全部服务 healthy
-bash scripts/service.sh compose-release up --tag v1.3 --env-file deploy/docker/.env
-
-# 出现回归时切回旧 tag；脚本不会改写 env 文件
-bash scripts/service.sh compose-release rollback v1.2 --env-file deploy/docker/.env
+bash scripts/compose-release.sh preflight --env-file deploy/docker/.env
+bash scripts/compose-release.sh up --tag v1.9 --env-file deploy/docker/.env
 ```
 
-control-api 镜像入口点会先执行 `./node_modules/.bin/prisma migrate deploy`，迁移成功后才启动应用；二进制/systemd `prod up` 也执行同一 migration 门禁。
+脚本先拉取，再启动，等待 PostgreSQL、Redis、API、网关和前端均 healthy。失败返回非零，不自动切换数据库。确认旧版兼容当前数据库后，才使用 rollback <已有镜像版本>。此前仅有 Git tag 不代表该版本存在可拉取镜像。
+
+## Binary + systemd
+
+下载 archive 和 SHA256 文件到同一目录；不得覆盖正在运行的版本目录。以下命令假设 current 已是符号链接，v1.9 目录尚不存在：
 
 ```bash
-# binary/systemd
-systemctl status kubenova-runtime-gateway.service --no-pager
-systemctl status kubenova-control-api.service --no-pager
-curl -fsS http://127.0.0.1:4100/healthz
-curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null
-
-# docker compose
-docker compose -f deploy/docker/docker-compose.prod.yml --env-file deploy/docker/.env ps
-
-# kubernetes
-kubectl rollout status deploy/control-api -n kubenova
-kubectl rollout status deploy/runtime-gateway -n kubenova
-kubectl rollout status deploy/frontend -n kubenova
+sha256sum -c kubenova-ubuntu.tar.gz.sha256
+sudo mkdir -p /opt/kubenova/releases/v1.9
+sudo tar -xzf kubenova-ubuntu.tar.gz -C /opt/kubenova/releases/v1.9 --strip-components=1
+# 使用新版本脚本补齐前端 systemd 单元；不会覆盖已有 /etc/kubenova 配置。
+sudo bash /opt/kubenova/releases/v1.9/scripts/prod.sh install
+sudo bash /opt/kubenova/releases/v1.9/scripts/prod.sh switch v1.9
 ```
+
+switch 校验版本和完整目录、原子替换 current，再重启三个服务，并等待三个 HTTP 健康端点成功。重启/健康检查失败时返回非零并尝试恢复旧版本指针；如果旧服务重启也失败，需人工检查数据库兼容性与日志。不存在“秒级回滚”保证。
+
+若旧版把文件直接放在 /opt/kubenova/current 实体目录：在维护窗口停止旧服务（包括非 systemd 启动的前端），将该实体目录重命名为 releases 下的一个保留目录，再创建指向它的 current 软链。先验证旧版可以恢复，再按上述步骤升级。脚本会拒绝直接覆盖实体 current，避免丢失旧版本。不要将 current 当作可删除的缓存目录。
+
+## 验收
+
+- /api/health/ready、/healthz、/login 均返回 2xx。
+- 更新页显示真实运行版本；没有把旧 state JSON 的虚拟版本恢复进来。
+- 登录、集群列表、资源详情、授权及日志/终端实际可用。
+- 保留旧产物和数据库备份，观察稳定后再清理；不要删除正在使用的版本目录。

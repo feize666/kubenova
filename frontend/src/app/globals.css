@@ -6776,6 +6776,7 @@ body {
   align-items: center;
   height: 21px;
   line-height: 21px;
+  
 }
 
 .namespace-filter-select:hover .ant-select-selector,
@@ -6798,6 +6799,7 @@ body {
 .namespace-filter-select__label {
   color: var(--ops-control-text-muted, var(--kn-text-secondary));
   font-size: 12px;
+  
   font-weight: 600;
   letter-spacing: 0;
   white-space: nowrap;
@@ -12114,7 +12116,7 @@ body.topology-overview-active {
   --map-grid: rgba(148, 163, 184, 0.07);
 }
 .resource-map-header.ops-page-header {
-  min-height: 52px;
+  min-height: 44px;
   background: var(--map-panel-bg);
   border-color: var(--map-border);
   box-shadow: var(--map-shadow);
@@ -12144,10 +12146,11 @@ body.topology-overview-active {
   gap: 6px;
   border: 1px solid var(--map-border);
   background: var(--map-panel-bg);
-  border-radius: 8px;
-  padding: 7px 10px;
+  border-radius: 6px;
+  padding: 5px 9px;
   color: var(--map-muted);
   text-transform: none;
+  font-size: 12px;
 }
 .resource-map-header__stats strong {
   color: var(--map-heading);
@@ -12156,19 +12159,19 @@ body.topology-overview-active {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   border: 1px solid var(--map-border);
   background: var(--map-panel-bg);
   box-shadow: var(--map-shadow);
   border-radius: 8px;
-  padding: 8px;
+  padding: 6px 8px;
 }
 .resource-map-toolbar__scope,
 .resource-map-toolbar__filters,
 .resource-map-toolbar__actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 .resource-map-toolbar__filters {
@@ -12179,41 +12182,31 @@ body.topology-overview-active {
 }
 .resource-map-toolbar select,
 .resource-map-toolbar button {
-  height: 34px;
-  border-radius: 8px;
-  border: 1px solid var(--map-border-strong);
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--map-border);
   background: var(--map-card-bg-soft);
   color: var(--map-text);
   padding: 0 10px;
   font-size: 13px;
+  line-height: 1;
   white-space: nowrap;
   box-shadow: none;
+  transition: border-color 140ms ease, background 140ms ease;
 }
 .resource-map-toolbar button {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   cursor: pointer;
 }
-.resource-map-toolbar button:hover {
-  border-color: color-mix(in srgb, #2563eb 34%, var(--map-border));
-  background: color-mix(
-    in srgb,
-    var(--map-card-bg-soft) 82%,
-    var(--map-card-bg)
-  );
+.resource-map-toolbar button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--kn-primary) 38%, var(--map-border));
+  background: color-mix(in srgb, var(--map-card-bg) 7%, var(--map-card-bg-soft));
 }
 .resource-map-toolbar button.is-active {
-  background: color-mix(
-    in srgb,
-    var(--source-color, #0ea5e9) 16%,
-    var(--map-card-bg)
-  );
-  border-color: color-mix(
-    in srgb,
-    var(--source-color, #0ea5e9) 58%,
-    var(--map-border)
-  );
+  background: color-mix(in srgb, var(--source-color, var(--kn-primary)) 12%, var(--map-card-bg));
+  border-color: color-mix(in srgb, var(--source-color, var(--kn-primary)) 50%, var(--map-border));
   color: var(--map-heading);
 }
 .resource-map-toolbar button:disabled {
@@ -12221,17 +12214,24 @@ body.topology-overview-active {
   cursor: not-allowed;
 }
 .resource-map-toolbar .ant-input-affix-wrapper {
-  width: 220px;
-  height: 34px;
-  border-radius: 8px;
+  width: 200px;
+  height: 32px;
+  border-radius: 6px;
   background: var(--map-card-bg-soft);
-  border-color: var(--map-border-strong);
+  border-color: var(--map-border);
   color: var(--map-text);
 }
 .resource-map-toolbar .ant-input {
   background: transparent;
   color: var(--map-text);
 }
+.resource-map-toolbar .ant-select-selector {
+  height: 32px !important;
+  min-height: 32px !important;
+  border-radius: 6px !important;
+  padding-block: 0 !important;
+}
+
 .resource-map-source-chips,
 .resource-map-segments {
   display: inline-flex;

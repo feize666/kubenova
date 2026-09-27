@@ -89,9 +89,11 @@ install_systemd() {
   install -m 0644 "$ROOT_DIR/deploy/systemd/kubenova.target" "$SYSTEMD_DIR/kubenova.target"
   install -m 0644 "$ROOT_DIR/deploy/systemd/kubenova-control-api.service" "$SYSTEMD_DIR/kubenova-control-api.service"
   install -m 0644 "$ROOT_DIR/deploy/systemd/kubenova-runtime-gateway.service" "$SYSTEMD_DIR/kubenova-runtime-gateway.service"
+  install -m 0644 "$ROOT_DIR/deploy/systemd/kubenova-frontend.service" "$SYSTEMD_DIR/kubenova-frontend.service"
 
   install -m 0644 "$ROOT_DIR/deploy/systemd/env/control-api.env.example" "$CURRENT_DIR/env/control-api.env.example"
   install -m 0644 "$ROOT_DIR/deploy/systemd/env/runtime-gateway.env.example" "$CURRENT_DIR/env/runtime-gateway.env.example"
+  install -m 0644 "$ROOT_DIR/deploy/systemd/env/frontend.env.example" "$CURRENT_DIR/env/frontend.env.example"
 
   if [[ ! -f "$ENV_DIR/control-api.env" ]]; then
     install -m 0644 "$ROOT_DIR/deploy/systemd/env/control-api.env.example" "$ENV_DIR/control-api.env"
@@ -99,11 +101,15 @@ install_systemd() {
   if [[ ! -f "$ENV_DIR/runtime-gateway.env" ]]; then
     install -m 0644 "$ROOT_DIR/deploy/systemd/env/runtime-gateway.env.example" "$ENV_DIR/runtime-gateway.env"
   fi
+  if [[ ! -f "$ENV_DIR/frontend.env" ]]; then
+    install -m 0644 "$ROOT_DIR/deploy/systemd/env/frontend.env.example" "$ENV_DIR/frontend.env"
+  fi
 
   systemctl daemon-reload
   systemctl enable kubenova.target >/dev/null 2>&1 || true
   systemctl enable kubenova-control-api.service >/dev/null 2>&1 || true
   systemctl enable kubenova-runtime-gateway.service >/dev/null 2>&1 || true
+  systemctl enable kubenova-frontend.service >/dev/null 2>&1
 
   echo "✔ systemd 与环境模板安装完成"
   echo "  单元目录: $SYSTEMD_DIR"
@@ -113,6 +119,7 @@ install_systemd() {
 
 uninstall_systemd() {
   if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop kubenova-frontend.service >/dev/null 2>&1 || true
     systemctl stop kubenova-runtime-gateway.service >/dev/null 2>&1 || true
     systemctl stop kubenova-control-api.service >/dev/null 2>&1 || true
     systemctl disable kubenova.target >/dev/null 2>&1 || true
@@ -120,10 +127,10 @@ uninstall_systemd() {
 
   rm -f "$SYSTEMD_DIR/kubenova.target" \
         "$SYSTEMD_DIR/kubenova-control-api.service" \
-        "$SYSTEMD_DIR/kubenova-runtime-gateway.service"
+        "$SYSTEMD_DIR/kubenova-runtime-gateway.service" +        "$SYSTEMD_DIR/kubenova-frontend.service"
 
   rm -f "$ENV_DIR/control-api.env" \
-        "$ENV_DIR/runtime-gateway.env"
+        "$ENV_DIR/runtime-gateway.env" +        "$ENV_DIR/frontend.env"
 
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload || true
@@ -134,7 +141,7 @@ uninstall_systemd() {
 
 switch_release() {
   local version="$1" action="$2"
-  if [[ -z "$version" ]]; then
+  if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
     echo "用法: bash scripts/service.sh prod $action <version>" >&2
     exit 1
   fi
@@ -144,6 +151,8 @@ switch_release() {
   require_cmd ln
   require_cmd readlink
   require_cmd systemctl "systemd"
+  require_cmd node "Node.js 22+"
+  require_cmd curl
 
   if [[ ! -d "$release_dir" ]]; then
     echo "[错误] 目标版本不存在：$release_dir" >&2
@@ -151,13 +160,48 @@ switch_release() {
   fi
   require_release_layout "$release_dir"
 
-  echo "[$action] 当前版本: $(readlink -f "$current_link" 2>/dev/null || echo 未设置)"
+  if [[ -e "$current_link" && ! -L "$current_link" ]]; then
+    echo '[错误] current 必须是版本目录的符号链接；请先按升级文档迁移旧的平铺安装。' >&2
+    return 1
+  fi
+
+  local previous
+  previous="$(readlink "$current_link" 2>/dev/null || true)"
+  echo "[$action] 当前版本: $previous"
   echo "[$action] 目标版本: $version"
-  ln -sfn "$release_dir" "$current_link"
   systemctl daemon-reload
-  systemctl restart kubenova-runtime-gateway.service kubenova-control-api.service || true
+  replace_current "$release_dir" "$current_link"
+  if ! systemctl restart kubenova-runtime-gateway.service kubenova-control-api.service kubenova-frontend.service || ! release_healthy; then
+    echo '[错误] 激活或健康检查失败；不报告升级成功。数据库迁移不会自动回滚。' >&2
+    if [[ -n "$previous" ]]; then
+      replace_current "$previous" "$current_link"
+      systemctl restart kubenova-runtime-gateway.service kubenova-control-api.service kubenova-frontend.service || echo '[错误] 旧版本重启也失败，请立即检查服务日志及数据库兼容性。' >&2
+      echo '[提示] 已恢复原版本指针，请核查旧版本健康状态。' >&2
+    fi
+    return 1
+  fi
   echo "✔ 已切换到版本 $version"
   echo "  current: $(readlink -f "$current_link")"
+}
+
+replace_current() {
+  local target="$1" link="$2" temporary="$2.next.$$"
+  ln -s "$target" "$temporary"
+  # Atomic rename; unlike ln -sfn it never leaves current temporarily absent.
+  node -e 'require("node:fs").renameSync(process.argv[1], process.argv[2])' "$temporary" "$link"
+}
+
+release_healthy() {
+  local deadline=$((SECONDS + 180))
+  while (( SECONDS < deadline )); do
+    if curl --fail --silent --max-time 5 "http://127.0.0.1:$CONTROL_API_PORT/api/health/ready" >/dev/null &&
+       curl --fail --silent --max-time 5 "http://127.0.0.1:$RUNTIME_GATEWAY_PORT/healthz" >/dev/null &&
+       curl --fail --silent --max-time 5 "http://127.0.0.1:$FRONTEND_PORT/login" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
 }
 
 stop_prod() {

@@ -163,9 +163,125 @@ export function groupKubejojoGraph(
     .sort((left, right) => (left.identityKey ?? left.id).localeCompare(right.identityKey ?? right.id, "en"))
     .map(makeResourceNode);
   const components = weakComponents(nodes, partitioned.backbone, relations);
+  // === History ReplicaSet aggregation ===
+  // Detect RS with zero members that have active siblings under the same parent
+  const historyRsIds = new Set<string>();
+  const rsByParent = new Map<string, KubejojoGraphNode[]>();
+  const nonHistoryComponents: KubejojoGraphNode[] = [];
+  
+  for (const component of components) {
+    const leaves = leavesKubejojo(component);
+    
+    for (const leaf of leaves) {
+      if (leaf.resource?.kind === "ReplicaSet") {
+        const parentKey = leaf.resource?.instanceName ?? leaf.resource?.namespace ?? "";
+        const siblings = rsByParent.get(parentKey) ?? [];
+        siblings.push(leaf);
+        rsByParent.set(parentKey, siblings);
+      }
+    }
+    nonHistoryComponents.push(component);
+  }
+  
+  // Mark zero-member RS as historical when there's an active sibling
+  for (const [, siblings] of rsByParent) {
+    if (siblings.length <= 1) continue;
+    const hasActive = siblings.some((n) => (n.resource?.aggregation?.memberCount ?? 0) > 0);
+    if (!hasActive) continue;
+    for (const n of siblings) {
+      if ((n.resource?.aggregation?.memberCount ?? 0) === 0) historyRsIds.add(n.id);
+    }
+  }
+  
+  // Wrap historical RS in a "历史版本" component per parent
+  const processedComponents: typeof components = [];
+  const historyGroups = new Map<string, KubejojoGraphNode[]>();
+  
+  // Collect history RS by parent key
+  for (const component of nonHistoryComponents) {
+    // A disconnected resource is itself a component, not an empty container.
+    if (component.resource) {
+      processedComponents.push(component);
+      continue;
+    }
+    const activeNodes: KubejojoGraphNode[] = [];
+    for (const node of component.nodes ?? []) {
+      if (historyRsIds.has(node.id)) {
+        const parentKey = node.resource?.instanceName ?? node.resource?.namespace ?? "";
+        const group = historyGroups.get(parentKey) ?? [];
+        group.push(node);
+        historyGroups.set(parentKey, group);
+      } else {
+        activeNodes.push(node);
+      }
+    }
+    
+    if (activeNodes.length) {
+      processedComponents.push({
+        ...component,
+        nodes: activeNodes,
+        edges: (component.edges ?? []).filter(
+          (e) => !historyRsIds.has(e.source) && !historyRsIds.has(e.target)
+        ),
+        label: activeNodes[0]?.label ?? component.label,
+      });
+    }
+  }
+  
+  // Add history groups as components
+  for (const [parentKey, nodes] of historyGroups) {
+    if (!nodes.length) continue;
+    const historyNode: KubejojoGraphNode = {
+      id: `history-rs:${parentKey}`,
+      label: "历史版本",
+      subtitle: `${nodes.length} 个旧 ReplicaSet`,
+      nodes: nodes.sort(compareKubejojoNodes),
+      edges: [],
+      groupKind: "component",
+      collapsedPreferred: true,
+      weight: 960,
+    };
+    processedComponents.push(historyNode);
+  }
+  
+  const finalComponents = processedComponents.length ? processedComponents : components;
+  
+  // === Shared resource dedup ===
+  // Track resources seen across components; mark duplicates
+  const seenResourceIds = new Set<string>();
+  const dedupedComponents = finalComponents.map((component) => {
+    if (component.resource) {
+      seenResourceIds.add(component.resource.id);
+      return component;
+    }
+    const dedupedNodes = (component.nodes ?? []).filter((node) => {
+      if (!node.resource) return true;
+      const rid = node.resource.id;
+      if (seenResourceIds.has(rid)) {
+        // Mark as shared reference
+        return false;
+      }
+      seenResourceIds.add(rid);
+      return true;
+    });
+    
+    // Check if this is a shared resource (connected from multiple components)
+    const isShared = component.nodes && component.nodes.length === 1 && 
+      component.nodes[0].resource && 
+      (component.edges ?? []).length > 0;
+    
+    return {
+      ...component,
+      nodes: dedupedNodes,
+      subtitle: isShared && component.nodes?.[0]?.resource
+        ? (component.subtitle ?? "") + " · 共享"
+        : component.subtitle,
+    };
+  }).filter((component) => component.resource || (component.nodes ?? []).length > 0);
+
 
   const byGroup = new Map<string, KubejojoGraphNode[]>();
-  components.forEach((component) => {
+  dedupedComponents.forEach((component) => {
     const key = componentGroupKey(component, groupBy);
     byGroup.set(key, [...(byGroup.get(key) ?? []), component]);
   });
@@ -191,4 +307,3 @@ export function groupKubejojoGraph(
 
   return root;
 }
-

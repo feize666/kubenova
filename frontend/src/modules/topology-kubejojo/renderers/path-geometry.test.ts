@@ -27,6 +27,32 @@ test("a spline without control points still renders as the same curve family", (
   assert.doesNotMatch(path, /NaN|undefined/);
 });
 
+test("collinear ELK label control points do not create a detour between aligned cards", () => {
+  const path = buildRelationshipPath([{
+    startPoint: { x: 236, y: 116 },
+    bendPoints: [266, 281, 296, 311, 326].map((x) => ({ x, y: 116 })),
+    endPoint: { x: 356, y: 116 },
+  }], { x: 12, y: 8 });
+
+  assert.equal(path, "M 248,124 C 278,124 293,124 368,124");
+});
+
+test("ELK fan-out uses Headlamp's single cubic without an artificial upper or lower rail", () => {
+  for (const endY of [51, 181]) {
+    const startY = endY < 116 ? 104 : 128;
+    const sections = [{
+      startPoint: { x: 1256, y: startY },
+      bendPoints: [1286, 1301, 1311, 1321, 1326, 1332.25, 1338.5, 1346]
+        .map((x) => ({ x, y: endY })),
+      endPoint: { x: 1376, y: endY },
+    }];
+    assert.equal(buildRelationshipPath(sections, { x: 0, y: 0 }),
+      `M 1256,${startY} C 1286,${endY} 1301,${endY} 1376,${endY}`);
+    assert.deepEqual(relationshipPathMidpoint(sections, { x: 0, y: 0 }),
+      { x: 1299.125, y: startY / 8 + endY * 7 / 8 });
+  }
+});
+
 test("consecutive sections sharing an endpoint stay one stroke", () => {
   const path = buildRelationshipPath([
     { startPoint: { x: 0, y: 0 }, bendPoints: [{ x: 50, y: 0 }, { x: 100, y: 0 }], endPoint: { x: 100, y: 0 } },
@@ -34,20 +60,6 @@ test("consecutive sections sharing an endpoint stay one stroke", () => {
   ], { x: 0, y: 0 });
 
   assert.equal(path.match(/M /g)?.length, 1, "a continuous rail must not restart");
-});
-
-test("long ELK obstacle routes collapse to one separated rail", () => {
-  const path = buildRelationshipPath([{
-    startPoint: { x: 0, y: 40 },
-    bendPoints: [
-      { x: 40, y: 42 }, { x: 80, y: 44 }, { x: 120, y: 46 },
-      { x: 160, y: 48 }, { x: 200, y: 50 },
-    ],
-    endPoint: { x: 320, y: 260 },
-  }], { x: 0, y: 0 });
-
-  assert.equal(path.match(/C /g)?.length, 3);
-  assert.doesNotMatch(path, /NaN|undefined/);
 });
 
 test("the label anchor follows the cubic curve", () => {

@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowUpOutlined, CloudDownloadOutlined, LinkOutlined, ReloadOutlined, RollbackOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { ArrowUpOutlined, CloudDownloadOutlined, LinkOutlined, ReloadOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Col, Divider, Input, Row, Space, Typography } from "antd";
+import { Alert, App, Col, Row, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
@@ -16,9 +16,7 @@ import { createTablePreferencesClient } from "@/lib/api/table-preferences";
 import {
   getSystemUpdateHistory,
   getSystemUpdateStatus,
-  installSystemUpdate,
-  restartSystemUpdate,
-  rollbackSystemUpdate,
+  checkSystemUpdate,
   triggerPostReleaseAudit,
   type SystemUpdateHistoryItem,
 } from "@/lib/api/system-update";
@@ -38,8 +36,6 @@ export default function SystemUpdatePage() {
   const { message } = App.useApp();
   const { accessToken, isInitializing } = useAuth();
   const queryClient = useQueryClient();
-  const [targetVersion, setTargetVersion] = useState("");
-  const [rollbackVersion, setRollbackVersion] = useState("");
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [detailRecord, setDetailRecord] = useState<SystemUpdateHistoryItem | null>(null);
 
@@ -57,79 +53,13 @@ export default function SystemUpdatePage() {
     refetchInterval: 5000,
   });
 
-  const installMutation = useMutation({
-    mutationFn: (version?: string) =>
-      installSystemUpdate(
-        {
-          confirm: true,
-          targetVersion: (version ?? targetVersion).trim(),
-        },
-        accessToken ?? undefined,
-      ),
-    onSuccess: async () => {
-      message.success("安装已完成：当前为已安装未激活状态，请执行重启激活");
-      await queryClient.invalidateQueries({ queryKey: ["system-update"] });
+  const checkMutation = useMutation({
+    mutationFn: () => checkSystemUpdate(accessToken ?? undefined),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["system-update", "status", accessToken], data);
+      if (!data.updateCheckError) message.success(data.updateAvailable ? "发现可用更新" : "版本检测完成");
     },
-    onError: (error) => {
-      message.error(error instanceof Error ? error.message : "发布失败");
-    },
-  });
-
-  const upgradeMutation = useMutation({
-    mutationFn: async (version: string) => {
-      await installSystemUpdate(
-        { confirm: true, targetVersion: version.trim() },
-        accessToken ?? undefined,
-      );
-      return restartSystemUpdate(
-        { confirm: true, message: `一键升级并激活 ${version.trim()}` },
-        accessToken ?? undefined,
-      );
-    },
-    onSuccess: async () => {
-      message.success("升级并激活完成");
-      await queryClient.invalidateQueries({ queryKey: ["system-update"] });
-    },
-    onError: (error) => {
-      message.error(error instanceof Error ? error.message : "升级失败");
-    },
-  });
-
-  const rollbackMutation = useMutation({
-    mutationFn: () =>
-      rollbackSystemUpdate(
-        {
-          confirm: true,
-          ...(rollbackVersion.trim() ? { targetVersion: rollbackVersion.trim() } : {}),
-          message: "秒级回滚（指针切换）",
-        },
-        accessToken ?? undefined,
-      ),
-    onSuccess: async () => {
-      message.success("回滚已完成（秒级指针切换）");
-      await queryClient.invalidateQueries({ queryKey: ["system-update"] });
-    },
-    onError: (error) => {
-      message.error(error instanceof Error ? error.message : "回滚失败");
-    },
-  });
-
-  const restartMutation = useMutation({
-    mutationFn: () =>
-      restartSystemUpdate(
-        {
-          confirm: true,
-          message: "激活已安装版本",
-        },
-        accessToken ?? undefined,
-      ),
-    onSuccess: async () => {
-      message.success("重启完成，已尝试激活安装版本");
-      await queryClient.invalidateQueries({ queryKey: ["system-update"] });
-    },
-    onError: (error) => {
-      message.error(error instanceof Error ? error.message : "重启失败");
-    },
+    onError: (error) => message.error(error instanceof Error ? error.message : "检查更新失败"),
   });
 
   const auditMutation = useMutation({
@@ -250,191 +180,52 @@ export default function SystemUpdatePage() {
           actions={(
             <>
               <OpsFilterChip tone="neutral">运行 {status?.runningVersion ?? "-"}</OpsFilterChip>
-              <OpsFilterChip tone={status?.installable ? "success" : "warning"}>
-                {status?.installable ? "可安装" : "暂不可安装"}
-              </OpsFilterChip>
-              {status ? statusTag(status.installStatus) : <OpsStatusTag tone="neutral">加载中</OpsStatusTag>}
+              <OpsIconActionButton icon={<ReloadOutlined />} loading={checkMutation.isPending} onClick={() => checkMutation.mutate()}>
+                检查更新
+              </OpsIconActionButton>
             </>
           )}
         />
       </OpsSurface>
 
-      <Alert
-        className="system-resource-state-alert"
-        showIcon
-        type="success"
-        title="更新策略：安装与激活分离"
-        description="安装阶段只落盘新版本；重启阶段激活运行版本并异步触发发布后审计。回滚保持指针切换，目标秒级恢复。"
-      />
-
+      {statusQuery.isError ? <Alert type="error" showIcon title="无法读取更新状态" description={statusQuery.error.message} /> : null}
+      {status?.updateCheckError ? <Alert type="warning" showIcon title="检查更新失败" description={status.updateCheckError} /> : null}
+      <Alert className="system-resource-state-alert" showIcon type="info" title="发布检测与部署执行分离"
+        description={status?.manualUpdateReason ?? "只检测包含完整产物和校验文件的正式 Release；实际升级通过部署脚本执行。"} />
       {status?.updateAvailable ? (
-        <Alert
-          className="system-update-available-alert"
-          type="info"
-          showIcon
-          icon={<ArrowUpOutlined />}
+        <Alert className="system-update-available-alert" type="info" showIcon icon={<ArrowUpOutlined />}
           title={`发现新版本 ${status.latestVersion}`}
-          description={(
-            <Space wrap>
-              <span>
-                当前运行 {status.runningVersion}，可安装新版本并在确认后激活。
-              </span>
-              {status.latestReleaseUrl ? (
-                <Typography.Link href={status.latestReleaseUrl} target="_blank" rel="noreferrer">
-                  查看发布说明 <LinkOutlined />
-                </Typography.Link>
-              ) : null}
-            </Space>
-          )}
-          action={(
-            <OpsIconActionButton
-              icon={<CloudDownloadOutlined />}
-              opsTone="primary"
-              opsVariant="primary"
-              loading={upgradeMutation.isPending}
-              onClick={() => upgradeMutation.mutate(status.latestVersion)}
-            >
-              升级到 {status.latestVersion}
-            </OpsIconActionButton>
-          )}
-        />
+          description="发布包与 SHA256 校验文件已就绪。升级前请备份数据库和配置，并核对发布说明中的兼容性要求。" />
       ) : null}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} md={12}>
           <OpsSurface variant="panel" padding="sm" title="版本状态">
-            <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-              <div>
-                <Typography.Text type="secondary">当前版本</Typography.Text>
-                <div>
-                  <OpsFilterChip tone="info">{status?.runningVersion ?? "-"}</OpsFilterChip>
-                </div>
-              </div>
-              <div>
-                <Typography.Text type="secondary">已安装版本</Typography.Text>
-                <div>
-                  <OpsFilterChip tone="info">{status?.installedVersion ?? "-"}</OpsFilterChip>
-                </div>
-              </div>
-              <div>
-                <Typography.Text type="secondary">最新版本</Typography.Text>
-                <div>
-                  <OpsFilterChip tone="warning">{status?.latestVersion ?? "-"}</OpsFilterChip>
-                </div>
-              </div>
-              <div>
-                <Typography.Text type="secondary">备份版本（回滚指针）</Typography.Text>
-                <div>
-                  <OpsFilterChip tone="neutral">{status?.backupVersion ?? "-"}</OpsFilterChip>
-                </div>
-              </div>
-              <div>
-                <Typography.Text type="secondary">安装状态</Typography.Text>
-                <div>{status ? statusTag(status.installStatus) : <OpsStatusTag tone="neutral">加载中</OpsStatusTag>}</div>
-              </div>
-              <div>
-                <Typography.Text type="secondary">可安装状态</Typography.Text>
-                <div>
-                  <OpsStatusTag tone={status?.installable ? "success" : "danger"}>
-                    {status?.installable ? "可安装" : "暂不可安装"}
-                  </OpsStatusTag>
-                </div>
-              </div>
-              <Divider style={{ margin: "8px 0" }} />
-              <div>
-                <Typography.Text type="secondary">回滚模式</Typography.Text>
-                <div>
-                  <OpsFilterChip tone="neutral">{status?.releaseMode ?? "pointer-swap"}</OpsFilterChip>
-                  <Typography.Text style={{ marginLeft: 8 }}>
-                    目标 SLA: {status?.rollbackSlaTargetMs ?? 3000}ms
-                  </Typography.Text>
-                </div>
-              </div>
-              <div>
-                <Typography.Text type="secondary">最近回滚耗时</Typography.Text>
-                <div>
-                  <OpsStatusTag tone={status?.rollbackSlaMet ? "success" : "danger"}>
-                    {status?.rollbackSlaLastMs ?? "-"} ms
-                  </OpsStatusTag>
-                  {status?.rollbackSlaMet !== null && status?.rollbackSlaMet !== undefined ? (
-                    <Typography.Text style={{ marginLeft: 8 }}>
-                      {status.rollbackSlaMet ? "达标" : "未达标"}
-                    </Typography.Text>
-                  ) : null}
-                </div>
-              </div>
-              <Divider style={{ margin: "8px 0" }} />
-              <div>
-                <Typography.Text type="secondary">发布后审计</Typography.Text>
-                <div>
-                  <OpsStatusTag
-                    tone={
-                      status?.postReleaseAudit.status === "failed"
-                        ? "danger"
-                        : status?.postReleaseAudit.status === "passed"
-                          ? "success"
-                          : "processing"
-                    }
-                  >
-                    {status?.postReleaseAudit.status ?? "idle"}
-                  </OpsStatusTag>
-                  <Typography.Text style={{ marginLeft: 8 }}>
-                    {status?.postReleaseAudit.lastSummary ?? "暂无结果"}
-                  </Typography.Text>
-                </div>
-              </div>
+            <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+              <div><Typography.Text type="secondary">当前构建版本</Typography.Text><div><OpsFilterChip tone="info">{status?.runningVersion ?? "—"}</OpsFilterChip></div></div>
+              <div><Typography.Text type="secondary">部署类型</Typography.Text><div>{status ? (status.buildType === "release" ? "正式发布产物" : "源码部署") : "—"}</div></div>
+              <div><Typography.Text type="secondary">最近检测到的正式版本</Typography.Text><div><OpsFilterChip tone="neutral">{status?.latestReleaseUrl ? status.latestVersion : "尚未获取"}</OpsFilterChip></div></div>
+              <div><Typography.Text type="secondary">检测时间</Typography.Text><div>{status?.lastUpdateCheckAt ? new Date(status.lastUpdateCheckAt).toLocaleString("zh-CN") : "检测中…"}</div></div>
+              <div><Typography.Text type="secondary">发布时间</Typography.Text><div>{status?.latestReleasePublishedAt ? new Date(status.latestReleasePublishedAt).toLocaleString("zh-CN") : "—"}</div></div>
+              <Typography.Text type="secondary">每 5 分钟自动检查；网络失败会明确提示，不会被误报为“已是最新版本”。源码构建版本不代表已安装的生产版本。</Typography.Text>
             </Space>
           </OpsSurface>
         </Col>
-
         <Col xs={24} md={12}>
-          <OpsSurface variant="panel" padding="sm" title="操作区">
+          <OpsSurface variant="panel" padding="sm" title="下载与升级">
             <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-              <Typography.Text type="secondary">
-                安装不阻塞运行流量；重启后激活新版本并异步审计。回滚采用指针切换，目标秒级完成。
-              </Typography.Text>
-              <Input
-                value={targetVersion}
-                onChange={(e) => setTargetVersion(e.target.value)}
-                placeholder="目标发布版本，例如 v1.4.2"
-              />
-              <OpsIconActionButton
-                icon={<CloudDownloadOutlined />}
-                loading={installMutation.isPending}
-                opsTone="primary"
-                opsVariant="primary"
-                onClick={() => installMutation.mutate(undefined)}
-              >
-                安装更新（不立即激活）
-              </OpsIconActionButton>
-              <OpsIconActionButton
-                icon={<ReloadOutlined />}
-                loading={restartMutation.isPending}
-                onClick={() => restartMutation.mutate()}
-              >
-                重启并激活已安装版本
-              </OpsIconActionButton>
-              <Input
-                value={rollbackVersion}
-                onChange={(e) => setRollbackVersion(e.target.value)}
-                placeholder="回滚到版本（可选，默认最近备份）"
-              />
-              <OpsIconActionButton
-                icon={<RollbackOutlined />}
-                loading={rollbackMutation.isPending}
-                opsTone="danger"
-                opsVariant="danger"
-                onClick={() => rollbackMutation.mutate()}
-              >
-                秒级回滚（指针切换）
-              </OpsIconActionButton>
-              <OpsIconActionButton
-                icon={<SafetyCertificateOutlined />}
-                loading={auditMutation.isPending}
-                onClick={() => auditMutation.mutate()}
-              >
-                手动触发发布后审计
-              </OpsIconActionButton>
+              {status?.latestReleaseUrl ? <Typography.Link href={status.latestReleaseUrl} target="_blank" rel="noopener noreferrer">查看发布说明 <LinkOutlined /></Typography.Link> : null}
+              {status?.releaseReady && status.downloadUrl && status.checksumUrl ? <>
+                <Typography.Link href={status.downloadUrl}><CloudDownloadOutlined /> 下载 Ubuntu 24.04 x64 发布包</Typography.Link>
+                <Typography.Link href={status.checksumUrl}>下载 SHA256 校验文件</Typography.Link>
+                <Typography.Text type="secondary">将两个文件放在同一目录后验证完整性：</Typography.Text>
+                <Typography.Paragraph code copyable>sha256sum -c kubenova-ubuntu.tar.gz.sha256</Typography.Paragraph>
+                <Typography.Text type="secondary">Docker Compose：先在部署主机备份数据库，并更新部署脚本与配置模板；再用同一版本更新三个服务。首次拉取私有 GHCR 包需登录或由仓库管理员将包设为公开。</Typography.Text>
+                <Typography.Paragraph code copyable>{`bash scripts/compose-release.sh up --tag ${status.latestVersion}`}</Typography.Paragraph>
+                <Typography.Text type="secondary">二进制部署：校验后解压到独立版本目录，按升级文档完成迁移、切换与健康检查。不要覆盖正在运行的目录。</Typography.Text>
+              </> : <Typography.Text type="secondary">正式发布完成后提供下载和升级指引。仅推送 tag 不会被当作可安装更新。</Typography.Text>}
+              <Typography.Text type="warning">网页不执行宿主机安装、重启或回滚。数据库迁移不会因切换旧镜像自动撤销，回滚前必须核对兼容性。</Typography.Text>
+              {status?.postReleaseAudit.enabled ? <OpsIconActionButton icon={<SafetyCertificateOutlined />} loading={auditMutation.isPending} onClick={() => auditMutation.mutate()}>手动触发发布后审计</OpsIconActionButton> : null}
             </Space>
           </OpsSurface>
         </Col>

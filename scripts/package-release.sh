@@ -56,6 +56,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$SKIP_BUILD" != "true" ]]; then
+  [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || { echo '[错误] Ubuntu x64 发布包必须在 Linux x64 构建（含原生 Node/Prisma 依赖）；请使用 GitHub Release workflow。' >&2; exit 2; }
   kubenova_require_node_package_tools package-release
 fi
 
@@ -116,6 +117,7 @@ mkdir -p "$STAGE_DIR/frontend/.next/standalone/.next"
 copy_dir "$ROOT_DIR/frontend/.next/static" "$STAGE_DIR/frontend/.next/standalone/.next/static"
 if [[ -d "$ROOT_DIR/frontend/public" ]]; then
   copy_dir "$ROOT_DIR/frontend/public" "$STAGE_DIR/frontend/public"
+  copy_dir "$ROOT_DIR/frontend/public" "$STAGE_DIR/frontend/.next/standalone/public"
 fi
 
 copy_dir "$ROOT_DIR/backend/control-api/dist" "$STAGE_DIR/control-api/dist"
@@ -133,9 +135,10 @@ fi
 install -m 0755 "$RUNTIME_BIN" "$STAGE_DIR/runtime-gateway/runtime-gateway"
 
 cp -a "$ROOT_DIR/deploy/systemd" "$STAGE_DIR/deploy/systemd"
-cp -a "$ROOT_DIR/scripts" "$STAGE_DIR/deploy/scripts"
+cp -a "$ROOT_DIR/scripts" "$STAGE_DIR/scripts"
 cp "$ROOT_DIR/deploy/systemd/env/control-api.env.example" "$STAGE_DIR/env/control-api.env.example"
 cp "$ROOT_DIR/deploy/systemd/env/runtime-gateway.env.example" "$STAGE_DIR/env/runtime-gateway.env.example"
+cp "$ROOT_DIR/deploy/systemd/env/frontend.env.example" "$STAGE_DIR/env/frontend.env.example"
 
 cat > "$STAGE_DIR/metadata.json" <<EOF
 {
@@ -156,9 +159,9 @@ cp "$STAGE_DIR/metadata.json" "$OUT_DIR/metadata.json"
 # Emit a digest alongside the archive so an operator can verify that the
 # artifact transferred to a host is the exact one that was built.
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "$OUT_DIR/kubenova-ubuntu.tar.gz" > "$OUT_DIR/kubenova-ubuntu.tar.gz.sha256"
+  (cd "$OUT_DIR" && sha256sum kubenova-ubuntu.tar.gz > kubenova-ubuntu.tar.gz.sha256)
 elif command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 "$OUT_DIR/kubenova-ubuntu.tar.gz" > "$OUT_DIR/kubenova-ubuntu.tar.gz.sha256"
+  (cd "$OUT_DIR" && shasum -a 256 kubenova-ubuntu.tar.gz > kubenova-ubuntu.tar.gz.sha256)
 fi
 
 echo "✔ release packaged"

@@ -233,11 +233,11 @@ test("canonical access path has stable visual ordering", () => {
   leftOf("Pod", "Service");
   leftOf("Service", "EndpointSlice");
   leftOf("Service", "Ingress");
-  // Endpoint resources share a stage; Ingress is the final stage to their right.
+  // Headlamp puts endpoint resources and Ingress in the same stage after Service.
   sameColumn("EndpointSlice", "Endpoints");
-  leftOf("EndpointSlice", "Ingress");
+  sameColumn("EndpointSlice", "Ingress");
   sameColumn("Gateway", "HTTPRoute");
-  sameColumn("HTTPRoute", "Ingress");
+  leftOf("Ingress", "HTTPRoute");
   sameColumn("TCPRoute", "HTTPRoute");
   sameColumn("TLSRoute", "HTTPRoute");
   sameColumn("UDPRoute", "HTTPRoute");
@@ -329,7 +329,7 @@ test("unscheduled Pods stay visible under a sentinel group and never vanish", ()
   assert.deepEqual([...labels].sort(), ["worker-1", "未调度"].sort());
 });
 
-test("over-limit groups reveal their scene instead of adding another summary row", async () => {
+test("large namespaces keep component summaries and reveal every resource when drilled into", async () => {
   const connectedResources: KubejojoResource[] = Array.from({ length: 130 }, (_, index) => ({
     id: `connected-${String(index).padStart(3, "0")}`,
     kind: index === 0 ? "Deployment" : "Pod",
@@ -347,13 +347,16 @@ test("over-limit groups reveal their scene instead of adding another summary row
   const groupId = "group:namespace:prod";
   const focused = collapseKubejojoGraph(grouped, groupId, false);
 
-  assert.ok(
-    focused.nodes?.some((node) => node.id.startsWith("component:")),
-    "an opened group renders its component scene",
-  );
-  const layout = await layoutKubejojoGraph(focused, 1.6);
-  assert.ok(layout.edges.length > 0, "an opened group draws its relationships");
-  assert.ok(layout.nodes.length > 1);
+  const component = focused.nodes?.find((node) => node.groupKind === "component");
+  assert.ok(component?.collapsed, "entering a namespace does not expand every workload");
+  const summary = await layoutKubejojoGraph(focused, 1.6);
+  assert.deepEqual(summary.nodes.map((node) => node.id), [component.id]);
+  assert.equal(summary.edges.length, 0, "internal edges stay inside the folded component");
+
+  const expanded = collapseKubejojoGraph(grouped, component.id);
+  const layout = await layoutKubejojoGraph(expanded, 1.6);
+  assert.deepEqual(layout.nodes.map((node) => node.id).sort(), connectedResources.map((node) => node.id).sort());
+  assert.deepEqual(layout.edges.map((edge) => edge.id).sort(), relations.map((edge) => edge.id).sort());
 });
 
 test("configuration relationships stay on one side and never merge workloads", () => {
@@ -414,12 +417,12 @@ test("full association mode renders configuration edges while core mode keeps th
   const coreGraph = collapseKubejojoGraph(
     groupKubejojoGraph(coreProjection.resources, coreProjection.relations, "namespace"),
     "group:namespace:prod",
-    false,
+    true,
   );
   const fullGraph = collapseKubejojoGraph(
     groupKubejojoGraph(fullProjection.resources, fullProjection.relations, "namespace"),
     "group:namespace:prod",
-    false,
+    true,
   );
   clearKubejojoLayoutCache();
   const coreLayout = await layoutKubejojoGraph(coreGraph, 1.6);
@@ -507,8 +510,8 @@ test("ELK partitions are the negated Headlamp weights", () => {
   assert.equal(getKubejojoPartition({ id: "replicaset", resource: { id: "replicaset", kind: "ReplicaSet", name: "api-rs" } }), -960);
   assert.equal(getKubejojoPartition({ id: "pod", resource: { id: "pod", kind: "Pod", name: "api-0" } }), -800);
   assert.equal(getKubejojoPartition({ id: "service", resource: { id: "service", kind: "Service", name: "api" } }), -790);
-  assert.equal(getKubejojoPartition({ id: "ingress", resource: { id: "ingress", kind: "Ingress", name: "api" } }), -770);
-  assert.equal(getKubejojoPartition({ id: "pvc", resource: { id: "pvc", kind: "PersistentVolumeClaim", name: "data" } }), -780);
+  assert.equal(getKubejojoPartition({ id: "ingress", resource: { id: "ingress", kind: "Ingress", name: "api" } }), -780);
+  assert.equal(getKubejojoPartition({ id: "pvc", resource: { id: "pvc", kind: "PersistentVolumeClaim", name: "data" } }), -790);
   assert.equal(getKubejojoPartition({ id: "pv", resource: { id: "pv", kind: "PersistentVolume", name: "pv-1" } }), -750);
   // An unrecognised CRD falls back to the shared default column.
   assert.equal(getKubejojoPartition({ id: "crd", resource: { id: "crd", kind: "Widget", name: "w" } }), -500);
@@ -657,24 +660,30 @@ test("focused access path keeps singleton stages on one horizontal reading line"
   const layout = await layoutKubejojoGraph(graph, 1.6);
   const byId = new Map(layout.nodes.map((node) => [node.id, node]));
   const center = (id: string) => byId.get(id)!.position.y + (byId.get(id)!.style!.height as number) / 2;
-  for (const id of ["deploy", "rs", "svc", "slice", "ingress"]) {
+  for (const id of ["deploy", "rs", "svc"]) {
     assert.ok(Math.abs(center(id) - center("svc")) <= 1, `${id} should share the access-path centerline`);
   }
   assert.ok(byId.get("pod-a")!.position.x < byId.get("svc")!.position.x);
   assert.ok(byId.get("svc")!.position.x < byId.get("slice")!.position.x);
-  assert.ok(byId.get("slice")!.position.x < byId.get("ingress")!.position.x);
+  assert.equal(byId.get("slice")!.position.x, byId.get("ingress")!.position.x);
+  assert.equal(byId.get("pod-a")!.position.x, byId.get("pod-b")!.position.x);
+  for (const [a, b] of [["pod-a", "pod-b"], ["slice", "ingress"]]) {
+    assert.ok(Math.abs((center(a) + center(b)) / 2 - center("svc")) <= 1, "fan-out columns stay centred on the access path");
+    assert.ok(Math.abs(center(a) - center(b)) >= KUBEJOJO_LAYOUT_METRICS.nodeHeight, "cards in a shared column never overlap");
+  }
   const ingressRoute = layout.edges.find((edge) => edge.id === "i-s")!;
   assert.equal(ingressRoute.source, "svc", "Ingress still routes to Service in Kubernetes");
-  const slice = byId.get("slice")!;
-  const bypass = ingressRoute.data?.sections ?? [];
-  assert.equal(bypass.length, 3, "Service-to-Ingress route has a separate rail around EndpointSlice");
-  assert.ok(bypass[1].startPoint.x < slice.position.x && bypass[1].endPoint.x > slice.position.x + (slice.style!.width as number));
-  assert.ok(bypass[1].startPoint.y < slice.position.y || bypass[1].startPoint.y > slice.position.y + (slice.style!.height as number));
-  const upperPod = ["pod-a", "pod-b"].map((id) => byId.get(id)!).sort((a, b) => a.position.y - b.position.y)[0];
-  const upperPodRoute = layout.edges.find((edge) => edge.id === (upperPod.id === "pod-a" ? "e-a" : "e-b"))!;
-  const routeY = upperPodRoute.data?.sections?.[1]?.startPoint.y ?? Number.NaN;
-  assert.ok(routeY >= center(upperPod.id) && routeY <= center("slice"),
-    "upper Pod-to-EndpointSlice route stays within its natural vertical band");
+  assert.equal(ingressRoute.data?.sections?.length, 1, "adjacent stages connect directly without an invented bypass");
+  const service = byId.get("svc")!;
+  for (const id of ["e-a", "e-b"]) {
+    const sections = layout.edges.find((edge) => edge.id === id)!.data!.sections!;
+    if (sections.length === 3) {
+      const rail = sections[1];
+      assert.ok(rail.startPoint.x < service.position.x && rail.endPoint.x > service.position.x + KUBEJOJO_LAYOUT_METRICS.nodeWidth);
+      assert.ok(rail.startPoint.y < service.position.y || rail.startPoint.y > service.position.y + KUBEJOJO_LAYOUT_METRICS.nodeHeight,
+        "a cross-stage dependency detours outside the intervening Service card");
+    }
+  }
   assert.equal(layout.edges.length, edges.length);
   for (const edge of layout.edges) {
     const sections = edge.data?.sections ?? [];

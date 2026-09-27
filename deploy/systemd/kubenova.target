@@ -1,6 +1,6 @@
 [Unit]
 Description=KubeNova Platform Target
-Wants=kubenova-control-api.service kubenova-runtime-gateway.service
+Wants=kubenova-control-api.service kubenova-runtime-gateway.service kubenova-frontend.service
 After=network-online.target
 
 [Install]

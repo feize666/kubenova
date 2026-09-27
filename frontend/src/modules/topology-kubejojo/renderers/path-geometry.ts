@@ -30,7 +30,8 @@ function toCurve(section: TopologyElkSection, offset: TopologyElkPoint): Relatio
   const endPoint = offsetPoint(section.endPoint, offset);
   const bends = (section.bendPoints ?? []).map((point) => offsetPoint(point, offset));
 
-  // Use ELK bend points directly when available (2 points form a cubic Bézier).
+  // Match Headlamp: use the first two ELK control points for one cubic.
+  // Extra label-routing points do not imply an obstacle or a separate rail.
   if (bends.length >= 2) {
     return {
       startPoint,
@@ -93,29 +94,6 @@ function toCurve(section: TopologyElkSection, offset: TopologyElkPoint): Relatio
   };
 }
 
-function toSectionCurves(section: TopologyElkSection, offset: TopologyElkPoint): RelationshipCurve[] {
-  if ((section.bendPoints?.length ?? 0) <= 2) return [toCurve(section, offset)];
-
-  // ELK can emit a long obstacle-by-obstacle spline for a fan-out edge
-  // (Pod -> EndpointSlice is the common case). Replaying every bend produces
-  // the giant zig-zags visible in the old canvas. Collapse that route to one
-  // calm Headlamp-style rail above/below the intervening cards while keeping
-  // the real endpoints intact.
-  const startPoint = offsetPoint(section.startPoint, offset);
-  const endPoint = offsetPoint(section.endPoint, offset);
-  const bends = (section.bendPoints ?? []).map((point) => offsetPoint(point, offset));
-  const minY = Math.min(...bends.map((point) => point.y));
-  const maxY = Math.max(...bends.map((point) => point.y));
-  const channelY = startPoint.y <= endPoint.y ? minY - 24 : maxY + 24;
-  const entryX = startPoint.x + Math.min(32, Math.max(16, (endPoint.x - startPoint.x) * 0.12));
-  const exitX = endPoint.x - Math.min(32, Math.max(16, (endPoint.x - startPoint.x) * 0.12));
-  return [
-    { startPoint, endPoint: { x: entryX, y: channelY } },
-    { startPoint: { x: entryX, y: channelY }, endPoint: { x: exitX, y: channelY } },
-    { startPoint: { x: exitX, y: channelY }, endPoint },
-  ].map((rail) => toCurve(rail, { x: 0, y: 0 }));
-}
-
 function cubicCommand(curve: RelationshipCurve): string {
   return `C ${formatPoint(curve.controlPointA)} ${formatPoint(curve.controlPointB)} ${formatPoint(curve.endPoint)}`;
 }
@@ -127,11 +105,10 @@ export function buildRelationshipPath(
   let previousEnd: TopologyElkPoint | undefined;
   const commands: string[] = [];
   sections.forEach((section) => {
-    toSectionCurves(section, offset).forEach((curve) => {
-      if (!previousEnd || !samePoint(previousEnd, curve.startPoint)) commands.push(`M ${formatPoint(curve.startPoint)}`);
-      commands.push(cubicCommand(curve));
-      previousEnd = curve.endPoint;
-    });
+    const curve = toCurve(section, offset);
+    if (!previousEnd || !samePoint(previousEnd, curve.startPoint)) commands.push(`M ${formatPoint(curve.startPoint)}`);
+    commands.push(cubicCommand(curve));
+    previousEnd = curve.endPoint;
   });
   return commands.join(" ");
 }

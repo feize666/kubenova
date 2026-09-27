@@ -31,14 +31,14 @@ services:
       retries: 10
 
   control-api:
-    image: ${CONTROL_API_IMAGE:-ghcr.io/feize1995/kubenova-control-api:${KUBENOVA_IMAGE_TAG:-latest}}
+    image: ${CONTROL_API_IMAGE:-ghcr.io/feize666/kubenova-control-api:${KUBENOVA_IMAGE_TAG:-latest}}
     container_name: kubenova-control-api
     restart: unless-stopped
     env_file:
       - .env
     environment:
       NODE_ENV: production
-      PORT: ${CONTROL_API_PORT:-4000}
+      PORT: 4000
       CONTROL_API_BASE_URL: ${CONTROL_API_BASE_URL:-http://localhost:4000}
       DATABASE_URL: postgresql://${POSTGRES_USER:-kubenova}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-kubenova}
       REDIS_URL: redis://redis:6379
@@ -81,19 +81,19 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/api/health/ready',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/api/health/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 10
 
   runtime-gateway:
-    image: ${RUNTIME_GATEWAY_IMAGE:-ghcr.io/feize1995/kubenova-runtime-gateway:${KUBENOVA_IMAGE_TAG:-latest}}
+    image: ${RUNTIME_GATEWAY_IMAGE:-ghcr.io/feize666/kubenova-runtime-gateway:${KUBENOVA_IMAGE_TAG:-latest}}
     container_name: kubenova-runtime-gateway
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      PORT: ${RUNTIME_GATEWAY_PORT:-4100}
+      PORT: 4100
       NODE_ENV: production
       CONTROL_API_BASE_URL: ${CONTROL_API_INTERNAL_BASE_URL:-http://control-api:4000}
       RUNTIME_TOKEN_SECRET: ${RUNTIME_TOKEN_SECRET:?RUNTIME_TOKEN_SECRET must be set in the production env file}
@@ -112,7 +112,7 @@ services:
       retries: 10
 
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/feize1995/kubenova-frontend:${KUBENOVA_IMAGE_TAG:-latest}}
+    image: ${FRONTEND_IMAGE:-ghcr.io/feize666/kubenova-frontend:${KUBENOVA_IMAGE_TAG:-latest}}
     container_name: kubenova-frontend
     restart: unless-stopped
     env_file:
@@ -129,7 +129,7 @@ services:
       control-api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 10

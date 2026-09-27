@@ -1,0 +1,130 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.ref_name }}
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/control-api/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/runtime-gateway/go.mod
+          cache-dependency-path: backend/runtime-gateway/go.sum
+      - name: Validate release version
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+[.][0-9]+([.][0-9]+)?$ ]]
+          node -e 'const tag=process.env.RELEASE_TAG.slice(1).split("."); while(tag.length<3)tag.push("0"); for(const p of ["./frontend/package.json","./backend/control-api/package.json"]) if(require(p).version!==tag.join("."))throw Error("Tag/package version mismatch: "+p)'
+      - name: Build Linux x64 release
+        run: VERSION="$RELEASE_TAG" bash scripts/package-release.sh
+      - name: Verify release contracts and updater
+        run: |
+          bash scripts/release-check.sh
+          node scripts/check-release-switch.mjs
+          npm --prefix backend/control-api test -- --runInBand --testPathPatterns=system-update
+          node frontend/scripts/check-topology-interactions.mjs
+          cd tmp/release
+          sha256sum -c kubenova-ubuntu.tar.gz.sha256
+          tar -tzf kubenova-ubuntu.tar.gz > "$RUNNER_TEMP/release-files.txt"
+          grep -q 'frontend/.next/standalone/server.js' "$RUNNER_TEMP/release-files.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: |
+            tmp/release/kubenova-ubuntu.tar.gz
+            tmp/release/kubenova-ubuntu.tar.gz.sha256
+            tmp/release/metadata.json
+          if-no-files-found: error
+          retention-days: 7
+
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build versioned images
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+[.][0-9]+([.][0-9]+)?$ ]]
+          IMAGE_ROOT="ghcr.io/${GITHUB_REPOSITORY,,}"
+          for service in frontend control-api runtime-gateway; do
+            context="backend/$service"
+            [[ "$service" != frontend ]] || context=frontend
+            docker build --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.version=$RELEASE_TAG" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE_ROOT-$service:$RELEASE_TAG" "$context"
+          done
+      - name: Verify full Compose startup before publication
+        run: |
+          cp deploy/docker/.env.example deploy/docker/.env
+          export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+          export JWT_SECRET="$(openssl rand -hex 32)"
+          export RUNTIME_TOKEN_SECRET="$(openssl rand -hex 32)"
+          export RUNTIME_GATEWAY_INTERNAL_SECRET="$(openssl rand -hex 32)"
+          export AI_CREDENTIAL_ENCRYPTION_KEY="$(openssl rand -hex 32)"
+          export DEFAULT_ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          export KUBENOVA_IMAGE_TAG="$RELEASE_TAG"
+          IMAGE_ROOT="ghcr.io/${GITHUB_REPOSITORY,,}"
+          export FRONTEND_IMAGE="$IMAGE_ROOT-frontend:$RELEASE_TAG"
+          export CONTROL_API_IMAGE="$IMAGE_ROOT-control-api:$RELEASE_TAG"
+          export RUNTIME_GATEWAY_IMAGE="$IMAGE_ROOT-runtime-gateway:$RELEASE_TAG"
+          bash scripts/compose-release.sh preflight
+          docker compose -f deploy/docker/docker-compose.prod.yml --env-file deploy/docker/.env up -d --wait --wait-timeout 240
+          curl --fail --retry 3 http://127.0.0.1:4000/api/health/ready
+          curl --fail --retry 3 http://127.0.0.1:4100/healthz
+          curl --fail --retry 3 http://127.0.0.1:3000/login -o /dev/null
+      - name: Publish tested images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          IMAGE_ROOT="ghcr.io/${GITHUB_REPOSITORY,,}"
+          for service in frontend control-api runtime-gateway; do
+            docker push "$IMAGE_ROOT-$service:$RELEASE_TAG"
+          done
+
+  publish:
+    needs: [package, images]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: release
+      - name: Publish only complete release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release
+          sha256sum -c kubenova-ubuntu.tar.gz.sha256
+          # Keep partial uploads invisible to /releases/latest; a retry may reuse only a draft.
+          if gh release view "$RELEASE_TAG" --json isDraft > release-state.json 2>/dev/null; then
+            node -e 'if(!require("./release-state.json").isDraft)throw Error("Published releases are immutable")'
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "KubeNova $RELEASE_TAG" --generate-notes --notes "Linux x64 / Ubuntu 24.04 / Node.js 22+. Download the archive and its SHA256 file together; run sha256sum -c kubenova-ubuntu.tar.gz.sha256 before installing. Frontend, control-api and runtime-gateway images use the same tag at ghcr.io/$GITHUB_REPOSITORY-<service>. Back up PostgreSQL and configuration before upgrading. The web console checks real releases; host deployment uses the deployment scripts, not simulated in-app installation."
+          fi
+          gh release upload "$RELEASE_TAG" kubenova-ubuntu.tar.gz kubenova-ubuntu.tar.gz.sha256 metadata.json --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest

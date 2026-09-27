@@ -45,6 +45,12 @@ export interface SystemUpdateStatusPayload {
   latestReleaseUrl?: string | null;
   latestReleasePublishedAt?: string | null;
   lastUpdateCheckAt?: string | null;
+  buildType: 'release' | 'source';
+  updateCheckError: string | null;
+  releaseReady: boolean;
+  downloadUrl: string | null;
+  checksumUrl: string | null;
+  manualUpdateReason: string;
   backupVersion?: string | null;
   installStatus:
     | 'idle'
@@ -56,7 +62,7 @@ export interface SystemUpdateStatusPayload {
     | 'failed';
   installable?: boolean;
   backupAvailable: boolean;
-  releaseMode?: 'pointer-swap';
+  releaseMode?: 'pointer-swap' | 'manual';
   rollbackSlaTargetMs?: number;
   rollbackSlaLastMs?: number | null;
   rollbackSlaMet?: boolean | null;

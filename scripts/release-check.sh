@@ -38,6 +38,8 @@ require_literal() {
 
 require_file deploy/docker/docker-compose.prod.yml
 require_file deploy/docker/.env.example
+require_file deploy/systemd/kubenova-frontend.service
+require_file deploy/systemd/env/frontend.env.example
 require_file backend/control-api/Dockerfile
 require_file backend/control-api/docker-entrypoint.sh
 require_file backend/control-api/prisma/migrations/migration_lock.toml

@@ -127,7 +127,7 @@
 .topology-kubejojo__canvas .react-flow__pane:active { cursor: grabbing; }
 .topology-kubejojo__canvas .react-flow__attribution { display: none; }
 .topology-kubejojo__canvas .react-flow__background { opacity: 0.36; }
-.topology-kubejojo__canvas .react-flow__nodes { pointer-events: auto; }
+.topology-kubejojo__canvas .react-flow__nodes { pointer-events: none; }
 .topology-kubejojo__canvas .react-flow__edges {
   pointer-events: none;
   /* Keep relationship paths above the opaque grouping surfaces. React Flow
@@ -1123,7 +1123,7 @@
 
 /* Archify-style relationship hit rail: a wide invisible target keeps narrow
  * operational links easy to inspect without changing their visible weight. */
-.topology-kubejojo__canvas .react-flow__edges { pointer-events: auto; }
+.topology-kubejojo__canvas .react-flow__edges { pointer-events: none; }
 .topology-kubejojo__canvas .react-flow__edge-path { pointer-events: none; }
 .topology-kubejojo__canvas .react-flow__edge-interaction {
   stroke: transparent;

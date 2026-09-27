@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../common/auth.guard';
-import { assertWritePermission, type PlatformRole } from '../common/governance';
+import {
+  assertAdministrationPermission,
+  type PlatformRole,
+} from '../common/governance';
 import type {
   SystemUpdateInstallRequest,
   SystemUpdatePostReleaseAuditRequest,
@@ -19,13 +22,19 @@ export class SystemUpdateController {
     return this.systemUpdateService.getStatus();
   }
 
+  @Post('check')
+  check(@Req() req: { user: { user?: { role?: PlatformRole } } }) {
+    assertAdministrationPermission(req.user?.user);
+    return this.systemUpdateService.checkForUpdates();
+  }
+
   @Post('install')
   install(
     @Req()
     req: { user: { user?: { username?: string; role?: PlatformRole } } },
     @Body() body: SystemUpdateInstallRequest,
   ) {
-    assertWritePermission(req.user?.user);
+    assertAdministrationPermission(req.user?.user);
     return this.systemUpdateService.install(
       body ?? {},
       req.user?.user?.username ?? 'unknown',
@@ -38,7 +47,7 @@ export class SystemUpdateController {
     req: { user: { user?: { username?: string; role?: PlatformRole } } },
     @Body() body: SystemUpdateRestartRequest,
   ) {
-    assertWritePermission(req.user?.user);
+    assertAdministrationPermission(req.user?.user);
     return this.systemUpdateService.restart(
       body?.confirm,
       req.user?.user?.username ?? 'unknown',
@@ -52,7 +61,7 @@ export class SystemUpdateController {
     req: { user: { user?: { username?: string; role?: PlatformRole } } },
     @Body() body: SystemUpdateRollbackRequest,
   ) {
-    assertWritePermission(req.user?.user);
+    assertAdministrationPermission(req.user?.user);
     return this.systemUpdateService.rollback(
       body ?? {},
       req.user?.user?.username ?? 'unknown',
@@ -65,7 +74,7 @@ export class SystemUpdateController {
     req: { user: { user?: { username?: string; role?: PlatformRole } } },
     @Body() body: SystemUpdatePostReleaseAuditRequest,
   ) {
-    assertWritePermission(req.user?.user);
+    assertAdministrationPermission(req.user?.user);
     return this.systemUpdateService.triggerPostReleaseAudit(
       body ?? {},
       req.user?.user?.username ?? 'unknown',

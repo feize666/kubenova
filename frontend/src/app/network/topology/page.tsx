@@ -233,6 +233,62 @@ function toCanvasRelation(relation: TopologyGraphRelation): KubejojoRelation {
   };
 }
 
+/**
+ * Keep the canvas focused on the operator-facing access path. Endpoint and
+ * EndpointSlice address resolution is still part of the API graph (and is
+ * available in the detail drawer), but drawing every Pod address edge makes a
+ * panorama cross the whole canvas. When the API omits the direct Service
+ * selector because an EndpointSlice is present, project that selector back into
+ * the panorama so the visible chain remains Service -> Pod.
+ */
+function toPanoramaRelations(relations: TopologyGraphRelation[]): KubejojoRelation[] {
+  const publishes = relations.filter((relation) => relation.type === "PUBLISHES");
+  const visible = relations.filter((relation) => relation.type !== "RESOLVES");
+  const existingSelectors = new Set(
+    visible
+      .filter((relation) => relation.type === "SELECTS")
+      .flatMap((relation) => [
+        relation.source + "->" + relation.target,
+        relation.target + "->" + relation.source,
+      ]),
+  );
+  const synthesized: TopologyGraphRelation[] = [];
+
+  relations
+    .filter((relation) => relation.type === "RESOLVES")
+    .forEach((resolution) => {
+      publishes
+        .filter((publish) => publish.target === resolution.source || publish.source === resolution.source)
+        .forEach((publish) => {
+          // API adapters normally emit Service -> EndpointSlice/Endpoints, but
+          // older adapters may reverse the same relation. Resolve the service
+          // endpoint from whichever side touches the resolution source so the
+          // canvas projection remains stable across both payloads.
+          const serviceId = publish.target === resolution.source ? publish.source : publish.target;
+          const pair = serviceId + "->" + resolution.target;
+          if (existingSelectors.has(pair) || existingSelectors.has(resolution.target + "->" + serviceId)) return;
+          existingSelectors.add(pair);
+          synthesized.push({
+            ...resolution,
+            id: "panorama:selects:" + pair,
+            source: serviceId,
+            target: resolution.target,
+            label: "选择",
+            type: "SELECTS",
+            role: "network",
+            direction: publish.direction,
+            evidence: [...publish.evidence, ...resolution.evidence],
+            evidenceDetails: [...publish.evidenceDetails, ...resolution.evidenceDetails],
+            ports: [...publish.ports, ...resolution.ports],
+            portDetails: [...publish.portDetails, ...resolution.portDetails],
+            confidence: Math.min(publish.confidence, resolution.confidence),
+          });
+        });
+    });
+
+  return [...visible, ...synthesized].map(toCanvasRelation);
+}
+
 function detailRequest(resource: TopologyGraphResource): DetailRequest {
   const kind = normalizeKind(resource.kind);
   const dynamic = dynamicIdentity(resource);
@@ -538,24 +594,8 @@ export default function NetworkTopologyPage() {
     [graph.resources],
   );
   const canvasRelations = useMemo(
-    () => graph.relations
-      // Headlamp's panorama shows the operator-facing access chain. Endpoint
-      // address resolution is still available in resource details, but drawing
-      // every EndpointSlice -> Pod address edge turns a fan-out into a web.
-      .filter((relation) => relation.type !== "RESOLVES")
-      .map(toCanvasRelation),
+    () => toPanoramaRelations(graph.relations),
     [graph.relations],
-  );
-  const selectedResourceId = topologySelection?.resourceId ?? null;
-  const selectedResource = useMemo(
-    () => graphQuery.data?.resources.find((resource) => resource.id === selectedResourceId) ?? null,
-    [graphQuery.data?.resources, selectedResourceId],
-  );
-  const selectedRelationCount = useMemo(
-    () => (graphQuery.data?.relations ?? []).filter(
-      (relation) => relation.source === selectedResourceId || relation.target === selectedResourceId,
-    ).length,
-    [graphQuery.data?.relations, selectedResourceId],
   );
   const sourceCounts = useMemo(
     () => Object.fromEntries(
@@ -722,23 +762,12 @@ export default function NetworkTopologyPage() {
     setFitVersion(String(Date.now()));
   }, []);
 
-  const navigateToResource = useCallback((resource: TopologyGraphResource) => {
-    const kind = normalizeKind(resource.kind);
-    const routes = RESOURCE_MANAGEMENT_ROUTES;
-    const params = new URLSearchParams({ keyword: resource.name });
-    if (!workspace) params.set("clusterId", resource.clusterId);
-    if (resource.namespace) params.set("namespace", resource.namespace);
-    const targetPath = resolveWorkspaceResourceHref(
-      workspace?.clusterId,
-      routes[kind] ?? "/network/topology",
-    );
-    router.push(`${targetPath}?${params.toString()}`);
-    setTopologySelection(null);
-    setDetail(null);
-  }, [router, workspace]);
+  const openResourceDetail = useCallback((resource: TopologyGraphResource) => {
+    setDetail(detailRequest(resource));
+  }, []);
 
   const navigateDetailRequest = useCallback((request: DetailRequest) => {
-    const kind = normalizeKind(request.kind);
+    const kind = normalizeKind(request.kind === "dynamic" ? request.kindLabel ?? request.kind : request.kind);
     const route = RESOURCE_MANAGEMENT_ROUTES[kind];
     if (!route || !request.name) {
       setDetail(request);
@@ -927,41 +956,6 @@ export default function NetworkTopologyPage() {
         />
       ) : null}
 
-      <div
-        className="topology-selection-strip"
-        role="status"
-        aria-live="polite"
-        hidden={!selectedResource}
-      >
-        {selectedResource ? (
-          <>
-            <span className="topology-selection-strip__kind">
-              {KIND_LABEL[normalizeKind(selectedResource.kind)] ?? normalizeKind(selectedResource.kind)}
-            </span>
-            <button
-              type="button"
-              className="topology-selection-strip__name"
-              title="在资源管理页中筛选该资源"
-              onClick={() => navigateToResource(selectedResource)}
-            >
-              {selectedResource.name}
-            </button>
-            <span className="topology-selection-strip__meta">
-              {selectedResource.namespace ?? "集群级"} · {selectedResource.status} · {selectedRelationCount} 条关系
-            </span>
-            <span className="topology-selection-strip__actions">
-              <Button size="small" type="primary" onClick={() => setDetail(detailRequest(selectedResource))}>
-                详情
-              </Button>
-              <Button size="small" onClick={() => setYaml(yamlTarget(selectedResource))}>YAML</Button>
-              <Button size="small" type="text" onClick={() => selectTopologyResource(null)}>
-                关闭
-              </Button>
-            </span>
-          </>
-        ) : null}
-      </div>
-
       <div className="resource-map-workbench">
         <div className="resource-map-canvas">
           {loading ? (
@@ -1002,7 +996,11 @@ export default function NetworkTopologyPage() {
               onSelectResource={selectTopologyResource}
               onOpen={(id) => {
                 const resource = graphQuery.data?.resources.find((item) => item.id === id);
-                if (resource) navigateToResource(resource);
+                if (resource) openResourceDetail(resource);
+              }}
+              onNavigate={(id) => {
+                const resource = graphQuery.data?.resources.find((item) => item.id === id);
+                if (resource) navigateDetailRequest(detailRequest(resource));
               }}
               fitVersion={fitVersion}
             />
@@ -1012,7 +1010,10 @@ export default function NetworkTopologyPage() {
 
       <ResourceDetailDrawer
         open={Boolean(detail)}
-        onClose={() => setDetail(null)}
+        onClose={() => {
+          setDetail(null);
+          setTopologySelection(null);
+        }}
         token={token}
         request={detail}
         onNavigateRequest={navigateDetailRequest}

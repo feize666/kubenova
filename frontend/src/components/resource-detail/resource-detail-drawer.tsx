@@ -3,7 +3,7 @@
 import { ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
 import { Space, Tabs, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
 import type { DynamicResourceIdentity, ResourceIdentity, ResourceDetailResponse } from "@/lib/api/resources";
@@ -175,13 +175,11 @@ export function ResourceDetailDrawer({
   const handleTabChange = useCallback((key: string) => setActiveTab(key), []);
 
   // Reset the tab when drilling into a different resource in the same drawer.
-  const previousRequestKey = useRef(activeRequestKey);
-  useEffect(() => {
-    if (previousRequestKey.current !== activeRequestKey) {
-      previousRequestKey.current = activeRequestKey;
-      setActiveTab("overview");
-    }
-  }, [activeRequestKey]);
+  const [previousRequestKey, setPreviousRequestKey] = useState(activeRequestKey);
+  if (previousRequestKey !== activeRequestKey) {
+    setPreviousRequestKey(activeRequestKey);
+    setActiveTab("overview");
+  }
 
   const clusterQuery = useQuery({
     queryKey: ["resource-detail", "clusters", token],
@@ -215,7 +213,13 @@ export function ResourceDetailDrawer({
         : id;
     const next = { ...nextRequest, kind, id: nextId };
     const nextKey = getRequestKey(next);
-    if (!nextKey || nextKey === activeRequestKey) return;
+    if (!nextKey) return;
+    // The title is also a navigation link. Avoid stacking the same detail,
+    // but let its owner navigate to the resource's management page.
+    if (nextKey === activeRequestKey) {
+      onNavigateRequest?.(next);
+      return;
+    }
 
     setNavigationState((current) => ({
       baseKey: hasActiveNavigationState

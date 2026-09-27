@@ -1,4 +1,12 @@
-import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotImplementedException,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -19,108 +27,130 @@ const AUDIT_REPORT_PATH = join(
   '.run/resource-reality-audit.json',
 );
 const UPDATE_STATE_PATH = join(process.cwd(), '.run/system-update-state.json');
-const UPDATE_REPOSITORY = process.env.KUBENOVA_UPDATE_REPOSITORY ?? 'feize666/kubenova';
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60_000;
+const MANUAL_UPDATE_REASON =
+  '此部署未接入宿主机升级执行器。请下载并校验 Release，或通过部署脚本更新同版本镜像；网页不会模拟安装、重启或回滚成功。';
 
-interface RecordOperationInput {
-  operationType: SystemUpdateHistoryItem['operationType'];
-  result: SystemUpdateHistoryItem['result'];
-  operator: string;
-  message: string;
-  targetVersion?: string;
-  durationMs?: number;
-}
+type RecordOperationInput = Omit<SystemUpdateHistoryItem, 'timestamp'>;
 
-interface PersistedUpdateState {
-  state: {
-    runningVersion: string;
-    installedVersion: string | null;
-    latestVersion: string;
-    backupVersion: string | null;
-    installStatus: SystemUpdateStatusPayload['installStatus'];
-    backupAvailable: boolean;
-    releaseMode: 'pointer-swap';
-    rollbackSlaTargetMs: number;
-    rollbackSlaLastMs: number | null;
-    rollbackSlaMet: boolean | null;
-    postReleaseAudit: SystemUpdateStatusPayload['postReleaseAudit'];
-    lastOperation: SystemUpdateHistoryItem | null;
+// Running identity comes from the artifact, never from mutable updater state.
+function runningBuild(): { version: string; buildType: 'release' | 'source' } {
+  let version = process.env.KUBENOVA_VERSION;
+  let buildType: 'release' | 'source' =
+    process.env.KUBENOVA_BUILD_TYPE === 'release' ? 'release' : 'source';
+  for (const file of ['../metadata.json', 'package.json']) {
+    try {
+      const metadata = JSON.parse(
+        readFileSync(join(process.cwd(), file), 'utf8'),
+      ) as { version?: string; name?: string };
+      if (file === 'package.json' && metadata.name !== 'control-api') continue;
+      if (file === '../metadata.json' && metadata.name !== 'kubenova') continue;
+      if (!version && typeof metadata.version === 'string')
+        version = metadata.version;
+      if (file === '../metadata.json') buildType = 'release';
+    } catch {
+      /* Source checkouts have no release metadata. */
+    }
+  }
+  return {
+    version:
+      version && parseVersion(version)
+        ? version.startsWith('v')
+          ? version
+          : 'v' + version
+        : 'v0.0.0-dev',
+    buildType,
   };
-  history: SystemUpdateHistoryItem[];
 }
 
 @Injectable()
-export class SystemUpdateService implements OnModuleInit {
+export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(SystemUpdateService.name);
+  private readonly build = runningBuild();
+  private readonly repository =
+    process.env.KUBENOVA_UPDATE_REPOSITORY ?? 'feize666/kubenova';
   private readonly history: SystemUpdateHistoryItem[] = [];
-
-  private state: {
-    runningVersion: string;
-    installedVersion: string | null;
-    latestVersion: string;
-    backupVersion: string | null;
-    installStatus: SystemUpdateStatusPayload['installStatus'];
-    backupAvailable: boolean;
-    releaseMode: 'pointer-swap';
-    rollbackSlaTargetMs: number;
-    rollbackSlaLastMs: number | null;
-    rollbackSlaMet: boolean | null;
-    postReleaseAudit: SystemUpdateStatusPayload['postReleaseAudit'];
-    lastOperation: SystemUpdateHistoryItem | null;
-  } = {
-    runningVersion: 'v0.0.0-dev',
-    installedVersion: 'v0.0.0-dev',
-    latestVersion: 'v0.0.0-dev',
-    backupVersion: null,
-    installStatus: 'idle',
-    backupAvailable: false,
-    releaseMode: 'pointer-swap',
-    rollbackSlaTargetMs: 3000,
-    rollbackSlaLastMs: null,
-    rollbackSlaMet: null,
+  private state = {
+    runningVersion: this.build.version,
+    latestVersion: this.build.version,
     postReleaseAudit: {
-      enabled: true,
-      strategy: 'async-after-release',
-      status: 'idle',
-      lastRunAt: null,
-      lastSummary: null,
+      enabled: existsSync(AUDIT_SCRIPT),
+      strategy: 'async-after-release' as const,
+      status: 'idle' as SystemUpdateStatusPayload['postReleaseAudit']['status'],
+      lastRunAt: null as string | null,
+      lastSummary: null as string | null,
     },
-    lastOperation: null,
+    lastOperation: null as SystemUpdateHistoryItem | null,
   };
-
+  private timer?: ReturnType<typeof setInterval>;
   private auditPromise: Promise<void> | null = null;
   private persistQueue: Promise<void> = Promise.resolve();
   private latestReleaseUrl: string | null = null;
   private latestReleasePublishedAt: string | null = null;
   private lastUpdateCheckAt: string | null = null;
+  private updateCheckError: string | null = null;
+  private downloadUrl: string | null = null;
+  private checksumUrl: string | null = null;
+  private releaseReady = false;
   private updateCheckPromise: Promise<void> | null = null;
 
   async onModuleInit(): Promise<void> {
-    await this.loadPersistedState();
+    // Older updater state only changed version strings, not installed files.
+    // Do not restore those versions or its unverified install/restart history.
+    try {
+      const parsed = JSON.parse(await readFile(UPDATE_STATE_PATH, 'utf8')) as {
+        history?: SystemUpdateHistoryItem[];
+      };
+      if (Array.isArray(parsed.history))
+        this.history.push(
+          ...parsed.history
+            .filter((row) => row?.operationType === 'post_release_audit')
+            .slice(0, 200),
+        );
+    } catch {
+      /* History is optional. */
+    }
     void this.refreshLatestVersion();
-    const timer = setInterval(() => void this.refreshLatestVersion(), UPDATE_CHECK_INTERVAL_MS);
-    timer.unref();
+    this.timer = setInterval(
+      () => void this.refreshLatestVersion(),
+      UPDATE_CHECK_INTERVAL_MS,
+    );
+    this.timer.unref();
+  }
+
+  onModuleDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
   }
 
   getStatus(): SystemUpdateStatusPayload {
-    if (!this.updateCheckPromise && (!this.lastUpdateCheckAt || Date.now() - Date.parse(this.lastUpdateCheckAt) > UPDATE_CHECK_INTERVAL_MS)) {
+    if (
+      !this.updateCheckPromise &&
+      (!this.lastUpdateCheckAt ||
+        Date.now() - Date.parse(this.lastUpdateCheckAt) >=
+          UPDATE_CHECK_INTERVAL_MS)
+    )
       void this.refreshLatestVersion();
-    }
     return {
       runningVersion: this.state.runningVersion,
-      installedVersion: this.state.installedVersion,
+      installedVersion: this.state.runningVersion,
+      buildType: this.build.buildType,
       latestVersion: this.state.latestVersion,
-      updateAvailable: isNewerVersion(this.state.latestVersion, this.state.runningVersion),
+      updateAvailable:
+        this.releaseReady &&
+        isNewerVersion(this.state.latestVersion, this.state.runningVersion),
       latestReleaseUrl: this.latestReleaseUrl,
       latestReleasePublishedAt: this.latestReleasePublishedAt,
       lastUpdateCheckAt: this.lastUpdateCheckAt,
-      backupVersion: this.state.backupVersion,
-      installStatus: this.state.installStatus,
-      installable: this.isInstallable(),
-      backupAvailable: this.state.backupAvailable,
-      releaseMode: this.state.releaseMode,
-      rollbackSlaTargetMs: this.state.rollbackSlaTargetMs,
-      rollbackSlaLastMs: this.state.rollbackSlaLastMs,
-      rollbackSlaMet: this.state.rollbackSlaMet,
+      updateCheckError: this.updateCheckError,
+      releaseReady: this.releaseReady,
+      downloadUrl: this.downloadUrl,
+      checksumUrl: this.checksumUrl,
+      installStatus: 'idle',
+      installable: false,
+      manualUpdateReason: MANUAL_UPDATE_REASON,
+      backupVersion: null,
+      backupAvailable: false,
+      releaseMode: 'manual',
       postReleaseAudit: { ...this.state.postReleaseAudit },
       lastOperation: this.state.lastOperation
         ? { ...this.state.lastOperation }
@@ -130,145 +160,32 @@ export class SystemUpdateService implements OnModuleInit {
     };
   }
 
-  install(
-    body: SystemUpdateInstallRequest,
-    operator: string,
-  ): SystemUpdateStatusPayload {
-    this.requireConfirm(body.confirm, 'install');
-    if (!this.isInstallable()) {
-      throw new BadRequestException({
-        code: ErrorCode.SYSTEM_UPDATE_INSTALL_CONFLICT,
-        message: '当前存在进行中的安装/重启/回滚任务，暂不可安装新版本',
-      });
-    }
-    const beginAt = Date.now();
-
-    const targetVersion = this.normalizeVersion(body.targetVersion);
-    const activeVersion = this.state.runningVersion;
-    this.state.installStatus = 'installing';
-    this.state.latestVersion = targetVersion;
-    this.state.installedVersion = targetVersion;
-    this.state.installStatus =
-      targetVersion === activeVersion ? 'installed' : 'installed-not-active';
-    this.state.backupAvailable = Boolean(this.state.backupVersion);
-
-    this.recordOperation({
-      operationType: 'install',
-      targetVersion,
-      result: 'success',
-      message:
-        targetVersion === activeVersion
-          ? `安装完成，当前运行版本已是 ${targetVersion}`
-          : `安装完成，待重启激活：${activeVersion} -> ${targetVersion}`,
-      operator,
-      durationMs: Date.now() - beginAt,
-    });
-    this.enqueuePersist();
+  async checkForUpdates(): Promise<SystemUpdateStatusPayload> {
+    await this.refreshLatestVersion();
     return this.getStatus();
   }
 
+  install(body: SystemUpdateInstallRequest, _operator: string): never {
+    this.requireConfirm(body.confirm, 'install');
+    return this.unsupportedDeployment();
+  }
   restart(
     confirm: boolean | undefined,
-    operator: string,
-    message?: string,
-  ): SystemUpdateStatusPayload {
+    _operator: string,
+    _message?: string,
+  ): never {
     this.requireConfirm(confirm, 'restart');
-    const beginAt = Date.now();
-    const previousVersion = this.state.runningVersion;
-    const pendingVersion = this.state.installedVersion;
-
-    this.state.installStatus = 'restarting';
-    if (pendingVersion && pendingVersion !== previousVersion) {
-      this.state.backupVersion = previousVersion;
-      this.state.runningVersion = pendingVersion;
-      this.state.latestVersion = pendingVersion;
-    }
-    this.state.installStatus = 'installed';
-    this.state.backupAvailable = Boolean(this.state.backupVersion);
-
-    this.recordOperation({
-      operationType: 'restart',
-      targetVersion: this.state.runningVersion,
-      result: 'success',
-      message: this.normalizeMessage(
-        message,
-        pendingVersion && pendingVersion !== previousVersion
-          ? `重启完成，已激活版本 ${pendingVersion}`
-          : `重启完成，运行版本保持 ${this.state.runningVersion}`,
-      ),
-      operator,
-      durationMs: Date.now() - beginAt,
-    });
-    this.enqueuePersist();
-    if (this.state.postReleaseAudit.enabled) {
-      void this.runPostReleaseAudit(this.state.runningVersion, operator);
-    }
-    return this.getStatus();
+    return this.unsupportedDeployment();
   }
-
-  rollback(
-    body: SystemUpdateRollbackRequest,
-    operator: string,
-  ): SystemUpdateStatusPayload {
+  rollback(body: SystemUpdateRollbackRequest, _operator: string): never {
     this.requireConfirm(body.confirm, 'rollback');
-    const beginAt = Date.now();
-
-    if (!this.state.backupAvailable) {
-      this.state.installStatus = 'failed';
-      this.recordOperation({
-        operationType: 'rollback',
-        result: 'failed',
-        message: '无可用备份，回滚失败',
-        operator,
-      });
-      throw new BadRequestException({
-        code: ErrorCode.SYSTEM_UPDATE_BACKUP_MISSING,
-        message: '无可用备份，无法执行回滚',
-      });
-    }
-
-    const targetVersion =
-      this.normalizeOptionalVersion(body.targetVersion) ??
-      this.state.backupVersion;
-    if (!targetVersion) {
-      this.state.installStatus = 'failed';
-      this.recordOperation({
-        operationType: 'rollback',
-        result: 'failed',
-        message: '无可用备份版本，回滚失败',
-        operator,
-      });
-      throw new BadRequestException({
-        code: ErrorCode.SYSTEM_UPDATE_BACKUP_MISSING,
-        message: '无可用备份版本，无法执行回滚',
-      });
-    }
-
-    const previousVersion = this.state.runningVersion;
-    this.state.installStatus = 'rollbacking';
-    this.state.runningVersion = targetVersion;
-    this.state.installedVersion = targetVersion;
-    this.state.backupVersion = previousVersion;
-    this.state.latestVersion = targetVersion;
-    this.state.installStatus = 'installed';
-    this.state.backupAvailable = Boolean(this.state.backupVersion);
-    const durationMs = Date.now() - beginAt;
-    this.state.rollbackSlaLastMs = durationMs;
-    this.state.rollbackSlaMet = durationMs <= this.state.rollbackSlaTargetMs;
-
-    this.recordOperation({
-      operationType: 'rollback',
-      targetVersion,
-      result: 'success',
-      message: this.normalizeMessage(
-        body.message,
-        `回滚完成（指针切换）：${previousVersion} -> ${targetVersion}`,
-      ),
-      operator,
-      durationMs,
+    return this.unsupportedDeployment();
+  }
+  private unsupportedDeployment(): never {
+    throw new NotImplementedException({
+      code: 'SYSTEM_UPDATE_DEPLOYMENT_REQUIRED',
+      message: MANUAL_UPDATE_REASON,
     });
-    this.enqueuePersist();
-    return this.getStatus();
   }
 
   triggerPostReleaseAudit(
@@ -276,19 +193,12 @@ export class SystemUpdateService implements OnModuleInit {
     operator: string,
   ): SystemUpdateStatusPayload {
     this.requireConfirm(body.confirm, 'post_release_audit');
-    const releaseVersion =
-      this.normalizeOptionalVersion(body.releaseVersion) ??
-      this.state.runningVersion;
-    void this.runPostReleaseAudit(releaseVersion, operator);
-    this.enqueuePersist();
+    if (!this.state.postReleaseAudit.enabled)
+      throw new BadRequestException('此部署未安装发布后审计脚本');
+    void this.runPostReleaseAudit(this.state.runningVersion, operator);
     return this.getStatus();
   }
-
-  getHistory(): {
-    items: SystemUpdateHistoryItem[];
-    total: number;
-    timestamp: string;
-  } {
+  getHistory() {
     return {
       items: this.history.map((item) => ({ ...item })),
       total: this.history.length,
@@ -296,210 +206,125 @@ export class SystemUpdateService implements OnModuleInit {
     };
   }
 
-  private requireConfirm(
-    confirm: boolean | undefined,
-    action: 'install' | 'restart' | 'rollback' | 'post_release_audit',
-  ): void {
-    if (confirm === true) {
-      return;
-    }
-    throw new BadRequestException({
-      code: ErrorCode.SYSTEM_UPDATE_CONFIRM_REQUIRED,
-      message: `${action} 是高风险操作，body.confirm 必须显式为 true`,
-    });
-  }
-
-  private recordOperation(input: RecordOperationInput): void {
-    const item: SystemUpdateHistoryItem = {
-      operationType: input.operationType,
-      ...(input.targetVersion ? { targetVersion: input.targetVersion } : {}),
-      result: input.result,
-      message: input.message,
-      timestamp: new Date().toISOString(),
-      operator: input.operator,
-      ...(input.durationMs !== undefined
-        ? { durationMs: input.durationMs }
-        : {}),
-    };
-
-    this.history.unshift(item);
-    this.state.lastOperation = item;
-    if (this.history.length > 200) {
-      this.history.length = 200;
-    }
-    this.enqueuePersist();
-  }
-
-  private normalizeVersion(raw: string | undefined): string {
-    const value = raw?.trim();
-    if (!value) {
-      throw new BadRequestException('targetVersion 是必填参数');
-    }
-    return value;
-  }
-
-  private normalizeOptionalVersion(
-    raw: string | undefined,
-  ): string | undefined {
-    const value = raw?.trim();
-    return value ? value : undefined;
-  }
-
-  private normalizeMessage(raw: string | undefined, fallback: string): string {
-    const value = raw?.trim();
-    return value ? value : fallback;
-  }
-
-  private isInstallable(): boolean {
-    return (
-      this.state.installStatus !== 'installing' &&
-      this.state.installStatus !== 'restarting' &&
-      this.state.installStatus !== 'rollbacking'
-    );
-  }
-
-  private enqueuePersist(): void {
-    this.persistQueue = this.persistQueue
-      .then(() => this.persistState())
-      .catch(() => {
-        // 持久化失败不阻塞主流程，状态以内存为准继续运行。
+  private requireConfirm(confirm: boolean | undefined, action: string): void {
+    if (confirm !== true)
+      throw new BadRequestException({
+        code: ErrorCode.SYSTEM_UPDATE_CONFIRM_REQUIRED,
+        message: action + ' 是高风险操作，body.confirm 必须显式为 true',
       });
   }
-
-  private async persistState(): Promise<void> {
-    const payload: PersistedUpdateState = {
-      state: {
-        runningVersion: this.state.runningVersion,
-        installedVersion: this.state.installedVersion,
-        latestVersion: this.state.latestVersion,
-        backupVersion: this.state.backupVersion,
-        installStatus: this.state.installStatus,
-        backupAvailable: this.state.backupAvailable,
-        releaseMode: this.state.releaseMode,
-        rollbackSlaTargetMs: this.state.rollbackSlaTargetMs,
-        rollbackSlaLastMs: this.state.rollbackSlaLastMs,
-        rollbackSlaMet: this.state.rollbackSlaMet,
-        postReleaseAudit: this.state.postReleaseAudit,
-        lastOperation: this.state.lastOperation,
-      },
-      history: this.history,
-    };
-    await mkdir(join(process.cwd(), '.run'), { recursive: true });
-    await writeFile(
-      UPDATE_STATE_PATH,
-      JSON.stringify(payload, null, 2),
-      'utf8',
-    );
+  private recordOperation(input: RecordOperationInput): void {
+    const item = { ...input, timestamp: new Date().toISOString() };
+    this.history.unshift(item);
+    this.history.length = Math.min(this.history.length, 200);
+    this.state.lastOperation = item;
+    this.enqueuePersist();
   }
-
-  private async loadPersistedState(): Promise<void> {
-    try {
-      const raw = await readFile(UPDATE_STATE_PATH, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<PersistedUpdateState>;
-      const savedState = parsed.state;
-      if (savedState) {
-        this.state.runningVersion =
-          savedState.runningVersion ?? this.state.runningVersion;
-        this.state.installedVersion =
-          savedState.installedVersion ?? this.state.installedVersion;
-        this.state.latestVersion =
-          savedState.latestVersion ?? this.state.latestVersion;
-        this.state.backupVersion = savedState.backupVersion ?? null;
-        this.state.installStatus =
-          savedState.installStatus ?? this.state.installStatus;
-        this.state.backupAvailable =
-          savedState.backupAvailable ?? Boolean(this.state.backupVersion);
-        this.state.releaseMode = 'pointer-swap';
-        this.state.rollbackSlaTargetMs =
-          savedState.rollbackSlaTargetMs ?? this.state.rollbackSlaTargetMs;
-        this.state.rollbackSlaLastMs = savedState.rollbackSlaLastMs ?? null;
-        this.state.rollbackSlaMet = savedState.rollbackSlaMet ?? null;
-        this.state.postReleaseAudit = {
-          ...this.state.postReleaseAudit,
-          ...(savedState.postReleaseAudit ?? {}),
-        };
-        this.state.lastOperation = savedState.lastOperation ?? null;
-      }
-
-      if (Array.isArray(parsed.history)) {
-        this.history.length = 0;
-        for (const row of parsed.history.slice(0, 200)) {
-          if (
-            row &&
-            typeof row === 'object' &&
-            typeof (row as { operationType?: unknown }).operationType ===
-              'string' &&
-            typeof (row as { result?: unknown }).result === 'string' &&
-            typeof (row as { message?: unknown }).message === 'string' &&
-            typeof (row as { timestamp?: unknown }).timestamp === 'string' &&
-            typeof (row as { operator?: unknown }).operator === 'string'
-          ) {
-            this.history.push(row);
-          }
-        }
-      }
-    } catch {
-      // 首次启动无持久化文件属正常场景。
-    }
+  private enqueuePersist(): void {
+    this.persistQueue = this.persistQueue
+      .then(async () => {
+        await mkdir(join(process.cwd(), '.run'), { recursive: true });
+        await writeFile(
+          UPDATE_STATE_PATH,
+          JSON.stringify({ history: this.history }),
+          { mode: 0o600 },
+        );
+      })
+      .catch(() => {
+        this.logger.error('Cannot persist update audit history');
+      });
   }
 
   private async refreshLatestVersion(): Promise<void> {
     if (this.updateCheckPromise) return this.updateCheckPromise;
     this.updateCheckPromise = (async () => {
       try {
-        const headers = {
-          accept: 'application/vnd.github+json',
-          'user-agent': 'kubenova-update-checker',
-        };
-        const releaseResponse = await fetch(
-          `https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`,
-          { headers, signal: AbortSignal.timeout(5000) },
+        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(this.repository))
+          throw new Error('更新仓库配置无效');
+        const response = await fetch(
+          'https://api.github.com/repos/' +
+            this.repository +
+            '/releases/latest',
+          {
+            headers: {
+              accept: 'application/vnd.github+json',
+              'user-agent': 'kubenova-update-checker',
+            },
+            signal: AbortSignal.timeout(10_000),
+            redirect: 'error',
+          },
         );
-        let tag: string | null = null;
-        let url: string | null = null;
-        let publishedAt: string | null = null;
-        if (releaseResponse.ok) {
-          const release = (await releaseResponse.json()) as {
-            tag_name?: unknown;
-            html_url?: unknown;
-            published_at?: unknown;
-          };
-          tag = typeof release.tag_name === 'string' ? release.tag_name : null;
-          url = typeof release.html_url === 'string' ? release.html_url : null;
-          publishedAt = typeof release.published_at === 'string' ? release.published_at : null;
-        }
-        if (!tag) {
-          const tagsResponse = await fetch(
-            `https://api.github.com/repos/${UPDATE_REPOSITORY}/tags?per_page=20`,
-            { headers, signal: AbortSignal.timeout(5000) },
+        if (!response.ok)
+          throw new Error(
+            response.status === 404
+              ? '尚无正式 Release（标签不等于可安装版本）'
+              : 'GitHub 版本检测失败：HTTP ' + response.status,
           );
-          if (tagsResponse.ok) {
-            const tags = (await tagsResponse.json()) as Array<{ name?: unknown }>;
-            const versionNames = tags
-              .map((item) => (typeof item.name === 'string' ? item.name : null))
-              .filter(Boolean) as string[];
-            if (versionNames.length > 0) {
-              versionNames.sort((a, b) => isNewerVersion(a, b) ? -1 : isNewerVersion(b, a) ? 1 : 0);
-              tag = versionNames[0];
-            }
-            url = tag
-              ? `https://github.com/${UPDATE_REPOSITORY}/releases/tag/${encodeURIComponent(tag)}`
-              : null;
-          }
-        }
-        if (tag) {
-          this.state.latestVersion = this.normalizeVersion(tag);
-          this.latestReleaseUrl = url;
-          this.latestReleasePublishedAt = publishedAt;
-        }
-        this.lastUpdateCheckAt = new Date().toISOString();
-      } catch {
-        this.lastUpdateCheckAt = new Date().toISOString();
+        const release = (await response.json()) as {
+          tag_name?: string;
+          draft?: boolean;
+          prerelease?: boolean;
+          published_at?: string;
+          assets?: Array<{
+            name?: string;
+            size?: number;
+            state?: string;
+            browser_download_url?: string;
+          }>;
+        };
+        const tag = release.tag_name;
+        if (
+          typeof tag !== 'string' ||
+          !/^v?\d+\.\d+(?:\.\d+)?$/.test(tag) ||
+          !parseVersion(tag) ||
+          release.draft !== false ||
+          release.prerelease !== false
+        )
+          throw new Error('Release 不是有效的稳定版本');
+        const assetUrl = (name: string): string | null => {
+          const expected =
+            'https://github.com/' +
+            this.repository +
+            '/releases/download/' +
+            tag +
+            '/' +
+            name;
+          const asset = release.assets?.find(
+            (item) =>
+              item.name === name &&
+              item.browser_download_url === expected &&
+              item.state === 'uploaded' &&
+              (item.size ?? 0) > 0,
+          );
+          return asset ? expected : null;
+        };
+        const download = assetUrl('kubenova-ubuntu.tar.gz');
+        const checksum = assetUrl('kubenova-ubuntu.tar.gz.sha256');
+        if (!download || !checksum)
+          throw new Error(
+            'Release 缺少 Linux x64 发布包或 SHA256 校验文件，暂不可更新',
+          );
+        this.state.latestVersion = tag;
+        this.latestReleaseUrl =
+          'https://github.com/' + this.repository + '/releases/tag/' + tag;
+        this.latestReleasePublishedAt = release.published_at ?? null;
+        this.downloadUrl = download;
+        this.checksumUrl = checksum;
+        this.releaseReady = true;
+        this.updateCheckError = null;
+      } catch (error) {
+        this.releaseReady = false;
+        this.updateCheckError =
+          error instanceof Error ? error.message : '更新检测失败，请稍后重试';
       } finally {
-        this.updateCheckPromise = null;
+        this.lastUpdateCheckAt = new Date().toISOString();
       }
     })();
-    return this.updateCheckPromise;
+    try {
+      await this.updateCheckPromise;
+    } finally {
+      this.updateCheckPromise = null;
+    }
   }
 
   private async runPostReleaseAudit(
@@ -570,14 +395,20 @@ export class SystemUpdateService implements OnModuleInit {
   }
 }
 
+function parseVersion(value: string): number[] | null {
+  const match =
+    /^v?(\d+)\.(\d+)(?:\.(\d+))?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(
+      value,
+    );
+  if (!match) return null;
+  const parts = [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)];
+  return parts.every(Number.isSafeInteger) ? parts : null;
+}
 function isNewerVersion(candidate: string, current: string): boolean {
-  const parse = (value: string) =>
-    value.trim().replace(/^v/i, '').split(/[.-]/).slice(0, 3)
-      .map((part) => Number.parseInt(part, 10) || 0);
-  const left = parse(candidate);
-  const right = parse(current);
-  for (let index = 0; index < 3; index += 1) {
-    if (left[index] !== right[index]) return left[index] > right[index];
-  }
-  return false;
+  const left = parseVersion(candidate),
+    right = parseVersion(current);
+  if (!left || !right) return false;
+  for (let i = 0; i < 3; i++)
+    if (left[i] !== right[i]) return left[i] > right[i];
+  return current.includes('-') && !candidate.includes('-');
 }

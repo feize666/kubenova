@@ -2,13 +2,13 @@
 
 KubeNova 是一套面向 Kubernetes 的集群运维控制台。它把集群接入、资源管理、资源拓扑、可观测性、访问控制和 AI 运维助手收敛到一个 Web 界面，可直接在浏览器中完成日常巡检与操作。
 
-当前版本：**v1.8**
+当前版本：**v1.9**
 
 ## 核心能力
 
 - **集群接入**：支持阿里云 ACK、腾讯云 TKE、华为云 CCE、AWS EKS、Google GKE、火山引擎 VKE 等主流托管 Kubernetes，上传 kubeconfig 后自动识别供应商与集群状态。
 - **资源管理**：覆盖工作负载（Pod、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job、CronJob、弹性伸缩）、网络（Service、Ingress、Endpoint、EndpointSlice、NetworkPolicy、Gateway API）、存储（PV、PVC、StorageClass）、配置（ConfigMap、Secret、ServiceAccount、LimitRange、ResourceQuota）与集群基础资源（Node、Namespace）。
-- **资源拓扑**：参考 Headlamp 资源全景图重构。以工作负载为起点，按 `Deployment → ReplicaSet → Pod → Service → Endpoint / EndpointSlice → Ingress` 的横向分层访问链路呈现资源关系，列序由节点权重表决定；连线采用三次贝塞尔曲线并沿访问路径从左到右布设，默认灰色、异常链路染橙／红、选中链路高亮流动；扇出关系使用单条上下分离的平滑通道，EndpointSlice 的地址解析明细保留在资源详情中，画布只绘制面向运维的访问关系，避免跨越节点形成大回环；折叠分组保留成员与关系计数并以叠层卡片区分。选中资源只占一条紧凑信息条，画布不再被宽抽屉挤压；适配视图为顶部浮层预留高度，资源路径与分组标签互不遮挡；折叠卡片的「进入」与面包屑逐级返回均可用；分组切换、展开／收起、搜索与仅异常筛选都在当前工作负载内收敛，不会退出到工作负载选择页。支持资源域多选、命名空间筛选，并将筛选、搜索和分组状态同步到 URL，便于刷新与分享。
+- **资源拓扑**：参考 Headlamp 资源全景图重构。以工作负载为起点，按 `Deployment → ReplicaSet → Pod → Service → Endpoint / EndpointSlice → Ingress` 的横向分层访问链路呈现资源关系，列序由节点权重表决定；连线采用单对单居中直线、多分支平滑曲线并沿访问路径从左到右布设，默认实线、异常链路染橙／红、选中链路高亮流动；折叠分组保留成员与关系计数并以叠层卡片区分。点击卡片直接打开资源详情抽屉，点击卡片内名称或详情标题跳转到对应资源列表；点击画布空白、外部区域或关闭抽屉会解除关联高亮，不改变筛选与画布视角；适配视图为顶部浮层预留高度，资源路径与分组标签互不遮挡；折叠卡片的「进入」与面包屑逐级返回均可用；分组切换、展开／收起、搜索与仅异常筛选都在当前工作负载内收敛，不会退出到工作负载选择页。支持资源域多选、命名空间筛选，并将筛选、搜索和分组状态同步到 URL，便于刷新与分享。
 - **资源详情**：点击任意资源名称以抽屉形式打开详情，包含概览、YAML、容器列表、关联 Pod 列表、事件与日志／终端入口，详情内的关联资源可继续跳转。Pod 的日志与终端以全屏工作台形式打开，关闭后回到原详情；`/clusters/{id}/logs` 与 `/clusters/{id}/terminal` 均在集群工作区内可直接访问，集群上下文从工作区自动继承。
 - **可观测性中心**：Prometheus 监控、日志中心与观测配置，支持告警接入、通知渠道与自定义模板。
 - **访问控制**：用户管理、集群访问授权、细致到命名空间与资源类型的权限范围，支持 MFA 与 OIDC 对接。
@@ -174,16 +174,36 @@ sudo bash scripts/service.sh prod rollback <version>
 
 ## 更新机制
 
-control-api 每 5 分钟读取一次 GitHub 仓库 `feize666/kubenova` 的最新版本，优先取 GitHub Releases，没有 Release 时回退到最新 tag。检测到新版本后会在通知中心和系统设置的更新管理页面提示。
+### 发布新版本
 
-运行版本来自发布包元数据，可通过环境变量调整检查行为：
+推送新的稳定版本标签（例如 `v1.9`）会触发 GitHub Actions：校验前后端 package 版本 → Linux x64 构建 → 更新检测/发布脚本测试 → 三服务 Docker Compose 启动检查 → 发布同版本 GHCR 镜像 → 上传发布包与 SHA256 → 将草稿 Release 转为正式版本。所有门禁通过前，更新页面不会把未完成的 tag 当成可用更新。不自动部署任何生产主机。
+
+正式 Release 包含 `kubenova-ubuntu.tar.gz`、`kubenova-ubuntu.tar.gz.sha256` 和 `metadata.json`。当前原生包面向 **Ubuntu 24.04 x64，Node.js 22+**；镜像面向 Linux amd64。下载发布包与校验文件到同一目录后执行：
 
 ```bash
-KUBENOVA_UPDATE_REPOSITORY=owner/repo
-UPDATE_CHECK_INTERVAL_MS=300000
+sha256sum -c kubenova-ubuntu.tar.gz.sha256
 ```
 
-升级与回滚流程见 [deploy/docs/upgrade-rollback.md](deploy/docs/upgrade-rollback.md)。
+### 检查与执行升级
+
+control-api 每 5 分钟读取 `feize666/kubenova` 的最新正式 Release，排除草稿/预发布，并要求发布包与校验文件完整。可在更新管理中点击“检查更新”立即检查；网络、限流、缺失产物错误会明确显示，不再静默显示无更新。旧版服务需先手动更新至本版本，才能获得这套检测修复。
+
+运行版本从构建环境 `KUBENOVA_VERSION`、发布包元数据或 control-api 的 package 版本读取，不再从可变更新状态文件读取虚拟版本。可通过 `KUBENOVA_UPDATE_REPOSITORY=owner/repo` 指定仓库；默认只使用公开 GitHub Release，不传递用户 GitHub 密钥。
+
+网页提供版本检测、发布说明、下载及校验指引，**不直接控制宿主机部署**。旧版只修改状态的“安装/激活/秒级回滚”接口已关闭，返回明确错误；不会再出现代码未升级但页面声称成功。
+
+实际升级前先备份数据库与配置，再使用当前部署方式的脚本：
+
+```bash
+# Docker Compose：同一个 tag 更新 frontend、control-api、runtime-gateway
+bash scripts/compose-release.sh up --tag v1.9
+# 二进制 systemd：将校验后的发布包放入独立版本目录，安装三个服务单元后切换
+sudo bash scripts/service.sh prod switch v1.9
+```
+
+镜像位于 `ghcr.io/feize666/kubenova-{frontend,control-api,runtime-gateway}:v1.9`。如果 GHCR 包首次创建为私有，部署主机需 `docker login ghcr.io`，或由仓库管理员将三个包设置为公开。不要沿用旧的 `feize1995` 镜像地址。
+
+systemd 切换会同时重启前端、API、网关并检查健康；失败返回非零且尝试恢复旧版本指针。它不自动撤销数据库迁移，也不承诺秒级恢复。完整步骤与旧平铺目录迁移见 [升级与回滚](deploy/docs/upgrade-rollback.md)。
 
 ## 项目结构
 

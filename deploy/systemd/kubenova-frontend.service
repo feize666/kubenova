@@ -1,0 +1,21 @@
+[Unit]
+Description=KubeNova Frontend (Next.js)
+After=network-online.target kubenova-control-api.service
+Wants=network-online.target
+PartOf=kubenova.target
+
+[Service]
+Type=simple
+Environment=NODE_ENV=production
+Environment=HOSTNAME=0.0.0.0
+Environment=PORT=3000
+EnvironmentFile=-/etc/kubenova/frontend.env
+WorkingDirectory=/opt/kubenova/current/frontend/.next/standalone
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=kubenova.target

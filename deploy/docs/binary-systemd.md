@@ -1,59 +1,38 @@
 # Binary + systemd
 
-## 前置条件
+## 适用范围
 
-- Linux 主机，`systemd` 可用。
-- 已准备版本化发布目录（参考 `deploy/binary/install-layout.md`）。
-- 服务单元文件已部署：
-  - `/usr/lib/systemd/system/kubenova-runtime-gateway.service`
-  - `/usr/lib/systemd/system/kubenova-control-api.service`
-- 发布目录遵循 `deploy/binary/install-layout.md`，即 `/opt/kubenova/current/...`
-- 环境文件位于 `/etc/kubenova/`
+v1.9 的原生包在 Ubuntu 24.04 x64 构建，宿主机需 Node.js 22+、PostgreSQL、Redis、systemd。不能用 macOS 的 node_modules 打包后直接部署 Linux。
 
-## 安装（文档化步骤）
+## 首次安装
+
+先从正式 GitHub Release 下载发布包和 SHA256 文件，校验通过后再解压。以下示例只适用于 /opt/kubenova/current 尚不存在的首次安装；已部署实例按升级文档操作。
 
 ```bash
-VERSION=1.2.3
-SOURCE=/tmp/kubenova-release-${VERSION}
-TARGET_BASE=/opt/kubenova
-TARGET_RELEASE=${TARGET_BASE}/releases/${VERSION}
-
-sudo mkdir -p "${TARGET_RELEASE}"
-sudo rsync -a --delete "${SOURCE}/" "${TARGET_RELEASE}/"
-
-# 可选：校验 checksum
-# (cd "${SOURCE}" && sha256sum -c SHA256SUMS)
-
-# 要求 runtime-gateway 可执行
-sudo test -x "${TARGET_RELEASE}/runtime-gateway/runtime-gateway"
-# 要求 control-api 构建产物存在
-sudo test -f "${TARGET_RELEASE}/control-api/dist/src/main.js"
-
-# 原子切换 + 重启服务
-sudo ln -sfn "${TARGET_RELEASE}" "${TARGET_BASE}/current"
-sudo systemctl daemon-reload
-sudo systemctl restart kubenova-runtime-gateway.service kubenova-control-api.service
+sha256sum -c kubenova-ubuntu.tar.gz.sha256
+sudo mkdir -p /opt/kubenova/releases/v1.9
+sudo tar -xzf kubenova-ubuntu.tar.gz -C /opt/kubenova/releases/v1.9 --strip-components=1
+sudo ln -s /opt/kubenova/releases/v1.9 /opt/kubenova/current
+cd /opt/kubenova/current
+sudo bash scripts/prod.sh install
+sudo vi /etc/kubenova/control-api.env
+sudo vi /etc/kubenova/runtime-gateway.env
+sudo systemctl start kubenova.target
 ```
+
+部署包已包含 Prisma CLI 和迁移；control-api 启动前执行 migrate deploy。三个单元为 kubenova-frontend、kubenova-control-api、kubenova-runtime-gateway。前端默认 3000，API 4000，网关 4100。
+
+必需配置：DATABASE_URL、REDIS_URL、JWT_SECRET、RUNTIME_TOKEN_SECRET、RUNTIME_GATEWAY_INTERNAL_SECRET、AI_CREDENTIAL_ENCRYPTION_KEY、DEFAULT_ADMIN_PASSWORD。请替换所有示例密码；已有实例必须保留原加密密钥。前端如需改端口可创建 /etc/kubenova/frontend.env 设置 PORT。
 
 ## 验证
 
 ```bash
-systemctl status kubenova-runtime-gateway.service --no-pager
-systemctl status kubenova-control-api.service --no-pager
+systemctl status kubenova-frontend kubenova-control-api kubenova-runtime-gateway --no-pager
+curl -fsS http://127.0.0.1:3000/login >/dev/null
+curl -fsS http://127.0.0.1:4000/api/health/ready
 curl -fsS http://127.0.0.1:4100/healthz
-curl -fsS http://127.0.0.1:4000/api/health/ready >/dev/null
 ```
 
-## 回滚
+进程就绪不等于所有集群可访问；还需登录验证资源列表、权限与日志/终端。失败时查看对应单元的 journalctl，不要通过修改版本状态文件宣称升级完成。
 
-```bash
-PREVIOUS_VERSION=1.2.2
-sudo ln -sfn /opt/kubenova/releases/${PREVIOUS_VERSION} /opt/kubenova/current
-sudo systemctl restart kubenova-runtime-gateway.service kubenova-control-api.service
-```
-
-## 故障排查
-
-- 服务起不来：`journalctl -u kubenova-runtime-gateway.service -n 200 --no-pager`
-- 配置加载异常：核对 `/etc/kubenova/*.env`
-- 升级失败：检查新版本目录完整性、二进制权限与软链指向
+升级、旧安装目录迁移和回滚见 [升级与回滚](upgrade-rollback.md)。

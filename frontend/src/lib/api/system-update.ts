@@ -26,11 +26,17 @@ export interface SystemUpdateStatusPayload {
   latestReleaseUrl?: string | null;
   latestReleasePublishedAt?: string | null;
   lastUpdateCheckAt?: string | null;
+  buildType: "release" | "source";
+  updateCheckError: string | null;
+  releaseReady: boolean;
+  downloadUrl: string | null;
+  checksumUrl: string | null;
+  manualUpdateReason: string;
   backupVersion?: string | null;
   installStatus: "idle" | "installing" | "installed-not-active" | "installed" | "restarting" | "rollbacking" | "failed";
   installable?: boolean;
   backupAvailable: boolean;
-  releaseMode?: "pointer-swap";
+  releaseMode?: "pointer-swap" | "manual";
   rollbackSlaTargetMs?: number;
   rollbackSlaLastMs?: number | null;
   rollbackSlaMet?: boolean | null;
@@ -54,6 +60,10 @@ export interface SystemUpdateHistoryResponse {
 
 export async function getSystemUpdateStatus(token?: string): Promise<SystemUpdateStatusPayload> {
   return apiRequest<SystemUpdateStatusPayload>("/api/system/update/status", { token });
+}
+
+export async function checkSystemUpdate(token?: string): Promise<SystemUpdateStatusPayload> {
+  return apiRequest<SystemUpdateStatusPayload>("/api/system/update/check", { method: "POST", token });
 }
 
 export async function getSystemUpdateHistory(token?: string): Promise<SystemUpdateHistoryResponse> {

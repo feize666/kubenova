@@ -114,9 +114,9 @@ compose_tagged() {
     return
   fi
   local frontend control_api runtime
-  frontend="$(image_repository FRONTEND_IMAGE ghcr.io/feize1995/kubenova-frontend)"
-  control_api="$(image_repository CONTROL_API_IMAGE ghcr.io/feize1995/kubenova-control-api)"
-  runtime="$(image_repository RUNTIME_GATEWAY_IMAGE ghcr.io/feize1995/kubenova-runtime-gateway)"
+  frontend="$(image_repository FRONTEND_IMAGE ghcr.io/feize666/kubenova-frontend)"
+  control_api="$(image_repository CONTROL_API_IMAGE ghcr.io/feize666/kubenova-control-api)"
+  runtime="$(image_repository RUNTIME_GATEWAY_IMAGE ghcr.io/feize666/kubenova-runtime-gateway)"
   env "KUBENOVA_IMAGE_TAG=$TAG" "FRONTEND_IMAGE=$frontend:$TAG" "CONTROL_API_IMAGE=$control_api:$TAG" "RUNTIME_GATEWAY_IMAGE=$runtime:$TAG" docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
 }
 

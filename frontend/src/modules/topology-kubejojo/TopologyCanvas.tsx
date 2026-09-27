@@ -55,6 +55,7 @@ type Props = {
   onFocus: (id: string | null) => void;
   onSelectResource: (selection: KubejojoTopologySelection | null) => void;
   onOpen: (id: string) => void;
+  onNavigate: (id: string) => void;
   onOpenTopologyRoot?: (id: string) => void;
   topologyRootLabel?: string;
   topologyRootKind?: string;
@@ -174,6 +175,7 @@ function Canvas({
   onFocus,
   onSelectResource,
   onOpen,
+  onNavigate,
   onOpenTopologyRoot,
   topologyRootLabel,
   topologyRootKind,
@@ -192,6 +194,17 @@ function Canvas({
   const [layoutError, setLayoutError] = useState(false);
   const [layoutRetry, setLayoutRetry] = useState(0);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!selectedNodeId && !selectedEdgeId) return;
+    const clearOutsideSelection = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || target.closest(".react-flow__node, .react-flow__edge, .resource-detail-drawer-wrapper")) return;
+      setSelectedEdgeId(null);
+      onSelectResource(null);
+    };
+    document.addEventListener("pointerdown", clearOutsideSelection);
+    return () => document.removeEventListener("pointerdown", clearOutsideSelection);
+  }, [onSelectResource, selectedEdgeId, selectedNodeId]);
   const capacityProjection = useMemo(
     () => projectCanvasCapacity(resources, relations, groupBy, focusedId, expandAll, displayMode),
     [displayMode, expandAll, focusedId, groupBy, relations, resources],
@@ -312,7 +325,7 @@ function Canvas({
       selected: node.id === selectedNodeId,
       data: {
         ...node.data,
-        onOpenResource: onOpen,
+        onOpenResource: onNavigate,
         viewState: selectedEdgeId
           ? layout.edges.find((edge) => edge.id === selectedEdgeId && (edge.source === node.id || edge.target === node.id))
             ? "focused"
@@ -326,7 +339,7 @@ function Canvas({
               : "muted",
       },
     })),
-    [adjacent, layout.edges, layout.nodes, onOpen, selectedEdgeId, selectedNodeId],
+    [adjacent, layout.edges, layout.nodes, onNavigate, selectedEdgeId, selectedNodeId],
   );
 
   const edges = useMemo(() => {
@@ -369,6 +382,7 @@ function Canvas({
       resourceId: resource.aggregation?.representativeId ?? resource.id,
       aggregation: resource.aggregation ?? null,
     });
+    onOpen(resource.aggregation?.representativeId ?? resource.id);
   };
   return (
     <div className={`topology-kubejojo${selectionPath.length > 1 ? " is-focused-scene" : ""}`}>

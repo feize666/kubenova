@@ -84,6 +84,7 @@ const STATUS_META = {
 } as const;
 
 function activateOnKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+  if (event.target !== event.currentTarget) return;
   if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();
   event.currentTarget.click();
@@ -358,7 +359,8 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
               <button
                 type="button"
                 className="topology-kubejojo__node-title topology-kubejojo__node-title-button"
-                title={`打开 ${nodeKind} 管理页`}
+                title="跳转到资源页面"
+                role="link"
                 onClick={(event) => {
                   event.stopPropagation();
                   openResource();

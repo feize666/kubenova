@@ -3,15 +3,12 @@
 import { BaseEdge, EdgeLabelRenderer, type Edge, type EdgeProps } from "@xyflow/react";
 import { memo, useState } from "react";
 
-import type {
-  TopologyNodeStatus,
-  TopologyRendererEdgeData,
-  TopologyViewState,
-} from "./contracts";
+import type { TopologyRendererEdgeData, TopologyViewState } from "./contracts";
 import { buildRelationshipPath, relationshipPathMidpoint } from "./path-geometry";
 
 const MAIN_RELATION_TYPES = new Set([
   "OWNS",
+  "SELECTS",
   "PUBLISHES",
   "RESOLVES",
   "ROUTES_TO",
@@ -31,26 +28,15 @@ export function topologyEdgeLayer(
 
 function edgeStyle(
   viewState: TopologyViewState | undefined,
-  stroke: string | undefined,
-  dashed: boolean | undefined,
   confidence: number | undefined,
   layer: TopologyEdgeLayer,
-  status: TopologyNodeStatus | undefined,
 ) {
   const neutralStroke = "var(--tk-edge)";
-  const statusStroke: Record<TopologyNodeStatus, string> = {
-    healthy: "var(--tk-success)",
-    warning: "var(--tk-warning)",
-    critical: "var(--tk-danger)",
-    unknown: neutralStroke,
-  };
-  const typedStroke = status ? statusStroke[status] : stroke ?? neutralStroke;
+  // Headlamp keeps relationship rails neutral; status belongs to the node
+  // card and does not turn the graph into a bundle of coloured lines.
+  const typedStroke = neutralStroke;
   const confidenceOpacity = typeof confidence === "number" ? Math.max(0.35, Math.min(1, confidence)) : 1;
-  const base = {
-    strokeDasharray: viewState === "focused"
-      ? (layer === "main" ? "9 6" : "4 5")
-      : layer === "overlay" ? (dashed ? "4 5" : "2 5") : dashed ? "6 4" : undefined,
-  };
+  const base = { strokeDasharray: undefined };
   switch (viewState) {
     case "focused":
       return {
@@ -97,7 +83,7 @@ function EdgeRenderer({
   const layer = topologyEdgeLayer(edgeData?.relationType, edgeData?.dashed);
   const viewState = edgeData?.viewState ?? "default";
   const status = edgeData?.status ?? "unknown";
-  const style = edgeStyle(viewState, edgeData?.stroke, edgeData?.dashed, edgeData?.confidence, layer, status);
+  const style = edgeStyle(viewState, edgeData?.confidence, layer);
   const labelPosition = edgeData?.labelPosition ?? relationshipPathMidpoint(sections, offset);
   // Labels are a detail affordance, not a second graph layer: keep the canvas
   // quiet until the rail is focused or hovered.
