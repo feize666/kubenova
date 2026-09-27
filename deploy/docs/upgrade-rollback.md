@@ -8,26 +8,26 @@ GitHub tag 触发构建，发布包和三个镜像均验证通过后才公布正
 
 ## Docker Compose
 
-使用 v1.10 中的新脚本与 Compose 文件；旧镜像仓库 feize1995 已改为 feize666。三个镜像必须使用同一个 tag。若 GHCR 包为私有，先 docker login ghcr.io，或将三个包设为公开。
+使用 v1.11 中的新脚本与 Compose 文件；旧镜像仓库 feize1995 已改为 feize666。三个镜像必须使用同一个 tag。若 GHCR 包为私有，先 docker login ghcr.io，或将三个包设为公开。
 
 ```bash
 bash scripts/compose-release.sh preflight --env-file deploy/docker/.env
-bash scripts/compose-release.sh up --tag v1.10 --env-file deploy/docker/.env
+bash scripts/compose-release.sh up --tag v1.11 --env-file deploy/docker/.env
 ```
 
 脚本先拉取，再启动，等待 PostgreSQL、Redis、API、网关和前端均 healthy。失败返回非零，不自动切换数据库。确认旧版兼容当前数据库后，才使用 rollback <已有镜像版本>。此前仅有 Git tag 不代表该版本存在可拉取镜像。
 
 ## Binary + systemd
 
-下载 archive 和 SHA256 文件到同一目录；不得覆盖正在运行的版本目录。以下命令假设 current 已是符号链接，v1.10 目录尚不存在：
+下载 archive 和 SHA256 文件到同一目录；不得覆盖正在运行的版本目录。以下命令假设 current 已是符号链接，v1.11 目录尚不存在：
 
 ```bash
 sha256sum -c kubenova-ubuntu.tar.gz.sha256
-sudo mkdir -p /opt/kubenova/releases/v1.10
-sudo tar -xzf kubenova-ubuntu.tar.gz -C /opt/kubenova/releases/v1.10 --strip-components=1
+sudo mkdir -p /opt/kubenova/releases/v1.11
+sudo tar -xzf kubenova-ubuntu.tar.gz -C /opt/kubenova/releases/v1.11 --strip-components=1
 # 使用新版本脚本补齐前端 systemd 单元；不会覆盖已有 /etc/kubenova 配置。
-sudo bash /opt/kubenova/releases/v1.10/scripts/prod.sh install
-sudo bash /opt/kubenova/releases/v1.10/scripts/prod.sh switch v1.10
+sudo bash /opt/kubenova/releases/v1.11/scripts/prod.sh install
+sudo bash /opt/kubenova/releases/v1.11/scripts/prod.sh switch v1.11
 ```
 
 switch 校验版本和完整目录、原子替换 current，再重启三个服务，并等待三个 HTTP 健康端点成功。重启/健康检查失败时返回非零并尝试恢复旧版本指针；如果旧服务重启也失败，需人工检查数据库兼容性与日志。不存在“秒级回滚”保证。

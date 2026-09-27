@@ -2,7 +2,7 @@
 
 KubeNova 是一套面向 Kubernetes 的集群运维控制台。它把集群接入、资源管理、资源拓扑、可观测性、访问控制和 AI 运维助手收敛到一个 Web 界面，可直接在浏览器中完成日常巡检与操作。
 
-当前版本：**v1.10**
+当前版本：**v1.11**
 
 ## 核心能力
 
@@ -176,7 +176,7 @@ sudo bash scripts/service.sh prod rollback <version>
 
 ### 发布新版本
 
-推送新的稳定版本标签（例如 `v1.10`）会触发 GitHub Actions：校验前后端 package 版本 → Linux x64 构建 → 更新检测/发布脚本测试 → 三服务 Docker Compose 启动检查 → 发布同版本 GHCR 镜像 → 上传发布包与 SHA256 → 将草稿 Release 转为正式版本。所有门禁通过前，更新页面不会把未完成的 tag 当成可用更新。不自动部署任何生产主机。
+推送新的稳定版本标签（例如 `v1.11`）会触发 GitHub Actions：校验前后端 package 版本 → Linux x64 构建 → 更新检测/发布脚本测试 → 三服务 Docker Compose 启动检查 → 发布同版本 GHCR 镜像 → 上传发布包与 SHA256 → 将草稿 Release 转为正式版本。所有门禁通过前，更新页面不会把未完成的 tag 当成可用更新。不自动部署任何生产主机。
 
 正式 Release 包含 `kubenova-ubuntu.tar.gz`、`kubenova-ubuntu.tar.gz.sha256` 和 `metadata.json`。当前原生包面向 **Ubuntu 24.04 x64，Node.js 22+**；镜像面向 Linux amd64。下载发布包与校验文件到同一目录后执行：
 
@@ -196,12 +196,12 @@ control-api 每 5 分钟读取 `feize666/kubenova` 的最新正式 Release，排
 
 ```bash
 # Docker Compose：同一个 tag 更新 frontend、control-api、runtime-gateway
-bash scripts/compose-release.sh up --tag v1.10
+bash scripts/compose-release.sh up --tag v1.11
 # 二进制 systemd：将校验后的发布包放入独立版本目录，安装三个服务单元后切换
-sudo bash scripts/service.sh prod switch v1.10
+sudo bash scripts/service.sh prod switch v1.11
 ```
 
-镜像位于 `ghcr.io/feize666/kubenova-{frontend,control-api,runtime-gateway}:v1.10`。如果 GHCR 包首次创建为私有，部署主机需 `docker login ghcr.io`，或由仓库管理员将三个包设置为公开。不要沿用旧的 `feize1995` 镜像地址。
+镜像位于 `ghcr.io/feize666/kubenova-{frontend,control-api,runtime-gateway}:v1.11`。如果 GHCR 包首次创建为私有，部署主机需 `docker login ghcr.io`，或由仓库管理员将三个包设置为公开。不要沿用旧的 `feize1995` 镜像地址。
 
 systemd 切换会同时重启前端、API、网关并检查健康；失败返回非零且尝试恢复旧版本指针。它不自动撤销数据库迁移，也不承诺秒级恢复。完整步骤与旧平铺目录迁移见 [升级与回滚](deploy/docs/upgrade-rollback.md)。
 

@@ -2,7 +2,7 @@
 
 ## 适用范围
 
-v1.10 的原生包在 Ubuntu 24.04 x64 构建，宿主机需 Node.js 22+、PostgreSQL、Redis、systemd。不能用 macOS 的 node_modules 打包后直接部署 Linux。
+v1.11 的原生包在 Ubuntu 24.04 x64 构建，宿主机需 Node.js 22+、PostgreSQL、Redis、systemd。不能用 macOS 的 node_modules 打包后直接部署 Linux。
 
 ## 首次安装
 
@@ -10,9 +10,9 @@ v1.10 的原生包在 Ubuntu 24.04 x64 构建，宿主机需 Node.js 22+、Postg
 
 ```bash
 sha256sum -c kubenova-ubuntu.tar.gz.sha256
-sudo mkdir -p /opt/kubenova/releases/v1.10
-sudo tar -xzf kubenova-ubuntu.tar.gz -C /opt/kubenova/releases/v1.10 --strip-components=1
-sudo ln -s /opt/kubenova/releases/v1.10 /opt/kubenova/current
+sudo mkdir -p /opt/kubenova/releases/v1.11
+sudo tar -xzf kubenova-ubuntu.tar.gz -C /opt/kubenova/releases/v1.11 --strip-components=1
+sudo ln -s /opt/kubenova/releases/v1.11 /opt/kubenova/current
 cd /opt/kubenova/current
 sudo bash scripts/prod.sh install
 sudo vi /etc/kubenova/control-api.env

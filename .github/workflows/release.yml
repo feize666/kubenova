@@ -38,7 +38,18 @@ jobs:
       - name: Build Linux x64 release
         run: VERSION="$RELEASE_TAG" bash scripts/package-release.sh
       - name: Verify release contracts
-        run: bash scripts/release-check.sh
+        run: |
+          set -euxo pipefail
+          test -f deploy/docker/docker-compose.prod.yml
+          test -f deploy/systemd/kubenova-frontend.service
+          test -f backend/control-api/Dockerfile
+          test -f backend/control-api/docker-entrypoint.sh
+          test -f scripts/package-release.sh
+          test -f scripts/prod.sh
+          bash -n scripts/package-release.sh scripts/prod.sh scripts/compose-release.sh scripts/service.sh
+          grep -Fq 'prisma migrate deploy' backend/control-api/docker-entrypoint.sh
+          grep -Fq '/api/health/ready' deploy/docker/docker-compose.prod.yml
+          grep -Fq 'sha256' scripts/package-release.sh
       - name: Verify atomic binary switch
         run: node scripts/check-release-switch.mjs
       - name: Verify updater tests
