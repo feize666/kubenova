@@ -37,12 +37,17 @@ jobs:
           node -e 'const tag=process.env.RELEASE_TAG.slice(1).split("."); while(tag.length<3)tag.push("0"); for(const p of ["./frontend/package.json","./backend/control-api/package.json"]) if(require(p).version!==tag.join("."))throw Error("Tag/package version mismatch: "+p)'
       - name: Build Linux x64 release
         run: VERSION="$RELEASE_TAG" bash scripts/package-release.sh
-      - name: Verify release contracts and updater
+      - name: Verify release contracts
+        run: bash scripts/release-check.sh
+      - name: Verify atomic binary switch
+        run: node scripts/check-release-switch.mjs
+      - name: Verify updater tests
+        run: npm --prefix backend/control-api test -- --runInBand --testPathPatterns=system-update
+      - name: Verify topology interaction contract
+        run: node frontend/scripts/check-topology-interactions.mjs
+      - name: Verify package checksum and layout
         run: |
-          bash scripts/release-check.sh
-          node scripts/check-release-switch.mjs
-          npm --prefix backend/control-api test -- --runInBand --testPathPatterns=system-update
-          node frontend/scripts/check-topology-interactions.mjs
+          set -euxo pipefail
           cd tmp/release
           sha256sum -c kubenova-ubuntu.tar.gz.sha256
           tar -tzf kubenova-ubuntu.tar.gz > "$RUNNER_TEMP/release-files.txt"
