@@ -57,7 +57,7 @@ describe('release-backed system updates', () => {
       updateAvailable: false,
       updateCheckError: expect.any(String),
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
   it('does not treat an incomplete release as installable', async () => {
     fetchMock.mockResolvedValue(
@@ -201,5 +201,65 @@ describe('release-backed system updates', () => {
     expect(one).toMatchObject({ releaseReady: true, updateCheckError: null });
     expect(two).toMatchObject({ releaseReady: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the formal releases list on 404 and selects the highest valid version', async () => {
+    const candidates = [
+        { ...release, tag_name: 'v1.10' },
+        { ...release, tag_name: 'v1.2', prerelease: true },
+        { ...release, tag_name: 'garbage' },
+        { ...release, tag_name: 'v1.9' },
+      ].map((item) => ({
+        ...item,
+        assets: item.assets.map((asset) => ({
+          ...asset,
+          browser_download_url: asset.browser_download_url.replace('/v1.9/', `/${item.tag_name}/`),
+        })),
+      }));
+    fetchMock
+      .mockResolvedValueOnce(new Response('{}', { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(candidates)));
+    expect(await new SystemUpdateService().checkForUpdates()).toMatchObject({ latestVersion: 'v1.10', releaseReady: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a distinct authorization, rate-limit, and timeout failure', async () => {
+    for (const [status, message] of [[401, 'GitHub token unauthorized'], [403, 'GitHub access forbidden'], [429, 'GitHub rate limit exceeded']] as const) {
+      fetchMock.mockResolvedValueOnce(new Response('{}', { status }));
+      const result = await new SystemUpdateService().checkForUpdates();
+      expect(result.updateCheckError).toContain(message);
+    }
+    fetchMock.mockRejectedValueOnce(Object.assign(new Error('deadline'), { name: 'TimeoutError' }));
+    expect((await new SystemUpdateService().checkForUpdates()).updateCheckError).toContain('超时');
+  });
+
+  it('sends the optional GitHub token only to API requests and refreshes history after check', async () => {
+    process.env.KUBENOVA_UPDATE_GITHUB_TOKEN = 'secret-token';
+    const service = new SystemUpdateService();
+    await service.getReleases();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(release)));
+    await service.checkForUpdates();
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit]>;
+    expect(calls.every(([, init]) => (init.headers as Record<string, string>)['authorization'] === 'Bearer secret-token')).toBe(true);
+    delete process.env.KUBENOVA_UPDATE_GITHUB_TOKEN;
+  });
+
+  it('does not let an in-flight history request repopulate cache after manual check', async () => {
+    let resolveHistory!: (value: Response) => void;
+    const pendingHistory = new Promise<Response>((resolve) => { resolveHistory = resolve; });
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes('/releases?per_page=100')) return pendingHistory;
+      return Promise.resolve(new Response(JSON.stringify(release)));
+    });
+    const service = new SystemUpdateService();
+    const stale = service.getReleases();
+    await new Promise((resolve) => setImmediate(resolve));
+    await service.checkForUpdates();
+    resolveHistory(new Response(JSON.stringify([release])));
+    await stale;
+    const fresh = { ...release, tag_name: 'v1.10', assets: release.assets.map((asset) => ({ ...asset, browser_download_url: asset.browser_download_url.replace('/v1.9/', '/v1.10/') })) };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([fresh])));
+    const refreshed = await service.getReleases();
+    expect(refreshed.items[0]?.tag).toBe('v1.10');
   });
 });

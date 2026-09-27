@@ -7,12 +7,7 @@ kubenova_prefer_current_node_toolchain
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/tmp/release}"
 SKIP_BUILD="${SKIP_BUILD:-false}"
 PACKAGE_NAME="kubenova-ubuntu"
-VERSION="${VERSION:-unknown}"
-
-if [[ ! "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  echo "[错误] VERSION 只能包含字母、数字、点、下划线和短横线" >&2
-  exit 2
-fi
+VERSION="${VERSION:-v$(< "$ROOT_DIR/VERSION")}"
 
 usage() {
   cat <<'USAGE'
@@ -29,7 +24,7 @@ Outputs:
   <out-dir>/metadata.json
 
 Environment:
-  VERSION=<release-version>    Optional release version written to metadata
+  VERSION=<release-tag>        Must match VERSION and package/lockfile versions
 USAGE
 }
 
@@ -93,6 +88,15 @@ require_cmd node "Node.js"
 require_cmd npm "npm"
 require_cmd go "Go"
 require_cmd tar "tar"
+node "$ROOT_DIR/scripts/release-version.mjs" "$VERSION"
+GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if command -v sha256sum >/dev/null 2>&1; then
+  CHECKSUM=(sha256sum)
+else
+  require_cmd shasum "sha256sum or shasum"
+  CHECKSUM=(shasum -a 256)
+fi
 
 mkdir -p "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd)"
@@ -106,7 +110,7 @@ if [[ "$SKIP_BUILD" != "true" ]]; then
   echo "[build] control-api"
   (cd "$ROOT_DIR/backend/control-api" && npm ci && npx prisma generate && npm run build)
   echo "[build] runtime-gateway"
-  (cd "$ROOT_DIR/backend/runtime-gateway" && CGO_ENABLED=0 GOOS="${GOOS:-linux}" GOARCH="${GOARCH:-amd64}" go build -trimpath -ldflags="-s -w" -o "$ROOT_DIR/tmp/runtime-gateway" ./cmd/runtime-gateway)
+  (cd "$ROOT_DIR/backend/runtime-gateway" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=$VERSION -X main.gitCommit=$GIT_COMMIT -X main.buildTime=$BUILD_TIME" -o "$ROOT_DIR/tmp/runtime-gateway" ./cmd/runtime-gateway)
 else
   echo "[build] skipped; using current build outputs"
 fi
@@ -140,16 +144,7 @@ cp "$ROOT_DIR/deploy/systemd/env/control-api.env.example" "$STAGE_DIR/env/contro
 cp "$ROOT_DIR/deploy/systemd/env/runtime-gateway.env.example" "$STAGE_DIR/env/runtime-gateway.env.example"
 cp "$ROOT_DIR/deploy/systemd/env/frontend.env.example" "$STAGE_DIR/env/frontend.env.example"
 
-cat > "$STAGE_DIR/metadata.json" <<EOF
-{
-  "name": "kubenova",
-  "package": "$PACKAGE_NAME",
-  "target": "ubuntu-systemd",
-  "version": "${VERSION:-unknown}",
-  "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "gitCommit": "$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-}
-EOF
+node "$ROOT_DIR/scripts/release-version.mjs" "$VERSION" --metadata > "$STAGE_DIR/metadata.json"
 
 require_release_layout "$STAGE_DIR"
 tar -C "$OUT_DIR/stage" -czf "$OUT_DIR/kubenova-ubuntu.tar.gz" "$PACKAGE_NAME"
@@ -158,11 +153,8 @@ cp "$STAGE_DIR/metadata.json" "$OUT_DIR/metadata.json"
 
 # Emit a digest alongside the archive so an operator can verify that the
 # artifact transferred to a host is the exact one that was built.
-if command -v sha256sum >/dev/null 2>&1; then
-  (cd "$OUT_DIR" && sha256sum kubenova-ubuntu.tar.gz > kubenova-ubuntu.tar.gz.sha256)
-elif command -v shasum >/dev/null 2>&1; then
-  (cd "$OUT_DIR" && shasum -a 256 kubenova-ubuntu.tar.gz > kubenova-ubuntu.tar.gz.sha256)
-fi
+(cd "$OUT_DIR" && "${CHECKSUM[@]}" kubenova-ubuntu.tar.gz > kubenova-ubuntu.tar.gz.sha256)
+(cd "$OUT_DIR" && "${CHECKSUM[@]}" kubenova-ubuntu.tar.gz metadata.json > checksums.txt)
 
 echo "✔ release packaged"
 echo "  tar: $OUT_DIR/kubenova-ubuntu.tar.gz"

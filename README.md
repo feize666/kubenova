@@ -176,9 +176,9 @@ sudo bash scripts/service.sh prod rollback <version>
 
 ### 发布新版本
 
-推送新的稳定版本标签（例如 `v1.1`，后续使用 `v1.1.1`、`v1.2`）会触发 GitHub Actions：校验前后端 package 版本 → Linux x64 构建 → 更新检测/发布脚本测试 → 三服务 Docker Compose 启动检查 → 发布同版本 GHCR 镜像 → 上传发布包与 SHA256 → 将草稿 Release 转为正式版本。所有门禁通过前，更新页面不会把未完成的 tag 当成可用更新。不自动部署任何生产主机。
+根目录 `VERSION` 为版本基准（例如 `1.1.0`）；前后端 package.json、package-lock.json 必须同步，发布 tag 支持 `v1.1` 或 `v1.1.0`。推送新的稳定版本标签触发 GitHub Actions：版本与已发布版本不可覆盖检查 → 前后端构建、单元测试、网关测试及发布脚本校验 → Linux x64 打包与三服务 Docker Compose 启动检查 → 发布同版本 GHCR 镜像 → 上传完整资产 → 将草稿 Release 转为正式版本。分支和 PR 复用同一套 CI，代码变更检查 README 同步。已发布版本不能覆盖，失败的草稿可重试；不自动部署任何生产主机。
 
-正式 Release 包含 `kubenova-ubuntu.tar.gz`、`kubenova-ubuntu.tar.gz.sha256` 和 `metadata.json`。当前原生包面向 **Ubuntu 24.04 x64，Node.js 22+**；镜像面向 Linux amd64。下载发布包与校验文件到同一目录后执行：
+正式 Release 包含 `kubenova-ubuntu.tar.gz`、兼容旧更新检测的 `kubenova-ubuntu.tar.gz.sha256`、`metadata.json` 和 `checksums.txt`。元数据记录三个组件版本、完整 Git commit、构建时间及数据库迁移提示；checksums.txt 覆盖发布包和元数据。当前原生包面向 **Ubuntu 24.04 x64，Node.js 22+**；镜像面向 Linux amd64。下载发布包与校验文件到同一目录后执行：
 
 ```bash
 sha256sum -c kubenova-ubuntu.tar.gz.sha256
@@ -186,9 +186,9 @@ sha256sum -c kubenova-ubuntu.tar.gz.sha256
 
 ### 检查与执行升级
 
-control-api 每 5 分钟读取 `feize666/kubenova` 的最新正式 Release，排除草稿/预发布，并要求发布包与校验文件完整。可在更新管理中点击“检查更新”立即检查；网络、限流、缺失产物错误会明确显示，不再静默显示无更新。旧版服务需先手动更新至本版本，才能获得这套检测修复。
+control-api 每 5 分钟读取 `feize666/kubenova` 的最新正式 Release，排除草稿/预发布，并要求发布包与校验文件完整。仅当 GitHub latest 接口返回 404 时，从发布列表选择版本号最高的稳定版本；最高版本产物不完整会明确报错，不静默退回旧版本。点击“检查更新”会立即检查并刷新发布历史缓存；鉴权、限流、网络超时均有明确提示。旧版服务需先手动更新至本版本，才能获得这套检测修复。
 
-运行版本从构建环境 `KUBENOVA_VERSION`、发布包元数据或 control-api 的 package 版本读取，不再从可变更新状态文件读取虚拟版本。可通过 `KUBENOVA_UPDATE_REPOSITORY=owner/repo` 指定仓库；默认只使用公开 GitHub Release，不传递用户 GitHub 密钥。
+运行版本从构建环境 `KUBENOVA_VERSION`、发布包元数据或 control-api 的 package 版本读取，不再从可变更新状态文件读取虚拟版本。可通过 `KUBENOVA_UPDATE_REPOSITORY=owner/repo` 指定仓库；默认匿名读取公开 GitHub Release。需要提高限额或访问私有仓库时，可在 control-api 服务端配置只读 `KUBENOVA_UPDATE_GITHUB_TOKEN`：仅发送至 api.github.com，禁止重定向，不下发浏览器。私有发布资产下载仍需操作者具备 GitHub 权限。
 
 网页提供版本检测、发布说明、下载及校验指引，**不直接控制宿主机部署**。旧版只修改状态的“安装/激活/秒级回滚”接口已关闭，返回明确错误；不会再出现代码未升级但页面声称成功。
 
