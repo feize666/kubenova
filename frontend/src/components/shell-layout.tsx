@@ -14,7 +14,7 @@ import {
   SunFilled,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { App, Avatar, Badge, Breadcrumb, Button, Dropdown, Input, Layout, Menu, Popover, Skeleton, Space } from "antd";
+import { Avatar, Badge, Breadcrumb, Dropdown, Input, Layout, Menu, Popover, Skeleton, Space } from "antd";
 import type { MenuProps } from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -29,13 +29,12 @@ import { buildLoginRoute, buildInternalReturnTo } from "@/lib/login-return";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
 import { OpsIconActionButton } from "@/components/ops";
 import { QUERY_CACHE_TIMINGS, queryKeys } from "@/lib/query";
-import { getPlatformNavigation, getPlatformTitle, type PlatformNavigationItem } from "@/lib/console-routing";
+import { getPlatformNavigation, getPlatformTitle, isPlatformAdmin, type PlatformNavigationItem } from "@/lib/console-routing";
 
 const { Header, Sider, Content } = Layout;
 const MAX_REMEMBERED_PREFETCH_PATHS = 48;
 const ROUTE_TRANSITION_QUIET_MS = 650;
 const ENABLE_ROUTE_PREFETCH = process.env.NODE_ENV === "production";
-const UPDATE_NOTICE_VERSION_KEY = "kubenova.system-update.notice-version";
 
 const platformIconMap: Record<PlatformNavigationItem["icon"], React.ReactNode> = {
   home: <HomeOutlined />,
@@ -320,7 +319,6 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { mode, toggleTheme } = useThemeMode();
   const { accessToken, isAuthenticated, isInitializing, username, role, logout } = useAuth();
-  const { notification } = App.useApp();
   const [notificationOpen, setNotificationOpen] = useState(false);
   const isLoginPage = pathname === "/login";
   const currentTitle = getPlatformTitle(pathname);
@@ -337,39 +335,17 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     refetchOnWindowFocus: false,
   });
   const updateStatusQuery = useQuery<SystemUpdateStatusPayload>({
-    queryKey: ["system-update", "shell-status", accessToken],
+    queryKey: ["system-update", "status", accessToken],
     queryFn: () => getSystemUpdateStatus(accessToken ?? undefined),
-    enabled: !isLoginPage && !isInitializing && isAuthenticated && Boolean(accessToken) && ["admin", "platform-admin"].includes(role.toLowerCase()),
+    enabled: !isLoginPage && !isInitializing && isAuthenticated && Boolean(accessToken) && isPlatformAdmin(role),
     staleTime: 60_000,
-    refetchInterval: 60_000,
+    refetchInterval: 300_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
   const updateStatus = updateStatusQuery.data;
-  const updateAvailable = Boolean(updateStatus?.updateAvailable);
-
-  useEffect(() => {
-    const version = updateStatus?.latestVersion?.trim();
-    if (!updateAvailable || !version || typeof window === "undefined") return;
-    const previousNoticeVersion = window.localStorage.getItem(UPDATE_NOTICE_VERSION_KEY);
-    if (previousNoticeVersion === version) return;
-    window.localStorage.setItem(UPDATE_NOTICE_VERSION_KEY, version);
-    notification.info({
-      key: `system-update-${version}`,
-      message: `发现新版本 ${version}`,
-      description: "KubeNova 已检测到可用更新，进入更新管理即可查看并一键升级。",
-      placement: "topRight",
-      duration: 8,
-      btn: (
-        <Button type="link" size="small" onClick={() => {
-          notification.destroy(`system-update-${version}`);
-          router.push("/settings/update");
-        }}>
-          查看更新
-        </Button>
-      ),
-    });
-  }, [notification, notificationOpen, router, updateAvailable, updateStatus?.latestVersion]);
+  const updateAvailable = isPlatformAdmin(role) && !updateStatus?.updateCheckError &&
+    Boolean(updateStatus?.updateAvailable || updateStatus?.migrationRequired);
   const userItems: MenuProps["items"] = [
     { key: "profile", label: "个人中心" },
     { key: "logout", label: "退出登录" },
@@ -609,11 +585,11 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                     <div className="shell-notification-center__item">
                       <div className="shell-notification-center__item-title">
                         <Badge status="processing" />
-                        <strong>系统更新可用</strong>
+                        <strong>{updateStatus.migrationRequired ? "版本编号迁移" : "系统更新可用"}</strong>
                       </div>
                       <span>最新版本 {updateStatus.latestVersion}，当前运行 {updateStatus.runningVersion}</span>
                       <Link href="/settings/update" onClick={() => setNotificationOpen(false)}>
-                        查看并升级
+                        查看发布说明与升级指引
                       </Link>
                     </div>
                   ) : (

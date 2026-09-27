@@ -19,6 +19,7 @@ import {
   type StandardTableLayoutOptions,
 } from "@/lib/table-column-widths";
 import { buildResourceTableLoading, type ResourceTableLoadingOptions } from "@/lib/table/pagination";
+import { getStableResourceRowKey } from "@/lib/table/row-key";
 import {
   useHeadlampTableState,
   type HeadlampGlobalSearchState,
@@ -56,28 +57,6 @@ type ResourceTableNavigateHandler = (request: ResourceTableNavigateRequest) => v
 
 function getResourceTableClassName(...classNames: Array<string | undefined>) {
   return classNames.filter(Boolean).join(" ");
-}
-
-function getStableResourceRowKey<T extends object>(record: T, index?: number): Key {
-  const value = record as Record<string, unknown>;
-  const metadata = value.metadata && typeof value.metadata === "object"
-    ? value.metadata as Record<string, unknown>
-    : undefined;
-  const directKey = value.key ?? value.id ?? value.uid ?? metadata?.uid;
-  if (typeof directKey === "string" || typeof directKey === "number") {
-    return directKey;
-  }
-
-  const namespace = metadata?.namespace ?? value.namespace;
-  const name = metadata?.name ?? value.name;
-  if ((typeof name === "string" || typeof name === "number") && (typeof namespace === "string" || typeof namespace === "number")) {
-    return `${namespace}/${name}`;
-  }
-  if (typeof name === "string" || typeof name === "number") {
-    return name;
-  }
-
-  return index ?? 0;
 }
 
 function toStringCellValue(value: unknown): string {
@@ -615,14 +594,13 @@ function renderMobileColumnValue<T extends object>(column: ColumnType<T>, record
 function resolveResourceTableRowKey<T extends object>(
   rowKey: TableProps<T>["rowKey"] | undefined,
   record: T,
-  index: number,
 ): Key {
-  if (typeof rowKey === "function") return rowKey(record, index);
+  if (typeof rowKey === "function") return rowKey(record);
   if (typeof rowKey === "string") {
     const value = (record as Record<string, unknown>)[rowKey];
     if (typeof value === "string" || typeof value === "number") return value;
   }
-  return getStableResourceRowKey(record, index);
+  return getStableResourceRowKey(record);
 }
 
 function buildMobileResourceNavigationRequest<T extends object>(record: T): ResourceTableNavigateRequest | null {
@@ -652,7 +630,7 @@ function renderMobileResourceCards<T extends object>(input: {
   return (
     <div className="resource-table-mobile-list" data-resource-table-mobile-list="">
       {dataSource.map((record, index) => {
-        const key = resolveResourceTableRowKey(rowKey, record, index);
+        const key = resolveResourceTableRowKey(rowKey, record);
         const request = onResourceNavigate ? buildMobileResourceNavigationRequest(record) : null;
         const title: ReactNode = titleColumn
           ? renderMobileColumnValue(titleColumn, record, index)

@@ -525,7 +525,7 @@ describe('TopologyGraphService', () => {
     );
   });
 
-  it('prefers EndpointSlice over legacy Endpoints and direct selector edges', async () => {
+  it('keeps both Service endpoint links but resolves Pods through EndpointSlice only', async () => {
     const { service, prisma, clusterHealthService } = build();
     (
       clusterHealthService.listReadableClusterIdsForResourceRead as jest.Mock
@@ -593,12 +593,12 @@ describe('TopologyGraphService', () => {
     expect(relationPairs).toEqual(
       expect.arrayContaining([
         'network:svc-1->network:slice-1',
+        'network:svc-1->network:endpoint-1',
         'network:slice-1->workloads:pod-1',
       ]),
     );
     expect(relationPairs).not.toEqual(
       expect.arrayContaining([
-        'network:svc-1->network:endpoint-1',
         'network:endpoint-1->workloads:pod-1',
         'network:svc-1->workloads:pod-1',
       ]),

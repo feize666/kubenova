@@ -20,9 +20,13 @@ const PLATFORM_NAVIGATION: readonly PlatformNavigationItem[] = [
 
 const PORTAL_PREFIXES = ["/clusters", "/authorization", "/applications", "/settings"] as const;
 
-export function getPlatformNavigation(userRole: string, disabledPaths?: ReadonlySet<string> | null) {
+export function isPlatformAdmin(userRole: string) {
   const normalizedRole = userRole.trim().toLowerCase();
-  const canManagePlatform = normalizedRole === "admin" || normalizedRole === "platform-admin";
+  return normalizedRole === "admin" || normalizedRole === "platform-admin";
+}
+
+export function getPlatformNavigation(userRole: string, disabledPaths?: ReadonlySet<string> | null) {
+  const canManagePlatform = isPlatformAdmin(userRole);
   return PLATFORM_NAVIGATION.filter(
     (item) => (!item.requiredRole || canManagePlatform) && !disabledPaths?.has(item.path),
   );

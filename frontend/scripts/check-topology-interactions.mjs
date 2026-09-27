@@ -85,4 +85,57 @@ const related = { kind: "Pod", id: "cluster/namespace/pod", name: "pod" };
 content.props.onNavigateRequest(related);
 assert.deepEqual(targets, [request, related]);
 assert.deepEqual(state[0].stack, [request], "related-resource navigation must retain drawer history");
-console.log("PASS: topology name/card keyboard separation and drawer title/related-resource navigation");
+// Execute the page/canvas handlers with their state bindings. Loading the full
+// page would require a router, authentication and live cluster queries.
+function readHandler(path, matches, bindings) {
+  const file = ts.createSourceFile(path, readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let expression;
+  function visit(node) {
+    if (matches(node)) expression = node;
+    else ts.forEachChild(node, visit);
+  }
+  visit(file);
+  assert.ok(expression, `missing event handler in ${path}`);
+  const { outputText } = ts.transpileModule(`const handler = ${expression.getText(file)};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  });
+  return new Function(...Object.keys(bindings), `${outputText}; return handler;`)(...Object.values(bindings));
+}
+const jsxHandler = (tag, prop) => (node) => ts.isArrowFunction(node)
+  && ts.isJsxExpression(node.parent)
+  && ts.isJsxAttribute(node.parent.parent)
+  && node.parent.parent.name.text === prop
+  && node.parent.parent.parent.parent.tagName?.getText() === tag;
+let detailOpen = true;
+let selectedResource = "service";
+let selectedEdge = "service-endpoints";
+const selectionBindings = {
+  setDetail: (next) => { detailOpen = Boolean(next); },
+  setTopologySelection: (next) => { selectedResource = next; },
+  onSelectResource: (next) => { selectedResource = next; },
+  setSelectedEdgeId: (next) => { selectedEdge = next; },
+};
+readHandler("app/network/topology/page.tsx", jsxHandler("ResourceDetailDrawer", "onClose"), selectionBindings)();
+assert.equal(detailOpen, false);
+assert.equal(selectedResource, "service", "closing the drawer must preserve the selected relationship and labels");
+class PointerTarget {
+  constructor(ancestors) { this.ancestors = ancestors; }
+  closest(selectors) { return selectors.split(",").some((selector) => this.ancestors.includes(selector.trim())); }
+}
+const clearOutsideSelection = readHandler("modules/topology-kubejojo/TopologyCanvas.tsx",
+  (node) => ts.isArrowFunction(node) && ts.isVariableDeclaration(node.parent) && node.parent.name.getText() === "clearOutsideSelection",
+  { ...selectionBindings, Element: PointerTarget },
+);
+for (const ancestors of [[".ant-drawer", ".ant-drawer-mask"], [".ant-drawer", ".resource-detail-drawer-wrapper"], [".react-flow__node"], [".react-flow__edge"]]) {
+  clearOutsideSelection({ target: new PointerTarget(ancestors) });
+  assert.equal(selectedResource, "service", "drawer controls, backdrop and resource interactions must preserve selection");
+}
+clearOutsideSelection({ target: new PointerTarget([".react-flow__pane"]) });
+assert.equal(selectedResource, null, "a later outside click restores all resource relationships");
+assert.equal(selectedEdge, null);
+selectedResource = "service";
+selectedEdge = "service-endpoints";
+readHandler("modules/topology-kubejojo/TopologyCanvas.tsx", jsxHandler("ReactFlow", "onPaneClick"), selectionBindings)();
+assert.equal(selectedResource, null);
+assert.equal(selectedEdge, null);
+console.log("PASS: topology navigation, drawer-close selection persistence and outside-click reset");

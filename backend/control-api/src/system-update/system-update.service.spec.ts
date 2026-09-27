@@ -150,6 +150,44 @@ describe('release-backed system updates', () => {
       await controller.check({ user: { user: { role: 'platform-admin' } } }),
     ).toMatchObject({ latestVersion: 'v1.9', releaseReady: true });
   });
+
+  it('protects status and history for platform administrators only', () => {
+    const controller = new SystemUpdateController(new SystemUpdateService());
+    expect(() => controller.getStatus({ user: { user: { role: 'cluster-operator' } } })).toThrow();
+    expect(() => controller.getHistory({ user: { user: { role: 'cluster-operator' } } })).toThrow();
+    expect(() => controller.releases({ user: { user: { role: 'cluster-operator' } } })).toThrow();
+    expect(controller.getStatus({ user: { user: { role: 'platform-admin' } } })).toHaveProperty('checkState');
+  });
+
+  it('marks the v1.11 to v1.1 numbering transition explicitly', async () => {
+    process.env.KUBENOVA_VERSION = 'v1.11';
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      ...release,
+      tag_name: 'v1.1',
+      assets: release.assets.map((asset) => ({
+        ...asset,
+        browser_download_url: asset.browser_download_url.replace('/v1.9/', '/v1.1/'),
+      })),
+    })));
+    expect(await checkedStatus()).toMatchObject({
+      checkState: 'migration-required',
+      migrationRequired: true,
+      updateAvailable: false,
+    });
+  });
+
+  it('lists only formal releases with verified assets', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify([
+      { ...release, name: 'v1.9', body: 'notes' },
+      { ...release, tag_name: 'v1.8', draft: true },
+      { ...release, tag_name: 'v1.7', prerelease: true },
+    ])));
+    const service = new SystemUpdateService();
+    await expect(service.getReleases()).resolves.toMatchObject({
+      total: 1,
+      items: [expect.objectContaining({ tag: 'v1.9', releaseReady: true, notes: 'notes' })],
+    });
+  });
   it('recovers after a failed check and coalesces concurrent checks', async () => {
     const service = new SystemUpdateService();
     fetchMock.mockRejectedValueOnce(new Error('offline'));

@@ -17,6 +17,8 @@ import type {
   SystemUpdateInstallRequest,
   SystemUpdatePostReleaseAuditRequest,
   SystemUpdateRollbackRequest,
+  SystemUpdateRelease,
+  SystemUpdateReleasesPayload,
   SystemUpdateStatusPayload,
 } from './dto/system-update.dto';
 
@@ -87,12 +89,16 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   private persistQueue: Promise<void> = Promise.resolve();
   private latestReleaseUrl: string | null = null;
   private latestReleasePublishedAt: string | null = null;
+  private releaseNotes: string | null = null;
   private lastUpdateCheckAt: string | null = null;
   private updateCheckError: string | null = null;
   private downloadUrl: string | null = null;
   private checksumUrl: string | null = null;
   private releaseReady = false;
   private updateCheckPromise: Promise<void> | null = null;
+  private releasesPromise: Promise<SystemUpdateReleasesPayload> | null = null;
+  private releasesCache: SystemUpdateReleasesPayload | null = null;
+  private releasesCacheAt = 0;
 
   async onModuleInit(): Promise<void> {
     // Older updater state only changed version strings, not installed files.
@@ -135,6 +141,9 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       installedVersion: this.state.runningVersion,
       buildType: this.build.buildType,
       latestVersion: this.state.latestVersion,
+      checkState: this.getCheckState(),
+      releaseNotes: this.releaseNotes,
+      migrationRequired: this.isMigrationRequired(),
       updateAvailable:
         this.releaseReady &&
         isNewerVersion(this.state.latestVersion, this.state.runningVersion),
@@ -166,7 +175,6 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   }
 
   install(body: SystemUpdateInstallRequest, _operator: string): never {
-    this.requireConfirm(body.confirm, 'install');
     return this.unsupportedDeployment();
   }
   restart(
@@ -174,11 +182,9 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     _operator: string,
     _message?: string,
   ): never {
-    this.requireConfirm(confirm, 'restart');
     return this.unsupportedDeployment();
   }
   rollback(body: SystemUpdateRollbackRequest, _operator: string): never {
-    this.requireConfirm(body.confirm, 'rollback');
     return this.unsupportedDeployment();
   }
   private unsupportedDeployment(): never {
@@ -204,6 +210,23 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       total: this.history.length,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  async getReleases(): Promise<SystemUpdateReleasesPayload> {
+    if (this.releasesCache && Date.now() - this.releasesCacheAt < UPDATE_CHECK_INTERVAL_MS)
+      return this.releasesCache;
+    if (this.releasesPromise) return this.releasesPromise;
+    this.releasesPromise = this.fetchReleases();
+    try {
+      const result = await this.releasesPromise;
+      if (!result.error) {
+        this.releasesCache = result;
+        this.releasesCacheAt = Date.now();
+      }
+      return result;
+    } finally {
+      this.releasesPromise = null;
+    }
   }
 
   private requireConfirm(confirm: boolean | undefined, action: string): void {
@@ -238,6 +261,9 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   private async refreshLatestVersion(): Promise<void> {
     if (this.updateCheckPromise) return this.updateCheckPromise;
     this.updateCheckPromise = (async () => {
+      this.updateCheckError = null;
+      this.releaseReady = false;
+      this.releaseNotes = null;
       try {
         if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(this.repository))
           throw new Error('更新仓库配置无效');
@@ -265,6 +291,8 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
           draft?: boolean;
           prerelease?: boolean;
           published_at?: string;
+          name?: string;
+          body?: string | null;
           assets?: Array<{
             name?: string;
             size?: number;
@@ -308,12 +336,18 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
         this.latestReleaseUrl =
           'https://github.com/' + this.repository + '/releases/tag/' + tag;
         this.latestReleasePublishedAt = release.published_at ?? null;
+        this.releaseNotes = typeof release.body === 'string' ? release.body : null;
         this.downloadUrl = download;
         this.checksumUrl = checksum;
         this.releaseReady = true;
         this.updateCheckError = null;
       } catch (error) {
         this.releaseReady = false;
+        this.state.latestVersion = this.state.runningVersion;
+        this.latestReleaseUrl = null;
+        this.latestReleasePublishedAt = null;
+        this.downloadUrl = null;
+        this.checksumUrl = null;
         this.updateCheckError =
           error instanceof Error ? error.message : '更新检测失败，请稍后重试';
       } finally {
@@ -325,6 +359,90 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.updateCheckPromise = null;
     }
+  }
+
+  private getCheckState(): SystemUpdateStatusPayload['checkState'] {
+    if (this.updateCheckPromise) return 'checking';
+    if (this.updateCheckError) return 'error';
+    if (this.isMigrationRequired()) return 'migration-required';
+    if (isNewerVersion(this.state.latestVersion, this.state.runningVersion)) return 'available';
+    if (isNewerVersion(this.state.runningVersion, this.state.latestVersion)) return 'ahead';
+    return 'current';
+  }
+
+  private isMigrationRequired(): boolean {
+    const current = parseVersion(this.state.runningVersion);
+    const latest = parseVersion(this.state.latestVersion);
+    return !!current && !!latest && latest[0] === 1 && latest[1] === 1 && current[0] === 1 && (current[1] === 11 || (current[1] >= 2 && current[1] <= 10));
+  }
+
+  private async fetchReleases(): Promise<SystemUpdateReleasesPayload> {
+    const timestamp = new Date().toISOString();
+    try {
+      if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(this.repository))
+        throw new Error('更新仓库配置无效');
+      const response = await fetch(
+        'https://api.github.com/repos/' + this.repository + '/releases?per_page=10',
+        {
+          headers: {
+            accept: 'application/vnd.github+json',
+            'user-agent': 'kubenova-update-checker',
+          },
+          signal: AbortSignal.timeout(10_000),
+          redirect: 'error',
+        },
+      );
+      if (!response.ok) throw new Error('GitHub 发布历史获取失败：HTTP ' + response.status);
+      const raw = (await response.json()) as unknown;
+      if (!Array.isArray(raw)) throw new Error('GitHub 发布历史响应无效');
+      const items = raw
+        .filter((item) => item && typeof item === 'object' && (item as { draft?: boolean }).draft === false && (item as { prerelease?: boolean }).prerelease === false)
+        .slice(0, 10)
+        .map((item) => this.mapRelease(item as Record<string, unknown>));
+      return { items, total: items.length, timestamp };
+    } catch (error) {
+      return {
+        items: [],
+        total: 0,
+        timestamp,
+        error: error instanceof Error ? error.message : '发布历史获取失败，请稍后重试',
+      };
+    }
+  }
+
+  private mapRelease(raw: Record<string, unknown>): SystemUpdateRelease {
+    const tag = typeof raw.tag_name === 'string' ? raw.tag_name : '';
+    const url = this.releaseUrl(tag);
+    const assets = Array.isArray(raw.assets) ? raw.assets : [];
+    const assetUrl = (name: string): string | null => {
+      const expected = this.assetUrl(tag, name);
+      const asset = assets.find((entry) => {
+        if (!entry || typeof entry !== 'object') return false;
+        const item = entry as Record<string, unknown>;
+        return item.name === name && item.browser_download_url === expected && item.state === 'uploaded' && Number(item.size) > 0;
+      });
+      return asset ? expected : null;
+    };
+    const downloadUrl = /^v?\d+\.\d+(?:\.\d+)?$/.test(tag) ? assetUrl('kubenova-ubuntu.tar.gz') : null;
+    const checksumUrl = /^v?\d+\.\d+(?:\.\d+)?$/.test(tag) ? assetUrl('kubenova-ubuntu.tar.gz.sha256') : null;
+    return {
+      tag,
+      name: typeof raw.name === 'string' ? raw.name : tag,
+      url,
+      publishedAt: typeof raw.published_at === 'string' ? raw.published_at : null,
+      notes: typeof raw.body === 'string' ? raw.body : null,
+      downloadUrl,
+      checksumUrl,
+      releaseReady: !!downloadUrl && !!checksumUrl,
+    };
+  }
+
+  private releaseUrl(tag: string): string {
+    return 'https://github.com/' + this.repository + '/releases/tag/' + encodeURIComponent(tag);
+  }
+
+  private assetUrl(tag: string, name: string): string {
+    return 'https://github.com/' + this.repository + '/releases/download/' + encodeURIComponent(tag) + '/' + encodeURIComponent(name);
   }
 
   private async runPostReleaseAudit(

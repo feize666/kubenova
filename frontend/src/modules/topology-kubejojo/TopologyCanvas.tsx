@@ -198,7 +198,8 @@ function Canvas({
     if (!selectedNodeId && !selectedEdgeId) return;
     const clearOutsideSelection = (event: PointerEvent) => {
       const target = event.target;
-      if (!(target instanceof Element) || target.closest(".react-flow__node, .react-flow__edge, .resource-detail-drawer-wrapper")) return;
+      // The drawer backdrop closes details, not the selected relationship.
+      if (!(target instanceof Element) || target.closest(".react-flow__node, .react-flow__edge, .ant-drawer")) return;
       setSelectedEdgeId(null);
       onSelectResource(null);
     };

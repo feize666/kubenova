@@ -3,7 +3,8 @@ import path from "node:path";
 import { constants } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)), "..");
+// This file lives in frontend/scripts; its parent is the frontend root.
+const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const nextDir = path.join(root, process.env.KUBENOVA_NEXT_DIST_DIR || ".next");
 const staticDir = path.join(nextDir, "static");
 const standaloneDir = path.join(nextDir, "standalone");

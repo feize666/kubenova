@@ -1010,10 +1010,7 @@ export default function NetworkTopologyPage() {
 
       <ResourceDetailDrawer
         open={Boolean(detail)}
-        onClose={() => {
-          setDetail(null);
-          setTopologySelection(null);
-        }}
+        onClose={() => setDetail(null)}
         token={token}
         request={detail}
         onNavigateRequest={navigateDetailRequest}

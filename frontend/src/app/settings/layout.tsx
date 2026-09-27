@@ -5,6 +5,8 @@ import { Menu, Space, Typography } from "antd";
 import type { MenuProps } from "antd";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/components/auth-context";
+import { isPlatformAdmin } from "@/lib/console-routing";
 
 const SETTINGS_ITEMS = [
   { key: "/settings/update", label: "更新管理", icon: <CloudDownloadOutlined /> },
@@ -14,10 +16,11 @@ const SETTINGS_ITEMS = [
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { role } = useAuth();
   const selectedKeys = SETTINGS_ITEMS.filter(
     (item) => pathname === item.key || pathname.startsWith(`${item.key}/`),
   ).map((item) => item.key);
-  const items: MenuProps["items"] = SETTINGS_ITEMS.map((item) => ({
+  const items: MenuProps["items"] = SETTINGS_ITEMS.filter((item) => item.key !== "/settings/update" || isPlatformAdmin(role)).map((item) => ({
     key: item.key,
     icon: item.icon,
     label: <Link href={item.key} prefetch={false}>{item.label}</Link>,

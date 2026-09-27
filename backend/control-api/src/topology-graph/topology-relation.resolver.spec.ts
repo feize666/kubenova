@@ -3,7 +3,7 @@ import type { TopologyRow } from './topology-graph.contract';
 import type { Prisma } from '@prisma/client';
 
 describe('TopologyRelationResolver access chain', () => {
-  it('links Ingress to Service, prefers EndpointSlice, and resolves address-only endpoints to Pods', () => {
+  it('links both endpoint types to Service while preferring EndpointSlice for Pod resolution', () => {
     const rows = [
       resource('network', 'ing', 'Ingress', 'web', 'app', {
         rules: [
@@ -66,16 +66,35 @@ describe('TopologyRelationResolver access chain', () => {
           source: 'network:slice',
           target: 'workloads:pod',
         }),
-      ]),
-    );
-    expect(relations).not.toEqual(
-      expect.arrayContaining([
         expect.objectContaining({
+          type: 'PUBLISHES',
           source: 'network:svc',
           target: 'network:eps',
         }),
       ]),
     );
+    expect(relations).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: 'network:eps',
+          target: 'workloads:pod',
+        }),
+      ]),
+    );
+  });
+
+  it('never links same-name Endpoints across namespaces or clusters', () => {
+    const rows = [
+      resource('network', 'svc', 'Service', 'web', 'app', {}),
+      resource('network', 'other-ns', 'Endpoints', 'web', 'other', {}),
+      resource('network', 'other-cluster', 'Endpoints', 'web', 'app', {}),
+    ];
+    rows[2].row.clusterId = 'c2';
+    const relations = new TopologyRelationResolver().resolveV2(
+      rows,
+      rows.map(({ row }) => ({ id: row.id, recordId: row.id })),
+    );
+    expect(relations).toEqual([]);
   });
 });
 

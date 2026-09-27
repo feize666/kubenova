@@ -19,6 +19,9 @@ export interface SystemUpdateHistoryItem {
 }
 
 export interface SystemUpdateStatusPayload {
+  checkState: "checking" | "current" | "available" | "migration-required" | "ahead" | "error";
+  releaseNotes: string | null;
+  migrationRequired: boolean;
   runningVersion: string;
   installedVersion?: string | null;
   latestVersion: string;
@@ -56,6 +59,23 @@ export interface SystemUpdateHistoryResponse {
   items: SystemUpdateHistoryItem[];
   total: number;
   timestamp: string;
+}
+
+export interface SystemRelease {
+  tag: string;
+  name: string;
+  url: string;
+  publishedAt: string | null;
+  notes: string | null;
+  downloadUrl: string | null;
+  checksumUrl: string | null;
+  releaseReady: boolean;
+}
+
+export function getSystemReleases(token?: string) {
+  return apiRequest<{ items: SystemRelease[]; total: number; timestamp: string; error?: string | null }>(
+    "/api/system/update/releases", { token },
+  );
 }
 
 export async function getSystemUpdateStatus(token?: string): Promise<SystemUpdateStatusPayload> {

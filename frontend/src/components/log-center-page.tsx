@@ -41,7 +41,7 @@ function LogQueryResults({ input, range, token }: { input: Omit<LogCenterQuery, 
       : !rows.length ? <OpsState kind="filtered-empty" title="未找到匹配日志" />
       : <Table<LogCenterRow>
         size="small"
-        rowKey={(_row, index) => String(index)}
+        rowKey="id"
         dataSource={rows}
         pagination={false}
         tableLayout="fixed"

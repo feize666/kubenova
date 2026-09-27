@@ -18,7 +18,10 @@ export class SystemUpdateController {
   constructor(private readonly systemUpdateService: SystemUpdateService) {}
 
   @Get('status')
-  getStatus() {
+  getStatus(
+    @Req() req: { user: { user?: { role?: PlatformRole } } },
+  ) {
+    assertAdministrationPermission(req.user?.user);
     return this.systemUpdateService.getStatus();
   }
 
@@ -82,7 +85,18 @@ export class SystemUpdateController {
   }
 
   @Get('history')
-  getHistory() {
+  getHistory(
+    @Req() req: { user: { user?: { role?: PlatformRole } } },
+  ) {
+    assertAdministrationPermission(req.user?.user);
     return this.systemUpdateService.getHistory();
+  }
+
+  @Get('releases')
+  releases(
+    @Req() req: { user: { user?: { role?: PlatformRole } } },
+  ) {
+    assertAdministrationPermission(req.user?.user);
+    return this.systemUpdateService.getReleases();
   }
 }

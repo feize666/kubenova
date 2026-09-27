@@ -203,7 +203,6 @@ export class TopologyRelationResolver {
       }
 
       if (source === 'network' && row.kind === 'Endpoints') {
-        if (endpointSliceServices.has(serviceKey(row, row.name))) continue;
         for (const service of findByKindAndName(
           byKindName,
           row,
@@ -214,6 +213,9 @@ export class TopologyRelationResolver {
             add(service, row, 'publishes', 'network', 'PUBLISHES', [
               'metadata.name',
             ]);
+        // Both endpoint objects belong to the Service; only backend address
+        // resolution prefers EndpointSlice to avoid drawing duplicate Pod edges.
+        if (endpointSliceServices.has(serviceKey(row, row.name))) continue;
         for (const target of endpointTargets(row)) {
           const workloads =
             target.kind && target.name

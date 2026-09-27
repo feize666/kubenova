@@ -41,6 +41,9 @@ export interface SystemUpdateStatusPayload {
   runningVersion: string;
   installedVersion?: string | null;
   latestVersion: string;
+  checkState: 'checking' | 'current' | 'available' | 'migration-required' | 'ahead' | 'error';
+  releaseNotes: string | null;
+  migrationRequired: boolean;
   updateAvailable?: boolean;
   latestReleaseUrl?: string | null;
   latestReleasePublishedAt?: string | null;
@@ -76,4 +79,22 @@ export interface SystemUpdateStatusPayload {
   lastOperation: SystemUpdateHistoryItem | null;
   lastOperationResult: SystemUpdateOperationResult | null;
   timestamp: string;
+}
+
+export interface SystemUpdateRelease {
+  tag: string;
+  name: string;
+  url: string;
+  publishedAt: string | null;
+  notes: string | null;
+  downloadUrl: string | null;
+  checksumUrl: string | null;
+  releaseReady: boolean;
+}
+
+export interface SystemUpdateReleasesPayload {
+  items: SystemUpdateRelease[];
+  total: number;
+  timestamp: string;
+  error?: string;
 }

@@ -6,7 +6,7 @@
  * dependency subpaths a few packages ship. Bundler builds handle these
  * themselves; Node does not, so the hook exists only for local test runs.
  */
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -17,7 +17,7 @@ const SUFFIXES = ["", ".ts", ".tsx", ".js", "/index.ts", "/index.tsx", "/index.j
 function firstExisting(base) {
   for (const suffix of SUFFIXES) {
     const candidate = `${base}${suffix}`;
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
   }
   return undefined;
 }
