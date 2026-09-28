@@ -44,6 +44,9 @@ require_file backend/control-api/Dockerfile
 require_file backend/control-api/docker-entrypoint.sh
 require_file backend/control-api/prisma/migrations/migration_lock.toml
 require_file scripts/package-release.sh
+require_file scripts/update-executor.mjs
+require_file deploy/systemd/kubenova-update-executor.service
+require_file deploy/systemd/env/update-executor.env.example
 require_file scripts/prod.sh
 
 require_pattern 'container startup runs Prisma migrations' 'prisma migrate deploy' backend/control-api/docker-entrypoint.sh
@@ -57,6 +60,7 @@ require_pattern 'Kubernetes injects AI credential key from Secret' 'name:\\s*AI_
 require_pattern 'release package carries control-api package metadata' 'control-api/package\\.json' scripts/package-release.sh
 require_pattern 'release package carries Prisma CLI' 'control-api/node_modules/\\.bin/prisma' scripts/package-release.sh
 require_pattern 'release package emits checksum' 'sha256' scripts/package-release.sh
+require_pattern 'online updater is host-executor based' 'KUBENOVA_UPDATE_EXECUTOR_URL' deploy/docker/.env.example
 
 if rg -n --hidden --glob '!**/.git/**' --glob '!**/node_modules/**' --glob '!**/.next/**' '\\.env\\.ai\\.local' "$ROOT_DIR/scripts" "$ROOT_DIR/deploy" >/dev/null; then
   # The filename may be mentioned in ignore/documentation, but it must never
@@ -71,6 +75,8 @@ fi
 for script in scripts/package-release.sh scripts/prod.sh scripts/service.sh scripts/_service-lib.sh scripts/readme-sync-check.sh .githooks/pre-commit; do
   if bash -n "$ROOT_DIR/$script"; then pass "$script shell syntax"; else fail "$script shell syntax"; fi
 done
+
+if node --check "$ROOT_DIR/scripts/update-executor.mjs"; then pass 'scripts/update-executor.mjs syntax'; else fail 'scripts/update-executor.mjs syntax'; fi
 
 require_file scripts/readme-sync-check.sh
 require_file .githooks/pre-commit

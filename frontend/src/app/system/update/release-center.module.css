@@ -9,6 +9,9 @@
 .label { font-size: 13px; color: var(--kn-text-secondary, var(--kn-text-muted)); }
 .statusLine { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--kn-border); }
 .downloads { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0 12px; }
+.upgradeActions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.progressPanel { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding: 14px; border: 1px solid var(--kn-border); border-radius: 10px; background: var(--kn-surface-raised, var(--kn-bg)); }
+.progressPanel > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .notes { font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; max-width: 75ch; }
 .notes h1, .notes h2, .notes h3, .notes h4 { font-size: 15px; margin: 16px 0 8px; }
 .notes > :first-child { margin-top: 0; }

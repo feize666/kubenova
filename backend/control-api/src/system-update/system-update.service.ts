@@ -21,6 +21,7 @@ import type {
   SystemUpdateReleasesPayload,
   SystemUpdateStatusPayload,
 } from './dto/system-update.dto';
+import { appendAudit } from '../common/governance';
 
 const execFileAsync = promisify(execFile);
 const AUDIT_SCRIPT = join(process.cwd(), 'tools/resource-reality-audit.mjs');
@@ -30,8 +31,12 @@ const AUDIT_REPORT_PATH = join(
 );
 const UPDATE_STATE_PATH = join(process.cwd(), '.run/system-update-state.json');
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60_000;
-const MANUAL_UPDATE_REASON =
-  '此部署未接入宿主机升级执行器。请下载并校验 Release，或通过部署脚本更新同版本镜像；网页不会模拟安装、重启或回滚成功。';
+const UPDATE_EXECUTOR_URL = (process.env.KUBENOVA_UPDATE_EXECUTOR_URL ?? '').trim().replace(/\/+$/, '');
+const UPDATE_EXECUTOR_TOKEN = (process.env.KUBENOVA_UPDATE_EXECUTOR_TOKEN ?? '').trim();
+const UPDATE_EXECUTOR_CONFIGURED = Boolean(UPDATE_EXECUTOR_URL && UPDATE_EXECUTOR_TOKEN);
+const MANUAL_UPDATE_REASON = UPDATE_EXECUTOR_CONFIGURED
+  ? '升级任务由宿主机执行器处理，网页会持续展示任务进度。'
+  : '未配置宿主机升级执行器。请设置 KUBENOVA_UPDATE_EXECUTOR_URL 后再执行在线升级。';
 
 type RecordOperationInput = Omit<SystemUpdateHistoryItem, 'timestamp'>;
 
@@ -50,6 +55,23 @@ interface GithubRelease {
   name?: string;
   body?: string | null;
   assets?: GithubAsset[];
+}
+
+interface ExecutorTaskState {
+  taskId: string;
+  targetVersion: string;
+  phase: string;
+  percent: number | null;
+  message: string | null;
+  startedAt: string;
+}
+
+interface ExecutorTaskResponse {
+  taskId?: string;
+  status?: 'queued' | 'running' | 'succeeded' | 'failed';
+  phase?: string;
+  percent?: number | null;
+  message?: string | null;
 }
 
 class GithubHttpError extends Error {
@@ -129,6 +151,9 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       lastSummary: null as string | null,
     },
     lastOperation: null as SystemUpdateHistoryItem | null,
+    installStatus: 'idle' as SystemUpdateStatusPayload['installStatus'],
+    installProgress: null as ExecutorTaskState | null,
+    backupVersion: null as string | null,
   };
   private timer?: ReturnType<typeof setInterval>;
   private auditPromise: Promise<void> | null = null;
@@ -201,17 +226,20 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       releaseReady: this.releaseReady,
       downloadUrl: this.downloadUrl,
       checksumUrl: this.checksumUrl,
-      installStatus: 'idle',
-      installable: false,
+      installStatus: this.state.installStatus,
+      installable: UPDATE_EXECUTOR_CONFIGURED,
       manualUpdateReason: MANUAL_UPDATE_REASON,
-      backupVersion: null,
-      backupAvailable: false,
-      releaseMode: 'manual',
+      backupVersion: this.state.backupVersion,
+      backupAvailable: Boolean(this.state.backupVersion),
+      releaseMode: UPDATE_EXECUTOR_CONFIGURED ? 'pointer-swap' : 'manual',
       postReleaseAudit: { ...this.state.postReleaseAudit },
       lastOperation: this.state.lastOperation
         ? { ...this.state.lastOperation }
         : null,
       lastOperationResult: this.state.lastOperation?.result ?? null,
+      installProgress: this.state.installProgress
+        ? { ...this.state.installProgress }
+        : null,
       timestamp: new Date().toISOString(),
     };
   }
@@ -222,8 +250,34 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     return this.getStatus();
   }
 
-  install(body: SystemUpdateInstallRequest, _operator: string): never {
-    return this.unsupportedDeployment();
+  install(body: SystemUpdateInstallRequest, operator: string): Promise<SystemUpdateStatusPayload> {
+    this.requireConfirm(body.confirm, 'install');
+    if (!UPDATE_EXECUTOR_CONFIGURED) return this.unsupportedDeployment();
+    return this.startInstall(body, operator);
+  }
+
+  private async startInstall(body: SystemUpdateInstallRequest, operator: string): Promise<SystemUpdateStatusPayload> {
+    if (this.state.installStatus !== 'idle' && this.state.installStatus !== 'installed' && this.state.installStatus !== 'failed')
+      throw new BadRequestException('已有升级任务正在运行，请等待完成');
+    await this.refreshLatestVersion();
+    const targetVersion = body.targetVersion?.trim() || this.state.latestVersion;
+    if (!/^v\d+\.\d+(?:\.\d+)?$/.test(targetVersion))
+      throw new BadRequestException('目标版本不是稳定版本');
+    const releases = await this.getReleases();
+    const release = releases.items.find((item) => item.tag === targetVersion);
+    if (!release?.releaseReady || !release.downloadUrl || !release.checksumUrl)
+      throw new BadRequestException('目标版本不是已校验的正式版本');
+    if (!isNewerVersion(targetVersion, this.state.runningVersion))
+      throw new BadRequestException('目标版本必须高于当前运行版本');
+    this.downloadUrl = release.downloadUrl;
+    this.checksumUrl = release.checksumUrl;
+    const task = await this.createExecutorTask('install', targetVersion, operator);
+    this.state.installStatus = 'queued';
+    this.state.installProgress = task;
+    this.state.backupVersion = this.state.runningVersion;
+    this.recordOperation({ operationType: 'install', targetVersion, result: 'success', message: '升级任务已提交，等待宿主机执行器处理', operator });
+    void this.pollExecutorTask(task, operator, 'install');
+    return this.getStatus();
   }
   restart(
     confirm: boolean | undefined,
@@ -232,14 +286,116 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   ): never {
     return this.unsupportedDeployment();
   }
-  rollback(body: SystemUpdateRollbackRequest, _operator: string): never {
-    return this.unsupportedDeployment();
+  rollback(body: SystemUpdateRollbackRequest, operator: string): Promise<SystemUpdateStatusPayload> {
+    this.requireConfirm(body.confirm, 'rollback');
+    if (!UPDATE_EXECUTOR_CONFIGURED) return this.unsupportedDeployment();
+    return this.startRollback(body, operator);
+  }
+
+  private async startRollback(body: SystemUpdateRollbackRequest, operator: string): Promise<SystemUpdateStatusPayload> {
+    if (!this.state.backupVersion) throw new BadRequestException('没有可用的上一版本备份');
+    if (this.state.installStatus !== 'idle' && this.state.installStatus !== 'installed' && this.state.installStatus !== 'failed')
+      throw new BadRequestException('已有升级任务正在运行，请等待完成');
+    const targetVersion = body.targetVersion?.trim() || this.state.backupVersion;
+    if (targetVersion !== this.state.backupVersion) throw new BadRequestException('只能回滚到最近一次升级前的版本');
+    const task = await this.createExecutorTask('rollback', targetVersion, operator);
+    this.state.installStatus = 'rollbacking';
+    this.state.installProgress = task;
+    this.recordOperation({ operationType: 'rollback', targetVersion, result: 'success', message: '回滚任务已提交', operator });
+    void this.pollExecutorTask(task, operator, 'rollback');
+    return this.getStatus();
   }
   private unsupportedDeployment(): never {
     throw new NotImplementedException({
       code: 'SYSTEM_UPDATE_DEPLOYMENT_REQUIRED',
       message: MANUAL_UPDATE_REASON,
     });
+  }
+
+  private async createExecutorTask(action: 'install' | 'rollback', targetVersion: string, operator: string): Promise<ExecutorTaskState> {
+    let response: Response;
+    try {
+      response = await fetch(UPDATE_EXECUTOR_URL + '/v1/system-update/tasks', {
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+          ...(UPDATE_EXECUTOR_TOKEN ? { authorization: 'Bearer ' + UPDATE_EXECUTOR_TOKEN } : {}),
+        },
+        body: JSON.stringify({
+          action,
+          targetVersion,
+          release: action === 'install' ? { downloadUrl: this.downloadUrl, checksumUrl: this.checksumUrl } : undefined,
+          operator,
+        }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      throw new BadRequestException('宿主机升级执行器不可达');
+    }
+    if (!response.ok) throw new BadRequestException('宿主机升级执行器拒绝任务（HTTP ' + response.status + '）');
+    let payload: ExecutorTaskResponse;
+    try { payload = await response.json() as ExecutorTaskResponse; } catch { throw new BadRequestException('宿主机升级执行器返回无效响应'); }
+    if (!payload.taskId) throw new BadRequestException('宿主机升级执行器未返回任务编号');
+    return {
+      taskId: payload.taskId,
+      targetVersion,
+      phase: payload.phase ?? 'queued',
+      percent: payload.percent ?? 0,
+      message: payload.message ?? null,
+      startedAt: new Date().toISOString(),
+    };
+  }
+
+  private async pollExecutorTask(task: ExecutorTaskState, operator: string, action: 'install' | 'rollback'): Promise<void> {
+    try {
+      for (let attempt = 0; attempt < 900; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        const response = await fetch(
+          UPDATE_EXECUTOR_URL + '/v1/system-update/tasks/' + encodeURIComponent(task.taskId),
+          {
+            headers: {
+              accept: 'application/json',
+              ...(UPDATE_EXECUTOR_TOKEN ? { authorization: 'Bearer ' + UPDATE_EXECUTOR_TOKEN } : {}),
+            },
+            redirect: 'error',
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        if (!response.ok) throw new Error('执行器状态查询失败（HTTP ' + response.status + '）');
+        const payload = await response.json() as ExecutorTaskResponse;
+        task.phase = payload.phase ?? task.phase;
+        task.percent = payload.percent ?? task.percent;
+        task.message = payload.message ?? task.message;
+        this.state.installProgress = { ...task };
+        if (payload.status === 'succeeded') {
+          this.state.installStatus = action === 'install' ? 'installed' : 'idle';
+          this.state.runningVersion = task.targetVersion;
+          this.state.installProgress = null;
+          this.recordOperation({ operationType: action, targetVersion: task.targetVersion, result: 'success', message: action === 'install' ? '升级完成并通过执行器健康检查' : '已回滚到上一版本', operator });
+          appendAudit({ actor: operator, role: 'platform-admin', action: 'update', resourceType: 'system-update', resourceId: task.targetVersion, result: 'success', reason: action });
+          return;
+        }
+        if (payload.status === 'failed') {
+          this.state.installStatus = 'failed';
+          this.state.installProgress = { ...task };
+          this.recordOperation({ operationType: action, targetVersion: task.targetVersion, result: 'failed', message: payload.message ?? '升级任务失败', operator });
+          appendAudit({ actor: operator, role: 'platform-admin', action: 'update', resourceType: 'system-update', resourceId: task.targetVersion, result: 'failure', reason: payload.message ?? action });
+          return;
+        }
+        this.state.installStatus = action === 'rollback'
+          ? 'rollbacking'
+          : (task.phase as SystemUpdateStatusPayload['installStatus']) || 'installing';
+      }
+      throw new Error('升级任务超过最大执行时间');
+    } catch (error) {
+      this.state.installStatus = 'failed';
+      task.message = error instanceof Error ? error.message : '升级任务失败';
+      this.state.installProgress = { ...task };
+      this.recordOperation({ operationType: action, targetVersion: task.targetVersion, result: 'failed', message: task.message, operator });
+      appendAudit({ actor: operator, role: 'platform-admin', action: 'update', resourceType: 'system-update', resourceId: task.targetVersion, result: 'failure', reason: task.message });
+    }
   }
 
   triggerPostReleaseAudit(

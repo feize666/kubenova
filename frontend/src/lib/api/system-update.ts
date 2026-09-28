@@ -36,8 +36,9 @@ export interface SystemUpdateStatusPayload {
   checksumUrl: string | null;
   manualUpdateReason: string;
   backupVersion?: string | null;
-  installStatus: "idle" | "installing" | "installed-not-active" | "installed" | "restarting" | "rollbacking" | "failed";
+  installStatus: "idle" | "queued" | "installing" | "backing-up" | "downloading" | "verifying" | "switching" | "health-check" | "installed-not-active" | "installed" | "restarting" | "rollbacking" | "failed";
   installable?: boolean;
+  installProgress?: { taskId: string; targetVersion: string; phase: string; percent: number | null; message: string | null; startedAt: string } | null;
   backupAvailable: boolean;
   releaseMode?: "pointer-swap" | "manual";
   rollbackSlaTargetMs?: number;

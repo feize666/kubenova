@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../common/auth.guard';
 import {
   assertAdministrationPermission,
@@ -37,7 +37,7 @@ export class SystemUpdateController {
     req: { user: { user?: { username?: string; role?: PlatformRole } } },
     @Body() body: SystemUpdateInstallRequest,
   ) {
-    assertAdministrationPermission(req.user?.user);
+    assertSuperAdmin(req.user?.user);
     return this.systemUpdateService.install(
       body ?? {},
       req.user?.user?.username ?? 'unknown',
@@ -64,7 +64,7 @@ export class SystemUpdateController {
     req: { user: { user?: { username?: string; role?: PlatformRole } } },
     @Body() body: SystemUpdateRollbackRequest,
   ) {
-    assertAdministrationPermission(req.user?.user);
+    assertSuperAdmin(req.user?.user);
     return this.systemUpdateService.rollback(
       body ?? {},
       req.user?.user?.username ?? 'unknown',
@@ -99,4 +99,9 @@ export class SystemUpdateController {
     assertAdministrationPermission(req.user?.user);
     return this.systemUpdateService.getReleases();
   }
+}
+
+function assertSuperAdmin(actor: { role?: string } | undefined): void {
+  if (actor?.role !== 'platform-admin' && actor?.role !== 'admin')
+    throw new ForbiddenException('当前操作需要超级管理员权限');
 }

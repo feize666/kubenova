@@ -13,7 +13,7 @@ KubeNova 是一套面向 Kubernetes 的集群运维控制台。它把集群接�
 - **可观测性中心**：Prometheus 监控、日志中心与观测配置，支持告警接入、通知渠道与自定义模板。
 - **访问控制**：用户管理、集群访问授权、细致到命名空间与资源类型的权限范围，支持 MFA 与 OIDC 对接。
 - **AI 助手**：支持 OpenAI、Azure OpenAI、Anthropic、Gemini、通义千问、火山引擎、DeepSeek、OpenAI 兼容接口与 Ollama，可在对话中查询集群状态并执行受控操作。
-- **更新管理**：仅超级管理员可见，读取真实 GitHub Release，提供版本迁移提示、校验下载、发布说明与手动升级指引；网页不执行宿主机部署。
+- **更新管理**：仅超级管理员可见，读取真实 GitHub Release；配置宿主机执行器后可在线备份、校验、升级、健康检查和失败回滚，并展示任务进度与审计结果。
 
 ## 架构
 
@@ -190,7 +190,16 @@ control-api 每 5 分钟读取 `feize666/kubenova` 的最新正式 Release，排
 
 运行版本从构建环境 `KUBENOVA_VERSION`、发布包元数据或 control-api 的 package 版本读取，不再从可变更新状态文件读取虚拟版本。可通过 `KUBENOVA_UPDATE_REPOSITORY=owner/repo` 指定仓库；默认匿名读取公开 GitHub Release。需要提高限额或访问私有仓库时，可在 control-api 服务端配置只读 `KUBENOVA_UPDATE_GITHUB_TOKEN`：仅发送至 api.github.com，禁止重定向，不下发浏览器。私有发布资产下载仍需操作者具备 GitHub 权限。
 
-网页提供版本检测、发布说明、下载及校验指引，**不直接控制宿主机部署**。旧版只修改状态的“安装/激活/秒级回滚”接口已关闭，返回明确错误；不会再出现代码未升级但页面声称成功。
+网页提供版本检测、发布说明和在线升级入口。在线升级必须配置独立宿主机执行器（不向 control-api 暴露 Docker socket）：执行器先备份 PostgreSQL，再下载并校验发布资产，切换三项 Compose 服务并等待健康检查；失败时自动回滚应用镜像，数据库不自动回滚。升级任务仅超级管理员可发起，同一时间只能运行一个任务，状态和结果写入审计记录。未配置执行器时页面保持只读，不会伪造升级成功。
+
+宿主机执行器使用 `scripts/update-executor.mjs`，配置 `deploy/systemd/env/update-executor.env.example` 后安装 `kubenova-update-executor.service`。control-api 仅配置同一个执行器地址和 token：
+
+```bash
+KUBENOVA_UPDATE_EXECUTOR_URL=http://127.0.0.1:4200
+KUBENOVA_UPDATE_EXECUTOR_TOKEN=<与执行器一致的随机密钥>
+```
+
+执行器只监听回环地址，任务状态保存于 `/var/lib/kubenova/update-executor`；备份和下载目录不通过网页暴露。
 
 实际升级前先备份数据库与配置，再使用当前部署方式的脚本：
 
