@@ -32,7 +32,10 @@ test('executor preparation shares a private key, resolves paths, and preserves e
       const rendered=JSON.parse(execFileSync('docker',['compose','-f',path.join(root,'deploy/docker/docker-compose.prod.yml'),'-f',path.join(root,'deploy/docker/docker-compose.update.yml'),'--env-file',env,'config','--format','json'],{
         encoding:'utf8',env:{...process.env,KUBENOVA_COMPOSE_ENV_FILE:env},
       }));
-      assert.equal(rendered.services['control-api'].environment.KUBENOVA_UPDATE_EXECUTOR_TOKEN,value(config,'KUBENOVA_UPDATE_EXECUTOR_TOKEN'));
+      const clientEnvFile=value(config,'KUBENOVA_UPDATE_CLIENT_ENV_FILE');
+      const apiEnvFiles=rendered.services['control-api'].env_file ?? [];
+      assert.ok(apiEnvFiles.some(entry=>path.resolve(typeof entry==='string'?entry:entry.path)===path.resolve(clientEnvFile)),
+        'the control API must load its executor credential from the protected client env file');
       for(const name of ['frontend','runtime-gateway']) assert.ok(!rendered.services[name].environment.KUBENOVA_UPDATE_EXECUTOR_TOKEN,'privileged key must not reach '+name);
       const mount=rendered.services['control-api'].volumes.find(v=>v.target==='/run/kubenova-update');
       assert.equal(mount.read_only,true);
