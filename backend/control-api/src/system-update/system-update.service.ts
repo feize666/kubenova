@@ -279,6 +279,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     if (this.state.installStatus !== 'idle' && this.state.installStatus !== 'installed' && this.state.installStatus !== 'failed')
       throw new BadRequestException('已有升级任务正在运行，请等待完成');
     await this.refreshLatestVersion();
+    if (this.updateCheckError) throw new BadRequestException('无法重新确认正式发布版本，请检查更新成功后重试');
     const targetVersion = body.targetVersion?.trim() || this.state.latestVersion;
     if (!/^v\d+\.\d+(?:\.\d+)?$/.test(targetVersion))
       throw new BadRequestException('目标版本不是稳定版本');
@@ -485,8 +486,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     if (this.updateCheckPromise) return this.updateCheckPromise;
     this.updateCheckPromise = (async () => {
       this.updateCheckError = null;
-      this.releaseReady = false;
-      this.releaseNotes = null;
+      const hadTrustedRelease = Boolean(this.latestReleaseUrl && this.state.latestVersion);
       try {
         let release: GithubRelease;
         try {
@@ -514,12 +514,18 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
           throw new Error('Release 缺少 Linux x64 发布包或 SHA256 校验文件，暂不可更新');
         this.applyRelease(mapped);
       } catch (error) {
-        this.releaseReady = false;
-        this.state.latestVersion = this.state.runningVersion;
-        this.latestReleaseUrl = null;
-        this.latestReleasePublishedAt = null;
-        this.downloadUrl = null;
-        this.checksumUrl = null;
+        // Keep the last verified release available for inspection during a
+        // transient GitHub outage. The UI marks it degraded through the error
+        // field and blocks a new install until a fresh check succeeds.
+        if (!hadTrustedRelease) {
+          this.releaseReady = false;
+          this.state.latestVersion = this.state.runningVersion;
+          this.latestReleaseUrl = null;
+          this.latestReleasePublishedAt = null;
+          this.releaseNotes = null;
+          this.downloadUrl = null;
+          this.checksumUrl = null;
+        }
         this.updateCheckError = error instanceof Error ? error.message : '更新检测失败，请稍后重试';
       } finally {
         this.lastUpdateCheckAt = new Date().toISOString();

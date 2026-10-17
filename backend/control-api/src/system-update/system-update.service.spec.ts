@@ -103,6 +103,20 @@ describe('release-backed system updates', () => {
       lastUpdateCheckAt: expect.any(String),
     });
   });
+  it('retains verified release details on a failed forced check and recovers on success', async () => {
+    const service = new SystemUpdateService();
+    await service.checkForUpdates();
+    fetchMock.mockRejectedValue(new Error('network unavailable'));
+    expect(await service.checkForUpdates()).toMatchObject({
+      checkState: 'error', latestVersion: 'v1.9', releaseReady: true,
+      downloadUrl: `https://github.com/${repo}/releases/download/v1.9/kubenova-ubuntu.tar.gz`,
+      updateCheckError: expect.any(String),
+    });
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(release)));
+    expect(await service.checkForUpdates()).toMatchObject({
+      checkState: 'available', latestVersion: 'v1.9', updateCheckError: null,
+    });
+  });
   it('rejects simulated installation, restart and rollback without changing the running version', () => {
     const service = new SystemUpdateService();
     expect(() =>

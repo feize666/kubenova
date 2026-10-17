@@ -10,6 +10,8 @@
 .statusLine { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--kn-border); }
 .downloads { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0 12px; }
 .upgradeActions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.updateFacts { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--kn-border); color: var(--kn-text-secondary, var(--kn-text-muted)); font-size: 13px; }
+.updateFacts span { display: inline-flex; align-items: center; gap: 6px; }
 .progressPanel { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding: 14px; border: 1px solid var(--kn-border); border-radius: 10px; background: var(--kn-surface-raised, var(--kn-bg)); }
 .progressPanel > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .notes { font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; max-width: 75ch; }
@@ -29,4 +31,9 @@
 .releases li:last-child { border-bottom: 0; padding-bottom: 0; }
 .releases li:first-child { padding-top: 0; }
 .releases li > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--kn-border); }
+.history li:first-child { padding-top: 0; }
+.history li:last-child { border-bottom: 0; padding-bottom: 0; }
+.history li > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 @media (max-width: 640px) { .versions { grid-template-columns: 1fr; gap: 18px; } .page { gap: 16px; } .releases li { align-items: flex-start; } }
