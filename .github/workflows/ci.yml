@@ -32,15 +32,18 @@ jobs:
         with:
           go-version-file: backend/runtime-gateway/go.mod
           cache-dependency-path: backend/runtime-gateway/go.sum
-      - name: Validate version and release scripts
+      - name: Validate release version
         env:
           RELEASE_TAG: ${{ inputs.release-tag }}
-        run: |
-          node scripts/release-version.mjs "$RELEASE_TAG"
-          node --test scripts/release-version.test.mjs
-          node --test scripts/init-compose-env.test.mjs scripts/install-update-executor.test.mjs scripts/update-executor.test.mjs
-          bash scripts/release-check.sh
-          node scripts/check-release-switch.mjs
+        run: node scripts/release-version.mjs "$RELEASE_TAG"
+      - name: Test release version metadata
+        run: node --test scripts/release-version.test.mjs
+      - name: Test update executor and setup
+        run: node --test scripts/init-compose-env.test.mjs scripts/install-update-executor.test.mjs scripts/update-executor.test.mjs
+      - name: Check release packaging contracts
+        run: bash scripts/release-check.sh
+      - name: Test atomic release switch
+        run: node scripts/check-release-switch.mjs
       - name: Refuse to overwrite an already published release
         if: inputs.release-tag != ''
         env:
