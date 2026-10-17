@@ -32,7 +32,7 @@ test('executor preparation shares a private key, resolves paths, and preserves e
       const rendered=JSON.parse(execFileSync('docker',['compose','-f',path.join(root,'deploy/docker/docker-compose.prod.yml'),'-f',path.join(root,'deploy/docker/docker-compose.update.yml'),'--env-file',env,'config','--format','json'],{
         encoding:'utf8',env:{...process.env,KUBENOVA_COMPOSE_ENV_FILE:env},
       }));
-      const clientEnvFile=value(config,'KUBENOVA_UPDATE_CLIENT_ENV_FILE');
+      const clientEnvFile=value(first,'KUBENOVA_UPDATE_CLIENT_ENV_FILE');
       const apiEnvFiles=rendered.services['control-api'].env_file ?? [];
       assert.ok(apiEnvFiles.some(entry=>path.resolve(typeof entry==='string'?entry:entry.path)===path.resolve(clientEnvFile)),
         'the control API must load its executor credential from the protected client env file');

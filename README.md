@@ -207,7 +207,7 @@ sudo node scripts/install-update-executor.mjs
 sudo bash scripts/compose-release.sh up --tag <当前部署版本>
 ```
 
-安装脚本自动生成或复用同一个执行器密钥，分别存入 `/etc/kubenova/update-executor.env` 与 `/etc/kubenova/update-client.env`；共享环境文件不存放该特权密钥，Compose 只把客户端密钥文件注入 control-api。执行器默认监听 `/run/kubenova-update/executor.sock`，仅将 socket 目录只读挂载给 control-api，不暴露公网端口，也不挂载 Docker socket。部署文件路径自动解析，并保留现有 Compose 项目名，避免误建数据库卷。不要把服务密钥粘贴到前端或提交 Git。
+安装脚本自动生成或复用同一个执行器密钥，分别存入 `/etc/kubenova/update-executor.env` 与 `/etc/kubenova/update-client.env`；共享环境文件不存放该特权密钥，Compose 只把客户端密钥文件注入 control-api，发布校验会验证这一隔离配置和只读 socket 挂载。执行器默认监听 `/run/kubenova-update/executor.sock`，仅将 socket 目录只读挂载给 control-api，不暴露公网端口，也不挂载 Docker socket。部署文件路径自动解析，并保留现有 Compose 项目名，避免误建数据库卷。不要把服务密钥粘贴到前端或提交 Git。
 
 页面只有在执行器实际通过 Docker/Compose 就绪检查后才启用在线升级。API 重启后从执行器恢复任务状态，暂时断连不会伪报任务失败，完成任务也不会修改旧进程的运行版本。任务及数据库备份保存于 `/var/lib/kubenova/update-executor`；大备份流式写入，备份失败不切换服务。发布资产允许 GitHub 官方下载重定向且校验 SHA256，失败切换才触发应用镜像回滚，不自动回滚数据库。已成功回滚的任务不会重复提供同一回滚入口。
 
