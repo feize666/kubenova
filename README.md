@@ -180,7 +180,7 @@ sudo bash scripts/service.sh prod rollback <version>
 
 ### 发布新版本
 
-根目录 `VERSION` 为版本基准（例如 `1.1.0`）；前后端 package.json、package-lock.json 必须同步，发布 tag 支持 `v1.1` 或 `v1.1.0`。推送新的稳定版本标签触发 GitHub Actions：版本与已发布版本不可覆盖检查 → 前后端构建、单元测试、网关测试及发布脚本校验 → Linux x64 打包与三服务 Docker Compose 启动检查 → 发布同版本 GHCR 镜像 → 上传完整资产 → 将草稿 Release 转为正式版本。Release job 会用生成的部署配置实际合并 Compose 文件并启动三服务；通用 CI 分步骤校验初始化、执行器、版本信息、发布打包契约及原子切换。分支和 PR 复用同一套 CI，代码变更检查 README 同步。已发布版本不能覆盖，失败的草稿可重试；不自动部署任何生产主机。
+根目录 `VERSION` 为版本基准（例如 `1.1.0`）；前后端 package.json、package-lock.json 必须同步，发布 tag 支持 `v1.1` 或 `v1.1.0`。推送新的稳定版本标签触发 GitHub Actions：版本与已发布版本不可覆盖检查 → 前后端构建、单元测试、网关测试及发布脚本校验 → Linux x64 打包与三服务 Docker Compose 启动检查 → 发布同版本 GHCR 镜像 → 上传完整资产 → 将草稿 Release 转为正式版本。Release job 会用生成的部署配置实际合并 Compose 文件并启动三服务；通用 CI 分步骤校验初始化、执行器、版本信息、发布打包契约及原子切换，静态检查只依赖 Bash、grep 和 find。分支和 PR 复用同一套 CI，代码变更检查 README 同步。已发布版本不能覆盖，失败的草稿可重试；不自动部署任何生产主机。
 
 正式 Release 包含 `kubenova-ubuntu.tar.gz`、兼容旧更新检测的 `kubenova-ubuntu.tar.gz.sha256`、`metadata.json` 和 `checksums.txt`。元数据记录三个组件版本、完整 Git commit、构建时间及数据库迁移提示；checksums.txt 覆盖发布包和元数据。当前原生包面向 **Ubuntu 24.04 x64，Node.js 22+**；镜像面向 Linux amd64。下载发布包与校验文件到同一目录后执行：
 

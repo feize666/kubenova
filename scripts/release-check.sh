@@ -17,10 +17,7 @@ require_file() {
 
 require_pattern() {
   local label="$1" pattern="$2" path="$3"
-  # Callers use shell literals, so collapse doubled backslashes before passing
-  # the expression to ripgrep.
-  pattern="${pattern//\\\\/\\}"
-  if [[ -f "$ROOT_DIR/$path" ]] && rg -q "$pattern" "$ROOT_DIR/$path"; then
+  if [[ -f "$ROOT_DIR/$path" ]] && grep -Eq -- "$pattern" "$ROOT_DIR/$path"; then
     pass "$label"
   else
     fail "$label"
@@ -29,7 +26,7 @@ require_pattern() {
 
 require_literal() {
   local label="$1" pattern="$2" path="$3"
-  if [[ -f "$ROOT_DIR/$path" ]] && rg -Fq -- "$pattern" "$ROOT_DIR/$path"; then
+  if [[ -f "$ROOT_DIR/$path" ]] && grep -Fq -- "$pattern" "$ROOT_DIR/$path"; then
     pass "$label"
   else
     fail "$label"
@@ -53,22 +50,23 @@ require_file deploy/systemd/env/update-executor.env.example
 require_file scripts/prod.sh
 
 require_pattern 'container startup runs Prisma migrations' 'prisma migrate deploy' backend/control-api/docker-entrypoint.sh
-require_pattern 'binary production startup runs Prisma migrations' 'node_modules/\\.bin/prisma migrate deploy' scripts/prod.sh
-require_pattern 'Dockerfile uses migration entrypoint' 'ENTRYPOINT.*docker-entrypoint\\.sh' backend/control-api/Dockerfile
-require_pattern 'Compose requires AI credential key' 'AI_CREDENTIAL_ENCRYPTION_KEY:\\s*\\$\\{AI_CREDENTIAL_ENCRYPTION_KEY:\?' deploy/docker/docker-compose.prod.yml
+require_pattern 'binary production startup runs Prisma migrations' 'node_modules/[.]bin/prisma migrate deploy' scripts/prod.sh
+require_pattern 'Dockerfile uses migration entrypoint' 'ENTRYPOINT.*docker-entrypoint[.]sh' backend/control-api/Dockerfile
+require_pattern 'Compose requires AI credential key' 'AI_CREDENTIAL_ENCRYPTION_KEY:[[:space:]]*[$][{]AI_CREDENTIAL_ENCRYPTION_KEY:[?]' deploy/docker/docker-compose.prod.yml
 require_pattern 'Compose has a release tag fallback' 'KUBENOVA_IMAGE_TAG' deploy/docker/docker-compose.prod.yml
 require_pattern 'Compose probes readiness endpoint' '/api/health/ready' deploy/docker/docker-compose.prod.yml
 require_pattern 'Kubernetes probes readiness endpoint' '/api/health/ready' deploy/k8s/control-api.yaml
-require_pattern 'Kubernetes injects AI credential key from Secret' 'name:\\s*AI_CREDENTIAL_ENCRYPTION_KEY' deploy/k8s/control-api.yaml
-require_pattern 'release package carries control-api package metadata' 'control-api/package\\.json' scripts/package-release.sh
-require_pattern 'release package carries Prisma CLI' 'control-api/node_modules/\\.bin/prisma' scripts/package-release.sh
+require_pattern 'Kubernetes injects AI credential key from Secret' 'name:[[:space:]]*AI_CREDENTIAL_ENCRYPTION_KEY' deploy/k8s/control-api.yaml
+require_pattern 'release package carries control-api package metadata' 'control-api/package[.]json' scripts/package-release.sh
+require_pattern 'release package carries Prisma CLI' 'control-api/node_modules/[.]bin/prisma' scripts/package-release.sh
 require_pattern 'release package emits checksum' 'sha256' scripts/package-release.sh
 require_pattern 'online updater is host-executor based' 'KUBENOVA_UPDATE_EXECUTOR_URL' deploy/docker/.env.example
 
-if rg -n --hidden --glob '!**/.git/**' --glob '!**/node_modules/**' --glob '!**/.next/**' '\\.env\\.ai\\.local' "$ROOT_DIR/scripts" "$ROOT_DIR/deploy" >/dev/null; then
+local_ai_refs="$(find "$ROOT_DIR/scripts" "$ROOT_DIR/deploy" -type f ! -path '*/node_modules/*' ! -path '*/.next/*' -exec grep -nF '.env.ai.local' {} + 2>/dev/null || true)"
+if [[ -n "$local_ai_refs" ]]; then
   # The filename may be mentioned in ignore/documentation, but it must never
   # be copied into an artifact or loaded by a production Docker image.
-  if rg -n 'cp .*\\.env\\.ai\\.local|COPY .*\\.env\\.ai\\.local|ADD .*\\.env\\.ai\\.local' "$ROOT_DIR/scripts" "$ROOT_DIR/deploy" >/dev/null; then
+  if printf '%s\n' "$local_ai_refs" | grep -Eq '(cp|COPY|ADD) .*([.]|/)[.]env[.]ai[.]local'; then
     fail 'release paths do not copy .env.ai.local'
   else
     pass '.env.ai.local is not copied into release paths'
