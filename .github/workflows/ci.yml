@@ -38,7 +38,7 @@ jobs:
         run: |
           node scripts/release-version.mjs "$RELEASE_TAG"
           node --test scripts/release-version.test.mjs
-          KUBENOVA_TEST_COMPOSE=1 node --test scripts/init-compose-env.test.mjs scripts/install-update-executor.test.mjs scripts/update-executor.test.mjs
+          node --test scripts/init-compose-env.test.mjs scripts/install-update-executor.test.mjs scripts/update-executor.test.mjs
           bash scripts/release-check.sh
           node scripts/check-release-switch.mjs
       - name: Refuse to overwrite an already published release
