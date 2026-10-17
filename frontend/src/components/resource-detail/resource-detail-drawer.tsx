@@ -1,18 +1,21 @@
 "use client";
 
-import { ArrowLeftOutlined, FileTextOutlined } from "@ant-design/icons";
+import { FileTextOutlined, FullscreenOutlined, FullscreenExitOutlined } from "@ant-design/icons";
 import { Space, Tabs, Typography } from "antd";
-import { useQuery } from "@tanstack/react-query";
+import { hashKey, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { getClusters } from "@/lib/api/clusters";
 import { getResourceDetail } from "@/lib/api/resources";
 import type { DynamicResourceIdentity, ResourceIdentity, ResourceDetailResponse } from "@/lib/api/resources";
-import { OpsCommandPreview, OpsDegradedState, OpsDrawerShell, OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState } from "@/components/ops";
+import { OpsCommandPreview, OpsDegradedState, OpsDrawerShell, OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState, OpsPermissionState } from "@/components/ops";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceDetailContent } from "./renderers";
 import type { ResourceDetailDrawerProps } from "./types";
 import { getKindTitle, getRenderProfile, normalizeKind } from "./utils";
 import { getDetailTabs, renderTabContent } from "@/app/clusters/[clusterId]/resource/[kind]/[...id]/detail-config";
+import { ResourceEditBoundaryContext, useResourceEditBoundary } from '@/components/resource-editor/resource-edit-boundary';
+import { useReadAccess } from '@/lib/query/read-access-state';
+import { visibleDetailData } from './query-state';
 
 type DetailRequest = NonNullable<ResourceDetailDrawerProps["request"]>;
 
@@ -110,7 +113,7 @@ function buildDetailYamlTarget(
   return {
     identity: {
       clusterId: detail.overview.clusterId,
-      namespace: detailKind === "namespace" ? detail.overview.name : detail.overview.namespace || "default",
+      namespace: detail.overview.namespace || "",
       kind: detail.overview.kind,
       name: detail.overview.name,
     },
@@ -127,6 +130,8 @@ export function ResourceDetailDrawer({
   children,
   onNavigateRequest,
 }: ResourceDetailDrawerProps) {
+  const editBoundary=useResourceEditBoundary();
+  const [fullscreen,setFullscreen]=useState(false);
   const requestKey = getRequestKey(request);
   const [navigationState, setNavigationState] = useState<NavigationState | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
@@ -168,11 +173,12 @@ export function ResourceDetailDrawer({
   const handleClose = useCallback(() => {
     setNavigationState(null);
     setYamlOpen(false);
+    setFullscreen(false);
     setActiveTab("overview");
     onClose();
   }, [onClose]);
 
-  const handleTabChange = useCallback((key: string) => setActiveTab(key), []);
+  const handleTabChange = useCallback((key: string) => {if(key!==activeTab)editBoundary.request(()=>setActiveTab(key));}, [activeTab,editBoundary]);
 
   // Reset the tab when drilling into a different resource in the same drawer.
   const [previousRequestKey, setPreviousRequestKey] = useState(activeRequestKey);
@@ -197,8 +203,9 @@ export function ResourceDetailDrawer({
     const matched = Object.entries(clusterMap).find(([, name]) => name === id);
     return matched?.[0] ?? id;
   }, [clusterMap, normalizedKind, rawRequestId]);
+  const detailQueryKey = ["resource-detail", normalizedKind, requestId, token];
   const query = useQuery({
-    queryKey: ["resource-detail", normalizedKind, requestId, token],
+    queryKey: detailQueryKey,
     queryFn: ({ signal }) => getResourceDetail({ kind: normalizedKind, id: requestId }, token, { signal }),
     enabled: open && Boolean(normalizedKind && requestId),
   });
@@ -233,18 +240,20 @@ export function ResourceDetailDrawer({
     }));
     onNavigateRequest?.(next);
   }, [activeRequest, activeRequestKey, clusterMap, hasActiveNavigationState, onNavigateRequest, requestKey]);
-  const hasDetailData = Boolean(query.data);
-  const yamlTarget = useMemo(() => buildDetailYamlTarget(query.data, activeRequest), [query.data, activeRequest]);
+  const permissionDenied = useReadAccess(hashKey(detailQueryKey), query);
+  const visibleDetail = visibleDetailData(query, permissionDenied);
+  const hasDetailData = Boolean(visibleDetail);
+  const yamlTarget = useMemo(() => buildDetailYamlTarget(visibleDetail, activeRequest), [visibleDetail, activeRequest]);
   const activeSnapshot = activeRequest?.snapshot;
-  const canShowSnapshotFallback = hasSnapshot(activeSnapshot);
+  const canShowSnapshotFallback = !permissionDenied && hasSnapshot(activeSnapshot);
   const drawerState = query.isFetching && hasDetailData ? "loading" : "idle";
 
   const title = (() => {
     if (!activeRequest) {
       return "资源详情";
     }
-    if (query.data) {
-      return `${getRenderProfile(query.data).title} · ${query.data.overview.name}`;
+    if (visibleDetail) {
+      return `${getRenderProfile(visibleDetail).title} · ${visibleDetail.overview.name}`;
     }
     const requestLabel =
       (activeRequest as { label?: string; name?: string } | null)?.label ??
@@ -256,14 +265,16 @@ export function ResourceDetailDrawer({
   })();
 
   return (
+    <ResourceEditBoundaryContext.Provider value={editBoundary}>
     <OpsDrawerShell
       title={title}
       size="large"
       open={open}
       destroyOnHidden
-      onClose={handleClose}
+      onClose={()=>editBoundary.request(handleClose)}
       variant="resource"
       widthPx={width}
+      fullscreen={fullscreen}
       state={drawerState}
       stateTitle={drawerState === "loading" ? "正在刷新资源详情" : undefined}
       stateDescription={drawerState === "loading" ? "当前内容保持可读，刷新完成后自动更新。" : undefined}
@@ -281,8 +292,11 @@ export function ResourceDetailDrawer({
       }}
       extra={
         <Space>
+          <OpsIconActionButton icon={fullscreen?<FullscreenExitOutlined/>:<FullscreenOutlined/>} aria-label={fullscreen?'退出详情全屏':'全屏资源详情'} aria-pressed={fullscreen} onClick={()=>setFullscreen(value=>!value)}>
+            {fullscreen?'退出全屏':'全屏'}
+          </OpsIconActionButton>
           {navigationStack.length > 0 ? (
-            <OpsIconActionButton icon={<ArrowLeftOutlined />} onClick={handleBack}>
+            <OpsIconActionButton onClick={()=>editBoundary.request(handleBack)}>
               返回
             </OpsIconActionButton>
           ) : null}
@@ -294,7 +308,7 @@ export function ResourceDetailDrawer({
               YAML
             </OpsIconActionButton>
           ) : null}
-          {extra}
+          {!permissionDenied && extra}
         </Space>
       }
     >
@@ -308,9 +322,15 @@ export function ResourceDetailDrawer({
       >
         {!activeRequest ? (
           <OpsEmptyState title="未选择资源" description="从资源列表选择一条记录后查看详情。" />
+        ) : permissionDenied ? (
+          <OpsPermissionState
+            title="无权查看该资源详情"
+            description="服务端拒绝了当前资源读取请求。请检查集群访问授权后重试。"
+            action={<OpsIconActionButton size="small" loading={query.isFetching} onClick={() => void query.refetch()}>重试</OpsIconActionButton>}
+          />
         ) : query.isLoading && !hasDetailData ? (
           <OpsLoadingState title="正在加载资源详情" description="正在读取资源概览、状态与关联信息。" />
-        ) : query.error instanceof Error ? (
+        ) : query.error instanceof Error && !hasDetailData ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             {canShowSnapshotFallback ? (
               <OpsDegradedState
@@ -344,19 +364,26 @@ export function ResourceDetailDrawer({
               </Space>
             ) : null}
           </Space>
-        ) : query.data ? (
+        ) : visibleDetail ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+            {query.error instanceof Error ? (
+              <OpsDegradedState
+                title="详情刷新失败，当前内容可能已过期"
+                description={`${query.error.message}。保留最近一次读取成功的详情，不会清空当前页面。`}
+                action={<OpsIconActionButton size="small" loading={query.isFetching} onClick={() => void query.refetch()}>重试</OpsIconActionButton>}
+              />
+            ) : null}
             {useTabbedDetail ? (
               <Tabs
                 key={activeRequestKey}
                 destroyOnHidden
                 activeKey={activeTab}
                 onChange={handleTabChange}
-                items={getDetailTabs(normalizedKind, query.data).map((tab) => ({
+                items={getDetailTabs(normalizedKind, visibleDetail).map((tab) => ({
                   key: tab.key,
                   label: tab.label,
                   children: renderTabContent(tab.key, {
-                    detail: query.data!,
+                    detail: visibleDetail,
                     clusterMap,
                     onNavigateRequest: emitNavigateRequest,
                   }),
@@ -366,7 +393,7 @@ export function ResourceDetailDrawer({
             ) : (
               <ResourceDetailContent
                 key={activeRequestKey}
-                detail={query.data}
+                detail={visibleDetail}
                 snapshot={activeRequest?.snapshot}
                 clusterMap={clusterMap}
                 onNavigateRequest={emitNavigateRequest}
@@ -387,5 +414,6 @@ export function ResourceDetailDrawer({
         onUpdated={() => void query.refetch()}
       />
     </OpsDrawerShell>
+    </ResourceEditBoundaryContext.Provider>
   );
 }

@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import type { ApiRequestSignalOptions } from "./types";
 
 export interface NamespaceListItem {
   id: string;
@@ -38,7 +39,7 @@ export interface UpdateNamespacePayload {
   labels: Record<string, string>;
 }
 
-export function getNamespaces(params: NamespaceQueryParams = {}, token?: string) {
+export function getNamespaces(params: NamespaceQueryParams = {}, token?: string, requestOptions: ApiRequestSignalOptions = {}) {
   const query: Record<string, string> = {};
   if (params.clusterId) {
     query.clusterId = params.clusterId;
@@ -58,7 +59,7 @@ export function getNamespaces(params: NamespaceQueryParams = {}, token?: string)
   if (params.sortOrder) {
     query.sortOrder = params.sortOrder;
   }
-  return apiRequest<NamespaceListResponse>("/api/namespaces", { query, token });
+  return apiRequest<NamespaceListResponse>("/api/namespaces", { query, token, signal: requestOptions.signal });
 }
 
 export function createNamespace(payload: CreateNamespacePayload, token?: string) {

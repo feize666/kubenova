@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
 import {
   CloseCircleOutlined,
   ArrowLeftOutlined,
@@ -29,6 +29,8 @@ import {
   redactGatewayWsDisplay,
   sanitizeSensitiveMessage,
   sanitizeWsUrlForDisplay,
+  shouldConnectTerminal,
+  canManuallyReconnect,
   type TerminalConnectionStatus,
   type TerminalParsedMessage,
 } from "@/lib/ws/terminal";
@@ -92,10 +94,6 @@ const VISUAL_FRAME_STATE: Record<TerminalVisualState, OpsFrameShellState> = {
   error: "error",
 };
 
-const MAX_RECONNECTS = 12;
-const INITIAL_RECONNECT_DELAY_MS = 1000;
-const MAX_RECONNECT_DELAY_MS = 30000;
-const RECONNECT_JITTER_RATIO = 0.2;
 const CONNECT_TIMEOUT_MS = 10000;
 const SESSION_RENEW_WINDOW_MS = 60000;
 const HEARTBEAT_INTERVAL_MS = 20000;
@@ -284,11 +282,12 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
   const workspace = useOptionalClusterWorkspace();
   const routeParams = useSearchParams();
   const searchParams = query ?? routeParams;
-  const clustersQuery = useQuery({
+  const clustersQuery = useResourceListQuery({
     queryKey: ["clusters", "list", accessToken],
     queryFn: () =>
       getClusters({ state: "active", selectableOnly: true }, accessToken!),
     enabled: !isInitializing && Boolean(accessToken),
+    retry: false,
   });
 
   const [status, setStatus] =
@@ -310,10 +309,9 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
   const connectingRef = useRef(false);
   const manualDisconnectRef = useRef(false);
   const blockReconnectRef = useRef(false);
-  const reconnectCountRef = useRef(0);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const connectionAbortRef = useRef<AbortController | null>(null);
   const connectTerminalRef = useRef<
     | ((options?: {
         forceNewSession?: boolean;
@@ -393,7 +391,6 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
   const effectiveContainer =
     selectedContainer || sessionInfo?.target?.container?.trim() || "";
   const podPhase = sessionInfo?.target?.podPhase;
-  const sourceLabel = fromPage || "手动打开";
 
   const fallbackReturnTo = useMemo(() => {
     const safeReturnTo = resolveSafeRuntimeReturnTo(returnTo);
@@ -438,13 +435,6 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
     terminal.writeln(text.replace(/\n/g, "\r\n"));
   };
 
-  const clearReconnectTimer = () => {
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
-  };
-
   const clearConnectTimeout = () => {
     if (connectTimeoutRef.current) {
       clearTimeout(connectTimeoutRef.current);
@@ -485,9 +475,10 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
   const openGatewaySocket = async (
     gatewayWsUrl: string,
     onSocketReady: (socket: WebSocket) => void,
+    signal: AbortSignal,
   ): Promise<WebSocket> => {
     const candidates = buildGatewayWsCandidates(gatewayWsUrl);
-    return connectWsWithCandidates(candidates, onSocketReady);
+    return connectWsWithCandidates(candidates, onSocketReady, signal);
   };
 
   const sessionAlmostExpired = (expiresAtMs?: number) => {
@@ -538,39 +529,18 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
       target: session.target,
       cacheKey: targetKey,
     };
-    sessionCacheRef.current = nextSession;
     return nextSession;
   };
 
-  const scheduleReconnect = () => {
-    if (manualDisconnectRef.current || blockReconnectRef.current) return;
-    if (reconnectCountRef.current >= MAX_RECONNECTS) {
-      setLastWarning("自动重连已达到上限，请手动重新连接。");
-      return;
-    }
-    const attempt = reconnectCountRef.current + 1;
-    reconnectCountRef.current = attempt;
-    const baseDelayMs = Math.min(
-      MAX_RECONNECT_DELAY_MS,
-      INITIAL_RECONNECT_DELAY_MS * 2 ** (attempt - 1),
-    );
-    const jitterFactor = 1 + (Math.random() * 2 - 1) * RECONNECT_JITTER_RATIO;
-    const delayMs = Math.max(300, Math.floor(baseDelayMs * jitterFactor));
-    clearReconnectTimer();
-    reconnectTimerRef.current = setTimeout(() => {
-      void connectTerminal({ isAutoReconnect: true, userInitiated: false });
-    }, delayMs);
-  };
-
   const disconnectTerminal = (showToast = false) => {
-    clearReconnectTimer();
     clearConnectTimeout();
     clearHeartbeatTimer();
-    reconnectCountRef.current = 0;
     manualDisconnectRef.current = true;
     blockReconnectRef.current = true;
     connectingRef.current = false;
     generationRef.current += 1;
+    connectionAbortRef.current?.abort();
+    connectionAbortRef.current = null;
     closeSocketSilently(wsRef.current);
     wsRef.current = null;
     setStatus("disconnected");
@@ -681,7 +651,8 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
       isAutoReconnect = false,
       userInitiated = false,
     } = options ?? {};
-    if (connectingRef.current || status === "connecting") return;
+    if (!shouldConnectTerminal(isAutoReconnect)) return;
+    if (connectingRef.current) return;
     if (isInitializing) {
       if (userInitiated) {
         toastOnce("auth-loading", "info", "认证信息加载中，请稍后重试");
@@ -707,6 +678,9 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
 
     const currentGeneration = ++generationRef.current;
     const isCurrent = () => currentGeneration === generationRef.current;
+    connectionAbortRef.current?.abort();
+    const connectionAbort = new AbortController();
+    connectionAbortRef.current = connectionAbort;
 
     connectingRef.current = true;
     manualDisconnectRef.current = false;
@@ -716,22 +690,18 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
       hasConnectedNoticeRef.current = false;
     }
     try {
-      if (!isAutoReconnect) {
-        clearReconnectTimer();
-        reconnectCountRef.current = 0;
-        blockReconnectRef.current = false;
-      }
+      blockReconnectRef.current = false;
+      clearHeartbeatTimer();
 
       closeSocketSilently(wsRef.current);
       wsRef.current = null;
       setStatus("connecting");
       setLastWarning("");
-      writeSystemLine(
-        isAutoReconnect ? "正在执行自动重连..." : "正在准备运行时会话...",
-      );
+      writeSystemLine("正在准备运行时会话...");
 
       const session = await readSession(forceNewSession);
       if (!isCurrent()) return;
+      sessionCacheRef.current = session;
       setSessionInfo(session);
 
       const socket = await openGatewaySocket(
@@ -740,8 +710,12 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
           nextSocket.binaryType = "arraybuffer";
           wsRef.current = nextSocket;
         },
+        connectionAbort.signal,
       );
-      if (!isCurrent()) return;
+      if (!isCurrent()) {
+        closeSocketSilently(socket);
+        return;
+      }
       clearConnectTimeout();
       connectTimeoutRef.current = setTimeout(() => {
         if (!isCurrent() || socket.readyState !== WebSocket.CONNECTING) return;
@@ -754,8 +728,6 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
         openHandled = true;
         if (!isCurrent()) return;
         clearConnectTimeout();
-        clearReconnectTimer();
-        reconnectCountRef.current = 0;
         setStatus("connected");
         connectingRef.current = false;
         startHeartbeat();
@@ -782,6 +754,7 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
         }
         if (typeof Blob !== "undefined" && event.data instanceof Blob) {
           event.data.arrayBuffer().then((buffer) => {
+            if (!isCurrent()) return;
             writeTerminal(new TextDecoder().decode(buffer));
           });
           return;
@@ -830,9 +803,7 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
           }
         }
         connectingRef.current = false;
-        if (!blockReconnectRef.current) {
-          scheduleReconnect();
-        }
+        if (!blockReconnectRef.current) setLastWarning(`${mapped.text} 请手动重新连接；不会重放已输入命令。`);
       };
     } catch (error) {
       if (!isCurrent()) return;
@@ -851,8 +822,6 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
       connectingRef.current = false;
       if (explained.blockReconnect) {
         blockReconnectRef.current = true;
-      } else {
-        scheduleReconnect();
       }
     }
   };
@@ -961,9 +930,11 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
   }, [status]);
 
   useEffect(() => {
-    clearReconnectTimer();
     clearConnectTimeout();
+    clearHeartbeatTimer();
     generationRef.current += 1;
+    connectionAbortRef.current?.abort();
+    connectionAbortRef.current = null;
     connectingRef.current = false;
     sessionCacheRef.current = null;
     closeSocketSilently(wsRef.current);
@@ -1016,10 +987,11 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
 
   useEffect(() => {
     return () => {
-      clearReconnectTimer();
       clearConnectTimeout();
       clearHeartbeatTimer();
       generationRef.current += 1;
+      connectionAbortRef.current?.abort();
+      connectionAbortRef.current = null;
       manualDisconnectRef.current = true;
       blockReconnectRef.current = true;
       closeSocketSilently(wsRef.current);
@@ -1048,6 +1020,12 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
   const gatewayLabel = sessionInfo?.gatewayWsUrl ? "已绑定" : "未创建";
   const reconnectLocked =
     blockReconnectRef.current || isNonReconnectableVisual || isExpiredVisual;
+  const canReconnect = canManuallyReconnect({
+    status,
+    blocked: reconnectLocked,
+    hasTarget: missingParams.length === 0,
+    newSession: reconnectLocked,
+  });
 
   return (
     <>
@@ -1056,7 +1034,7 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
         bodyClassName="terminal-workbench-body"
         state={VISUAL_FRAME_STATE[visualState]}
         title="Pod 终端工作区"
-        subtitle={`${clusterDisplayName} / ${targetBase.namespace || "-"} / ${targetBase.pod || "-"} · 来源 ${sourceLabel}`}
+        subtitle={`${clusterDisplayName} / ${targetBase.namespace || "-"} / ${targetBase.pod || "-"}`}
         status={
           <OpsStatusTag tone={visualTone}>
             {VISUAL_STATUS_LABEL[visualState]}
@@ -1078,27 +1056,29 @@ export default function TerminalWorkbench({ query, onClose }: { query?: URLSearc
               />
             </span>
             <span className="terminal-workbench-toolbar__group">
-              <Tooltip title="新建会话">
+              <Tooltip title={status === "disconnected" && !reconnectLocked ? "重新连接终端，不重放已输入命令" : "新建会话"}>
                 <OpsIconActionButton
                   opsTone="primary"
                   opsVariant="command"
                   icon={<ReloadOutlined />}
                   onClick={() =>
                     void connectTerminal({
-                      forceNewSession: true,
+                      forceNewSession: reconnectLocked || status !== "disconnected",
                       userInitiated: true,
                     })
                   }
-                  disabled={status === "connecting" || missingParams.length > 0}
+                  disabled={!canReconnect}
                   disabledReason={
-                    status === "connecting"
-                      ? "正在连接终端"
-                      : missingParams.length > 0
-                        ? missingText
-                        : undefined
+                    !canReconnect
+                      ? reconnectLocked
+                        ? "当前会话不可重连"
+                        : status === "connecting"
+                          ? "正在连接终端"
+                          : missingText
+                      : undefined
                   }
                 >
-                  新建
+                  {status === "disconnected" && !reconnectLocked ? "重连" : "新建"}
                 </OpsIconActionButton>
               </Tooltip>
               <Tooltip title="断开终端连接">

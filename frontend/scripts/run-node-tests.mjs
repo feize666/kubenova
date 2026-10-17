@@ -4,14 +4,14 @@
  *
  * The suites are written against the same specifiers the app uses
  * (`@/...`, extensionless relative imports), which Node cannot resolve on its
- * own. This runner registers a small resolver hook, then delegates to
- * `node --test` so the suites exercise the real modules instead of a copy.
+ * own. This runner uses tsx for TypeScript, JSX and path alias support, then
+ * delegates to `node --test` so suites exercise the actual React components.
  *
  * Usage: node scripts/run-node-tests.mjs [path ...]
  * Default paths: every `src/**\/*.test.ts` file.
  */
 import { spawnSync } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,12 +37,17 @@ if (!targets.length) {
   process.exit(1);
 }
 
+const invalidTargets = targets.filter((target) => !existsSync(target) || !statSync(target).isFile());
+if (invalidTargets.length) {
+  for (const target of invalidTargets) console.error(`[node-tests] test target is not a file: ${relative(frontendDir, target)}`);
+  process.exit(1);
+}
+
 const result = spawnSync(
   process.execPath,
   [
     "--import",
-    join(scriptDir, "node-test-resolver.mjs"),
-    "--experimental-strip-types",
+    "tsx",
     "--test",
     ...targets.map((target) => relative(frontendDir, target)),
   ],

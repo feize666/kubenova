@@ -1,7 +1,7 @@
 'use client';
 import { Empty, Input, Select, Spin } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
 import type React from 'react';
 import { useMemo, useState } from 'react';
 import { useAuth } from './auth-context';
@@ -93,11 +93,12 @@ export function NamespaceSelect({
   style,
 }: NamespaceSelectProps) {
   const { accessToken, isInitializing } = useAuth();
-  const namespacesQuery = useQuery({
+  const namespacesQuery = useResourceListQuery({
     queryKey: ['namespaces', clusterId || 'all', accessToken],
     queryFn: () => getNamespaces({ clusterId: clusterId || undefined, page: 1, pageSize: 500 }, accessToken),
     enabled: !isInitializing && Boolean(accessToken) && Boolean(clusterId) && !disabled,
     staleTime: 30_000,
+    retry: false,
   });
 
   const remoteNamespaces = (namespacesQuery.data?.items ?? []).map(
@@ -140,11 +141,12 @@ export function NamespaceOptionList({
 }: NamespaceOptionListProps) {
   const { accessToken, isInitializing } = useAuth();
   const [query, setQuery] = useState("");
-  const namespacesQuery = useQuery({
+  const namespacesQuery = useResourceListQuery({
     queryKey: ['namespaces', clusterId || 'all', accessToken],
     queryFn: () => getNamespaces({ clusterId: clusterId || undefined, page: 1, pageSize: 500 }, accessToken),
     enabled: !isInitializing && Boolean(accessToken) && Boolean(clusterId) && !disabled,
     staleTime: 30_000,
+    retry: false,
   });
   const remoteNamespaces = (namespacesQuery.data?.items ?? []).map((item) => item.namespace);
   const allNamespaces = Array.from(new Set([...remoteNamespaces, ...knownNamespaces])).sort();

@@ -1,4 +1,3 @@
-import { keepPreviousData } from "@tanstack/react-query";
 import type { QueryClientConfig, Query } from "@tanstack/react-query";
 
 export const QUERY_CACHE_TIMINGS = {
@@ -29,7 +28,9 @@ export const defaultQueryOptions = {
 export const listQueryOptions = {
   staleTime: QUERY_CACHE_TIMINGS.listStaleTimeMs,
   gcTime: QUERY_CACHE_TIMINGS.listGcTimeMs,
-  placeholderData: keepPreviousData,
+  // Placeholder data must be scoped by each resource query. A global
+  // keepPreviousData policy can briefly render another account/cluster's rows
+  // when a list key changes.
   refetchOnMount: false,
   refetchOnWindowFocus: shouldRefreshOnWindowFocus,
   refetchOnReconnect: true,

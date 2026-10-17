@@ -1,4 +1,7 @@
 "use client";
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,7 +13,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -128,7 +131,6 @@ function parsePorts(input?: string): EndpointSlicePort[] {
 
 export default function EndpointSlicesPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -140,7 +142,7 @@ export default function EndpointSlicesPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
@@ -157,10 +159,9 @@ export default function EndpointSlicesPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<EndpointSliceResource>({
-    defaultPageSize: 10,
   });
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, isFetching:queryIsFetching, refetch } = useResourceListQuery({
     queryKey: [
       "network",
       "EndpointSlice",
@@ -368,7 +369,7 @@ export default function EndpointSlicesPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: EndpointSliceResource) =>
         row.id ? (
-          <Typography.Link onClick={() => { setDetailTarget({ kind: "EndpointSlice", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/endpointslice/${encodeURIComponent(row.id)}`); }}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "EndpointSlice", id: row.id }); }}>
             {name}
           </Typography.Link>
         ) : (
@@ -417,6 +418,7 @@ export default function EndpointSlicesPage() {
       fixed: "right",
       render: (_: unknown, row: EndpointSliceResource) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind:"EndpointSlice",name:row.name,namespace:row.namespace}}
           deleteLabel="删除"
           deleteTitle="删除 EndpointSlice"
           deleteContent={`确认删除 EndpointSlice「${row.name}」吗？此操作不可恢复。`}
@@ -486,17 +488,6 @@ export default function EndpointSlicesPage() {
             </span>
           }
           description="查看 Kubernetes EndpointSlice 分片、地址状态与端口分布。"
-          extra={<ResourceAddButton title="创建EndpointSlice" onClick={() => {
-              const nextClusterId = clusterId || clusterOptions[0]?.value || "";
-              const nextNamespace = namespace || "default";
-              form.resetFields();
-              form.setFieldsValue({ clusterId: nextClusterId, namespace: nextNamespace, addressType: "IPv4", ports: "http:80/TCP" });
-              setCreateMode("form");
-              setCreateYaml("");
-              setCreateYamlClusterId(nextClusterId);
-              setCreateYamlNamespace(nextNamespace);
-              setModalOpen(true);
-            }} />}
         />
 
         <Space
@@ -509,18 +500,12 @@ export default function EndpointSlicesPage() {
             <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="network-resource-state-alert"
-              type="error"
-              showIcon
-              title="EndpointSlice 加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="EndpointSlice" className="network-resource-state-alert" query={{data,isError,error,isFetching:queryIsFetching,refetch}} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<EndpointSliceResource>
+              queryState={{data,isLoading,isError,error,isFetching:queryIsFetching}}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建EndpointSlice" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建EndpointSlice" /></>}
               rowKey="id"
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -623,7 +608,7 @@ export default function EndpointSlicesPage() {
         />
       </OpsModalShell>
 
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

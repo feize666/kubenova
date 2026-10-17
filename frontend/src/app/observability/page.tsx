@@ -6,7 +6,7 @@ import {
   SettingOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Col, Descriptions, Empty, Row, Select, Space, Typography } from "antd";
+import { Alert, Col, Descriptions, Empty, Result, Row, Select, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -26,6 +26,7 @@ import {
 import { getGrafanaPanelConfiguration } from "@/lib/api/observability-config";
 import type { MonitoringTimePreset } from "@/lib/api/monitoring";
 import { getClusterIdFromPathname } from "@/lib/cluster-workspace";
+import { isPlatformAdmin } from "@/lib/console-routing";
 import { listQueryOptions } from "@/lib/query";
 
 const OBSERVABILITY_RANGE_OPTIONS: Array<{ label: string; value: MonitoringTimePreset }> = [
@@ -70,7 +71,7 @@ function eventLevelTag(level: ObservabilityEvent["level"]) {
 }
 
 export default function ObservabilityCenterPage() {
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
   const pathname = usePathname();
   const clusterId = getClusterIdFromPathname(pathname);
   const [range, setRange] = useState<MonitoringTimePreset>("24h");
@@ -216,6 +217,9 @@ export default function ObservabilityCenterPage() {
     [],
   );
 
+  if (!isInitializing && !isPlatformAdmin(role)) {
+    return <Result status="403" title="仅超级管理员可访问" subTitle="可观测性中心仍在开发中，当前仅对超级管理员开放。" />;
+  }
   return (
     <Space className="resource-workbench ops-observability-cockpit" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
@@ -232,7 +236,6 @@ export default function ObservabilityCenterPage() {
             </span>
           }
           description="统一查看数据源状态、实体健康、信号联动与最近事件。"
-          freshness={summary ? { label: "最近采集", value: summary.timestamp, color: "blue" } : undefined}
           extra={
             <Space wrap>
               <Select

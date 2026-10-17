@@ -1,11 +1,15 @@
 import {
   BadRequestException,
+  ConflictException,
+  GatewayTimeoutException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as k8s from '@kubernetes/client-node';
+import { DEFAULT_INGRESS_CLASS, ingressClassReferences, validateSecretManifest } from './resource-editor-security';
 import { ClusterHealthService } from '../clusters/cluster-health.service';
 import { ClustersService } from '../clusters/clusters.service';
 import { K8sClientService } from '../clusters/k8s-client.service';
@@ -500,6 +504,16 @@ export interface ResourceYamlApplyResponse {
   dryRun: boolean;
   message: string;
   timestamp: string;
+}
+
+export interface ResourceEditorSubmitRequest {
+  clusterId: string;
+  namespace?: string;
+  operation: 'create' | 'update';
+  yaml: string;
+  dryRun: boolean;
+  identity?: { apiVersion?: string; kind?: string; name?: string; namespace?: string; resource?: string };
+  resourceVersion?: string;
 }
 
 interface DiscoveryCapabilityItem {
@@ -1603,10 +1617,8 @@ export class ResourcesService {
     let parsed: any;
     try {
       parsed = k8s.loadYaml(rawYaml);
-    } catch (error) {
-      throw new BadRequestException(
-        `YAML 解析失败：${error instanceof Error ? error.message : '格式错误'}`,
-      );
+    } catch {
+      throw new BadRequestException('YAML 解析失败，请检查文档格式');
     }
     if (!parsed || typeof parsed !== 'object') {
       throw new BadRequestException('YAML 内容无效');
@@ -1623,6 +1635,7 @@ export class ResourcesService {
       delete parsed.metadata.namespace;
     }
     if (
+      parsed.apiVersion !== this.toApiVersion(capability.group, capability.version) ||
       parsed.kind !== capability.kind ||
       parsed.metadata.name !== name ||
       (capability.namespaced && parsed.metadata.namespace !== namespace)
@@ -1631,21 +1644,18 @@ export class ResourcesService {
         'YAML 的 kind/name/namespace 必须与目标资源一致',
       );
     }
+    if (!parsed.metadata.resourceVersion) throw new BadRequestException('YAML 必须包含 metadata.resourceVersion');
     delete parsed.status;
     const client = await this.makeObjectClient(clusterId);
     try {
-      await client.patch(
-        parsed,
+      await client.replace(
+        this.sanitizeForManifest(parsed),
         undefined,
         input.dryRun ? 'All' : undefined,
         'kubenova',
-        true,
-        k8s.PatchStrategy.ServerSideApply,
       );
     } catch (error) {
-      throw new BadRequestException(
-        `Kubernetes API 调用失败：${this.errorMessage(error)}`,
-      );
+      throw this.editorApiError(error);
     }
     return {
       clusterId,
@@ -1659,6 +1669,278 @@ export class ResourcesService {
       message: input.dryRun ? 'YAML 校验通过（dry-run）' : 'YAML 已成功应用',
       timestamp: new Date().toISOString(),
     };
+  }
+
+  async getEditorSchema(input: { clusterId?: string; apiVersion?: string; kind?: string; namespace?: string; resource?: string }) {
+    const clusterId = input.clusterId?.trim();
+    const apiVersion = input.apiVersion?.trim();
+    const kind = input.kind?.trim();
+    if (!clusterId || !apiVersion || !kind) throw new BadRequestException('clusterId、apiVersion、kind 不能为空');
+    const kubeconfig = await this.clustersService.getKubeconfig(clusterId);
+    if (!kubeconfig) throw new NotFoundException('目标集群未配置 kubeconfig');
+    const kc = this.k8sClientService.createClient(kubeconfig);
+    const catalog = await this.getDiscoveryCatalog(clusterId);
+    const capability = catalog.items.find(item => item.group === (apiVersion.includes('/') ? apiVersion.split('/')[0] : '') && item.version === (apiVersion.includes('/') ? apiVersion.split('/')[1] : apiVersion) && item.kind === kind && (!input.resource || item.resource === input.resource));
+    if (!capability) return { schema: null, source: 'unavailable' as const, reason: '未找到匹配的 discovery 资源' };
+    const group = capability.group;
+    const crdName = `${capability.resource}.${group}`;
+    if (!group) return { schema: null, source: 'unavailable' as const, reason: '核心资源 OpenAPI schema 未通过安全客户端暴露' };
+    try {
+      const api = kc.makeApiClient(k8s.ApiextensionsV1Api as never) as any;
+      const response = await api.readCustomResourceDefinition({ name: crdName });
+      const versions = response?.spec?.versions ?? [];
+      const selected = versions.find((v: any) => v.name === (apiVersion.split('/')[1] ?? apiVersion) && v.served);
+      const schema = selected?.schema?.openAPIV3Schema;
+      return schema ? { schema, source: 'crd' as const } : { schema: null, source: 'unavailable' as const, reason: 'CRD 未提供 OpenAPI schema' };
+    } catch (error) {
+      if (this.editorApiError(error).getStatus() !== 404) throw this.editorApiError(error);
+      return { schema: null, source: 'unavailable' as const, reason: '未找到匹配的 CRD schema' };
+    }
+  }
+
+  async getConfigKeys(clusterId: string, namespace: string, kind: string, name: string) {
+    if (!['Secret', 'ConfigMap'].includes(kind) || !namespace || !name) throw new BadRequestException('请选择有效的配置资源');
+    const client = await this.makeObjectClient(clusterId);
+    const value = await client.read({ apiVersion: 'v1', kind, metadata: { name, namespace } });
+    return { keys: [...new Set([...Object.keys((value as any).data ?? {}), ...Object.keys((value as any).binaryData ?? {})])].sort() };
+  }
+
+  async getConfigReferences(clusterId: string, namespace: string, kind: string) {
+    const client = await this.makeObjectClient(clusterId);
+    const list = await client.list('v1', kind, namespace);
+    return { items: (list.items ?? []).map((item: any) => ({
+      name: item.metadata?.name, type: kind === 'Secret' ? item.type ?? 'Opaque' : undefined,
+      keys: [...new Set([...Object.keys((item as any).data ?? {}), ...Object.keys((item as any).binaryData ?? {})])].sort(),
+    })) };
+  }
+
+  async getAccessContext(identity: ResourceIdentity) {
+    const meta = this.resolveKind(identity.kind);
+    if (!['Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet', 'Pod', 'Job', 'CronJob'].includes(meta.kind)) {
+      throw new BadRequestException('访问方式仅支持工作负载');
+    }
+    if (!identity.name?.trim()) throw new BadRequestException('name 不能为空');
+    const namespace = this.resolveNamespace(meta, identity.namespace);
+    const client = await this.withDetailTimeout(this.makeObjectClient(identity.clusterId, AbortSignal.timeout(25_000)), null, 8_000);
+    if (!client) throw new GatewayTimeoutException('集群连接超时，请重试访问关系读取');
+    const workload = await this.withDetailTimeout(client.read({
+      apiVersion: meta.apiVersion,
+      kind: meta.kind,
+      metadata: { namespace, name: identity.name },
+    }), null, 8_000);
+    if (!workload) throw new GatewayTimeoutException('工作负载读取超时，请重试访问关系读取');
+    const project = (item: any, kind: string, apiVersion: string) => ({
+      apiVersion,
+      kind,
+      metadata: {
+        name: item.metadata?.name,
+        namespace: item.metadata?.namespace ?? namespace,
+        uid: item.metadata?.uid,
+        resourceVersion: item.metadata?.resourceVersion,
+        labels: item.metadata?.labels,
+        ownerReferences: item.metadata?.ownerReferences,
+        creationTimestamp: item.metadata?.creationTimestamp,
+      },
+      spec: item.spec,
+      status: item.status,
+      ...(kind === 'Endpoints' ? { subsets: item.subsets } : {}),
+      ...(kind === 'EndpointSlice' ? { endpoints: item.endpoints } : {}),
+    });
+    const kinds = ['Service', 'Ingress', 'Endpoints', 'EndpointSlice', 'Pod', 'Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet', 'Job', 'CronJob'];
+    const lists = await Promise.all(kinds.map(async kind => {
+      const definition = this.resolveKind(kind);
+      try {
+        const list = await this.withDetailTimeout(client.list(definition.apiVersion, kind, namespace, undefined, undefined, undefined, undefined, undefined, 500), null, 12_000);
+        if (!list) throw new GatewayTimeoutException('读取超时');
+        const items = (list.items ?? []).slice(0, 500).map(item => project(item, kind, definition.apiVersion));
+        return { kind, items, incomplete: Boolean(list.metadata?._continue) || (list.items?.length ?? 0) > 500 };
+      } catch (error) {
+        const code = (error as { code?: number; statusCode?: number })?.code ?? (error as { statusCode?: number })?.statusCode;
+        return {
+          kind,
+          items: [],
+          incomplete: true,
+          error: error instanceof GatewayTimeoutException || (error as Error)?.name === 'AbortError' ? '读取超时，请刷新重试' : code === 403 ? '当前集群凭据无权读取此类资源' : code === 404 ? '集群不支持此类资源 API' : '读取失败，请刷新重试',
+        };
+      }
+    }));
+    return { workload: project(workload, meta.kind, meta.apiVersion), lists, limit: 500 };
+  }
+
+  async listIngressClasses(clusterId: string) {
+    const client = await this.makeObjectClient(clusterId);
+    const classes = await client.list('networking.k8s.io/v1', 'IngressClass');
+    return { items: (classes.items ?? []).map((item: any) => ({
+      name: item.metadata?.name, resourceVersion: item.metadata?.resourceVersion,
+      controller: item.spec?.controller, parameters: item.spec?.parameters,
+      isDefault: item.metadata?.annotations?.[DEFAULT_INGRESS_CLASS] === 'true',
+      createdAt: item.metadata?.creationTimestamp,
+    })) };
+  }
+
+  private async assertIngressClassDefault(client: k8s.KubernetesObjectApi, manifest: any) {
+    if (manifest.kind !== 'IngressClass' || manifest.metadata?.annotations?.[DEFAULT_INGRESS_CLASS] !== 'true') return;
+    const list = await client.list('networking.k8s.io/v1', 'IngressClass');
+    const others = list.items.filter((item: any) => item.metadata?.name !== manifest.metadata.name && item.metadata?.annotations?.[DEFAULT_INGRESS_CLASS] === 'true');
+    if (others.length) throw new ConflictException('已有默认 IngressClass，请在列表中使用“设为默认”并确认影响范围');
+  }
+
+  async ingressClassImpact(clusterId: string, name: string) {
+    if (!name) throw new BadRequestException('name 不能为空');
+    const client = await this.makeObjectClient(clusterId);
+    const [classes, ingresses] = await Promise.all([
+      client.list('networking.k8s.io/v1', 'IngressClass'), client.list('networking.k8s.io/v1', 'Ingress'),
+    ]);
+    const target = classes.items.find((item: any) => item.metadata?.name === name);
+    if (!target) throw new NotFoundException('IngressClass 不存在');
+    return {
+      target: { name, resourceVersion: target.metadata?.resourceVersion },
+      defaults: classes.items.filter((item: any) => item.metadata?.annotations?.[DEFAULT_INGRESS_CLASS] === 'true')
+        .map((item: any) => ({ name: item.metadata.name, resourceVersion: item.metadata.resourceVersion })),
+      references: ingressClassReferences(name, ingresses.items),
+    };
+  }
+
+  async setDefaultIngressClass(clusterId: string, name: string, expected: Record<string, string>, dryRun: boolean) {
+    if (!expected || typeof expected !== 'object' || Array.isArray(expected) || typeof dryRun !== 'boolean')
+      throw new BadRequestException('需要提供影响预览的版本与 dryRun');
+    const client = await this.makeObjectClient(clusterId);
+    const list = await client.list('networking.k8s.io/v1', 'IngressClass');
+    const target = list.items.find((item: any) => item.metadata?.name === name);
+    if (!target) throw new NotFoundException('IngressClass 不存在');
+    const affected = list.items.filter((item: any) => item.metadata?.name === name || item.metadata?.annotations?.[DEFAULT_INGRESS_CLASS] === 'true');
+    if (affected.some((item: any) => expected[item.metadata.name] !== item.metadata.resourceVersion) ||
+        Object.keys(expected).some(key => !affected.some((item: any) => item.metadata.name === key)))
+      throw new ConflictException('默认类或资源版本已变化，请重新检查影响范围');
+    // Clear former defaults first; each replacement still uses Kubernetes resourceVersion.
+    const ordered = [...affected.filter(item => item !== target), target];
+    const changes = ordered.map((item: any) => {
+      const next = this.sanitizeForManifest(item) as any;
+      next.metadata.annotations = { ...next.metadata.annotations, [DEFAULT_INGRESS_CLASS]: item === target ? 'true' : 'false' };
+      return next;
+    });
+    for (const next of changes) {
+      try { await client.replace(next, undefined, 'All', 'kubenova'); }
+      catch (error) { throw this.editorApiError(error); }
+    }
+    if (dryRun) return { dryRun: true, completed: [], affected: changes.map(item => item.metadata.name) };
+    const completed: string[] = [];
+    for (const next of changes) {
+      try { await client.replace(next, undefined, undefined, 'kubenova'); completed.push(next.metadata.name); }
+      catch { throw new ConflictException({ code: 'PARTIAL_DEFAULT_CLASS_CHANGE', message: '默认类修改未全部完成，请刷新核对实际状态', details: { completed, failed: next.metadata.name } }); }
+    }
+    return { dryRun: false, completed };
+  }
+
+  async deleteIngressClass(clusterId: string, name: string, expectedVersion: string, force: boolean) {
+    const client = await this.makeObjectClient(clusterId);
+    const manifest = { apiVersion: 'networking.k8s.io/v1', kind: 'IngressClass', metadata: { name } };
+    const target = await client.read(manifest);
+    if (!expectedVersion || target.metadata?.resourceVersion !== expectedVersion) throw new ConflictException('资源版本已变化，请刷新后重试');
+    const ingress = await client.list('networking.k8s.io/v1', 'Ingress');
+    const references = ingressClassReferences(name, ingress.items);
+    if (references.length && !force) throw new ConflictException({ message: '仍有 Ingress 引用该类', details: { references } });
+    await client.delete(manifest, undefined, undefined, undefined, undefined, undefined, { preconditions: { resourceVersion: expectedVersion, uid: target.metadata?.uid } });
+    return { message: 'IngressClass 已删除' };
+  }
+
+  async submitEditor(input: ResourceEditorSubmitRequest, authorize?: (manifest: Record<string, any>) => Promise<void>) {
+    const clusterId = typeof input.clusterId === 'string' ? input.clusterId.trim() : '';
+    if (!clusterId || typeof input.yaml !== 'string' || !input.yaml.trim()) throw new BadRequestException('clusterId 和 yaml 不能为空');
+    if (typeof input.dryRun !== 'boolean' || (input.namespace !== undefined && typeof input.namespace !== 'string')) throw new BadRequestException('dryRun 必须为 boolean，namespace 必须为 string');
+    if (input.operation !== 'create' && input.operation !== 'update') throw new BadRequestException('operation 必须为 create 或 update');
+    const manifests: Record<string, any>[] = [];
+    let parsedManifests: Record<string, any>[];
+    try { parsedManifests = this.parseYamlManifests(input.yaml); }
+    catch { throw new BadRequestException('YAML 解析失败，请检查文档格式'); }
+    for (const raw of parsedManifests) {
+      if (!raw.metadata || typeof raw.metadata !== 'object' || Array.isArray(raw.metadata)) throw new BadRequestException('metadata 必须为 object');
+      if (raw.metadata.resourceVersion !== undefined && typeof raw.metadata.resourceVersion !== 'string') throw new BadRequestException('metadata.resourceVersion 必须为 string');
+      const scope = await this.resolveEditorScope({ clusterId, apiVersion: raw.apiVersion, kind: raw.kind, namespace: raw.metadata?.namespace ?? input.namespace });
+      if (input.operation === 'update' && !scope.namespaced && raw.metadata.namespace) throw new BadRequestException('集群资源的 namespace 必须为空');
+      if (typeof raw.metadata?.name !== 'string' || !raw.metadata.name.trim()) throw new BadRequestException('metadata.name 不能为空');
+      const manifest = this.sanitizeForManifest(raw) as Record<string, any>;
+      manifest.metadata = { ...manifest.metadata };
+      if (scope.namespaced) manifest.metadata.namespace = scope.namespace;
+      else delete manifest.metadata.namespace;
+      if (input.operation === 'create') delete manifest.metadata.resourceVersion;
+      manifests.push(manifest);
+    }
+    if (!manifests.length) throw new BadRequestException('YAML 未包含可应用资源');
+    for (const manifest of manifests) await authorize?.(manifest);
+    for (const manifest of manifests) validateSecretManifest(manifest);
+    const identities = manifests.map(m => `${m.apiVersion}|${m.kind}|${m.metadata?.namespace ?? ''}|${m.metadata?.name ?? ''}`);
+    if (new Set(identities).size !== identities.length) throw new BadRequestException('YAML 包含重复资源');
+    const client = await this.makeObjectClient(clusterId);
+    if (input.operation === 'create') {
+      const checked: any[] = [];
+      for (const manifest of manifests) {
+        await this.assertIngressClassDefault(client, manifest);
+        try { checked.push(await client.create(manifest, undefined, 'All', 'kubenova')); }
+        catch (error) { throw this.editorApiError(error); }
+      }
+      if (input.dryRun) return this.editorResponse(checked, true, 'YAML 校验通过（dry-run）');
+      const items: any[] = [];
+      for (const manifest of manifests) {
+        try {
+          const created = await client.create(manifest, undefined, undefined, 'kubenova');
+          items.push(this.editorItem(created, manifest));
+        } catch (error) {
+          if (!items.length) throw this.editorApiError(error);
+          throw new ConflictException({ code: 'PARTIAL_CREATE_FAILED', details: { completed: items.map(item => ({ apiVersion: item.apiVersion, kind: item.kind, namespace: item.namespace, name: item.name, resourceVersion: item.resourceVersion })), failed: { apiVersion: manifest.apiVersion, kind: manifest.kind, namespace: manifest.metadata?.namespace ?? '', name: manifest.metadata?.name ?? '' } }, message: '部分资源已创建，后续创建失败，请核对已完成资源' });
+        }
+      }
+      return this.editorResponse(items, false, `已创建 ${items.length} 个资源`);
+    }
+    if (manifests.length !== 1) throw new BadRequestException('update 仅支持单个 YAML 资源');
+    const draft = manifests[0];
+    const identity = input.identity ?? {};
+    const meta = this.toObject(draft.metadata);
+    if (![identity.apiVersion, identity.kind, identity.name].every(v => typeof v === 'string' && v.trim())) throw new BadRequestException('update 必须提供完整 identity');
+    await this.resolveEditorScope({ clusterId, ...identity });
+    if (identity.apiVersion !== draft.apiVersion || identity.kind !== draft.kind || identity.name !== meta.name || (identity.namespace ?? '') !== (meta.namespace ?? '')) throw new BadRequestException('YAML 与 identity 不一致');
+    const expected = input.resourceVersion ?? this.toMaybeString(meta.resourceVersion);
+    if (typeof expected !== 'string' || !expected.trim()) throw new BadRequestException('update 必须提供 resourceVersion');
+    let current: any;
+    try { current = await client.read(draft as any); } catch (error) { throw this.editorApiError(error); }
+    const currentVersion = this.extractResourceVersion(current);
+    if (currentVersion !== expected) throw new ConflictException('资源版本已变更，请刷新后重试');
+    if (meta.resourceVersion && meta.resourceVersion !== expected) throw new ConflictException('YAML resourceVersion 与请求不一致');
+    const updatedManifest = { ...draft, metadata: { ...meta, resourceVersion: expected } };
+    await this.assertIngressClassDefault(client, updatedManifest);
+    delete (updatedManifest as any).status;
+    let updated: any;
+    try { updated = await client.replace(updatedManifest, undefined, input.dryRun ? 'All' : undefined, 'kubenova'); } catch (error) { throw this.editorApiError(error); }
+    return this.editorResponse([updated], Boolean(input.dryRun), input.dryRun ? 'YAML 校验通过（dry-run）' : '资源已更新');
+  }
+
+  async resolveEditorScope(input: { clusterId?: string; apiVersion?: string; kind?: string; namespace?: string; resource?: string }) {
+    if (![input.clusterId, input.apiVersion, input.kind].every(v => typeof v === 'string' && v.trim()) || (input.namespace !== undefined && typeof input.namespace !== 'string') || (input.resource !== undefined && typeof input.resource !== 'string')) throw new BadRequestException('clusterId/apiVersion/kind/namespace/resource 无效');
+    const catalog = await this.getDiscoveryCatalog(input.clusterId!);
+    const capability = catalog.items.find(item => this.toApiVersion(item.group, item.version) === input.apiVersion && item.kind === input.kind && (!input.resource || item.resource === input.resource));
+    if (!capability) throw new BadRequestException('未找到匹配的 discovery GVK/GVR');
+    const namespace = capability.namespaced ? input.namespace?.trim() ?? '' : '';
+    if (capability.namespaced && !namespace) throw new BadRequestException('namespace 不能为空');
+    return { ...capability, namespace };
+  }
+
+  private editorApiError(error: unknown): HttpException {
+    const e = error as any;
+    const candidate = e instanceof HttpException ? e.getStatus() : Number(e?.response?.statusCode ?? e?.statusCode ?? e?.code ?? e?.body?.code);
+    const status = Number.isInteger(candidate) && candidate >= 400 && candidate <= 599 ? candidate : 502;
+    // API and admission messages can echo Secret payloads. Expose status and safe field paths only.
+    const fields = Array.isArray(e?.body?.details?.causes) ? e.body.details.causes.map((c: any) => c?.field).filter((f: unknown) => typeof f === 'string' && /^[a-zA-Z0-9_.\[\]-]{1,200}$/.test(f)) : [];
+    return new HttpException({ code: status === 409 ? 'RESOURCE_CONFLICT' : 'KUBERNETES_API_FAILED', message: status === 409 ? '资源已存在或版本已变更，请刷新后重试' : `Kubernetes API 请求失败 (${status})`, ...(fields.length ? { details: { fields } } : {}) }, status);
+  }
+
+  private editorItem(result: any, fallback: any) {
+    const metadata = this.toObject(result?.metadata ?? fallback?.metadata);
+    return { apiVersion: String(result?.apiVersion ?? fallback.apiVersion), kind: String(result?.kind ?? fallback.kind), name: String(metadata.name ?? ''), namespace: String(metadata.namespace ?? ''), resourceVersion: this.extractResourceVersion(result), message: '操作成功' };
+  }
+
+  private editorResponse(results: any[], dryRun: boolean, message: string) {
+    const items = results.map(result => result?.name ? result : this.editorItem(result, result));
+    return { dryRun, items, total: items.length, message };
   }
 
   async createDynamicResource(input: DynamicResourceCreateRequest): Promise<{
@@ -1781,10 +2063,8 @@ export class ResourcesService {
     let parsed: any;
     try {
       parsed = k8s.loadYaml(input.yaml);
-    } catch (error) {
-      throw new BadRequestException(
-        `YAML 解析失败：${error instanceof Error ? error.message : '格式错误'}`,
-      );
+    } catch {
+      throw new BadRequestException('YAML 解析失败，请检查文档格式');
     }
 
     if (!parsed || typeof parsed !== 'object') {
@@ -1802,24 +2082,21 @@ export class ResourcesService {
       delete parsed.metadata.namespace;
     }
 
-    if (parsed.kind !== meta.kind || parsed.metadata.name !== input.name) {
+    if (parsed.apiVersion !== meta.apiVersion || parsed.kind !== meta.kind || parsed.metadata.name !== input.name) {
       throw new BadRequestException('YAML 的 kind/name 必须与目标资源一致');
     }
 
     if (meta.namespaced && parsed.metadata.namespace !== namespace) {
       throw new BadRequestException('YAML 的 namespace 必须与目标资源一致');
     }
+    if (!parsed.metadata.resourceVersion) throw new BadRequestException('YAML 必须包含 metadata.resourceVersion');
 
     delete parsed.status;
 
-    const applied = await client.patch(
-      parsed,
-      undefined,
-      input.dryRun ? 'All' : undefined,
-      'kubenova',
-      true,
-      k8s.PatchStrategy.ServerSideApply,
-    );
+    let applied: k8s.KubernetesObject;
+    try {
+      applied = await client.replace(this.sanitizeForManifest(parsed), undefined, input.dryRun ? 'All' : undefined, 'kubenova');
+    } catch (error) { throw this.editorApiError(error); }
 
     return {
       clusterId: input.clusterId,
@@ -2559,6 +2836,77 @@ export class ResourcesService {
     };
   }
 
+  private matchesWorkloadSelector(
+    labels: Record<string, unknown>,
+    selector: Record<string, unknown>,
+  ): boolean {
+    const matchLabels = this.toObject(selector.matchLabels);
+    const expressions = this.toArray(selector.matchExpressions);
+    if (!Object.keys(matchLabels).length && !expressions.length) return false;
+    if (
+      !Object.entries(matchLabels).every(([key, value]) => labels[key] === value)
+    ) return false;
+    return expressions.every((value) => {
+      const expression = this.toObject(value);
+      const key = this.toMaybeString(expression.key);
+      if (!key) return false;
+      const present = Object.prototype.hasOwnProperty.call(labels, key);
+      const values = this.toArray(expression.values);
+      switch (expression.operator) {
+        case 'In':
+          return present && values.includes(labels[key]);
+        case 'NotIn':
+          return !values.includes(labels[key]);
+        case 'Exists':
+          return present;
+        case 'DoesNotExist':
+          return !present;
+        default:
+          return false;
+      }
+    });
+  }
+
+  private workloadOwnership(
+    pod: DetailResourceRecord,
+    base: DetailResourceRecord,
+    resources: DetailResourceRecord[],
+  ): 'owned' | 'unknown' | 'mismatch' {
+    const pending = [pod];
+    const visited = new Set<string>();
+    let mismatchedUid = false;
+    const sameScope = (item: DetailResourceRecord) =>
+      item.clusterId === base.clusterId && item.namespace === base.namespace;
+    while (pending.length) {
+      const item = pending.pop()!;
+      if (!sameScope(item) || visited.has(item.id)) continue;
+      visited.add(item.id);
+      const refs = this.toArray(this.toObject(item.statusJson).ownerReferences)
+        .map((ref) => this.toObject(ref));
+      const controllers = refs.filter((ref) => ref.controller === true);
+      for (const ref of controllers.length ? controllers : refs) {
+        const kind = this.toMaybeString(ref.kind);
+        const name = this.toMaybeString(ref.name);
+        if (!kind || !name) continue;
+        const target = kind === base.kind && name === base.name
+          ? base
+          : resources.find((candidate) => sameScope(candidate) &&
+              candidate.kind === kind && candidate.name === name);
+        if (!target) continue;
+        const refUid = this.toMaybeString(ref.uid);
+        const targetUid = this.toMaybeString(this.toObject(target.statusJson).uid);
+        // Older sync records can lack UIDs; a known mismatch never falls back to labels.
+        if (refUid && targetUid && refUid !== targetUid) {
+          mismatchedUid = true;
+          continue;
+        }
+        if (target === base) return 'owned';
+        pending.push(target);
+      }
+    }
+    return mismatchedUid ? 'mismatch' : 'unknown';
+  }
+
   private buildAssociations(
     base: DetailResourceRecord,
     context: DetailContext,
@@ -2605,27 +2953,17 @@ export class ResourcesService {
       if (base.kind !== 'Pod') {
         const baseSpec = this.toObject(base.spec);
         const baseSelector = this.toObject(baseSpec.selector);
-        const selectorLabels = this.toObject(baseSelector.matchLabels);
         for (const pod of context.workloads) {
           if (pod.kind !== 'Pod' || pod.namespace !== namespace) {
             continue;
           }
-          const status = this.toObject(pod.statusJson);
-          const ownerReferences = this.toArray(status.ownerReferences);
-          const owned = ownerReferences.some((owner) => {
-            const ownerObj = this.toObject(owner);
-            return (
-              this.toMaybeString(ownerObj.kind) === base.kind &&
-              this.toMaybeString(ownerObj.name) === base.name
-            );
-          });
+          const ownership = this.workloadOwnership(pod, base, context.workloads);
           const podLabels = this.toObject(pod.labels);
-          const selectorMatched =
-            Object.keys(selectorLabels).length > 0 &&
-            Object.entries(selectorLabels).every(
-              ([key, value]) => podLabels[key] === value,
-            );
-          if (owned || selectorMatched) {
+          const selectorMatched = this.matchesWorkloadSelector(
+            podLabels,
+            baseSelector,
+          );
+          if (ownership === 'owned' || (ownership === 'unknown' && selectorMatched)) {
             add('Pod', pod.name, pod.namespace ?? undefined, 'owned-pod');
           }
         }
@@ -2636,6 +2974,19 @@ export class ResourcesService {
           const kind = this.toMaybeString(ownerObj.kind);
           const name = this.toMaybeString(ownerObj.name);
           if (kind && name) {
+            const target = resources.find(
+              (item) =>
+                item.clusterId === base.clusterId &&
+                item.namespace === base.namespace &&
+                item.kind === kind &&
+                item.name === name,
+            );
+            if (!target) continue;
+            const referenceUid = this.toMaybeString(ownerObj.uid);
+            const targetUid = this.toMaybeString(
+              this.toObject(target.statusJson).uid,
+            );
+            if (referenceUid && targetUid && referenceUid !== targetUid) continue;
             add(kind, name, namespace, 'owner');
           }
         }
@@ -7100,6 +7451,7 @@ export class ResourcesService {
 
   private async makeObjectClient(
     clusterId: string,
+    signal?: AbortSignal,
   ): Promise<k8s.KubernetesObjectApi> {
     await this.clusterHealthService.assertClusterOnlineForRead(clusterId);
     const kubeconfig = await this.clustersService.getKubeconfig(clusterId);
@@ -7109,6 +7461,21 @@ export class ResourcesService {
       );
     }
     const kc = this.k8sClientService.createClient(kubeconfig);
+    if (signal) return kc.makeApiClient(class extends k8s.KubernetesObjectApi {
+      private readonly discoveries = new Map<string, Promise<k8s.V1APIResource | undefined>>();
+      constructor(configuration: ConstructorParameters<typeof k8s.KubernetesObjectApi>[0]) {
+        super({ ...configuration, httpApi: { send(context) {
+          context.setSignal(signal!);
+          return configuration.httpApi.send(context);
+        } } });
+      }
+      protected async resource(apiVersion: string, kind: string, options?: ConstructorParameters<typeof k8s.KubernetesObjectApi>[0]) {
+        // Reuse one discovery request per version; the SDK cache resolves each kind afterward.
+        if (!this.discoveries.has(apiVersion)) this.discoveries.set(apiVersion, super.resource(apiVersion, kind, options));
+        await this.discoveries.get(apiVersion);
+        return super.resource(apiVersion, kind, options);
+      }
+    });
     return k8s.KubernetesObjectApi.makeApiClient(kc);
   }
 

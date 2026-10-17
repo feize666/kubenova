@@ -45,6 +45,9 @@ require_file backend/control-api/docker-entrypoint.sh
 require_file backend/control-api/prisma/migrations/migration_lock.toml
 require_file scripts/package-release.sh
 require_file scripts/update-executor.mjs
+require_file scripts/init-compose-env.mjs
+require_file scripts/install-update-executor.mjs
+require_file deploy/docker/docker-compose.update.yml
 require_file deploy/systemd/kubenova-update-executor.service
 require_file deploy/systemd/env/update-executor.env.example
 require_file scripts/prod.sh
@@ -72,7 +75,7 @@ if rg -n --hidden --glob '!**/.git/**' --glob '!**/node_modules/**' --glob '!**/
   fi
 fi
 
-for script in scripts/package-release.sh scripts/prod.sh scripts/service.sh scripts/_service-lib.sh scripts/readme-sync-check.sh .githooks/pre-commit; do
+for script in scripts/compose-release.sh scripts/package-release.sh scripts/prod.sh scripts/service.sh scripts/_service-lib.sh scripts/readme-sync-check.sh .githooks/pre-commit; do
   if bash -n "$ROOT_DIR/$script"; then pass "$script shell syntax"; else fail "$script shell syntax"; fi
 done
 

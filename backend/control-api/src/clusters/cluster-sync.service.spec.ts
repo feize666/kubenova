@@ -22,6 +22,38 @@ interface ReplicaSetUpsertInput {
 type JobUpsertInput = ReplicaSetUpsertInput;
 
 describe('ClusterSyncService', () => {
+  it('does not let a failed sync block retries or merge different clusters', async () => {
+    const service = new ClusterSyncService({} as PrismaService, {} as K8sClientService);
+    const releases = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+    const run = jest.spyOn(service as any, 'runClusterSync').mockImplementation((...args: unknown[]) => new Promise((resolve, reject) => releases.set(String(args[0]), { resolve, reject })));
+    const first = service.syncCluster('a', 'fixture');
+    const same = service.syncCluster('a', 'fixture');
+    const other = service.syncCluster('b', 'fixture');
+    expect(run).toHaveBeenCalledTimes(2);
+    const failures = Promise.allSettled([first, same]);
+    releases.get('a')!.reject(new Error('fixture failure'));
+    expect((await failures).map(result => result.status)).toEqual(['rejected', 'rejected']);
+    const retry = service.syncCluster('a', 'fixture');
+    expect(run).toHaveBeenCalledTimes(3);
+    releases.get('a')!.resolve({ ok: true });
+    releases.get('b')!.resolve({ ok: true });
+    await Promise.all([retry, other]);
+  });
+  it('shares an in-flight full sync for the same cluster and releases it afterward', async () => {
+    const service = new ClusterSyncService({} as PrismaService, {} as K8sClientService);
+    let release!: (result: unknown) => void;
+    const run = jest.spyOn(service as any, 'runClusterSync').mockImplementation(() => new Promise(resolve => { release = resolve; }));
+    const first = service.syncCluster('c', 'fixture');
+    const second = service.syncCluster('c', 'fixture');
+    expect(run).toHaveBeenCalledTimes(1);
+    release({ ok: true });
+    await expect(first).resolves.toEqual({ ok: true });
+    await expect(second).resolves.toEqual({ ok: true });
+    const third = service.syncCluster('c', 'fixture');
+    expect(run).toHaveBeenCalledTimes(2);
+    release({ ok: true });
+    await third;
+  });
   it('persists ReplicaSet owner references for topology owner chains', async () => {
     let capturedCreateOwnerReferences: SerializedOwnerReference[] | null = null;
     let capturedUpdateOwnerReferences: SerializedOwnerReference[] | null = null;

@@ -13,6 +13,7 @@ TAG=""
 usage() {
   cat <<'USAGE'
 Usage:
+  bash scripts/compose-release.sh init [--env-file <file>]
   bash scripts/compose-release.sh preflight [--env-file <file>]
   bash scripts/compose-release.sh up [--tag <version>] [--env-file <file>]
   bash scripts/compose-release.sh pull [--tag <version>] [--env-file <file>]
@@ -43,7 +44,7 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    preflight|up|pull|rollback)
+    init|preflight|up|pull|rollback)
       [[ -z "$ACTION" ]] || die 'only one action may be supplied'
       ACTION="$1"
       shift
@@ -60,8 +61,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 ACTION="${ACTION:-preflight}"
+if [[ "$ACTION" == init ]]; then
+  require_cmd node
+  exec node "$ROOT_DIR/scripts/init-compose-env.mjs" "$ENV_FILE"
+fi
 [[ -f "$COMPOSE_FILE" ]] || die "compose file not found: $COMPOSE_FILE"
-[[ -f "$ENV_FILE" ]] || die "env file not found: $ENV_FILE (copy .env.example first)"
+[[ -f "$ENV_FILE" ]] || die "env file not found: $ENV_FILE (run init first)"
+ENV_FILE="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+export KUBENOVA_COMPOSE_ENV_FILE="$ENV_FILE"
 if [[ -n "$TAG" && ! "$TAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
   die 'tag may contain only letters, digits, dot, underscore, and dash'
 fi
@@ -104,8 +111,16 @@ image_repository() {
   printf '%s' "$value"
 }
 
+COMPOSE_ARGS=(-f "$COMPOSE_FILE")
+if [[ "$(env_value KUBENOVA_UPDATE_ENABLED)" == true ]]; then
+  COMPOSE_ARGS+=(-f "$(dirname "$COMPOSE_FILE")/docker-compose.update.yml")
+fi
+COMPOSE_ARGS+=(--env-file "$ENV_FILE")
+PROJECT_NAME="$(env_value COMPOSE_PROJECT_NAME)"
+if [[ -n "$PROJECT_NAME" ]]; then COMPOSE_ARGS+=(--project-name "$PROJECT_NAME"); fi
+
 compose() {
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+  docker compose "${COMPOSE_ARGS[@]}" "$@"
 }
 
 compose_tagged() {
@@ -117,7 +132,7 @@ compose_tagged() {
   frontend="$(image_repository FRONTEND_IMAGE ghcr.io/feize666/kubenova-frontend)"
   control_api="$(image_repository CONTROL_API_IMAGE ghcr.io/feize666/kubenova-control-api)"
   runtime="$(image_repository RUNTIME_GATEWAY_IMAGE ghcr.io/feize666/kubenova-runtime-gateway)"
-  env "KUBENOVA_IMAGE_TAG=$TAG" "FRONTEND_IMAGE=$frontend:$TAG" "CONTROL_API_IMAGE=$control_api:$TAG" "RUNTIME_GATEWAY_IMAGE=$runtime:$TAG" docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+  env "KUBENOVA_IMAGE_TAG=$TAG" "FRONTEND_IMAGE=$frontend:$TAG" "CONTROL_API_IMAGE=$control_api:$TAG" "RUNTIME_GATEWAY_IMAGE=$runtime:$TAG" docker compose "${COMPOSE_ARGS[@]}" "$@"
 }
 
 preflight() {

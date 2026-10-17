@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { ColumnFiltersState, PaginationState, SortingState, VisibilityState } from "@tanstack/react-table";
 import type { QueryParams, SortOrder } from "@/lib/contracts";
 import { buildResourceListQuery } from "@/lib/api/helpers";
+import { DEFAULT_RESOURCE_PAGE_SIZE } from "./pagination";
 
 export interface TableStateOptions {
   defaultPageSize?: number;
@@ -38,7 +39,7 @@ export function useTableState(options: TableStateOptions = {}) {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(options.initialVisibility ?? {});
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
-    pageSize: options.defaultPageSize ?? 20,
+    pageSize: options.defaultPageSize ?? DEFAULT_RESOURCE_PAGE_SIZE,
   });
 
   const tableState = useMemo(

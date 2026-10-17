@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftOutlined, PlusOutlined } from "@ant-design/icons";
+import { PlusOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert,
@@ -27,16 +27,17 @@ import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/
 import { getClusters } from "@/lib/api/clusters";
 import { getStorageResources } from "@/lib/api/storage";
 import { ApiError } from "@/lib/api/client";
-import { applyResourceYaml } from "@/lib/api/resources";
+import { EditorDocument } from "@/components/resource-editor/resource-editor-page";
+import { parseResourceDocuments } from "@/lib/resource-editor";
 import {
   renderWorkloadWorkspaceYaml,
-  submitWorkloadWorkspace,
   validateWorkloadWorkspace,
   type WorkloadWorkspacePayload,
   type WorkloadWorkspaceValidationIssue,
 } from "@/lib/api/workloads";
 import { mapApiErrorToWorkspaceIssues } from "./error-mapping";
 import { resolveWorkspaceResourceHref } from "@/lib/cluster-workspace";
+import editorStyles from "@/components/resource-editor/resource-editor-page.module.css";
 
 type SupportedKind = "Pod" | "Deployment" | "StatefulSet" | "ReplicaSet" | "DaemonSet";
 
@@ -479,9 +480,10 @@ export default function WorkloadCreateWorkspacePage() {
   const { message } = App.useApp();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
   const workspace = useOptionalClusterWorkspace();
   const [submitting, setSubmitting] = useState(false);
+  const [prepared,setPrepared] = useState<{yaml:string;clusterId:string;namespace:string;kind:string}|null>(null);
   const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
   const [createYaml, setCreateYaml] = useState("");
   const [createYamlClusterId, setCreateYamlClusterId] = useState(workspace?.clusterId ?? "");
@@ -492,7 +494,6 @@ export default function WorkloadCreateWorkspacePage() {
   const [form] = Form.useForm<WorkspaceFormValues>();
 
   const initialKind = useMemo(() => normalizeKind(searchParams.get("kind")), [searchParams]);
-  const draftStorageKey = useMemo(() => `kubenova.workload.create.${initialKind}`, [initialKind]);
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "all-for-workload-create-workspace", accessToken],
@@ -656,18 +657,6 @@ export default function WorkloadCreateWorkspacePage() {
     retry: false,
   });
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem(draftStorageKey);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as Partial<WorkspaceFormValues>;
-      form.setFieldsValue({ ...parsed, clusterId: workspace?.clusterId ?? parsed.clusterId });
-      setIsDirty(true);
-    } catch {
-      window.localStorage.removeItem(draftStorageKey);
-    }
-  }, [draftStorageKey, form, workspace?.clusterId]);
 
   useEffect(() => {
     if (!workspace) return;
@@ -685,18 +674,7 @@ export default function WorkloadCreateWorkspacePage() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isDirty]);
 
-  const persistDraft = () => {
-    if (typeof window === "undefined") return;
-    const values = form.getFieldsValue();
-    window.localStorage.setItem(draftStorageKey, JSON.stringify(values));
-    setIsDirty(true);
-  };
-
-  const clearDraft = () => {
-    if (typeof window === "undefined") return;
-    window.localStorage.removeItem(draftStorageKey);
-    setIsDirty(false);
-  };
+  const persistDraft = () => setIsDirty(true);
 
   const handleGoBack = () => {
     if (!isDirty) {
@@ -928,20 +906,9 @@ export default function WorkloadCreateWorkspacePage() {
     }
     setSubmitting(true);
     try {
-      const result = await applyResourceYaml(
-        {
-          clusterId: targetClusterId,
-          namespace: createYamlNamespace.trim() || undefined,
-          yaml: createYaml.trim(),
-        },
-        accessToken,
-      );
-      message.success(result.message || "YAML 已应用");
-      clearDraft();
-      const firstWorkload = result.items.find((item) => item.kind in TARGET_ROUTE_MAP);
-      if (firstWorkload) {
-        router.push(resolveWorkspaceResourceHref(workspace?.clusterId, TARGET_ROUTE_MAP[firstWorkload.kind as SupportedKind]));
-      }
+      const documents=parseResourceDocuments(createYaml);
+      setPrepared({yaml:createYaml,clusterId:targetClusterId,namespace:createYamlNamespace.trim()||'default',kind:documents[0].kind});
+      setIsDirty(false);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "YAML 创建失败");
     } finally {
@@ -949,12 +916,18 @@ export default function WorkloadCreateWorkspacePage() {
     }
   };
 
+  if (prepared) return <Space className={editorStyles.wizard} orientation="vertical" size={16} style={{width:'100%'}}>
+    <Typography.Title level={3}>伴生资源 · 校验与创建</Typography.Title>
+    <Alert type="info" title="以下为工作负载及伴生资源草稿。创建前将逐个预检；同名资源不会被覆盖。" />
+    <EditorDocument clusterId={prepared.clusterId} token={accessToken} initialKind={prepared.kind} initialVersion="" initialNamespace={prepared.namespace} initialDraftYaml={prepared.yaml} initialMode="yaml" readOnly={!['admin','platform-admin','operator','cluster-operator'].includes(role.trim().toLowerCase())} returnTo={resolveWorkspaceResourceHref(workspace?.clusterId,TARGET_ROUTE_MAP[prepared.kind as SupportedKind]??'/workloads/deployments')} resourceOptions={[]}/>
+  </Space>;
+
   return (
     <>
-    <Space className="workload-create-workspace" orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Space className={`workload-create-workspace ${editorStyles.wizard}`} orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsPageHeader
         className="resource-page-header"
-        title="统一创建工作区"
+        title="工作负载与伴生资源向导"
         subtitle="支持 Pod / Deployment / StatefulSet / ReplicaSet / DaemonSet，集中配置镜像、存储、网络与初始化容器。"
         scope={`${kind} / ${namespace || "default"}`}
         actions={(
@@ -969,9 +942,6 @@ export default function WorkloadCreateWorkspacePage() {
               }}
             >
               {createMode === "yaml" ? "表单创建" : "YAML / 上传"}
-            </Button>
-            <Button icon={<ArrowLeftOutlined />} onClick={handleGoBack}>
-              返回
             </Button>
           </Space>
         )}
@@ -1006,13 +976,11 @@ export default function WorkloadCreateWorkspacePage() {
               />
             )}
           />
-          <div className="workload-create-workspace__footer">
-            <Space>
-              <Button onClick={() => setCreateMode("form")}>返回表单创建</Button>
+          <div className={`${editorStyles.footer} ${editorStyles.wizardFooter}`} role="group" aria-label="资源编辑操作">
+              <Button disabled={submitting} onClick={handleGoBack}>返回</Button>
               <Button type="primary" loading={submitting} onClick={() => void handleYamlSubmit()}>
-                创建资源
+                校验并预览
               </Button>
-            </Space>
           </div>
         </OpsSurface>
       ) : (
@@ -1066,10 +1034,10 @@ export default function WorkloadCreateWorkspacePage() {
                 message.error(firstError?.message || "工作区校验失败");
                 return;
               }
-              await submitWorkloadWorkspace(payload, accessToken);
-              message.success(payload.kind + " 创建成功");
-              clearDraft();
-              router.push(resolveWorkspaceResourceHref(workspace?.clusterId, TARGET_ROUTE_MAP[payload.kind]));
+              const rendered = await renderWorkloadWorkspaceYaml(payload, accessToken);
+              parseResourceDocuments(rendered.yaml);
+              setPrepared({yaml:rendered.yaml,clusterId:payload.clusterId,namespace:payload.namespace,kind:payload.kind});
+              setIsDirty(false);
             } catch (error) {
               const issues = extractWorkspaceIssuesFromError(error);
               if (issues.length > 0) {
@@ -1741,21 +1709,20 @@ export default function WorkloadCreateWorkspacePage() {
             </OpsFormSection>
           ) : null}
 
-          <div className="workload-create-workspace__footer">
-            <Space>
-              <Button onClick={prevStep} disabled={currentStep === 0}>
+          <div className={`${editorStyles.footer} ${editorStyles.wizardFooter}`} role="group" aria-label="资源编辑操作">
+              <Button disabled={submitting} onClick={handleGoBack}>返回</Button>
+              <Button onClick={prevStep} disabled={currentStep === 0 || submitting}>
                 上一步
               </Button>
               {currentStep < WORKSPACE_STEPS.length - 1 ? (
-                <Button type="primary" onClick={() => void nextStep()}>
+                <Button key="next" type="primary" disabled={submitting} onClick={() => void nextStep()}>
                   下一步
                 </Button>
               ) : (
-                <Button type="primary" htmlType="submit" loading={submitting}>
-                  创建资源
+                <Button key="preview" type="primary" htmlType="submit" loading={submitting}>
+                  校验并预览
                 </Button>
               )}
-            </Space>
           </div>
         </Form>
       </OpsSurface>
@@ -1764,7 +1731,7 @@ export default function WorkloadCreateWorkspacePage() {
       <OpsConfirmModal
         open={leaveConfirmOpen}
         title="离开创建工作区？"
-        description="当前表单有未提交的配置。离开后页面状态会关闭，但本地草稿仍会保留，可再次进入继续编辑。"
+        description="当前表单有未提交的配置。草稿仅在当前页面内存中保留，离开后将丢弃。"
         okText="确认离开"
         cancelText="继续编辑"
         impact={

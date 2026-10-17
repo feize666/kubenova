@@ -15,7 +15,7 @@ for (const token of [
   "returnFocusRef",
   "VARIANT_WIDTH",
   "inspector: 460",
-  "clamp(384px, 32vw",
+  "drawerWrapperWidth(variant,resolvedWidth,fullscreen)",
   "afterOpenChange",
   "ops-drawer-shell__footer-actions",
 ]) {
@@ -47,21 +47,26 @@ for (const token of ["business-detail-drawer__identity", "OpsEmptyState", "OpsFi
 
 const yaml = read("src/components/resource-yaml-drawer.tsx");
 for (const token of [
-  "variant=\"resource\"",
-  "state={drawerState}",
+  "<EditorDocument embedded lockContext",
+  "<OpsDrawerShell",
+  "props.embedded",
   "readOnly",
   "maskSensitive",
-  "maskSensitiveYaml",
-  "formatYamlText",
+  "sensitive&&!visible",
+  "disabled={unavailable}",
   "复制",
-  "格式化",
-  "重置",
+  "YAML 只读预览",
   "显示敏感",
-  "footerActions",
+  "gcTime:0",
 ]) {
   if (!yaml.includes(token)) {
     failures.push(`src/components/resource-yaml-drawer.tsx: missing ${token}`);
   }
+}
+
+const editor = read("src/components/resource-editor/resource-editor-page.tsx");
+for (const token of ["dryRun:true", "dryRun:false", "sensitiveVisible", "资源编辑操作", "校验并预览"]) {
+  if (!editor.includes(token)) failures.push(`src/components/resource-editor/resource-editor-page.tsx: missing unified YAML editor contract ${token}`);
 }
 
 const css = read("src/app/globals.css");

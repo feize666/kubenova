@@ -14,6 +14,8 @@ import {
   type ThHTMLAttributes,
 } from "react";
 import type { ColumnType, ColumnsType, TableProps } from "antd/es/table";
+import { useAuth } from '@/components/auth-context';
+import { userTablePreferencesKey } from '@/lib/table/preferences-storage';
 
 export const RESOURCE_TABLE_WIDTHS_STORAGE_PREFIX = "resource-table-widths:";
 
@@ -172,6 +174,10 @@ export const ResizableHeaderCell = forwardRef<HTMLTableCellElement, ResizableHea
             aria-valuenow={numericWidth}
             aria-orientation="vertical"
             className="resource-table-resize-handle"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
             onDoubleClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -312,9 +318,10 @@ export function useResizableResourceTableColumns<T extends object>(
   columns: ColumnsType<T>,
   tableKey?: string,
 ) {
+  const {username}=useAuth();
   const storageKey = useMemo(
-    () => deriveWidthStorageKey(tableKey, columns),
-    [columns, tableKey],
+    () => userTablePreferencesKey(username,deriveWidthStorageKey(tableKey, columns)),
+    [columns, tableKey, username],
   );
   const [widthsByStorageKey, setWidthsByStorageKey] = useState<
     Record<string, ResourceTableColumnWidthMap>

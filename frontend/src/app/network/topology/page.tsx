@@ -2,7 +2,6 @@
 
 import {
   BranchesOutlined,
-  ClockCircleOutlined,
   CompressOutlined,
   DatabaseOutlined,
   DeploymentUnitOutlined,
@@ -14,7 +13,7 @@ import {
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Alert, Button, Input, Segmented, Select, Tooltip } from "antd";
+import { Alert, Button, Input, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useAuth } from "@/components/auth-context";
@@ -41,9 +40,6 @@ import {
   type KubejojoTopologySelection,
 } from "@/modules/topology-kubejojo/TopologyCanvas";
 import {
-  isTopologyRootKind,
-  projectTopologyRoot,
-  resolveTopologyRoot,
   parseTopologyUrlState,
   serializeTopologyUrlState,
   type KubejojoGroupBy,
@@ -54,7 +50,7 @@ import { normalizeTopologyKind } from "@/modules/topology-kubejojo/kind";
 import { getIncompleteTopologySources } from "@/modules/topology-kubejojo/coverage";
 
 const ALL_NAMESPACE = "__all__";
-const QUERY_STALE_MS = 30_000;
+const QUERY_STALE_MS = 10_000;
 const GLOBAL_EXPAND_LIMIT = 80;
 const SOURCE_KEYS: TopologyGraphSource[] = ["workloads", "network", "storage", "configuration"];
 
@@ -385,30 +381,6 @@ function dynamicIdentity(resource: TopologyGraphResource): DynamicResourceIdenti
   };
 }
 
-function yamlTarget(resource: TopologyGraphResource): YamlTarget {
-  const dynamic = dynamicIdentity(resource);
-  return {
-    identity: {
-      clusterId: resource.clusterId,
-      namespace: resource.namespace ?? "",
-      kind: normalizeKind(resource.kind),
-      name: resource.name,
-    },
-    dynamicIdentity: dynamic,
-  };
-}
-
-function formatTimestamp(value: string | null | undefined): string {
-  if (!value) return "未知";
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString("zh-CN") : "未知";
-}
-
-function freshnessMessage(data: Awaited<ReturnType<typeof getTopologyGraphV2>>): string {
-  if (data.freshness.status === "unavailable") return "当前集群尚无可用的资源库存快照。";
-  return `当前显示最近一次成功库存，数据时间 ${formatTimestamp(data.dataAsOf)}。`;
-}
-
 export default function NetworkTopologyPage() {
   const { accessToken: token } = useAuth();
   const workspace = useOptionalClusterWorkspace();
@@ -416,7 +388,6 @@ export default function NetworkTopologyPage() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const initialUrlState = useMemo(() => parseTopologyUrlState(searchParams), [searchParams]);
-  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [selectedNamespace, setSelectedNamespace] = useState(() => {
     if (initialUrlState.namespace) return initialUrlState.namespace;
     const storedNamespace = readStoredResourceNamespace(workspace?.clusterId ?? "");
@@ -439,16 +410,24 @@ export default function NetworkTopologyPage() {
   );
   const [queryInput, setQueryInput] = useState(() => initialUrlState.search ?? "");
   const [queryText, setQueryText] = useState(() => initialUrlState.search ?? "");
-  const [topologyRootId, setTopologyRootId] = useState<string | null>(null);
-  const [useRequestedRoot, setUseRequestedRoot] = useState(true);
   const [focusedGroupId, setFocusedGroupId] = useState<string | null>(null);
   const [topologySelection, setTopologySelection] = useState<KubejojoTopologySelection | null>(null);
   const [detail, setDetail] = useState<DetailRequest | null>(null);
   const [yaml, setYaml] = useState<YamlTarget | null>(null);
   const [fitVersion, setFitVersion] = useState("initial");
-  const [topologyDisplayMode, setTopologyDisplayMode] = useState<"core" | "full">("core");
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
+  const [realtimeDisconnected, setRealtimeDisconnected] = useState(false);
   const sourceMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleRealtimeState = (event: Event) => {
+      const state = (event as CustomEvent<{ state?: string }>).detail?.state;
+      if (state === "connected") setRealtimeDisconnected(false);
+      if (state === "disconnected") setRealtimeDisconnected(true);
+    };
+    window.addEventListener("kubenova:realtime-state", handleRealtimeState);
+    return () => window.removeEventListener("kubenova:realtime-state", handleRealtimeState);
+  }, []);
 
   // Keep the map state shareable without disturbing unrelated route state
   // (cluster/root/detail parameters are preserved by copying the current URL).
@@ -481,11 +460,13 @@ export default function NetworkTopologyPage() {
     queryFn: ({ signal }) => getClusters({ pageSize: 200, state: "active" }, token!, { signal }),
     enabled: Boolean(token),
     staleTime: QUERY_STALE_MS,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
   const clusters = clusterQuery.data?.items ?? [];
   const selectedCluster = workspace
     ? clusters.find((cluster) => cluster.id === workspace.clusterId) ?? null
-    : clusters.find((cluster) => cluster.id === selectedClusterId) ?? clusters[0] ?? null;
+    : clusters[0] ?? null;
   const effectiveClusterId = resolveWorkspaceClusterId(workspace?.clusterId, selectedCluster?.id ?? "");
 
   const namespaceQuery = useQuery({
@@ -494,6 +475,8 @@ export default function NetworkTopologyPage() {
       getTopologyNamespaceSummaries({ clusterId: effectiveClusterId }, token, { signal }),
     enabled: Boolean(token && effectiveClusterId),
     staleTime: QUERY_STALE_MS,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 
   const requestedSources = useMemo(
@@ -521,31 +504,14 @@ export default function NetworkTopologyPage() {
       ),
     enabled: Boolean(token && effectiveClusterId && requestedSources.length),
     staleTime: QUERY_STALE_MS,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchInterval: () => typeof document !== "undefined" && !document.hidden ? 15_000 : false,
+    refetchIntervalInBackground: false,
   });
 
-  const requestedRoot = useMemo(
-    () => ({
-      kind: searchParams.get("rootKind"),
-      name: searchParams.get("rootName"),
-      namespace: searchParams.get("namespace"),
-    }),
-    [searchParams],
-  );
-
-  const filteredGraph = useMemo(
-    () => filterGraph(
-      graphQuery.data?.resources ?? [],
-      graphQuery.data?.relations ?? [],
-      selectedSources,
-      queryText,
-      errorsOnly,
-    ),
-    [errorsOnly, graphQuery.data, queryText, selectedSources],
-  );
-  // The workload picker is searchable, but the graph the operator has already
-  // opened must not disappear when the query stops matching its root. Root
-  // resolution therefore reads the source-filtered inventory, and the search is
-  // applied afterwards, inside the selected workload's own chain.
+  // Search is applied after source filtering so the graph keeps only complete,
+  // valid relationship endpoints for the currently enabled resource domains.
   const scopeGraph = useMemo(
     () => filterGraph(
       graphQuery.data?.resources ?? [],
@@ -555,30 +521,6 @@ export default function NetworkTopologyPage() {
       false,
     ),
     [graphQuery.data, selectedSources],
-  );
-  const requestedTopologyRoot = useMemo(
-    () => resolveTopologyRoot(
-      scopeGraph.resources,
-      requestedRoot.kind,
-      requestedRoot.name,
-      requestedRoot.namespace,
-    ),
-    [scopeGraph.resources, requestedRoot.kind, requestedRoot.name, requestedRoot.namespace],
-  );
-  const topologyRoot = useMemo(
-    () => scopeGraph.resources.find((resource) => resource.id === topologyRootId)
-      ?? (useRequestedRoot ? requestedTopologyRoot : null),
-    [scopeGraph.resources, requestedTopologyRoot, topologyRootId, useRequestedRoot],
-  );
-  const workloadRoots = useMemo(
-    () => filteredGraph.resources
-      .filter((resource) => isTopologyRootKind(normalizeKind(resource.kind)))
-      .sort((left, right) => (
-        normalizeKind(left.kind).localeCompare(normalizeKind(right.kind), "en")
-        || left.namespace?.localeCompare(right.namespace ?? "", "zh-CN")
-        || left.name.localeCompare(right.name, "en")
-      )),
-    [filteredGraph.resources],
   );
   const graph = useMemo<FilteredGraph>(() => {
     return filterGraph(
@@ -645,13 +587,23 @@ export default function NetworkTopologyPage() {
   const warningCount = (graphQuery.data?.resources ?? []).filter(
     (resource) => resource.warnings > 0 || resourceStatus(resource) !== "healthy",
   ).length;
-  const loading = clusterQuery.isLoading
+  // A refresh can briefly leave a sibling query in its initial state. Once a
+  // graph is available, keep it mounted while those queries reconcile rather
+  // than replacing the canvas with a page-level loading screen.
+  const loading = !graphQuery.data && (
+    clusterQuery.isLoading
     || graphQuery.isLoading
     || namespaceQuery.isLoading
-    || clusterQuery.isFetching
-    || graphQuery.isFetching
-    || namespaceQuery.isFetching;
-  const error = clusterQuery.error ?? graphQuery.error;
+  );
+  // React Query keeps the last successful payload while a background refresh
+  // fails. Do not replace that usable graph with a page-level error state; a
+  // transient SSE/API hiccup should only make the canvas read-only until the
+  // next automatic refresh succeeds.
+  const error = !graphQuery.data
+    ? (clusterQuery.error ?? namespaceQuery.error ?? graphQuery.error)
+    : null;
+  const refreshError = graphQuery.data ? graphQuery.error : null;
+  const topologyReadOnly = realtimeDisconnected || Boolean(refreshError) || graphQuery.data?.freshness.status === "stale";
   const noClusters = !clusterQuery.isLoading && !clusterQuery.error && clusters.length === 0;
   // "Are there resources at all?" must read the unfiltered inventory; using the
   // filtered graph told operators the snapshot was empty whenever a filter
@@ -668,12 +620,9 @@ export default function NetworkTopologyPage() {
   );
 
   const resetFocus = useCallback(() => {
-    setUseRequestedRoot(false);
-    setTopologyRootId(null);
     setFocusedGroupId(null);
     setTopologySelection(null);
     setExpandAll(false);
-    setTopologyDisplayMode("core");
   }, []);
 
   const selectTopologyResource = useCallback((selection: KubejojoTopologySelection | null) => {
@@ -701,10 +650,11 @@ export default function NetworkTopologyPage() {
   }, [queryInput, queryText, resetCanvasFocus]);
 
   const refresh = useCallback(() => {
-    void clusterQuery.refetch();
-    void namespaceQuery.refetch();
-    void graphQuery.refetch();
-    setFitVersion(String(Date.now()));
+    void Promise.all([
+      clusterQuery.refetch(),
+      namespaceQuery.refetch(),
+      graphQuery.refetch(),
+    ]);
   }, [clusterQuery, graphQuery, namespaceQuery]);
 
   const toggleSource = useCallback((source: TopologyGraphSource) => {
@@ -730,17 +680,6 @@ export default function NetworkTopologyPage() {
     resetCanvasFocus();
   }, [resetCanvasFocus]);
 
-  const selectCluster = useCallback((clusterId: string) => {
-    const nextNamespace = readStoredResourceNamespace(clusterId) || ALL_NAMESPACE;
-    setSelectedClusterId(clusterId);
-    setSelectedNamespace(nextNamespace);
-    resetFocus();
-    emitResourceScopeChange({
-      clusterId,
-      namespace: nextNamespace === ALL_NAMESPACE ? undefined : nextNamespace,
-    });
-  }, [resetFocus]);
-
   const selectNamespace = useCallback((namespace: string) => {
     setSelectedNamespace(namespace);
     resetFocus();
@@ -752,15 +691,6 @@ export default function NetworkTopologyPage() {
       });
     }
   }, [effectiveClusterId, resetFocus, selectedCluster?.name]);
-
-  const openTopologyRoot = useCallback((resource: TopologyGraphResource) => {
-    if (!isTopologyRootKind(normalizeKind(resource.kind))) return;
-    setTopologyRootId(resource.id);
-    setFocusedGroupId(null);
-    setTopologySelection(null);
-    setExpandAll(true);
-    setFitVersion(String(Date.now()));
-  }, []);
 
   const openResourceDetail = useCallback((resource: TopologyGraphResource) => {
     setDetail(detailRequest(resource));
@@ -805,11 +735,6 @@ export default function NetworkTopologyPage() {
             <span><strong>{graph.resources.length}</strong> 资源</span>
             <span><strong>{graph.relations.length}</strong> 关系</span>
             <span><strong>{warningCount}</strong> 异常</span>
-            {graphQuery.data ? (
-              <span title={`revision ${graphQuery.data.revision}`}>
-                <ClockCircleOutlined /> {formatTimestamp(graphQuery.data.dataAsOf)}
-              </span>
-            ) : null}
           </div>
         )}
       />
@@ -923,18 +848,26 @@ export default function NetworkTopologyPage() {
             />
           </Tooltip>
 
-          <OpsIconActionButton aria-label="刷新拓扑" size="small" loading={graphQuery.isFetching || clusterQuery.isFetching} onClick={refresh}>
+          <OpsIconActionButton aria-label="刷新拓扑" size="small" loading={graphQuery.isFetching || clusterQuery.isFetching || namespaceQuery.isFetching} onClick={refresh}>
             <ReloadOutlined />
           </OpsIconActionButton>
         </div>
-      </div>{graphQuery.data && graphQuery.data.freshness.status !== "fresh" ? (
+      </div>{realtimeDisconnected ? (
         <Alert
           className="resource-map-status-alert"
-          type={graphQuery.data.freshness.status === "unavailable" ? "error" : "warning"}
+          type="warning"
           showIcon
-          title={graphQuery.data.freshness.status === "unavailable" ? "拓扑快照不可用" : "正在显示历史快照"}
-          description={freshnessMessage(graphQuery.data)}
-          action={<Button size="small" onClick={refresh}>重新获取</Button>}
+          title="实时连接中断"
+          description="当前保留的拓扑仅供查看，连接恢复后会自动同步。"
+        />
+      ) : null}
+      {refreshError ? (
+        <Alert
+          className="resource-map-status-alert"
+          type="warning"
+          showIcon
+          title="拓扑后台刷新暂时失败"
+          description="当前画布继续显示最近可用数据，系统会在后台自动重试。"
         />
       ) : null}
       {incompleteSources.length ? (
@@ -952,7 +885,7 @@ export default function NetworkTopologyPage() {
           type="warning"
           showIcon
           title="拓扑中包含活动告警"
-          description={`当前快照关联 ${graphQuery.data.coverage.warningRecords} 条活动告警。`}
+          description={`当前拓扑关联 ${graphQuery.data.coverage.warningRecords} 条活动告警。`}
         />
       ) : null}
 
@@ -960,7 +893,7 @@ export default function NetworkTopologyPage() {
         <div className="resource-map-canvas">
           {loading ? (
             <div className="resource-map-canvas-state">
-              <OpsLoadingState title="正在加载拓扑" description="正在读取资源库存快照。" />
+              <OpsLoadingState title="正在加载拓扑" description="正在读取集群资源。" />
             </div>
           ) : error ? (
             <div className="resource-map-canvas-state">
@@ -979,7 +912,7 @@ export default function NetworkTopologyPage() {
               <OpsEmptyState
                 title={rawResourceCount === 0 ? "暂无拓扑资源" : "暂无匹配资源"}
                 description={rawResourceCount === 0
-                  ? "当前库存快照中没有可展示的资源。"
+                  ? "当前集群没有可展示的资源。"
                   : "当前范围没有符合筛选条件的资源。"}
                 action={filtersActive ? <Button onClick={resetFilters}>清除筛选</Button> : undefined}
               />
@@ -993,12 +926,15 @@ export default function NetworkTopologyPage() {
               selectedNodeId={topologySelection?.canvasId ?? null}
               expandAll={canvasExpandAll}
               onFocus={setFocusedGroupId}
+              onCollapseAllStacks={() => setExpandAll(false)}
               onSelectResource={selectTopologyResource}
               onOpen={(id) => {
+                if (topologyReadOnly) return;
                 const resource = graphQuery.data?.resources.find((item) => item.id === id);
                 if (resource) openResourceDetail(resource);
               }}
               onNavigate={(id) => {
+                if (topologyReadOnly) return;
                 const resource = graphQuery.data?.resources.find((item) => item.id === id);
                 if (resource) navigateDetailRequest(detailRequest(resource));
               }}
@@ -1009,14 +945,14 @@ export default function NetworkTopologyPage() {
       </div>
 
       <ResourceDetailDrawer
-        open={Boolean(detail)}
+        open={Boolean(detail) && !topologyReadOnly}
         onClose={() => setDetail(null)}
         token={token}
         request={detail}
         onNavigateRequest={navigateDetailRequest}
       />
       <ResourceYamlDrawer
-        open={Boolean(yaml)}
+        open={Boolean(yaml) && !topologyReadOnly}
         onClose={() => setYaml(null)}
         token={token}
         identity={yaml?.identity ?? null}

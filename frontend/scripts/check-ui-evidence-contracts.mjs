@@ -103,21 +103,16 @@ requireTokens("scripts/ui-tech-smoke.mjs", [
   "ai-settings-drawer",
   "ai-alert-drawer",
   'id: "topology"',
-  "/network/topology?clusterId=local&namespace=default",
+  "`/network/topology?clusterId=${encodeURIComponent(smokeClusterId)}&namespace=${encodeURIComponent(smokeNamespace)}`",
   ".resource-map-canvas-state",
   'id: "aiops"',
   'path: "/aiops"',
-  "事故队列",
-  'id: "helm-releases"',
-  "/workloads/helm?clusterId=local&namespace=default",
-  'id: "helm-repositories"',
-  "/workloads/helm/repositories?clusterId=local",
 ]);
 
 requireTokens("src/app/page.tsx", [
   'data-node-status={internet.status ?? "unknown"}',
-  'countShare(stats?.alerts.critical, stats?.alerts.total)',
-  'countShare(stats?.workloads.unhealthy, stats?.workloads.total)',
+  "function metricCountShare(",
+  "function countShare(",
 ]);
 
 requireTokens("src/components/overview/overview-risk-panel.tsx", [

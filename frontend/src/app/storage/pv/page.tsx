@@ -1,4 +1,8 @@
 "use client";
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
 
 import { DeleteOutlined, FileTextOutlined, LinkOutlined, ArrowsAltOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,7 +16,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -130,11 +134,12 @@ const ACCESS_MODE_OPTIONS = [
 ];
 
 export default function PvPage() {
+  const openEditor = useResourceEditorNavigation();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const { clusterId, onClusterChange } = useClusterNamespaceFilter(initialClusterId);
@@ -151,7 +156,6 @@ export default function PvPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<StorageResource>({
-    defaultPageSize: 10,
   });
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -160,11 +164,11 @@ export default function PvPage() {
   const [createYamlClusterId, setCreateYamlClusterId] = useState("");
   const [bindTarget, setBindTarget] = useState<StorageResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const [form] = Form.useForm<PvFormValues>();
   const [bindForm] = Form.useForm<PvBindFormValues>();
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const listQuery = useResourceListQuery({
     queryKey: [
       "storage",
       "PV",
@@ -194,6 +198,7 @@ export default function PvPage() {
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
+  const { data, isLoading, refetch } = listQuery;
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "all", accessToken],
@@ -391,7 +396,7 @@ export default function PvPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: StorageResource) =>
         row.id ? (
-          <Typography.Link onClick={() => { setDetailTarget({ kind: "PersistentVolume", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/persistentvolume/${encodeURIComponent(row.id)}`); }}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "PersistentVolume", id: row.id }); }}>
             {name}
           </Typography.Link>
         ) : (
@@ -456,11 +461,12 @@ export default function PvPage() {
       fixed: "right",
       render: (_: unknown, row: StorageResource) => {
         const items: ResourceMenuItem[] = [
-          { key: "expand", icon: <ArrowsAltOutlined />, label: "扩容" },
-          { key: "bind", icon: <LinkOutlined />, label: "绑定" },
+          { key: "edit", label: "编辑" },
+          { key: "expand", icon: <ArrowsAltOutlined />, label: "扩容", disabled: !canWrite },
+          { key: "bind", icon: <LinkOutlined />, label: "绑定", disabled: !canWrite },
           { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
           { type: "divider" },
-          { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true },
+          { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true, disabled: !canWrite },
         ];
         const menuItems = buildResourceActionMenuItems(items);
         return (
@@ -471,11 +477,13 @@ export default function PvPage() {
             menu={{
               items: menuItems,
               onClick: ({ key }) => {
+                if (!canWrite && ['expand', 'bind', 'delete'].includes(key)) return;
+                if (key === 'edit') { openEditor({clusterId:row.clusterId,kind:'PersistentVolume',name:row.name}); return; }
                 if (key === "expand") {
                   void message.info("请在 YAML 中调整容量字段完成 PV 扩容。");
                   setYamlTarget({
                     clusterId: row.clusterId,
-                    namespace: row.namespace || "default",
+                    namespace: "",
                     kind: "PersistentVolume",
                     name: row.name,
                   });
@@ -488,7 +496,7 @@ export default function PvPage() {
                 if (key === "yaml") {
                   setYamlTarget({
                     clusterId: row.clusterId,
-                    namespace: row.namespace || "default",
+                    namespace: "",
                     kind: "PersistentVolume",
                     name: row.name,
                   });
@@ -561,18 +569,6 @@ export default function PvPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={<ResourceAddButton title="创建PV" onClick={() => {
-            const nextClusterId = clusterId || clusterOptions[0]?.value || "";
-            form.resetFields();
-            form.setFieldsValue({
-              clusterId: nextClusterId,
-              accessModes: ["ReadWriteOnce"],
-            });
-            setCreateMode("form");
-            setCreateYaml("");
-            setCreateYamlClusterId(nextClusterId);
-            setModalOpen(true);
-          }} />}
         />
 
         <Space
@@ -590,18 +586,12 @@ export default function PvPage() {
             />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="storage-resource-state-alert"
-              type="error"
-              showIcon
-              title="持久卷加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback className="storage-resource-state-alert" label="持久卷" query={listQuery} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<StorageResource>
+              queryState={listQuery}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建PV" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建PV" /></>}
               rowKey="id"
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -754,7 +744,7 @@ export default function PvPage() {
           </OpsFormSection>
         </Form>
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

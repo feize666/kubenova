@@ -236,6 +236,9 @@ export function getTopologyQueryPrefixes(event: RealtimeEvent): QueryPrefix[] {
   }
 
   const queryKey = topologyQueryKeyForResource(resourceKind);
+  // The resource map moved to the v2 graph endpoint. Keep its invalidation
+  // cluster scoped so unrelated workspaces do not refetch their topology.
+  if (topologyKinds.has(resourceKind)) return [["topology-v2", "graph", clusterId]];
   return queryKey ? [[...queryKey, clusterId]] : [];
 }
 
@@ -326,15 +329,17 @@ export function applyRealtimePatch(
 
   const patchList = (queryKey: QueryPrefix) => {
     let prefixPatched = false;
-    queryClient.setQueriesData({ queryKey }, (current: unknown) => {
+    // A stream patch is not a successful list read and must not clear a read
+    // failure (especially a permission denial) from the query cache.
+    queryClient.setQueriesData({ queryKey, predicate: (query) => query.state.status === "success" }, (current: unknown) => {
       if (!current || typeof current !== "object") {
-        return current;
+        return undefined;
       }
       const result = current as {
         items?: unknown[];
       };
       if (!Array.isArray(result.items)) {
-        return current;
+        return undefined;
       }
 
       const items = result.items;
@@ -357,7 +362,7 @@ export function applyRealtimePatch(
       }, []);
 
       if (!itemMatched) {
-        return current;
+        return undefined;
       }
       prefixPatched = true;
       patched = true;

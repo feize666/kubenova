@@ -12,6 +12,7 @@ export type OpsMobileResourceCardMeta = {
 
 export type OpsMobileResourceCardProps = Omit<HTMLAttributes<HTMLElement>, "onSelect" | "title"> & {
   actions?: ReactNode;
+  selectionControl?: ReactNode;
   cluster?: ReactNode;
   disabled?: boolean;
   footer?: ReactNode;
@@ -32,6 +33,7 @@ function stopNavigation(event: MouseEvent<HTMLElement>) {
 
 export function OpsMobileResourceCard({
   actions,
+  selectionControl,
   children,
   className,
   cluster,
@@ -71,6 +73,9 @@ export function OpsMobileResourceCard({
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     onKeyDown?.(event);
+    // Nested actions own their keyboard events; Enter on “more” must not
+    // also open the resource drawer through the enclosing card.
+    if (event.target !== event.currentTarget) return;
     if (event.defaultPrevented || disabled || !onSelect) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -99,6 +104,7 @@ export function OpsMobileResourceCard({
       tabIndex={interactive && !disabled ? 0 : undefined}
     >
       <div className="ops-mobile-resource-card__header">
+        {selectionControl ? <div onClick={stopNavigation} onMouseDown={stopNavigation} data-resource-table-stop-navigation="true">{selectionControl}</div> : null}
         <div className="ops-mobile-resource-card__identity">
           <div className="ops-mobile-resource-card__title">{title}</div>
           {subtitle ? <div className="ops-mobile-resource-card__subtitle">{subtitle}</div> : null}

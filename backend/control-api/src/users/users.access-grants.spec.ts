@@ -16,7 +16,7 @@ describe('access grant list confidentiality', () => {
       namespaces: [{ namespaceName: 'default', namespaceUid: 'uid' }], capabilities: [{ capability: 'logs' }],
       version: 1, updatedAt: new Date('2026-01-01T00:00:00Z'),
     }]);
-    const result = await service.listAccessGrants(undefined, { role: 'admin' });
+    const result = await service.listAccessGrants(undefined, { role: 'platform-admin' });
     expect(result.items[0]).toMatchObject({ principal: { id: 'u', type: 'user', username: 'operator@example.test', name: 'Operator' } });
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ include: expect.objectContaining({ user: { select: { id: true, email: true, name: true } } }) }));
   });

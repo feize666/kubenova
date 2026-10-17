@@ -2,14 +2,15 @@
 
 KubeNova 是一套面向 Kubernetes 的集群运维控制台。它把集群接入、资源管理、资源拓扑、可观测性、访问控制和 AI 运维助手收敛到一个 Web 界面，可直接在浏览器中完成日常巡检与操作。
 
-当前版本：**v1.1**
+当前版本：**v1.2**
 
 ## 核心能力
 
 - **集群接入**：支持阿里云 ACK、腾讯云 TKE、华为云 CCE、AWS EKS、Google GKE、火山引擎 VKE 等主流托管 Kubernetes，上传 kubeconfig 后自动识别供应商与集群状态。
-- **资源管理**：覆盖工作负载（Pod、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job、CronJob、弹性伸缩）、网络（Service、Ingress、Endpoint、EndpointSlice、NetworkPolicy、Gateway API）、存储（PV、PVC、StorageClass）、配置（ConfigMap、Secret、ServiceAccount、LimitRange、ResourceQuota）与集群基础资源（Node、Namespace）。
+- **资源管理**：覆盖工作负载（Pod、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job、CronJob、弹性伸缩）、网络（Service、Ingress、Endpoint、EndpointSlice、NetworkPolicy、Gateway API）、存储（PV、PVC、StorageClass）、配置（ConfigMap、Secret、ServiceAccount、LimitRange、ResourceQuota）与集群基础资源（Node、Namespace）。清单默认每页 25 条，可切换 10、50、100 条；表体按页面剩余空间滚动，工具栏、表头和分页保持稳定。
 - **资源拓扑**：参考 Headlamp 资源全景图重构。以工作负载为起点，按 `Deployment → ReplicaSet → Pod → Service → Endpoint / EndpointSlice → Ingress` 的横向分层访问链路呈现资源关系，列序由节点权重表决定；连线采用单对单居中直线、多分支平滑曲线并沿访问路径从左到右布设，默认实线、异常链路染橙／红、选中链路高亮流动；折叠分组保留成员与关系计数并以叠层卡片区分。点击卡片直接打开资源详情抽屉，点击卡片内名称或详情标题跳转到对应资源列表；点击画布空白、外部区域或关闭抽屉会解除关联高亮，不改变筛选与画布视角；适配视图为顶部浮层预留高度，资源路径与分组标签互不遮挡；折叠卡片的「进入」与面包屑逐级返回均可用；分组切换、展开／收起、搜索与仅异常筛选都在当前工作负载内收敛，不会退出到工作负载选择页。支持资源域多选、命名空间筛选，并将筛选、搜索和分组状态同步到 URL，便于刷新与分享。
-- **资源详情**：点击任意资源名称以抽屉形式打开详情，包含概览、YAML、容器列表、关联 Pod 列表、事件与日志／终端入口，详情内的关联资源可继续跳转。Pod 的日志与终端以全屏工作台形式打开，关闭后回到原详情；`/clusters/{id}/logs` 与 `/clusters/{id}/terminal` 均在集群工作区内可直接访问，集群上下文从工作区自动继承。
+- **资源详情**：点击任意资源名称以抽屉形式打开详情，包含概览、YAML、容器列表、关联 Pod 列表、事件与日志／终端入口，详情内的关联资源可继续跳转。YAML 在原抽屉内编辑、校验和预览；CodeMirror 编辑区使用黑底等宽字体与语法高亮，支持行号、折叠、搜索和撤销。Pod 的日志与终端以全屏工作台形式打开，关闭后回到原详情；`/clusters/{id}/logs` 与 `/clusters/{id}/terminal` 均在集群工作区内可直接访问，集群上下文从工作区自动继承。
+  关联 Pod 按控制器归属解析，支持 Deployment 经 ReplicaSet、CronJob 经 Job 关联；完整读取分页，不按名称前缀或相同应用标签猜测归属。返回 Pod 列表时重新读取，普通刷新失败保留最近授权快照，权限被拒绝后隐藏旧数据，成功读取才恢复。
 - **可观测性中心**：Prometheus 监控、日志中心与观测配置，支持告警接入、通知渠道与自定义模板。
 - **访问控制**：用户管理、集群访问授权、细致到命名空间与资源类型的权限范围，支持 MFA 与 OIDC 对接。
 - **AI 助手**：支持 OpenAI、Azure OpenAI、Anthropic、Gemini、通义千问、火山引擎、DeepSeek、OpenAI 兼容接口与 Ollama，可在对话中查询集群状态并执行受控操作。
@@ -48,7 +49,7 @@ flowchart LR
 | 概览 | `/` | 集群总览与关键指标 |
 | 集群 | `/clusters` | 集群列表，点击进入对应集群工作区 |
 | 访问控制 | `/authorization` | 用户管理、集群访问授权 |
-| 应用中心 | `/applications` | 应用与 Helm 能力 |
+| 应用中心 | `/applications` | 暂仅超级管理员可见，其他用户不显示入口且不能直接访问 |
 | 系统设置 | `/settings` | 更新管理、AI 助手配置、备份与恢复 |
 
 **集群工作区**（`/clusters/{clusterId}/...`）
@@ -64,6 +65,9 @@ flowchart LR
 | 配置 | ConfigMap、Secret、ServiceAccount、LimitRange、ResourceQuota |
 | 可观测性中心 | Prometheus 监控、日志中心、观测配置 |
 | 运维能力 | 资源巡检、AI 助手 |
+
+登录后的控制台共用右侧工具栏：顶部 AI 头像沿用现有管理员权限，点击原位打开会话面板；底部支持主题切换和侧栏收起，折叠状态在刷新与页面切换后保持。手机端展开时使用遮罩，不挤压资源页面。
+AI 会话面板默认桌面尺寸为 620 × 900px（不超过当前屏幕可用区域），四角支持拖拽调整大小，正文与输入区字号为 15px，窄屏自动全屏。
 
 ## 快速开始（本地）
 
@@ -192,25 +196,33 @@ control-api 每 5 分钟读取 `feize666/kubenova` 的最新正式 Release，排
 
 网页提供版本检测、发布说明和在线升级入口。在线升级必须配置独立宿主机执行器（不向 control-api 暴露 Docker socket）：执行器先备份 PostgreSQL，再下载并校验发布资产，切换三项 Compose 服务并等待健康检查；失败时自动回滚应用镜像，数据库不自动回滚。升级任务仅超级管理员可发起，同一时间只能运行一个任务，状态和结果写入审计记录。未配置执行器时页面保持只读，不会伪造升级成功。
 
-宿主机执行器使用 `scripts/update-executor.mjs`，配置 `deploy/systemd/env/update-executor.env.example` 后安装 `kubenova-update-executor.service`。control-api 仅配置同一个执行器地址和 token：
+Linux Docker Compose 部署使用初始化和安装脚本接入执行器，无需手工拼接 token 或填写执行器 IP。首次执行初始化时自动生成数据库密码、JWT、Runtime token、网关内部鉴权、AI 凭据加密密钥及初始管理员密码；各密钥独立随机生成并以 `0600` 保存。已有环境文件不会重新生成、覆盖或轮换密钥；旧模板中的占位值需人工补齐。公网域名、AI 厂商 key、外部数据库及 SMTP 凭据仍需按实际环境填写。
 
 ```bash
-KUBENOVA_UPDATE_EXECUTOR_URL=http://127.0.0.1:4200
-KUBENOVA_UPDATE_EXECUTOR_TOKEN=<与执行器一致的随机密钥>
+# 在项目/发布包根目录执行；主机需要 Node.js 22+、Docker Compose 和 systemd
+node scripts/init-compose-env.mjs
+# 检查 deploy/docker/.env 的公网地址与镜像版本，再安装（仅 Linux root）
+sudo node scripts/install-update-executor.mjs
+# 已有部署必须传实际运行版本，勿把它意外降级到示例版本
+sudo bash scripts/compose-release.sh up --tag <当前部署版本>
 ```
 
-执行器只监听回环地址，任务状态保存于 `/var/lib/kubenova/update-executor`；备份和下载目录不通过网页暴露。
+安装脚本自动生成或复用同一个执行器密钥，分别存入 `/etc/kubenova/update-executor.env` 与 `/etc/kubenova/update-client.env`；共享环境文件不存放该特权密钥。执行器默认监听 `/run/kubenova-update/executor.sock`，仅将 socket 目录只读挂载给 control-api，不暴露公网端口，也不挂载 Docker socket。部署文件路径自动解析，并保留现有 Compose 项目名，避免误建数据库卷。不要把服务密钥粘贴到前端或提交 Git。
+
+页面只有在执行器实际通过 Docker/Compose 就绪检查后才启用在线升级。API 重启后从执行器恢复任务状态，暂时断连不会伪报任务失败，完成任务也不会修改旧进程的运行版本。任务及数据库备份保存于 `/var/lib/kubenova/update-executor`；大备份流式写入，备份失败不切换服务。发布资产允许 GitHub 官方下载重定向且校验 SHA256，失败切换才触发应用镜像回滚，不自动回滚数据库。已成功回滚的任务不会重复提供同一回滚入口。
+
+此自动接入流程只覆盖 **Linux + Docker Compose + systemd**；macOS 本地源码/launchd 开发、原生二进制及 Kubernetes 部署不会被强制迁移或伪装为已接入。私有仓库的资产下载暂不支持执行器自动鉴权。完整操作与故障检查见 [Docker Compose 部署](deploy/docs/docker-compose.md)。
 
 实际升级前先备份数据库与配置，再使用当前部署方式的脚本：
 
 ```bash
 # Docker Compose：同一个 tag 更新 frontend、control-api、runtime-gateway
-bash scripts/compose-release.sh up --tag v1.1
+bash scripts/compose-release.sh up --tag v1.2
 # 二进制 systemd：将校验后的发布包放入独立版本目录，安装三个服务单元后切换
-sudo bash scripts/service.sh prod switch v1.1
+sudo bash scripts/service.sh prod switch v1.2
 ```
 
-镜像位于 `ghcr.io/feize666/kubenova-{frontend,control-api,runtime-gateway}:v1.1`。如果 GHCR 包首次创建为私有，部署主机需 `docker login ghcr.io`，或由仓库管理员将三个包设置为公开。不要沿用旧的 `feize1995` 镜像地址。
+镜像位于 `ghcr.io/feize666/kubenova-{frontend,control-api,runtime-gateway}:v1.2`。如果 GHCR 包首次创建为私有，部署主机需 `docker login ghcr.io`，或由仓库管理员将三个包设置为公开。不要沿用旧的 `feize1995` 镜像地址。
 
 systemd 切换会同时重启前端、API、网关并检查健康；失败返回非零且尝试恢复旧版本指针。它不自动撤销数据库迁移，也不承诺秒级恢复。完整步骤与旧平铺目录迁移见 [升级与回滚](deploy/docs/upgrade-rollback.md)。
 
@@ -271,6 +283,7 @@ bash scripts/service.sh test release
 
 | 版本 | 主要内容 |
 | --- | --- |
+| v1.2 | 在线升级执行器与任务恢复、资源表格与编辑体验增强、拓扑聚合和自适应布局、AI 操作授权与确认流程 |
 | v1.8 | 资源拓扑按 Headlamp 全景图重构（ELK 分层布局、贝塞尔链路、列序修正、紧凑选中信息条、可进入折叠卡与逐级面包屑），Pod 日志／终端全屏工作台接入集群工作区 |
 | v1.7 | 统一筛选控件、Headlamp 风格资源详情页、AI 助手与实时工作台 |
 | v1.6 | 企业控制台版本，统一 UI、OIDC 与细粒度授权 |

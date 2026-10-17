@@ -1,4 +1,8 @@
 "use client";
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
 
 import {
   DeleteOutlined,
@@ -323,6 +327,7 @@ function buildDaemonSetSpec(
 }
 
 export default function DaemonSetsPage() {
+  const openEditor = useResourceEditorNavigation();
   const workspace = useOptionalClusterWorkspace();
   const createWorkloadHref = useClusterWorkspaceHref("/workloads/create?kind=DaemonSet");
   const { message } = App.useApp();
@@ -333,7 +338,8 @@ export default function DaemonSetsPage() {
     namespace: initialNamespace,
     keyword: initialKeyword,
   } = readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const [keyword, setKeyword] = useState(initialKeyword);
@@ -356,7 +362,6 @@ export default function DaemonSetsPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<WorkloadListItem>({
-    defaultPageSize: 10,
   });
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -366,8 +371,7 @@ export default function DaemonSetsPage() {
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [scaleItem, setScaleItem] = useState<WorkloadListItem | null>(null);
   const [targetReplicas, setTargetReplicas] = useState(1);
-  const [detailTarget, setDetailTarget] =
-    useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
 
   const queryKey = [
     "workloads",
@@ -384,9 +388,9 @@ export default function DaemonSetsPage() {
     accessToken,
   ];
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, isFetching:queryIsFetching, refetch } = useResourceListQuery({
     queryKey,
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getWorkloadsByKind(
         "DaemonSet",
         {
@@ -399,6 +403,7 @@ export default function DaemonSetsPage() {
           sortOrder: sortOrder || undefined,
         },
         accessToken || undefined,
+        { signal },
       ),
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
@@ -649,30 +654,32 @@ export default function DaemonSetsPage() {
       { key: "describe", icon: <EyeOutlined />, label: "描述" },
       { key: "edit", icon: <EditOutlined />, label: "编辑" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
-      { key: "scale", icon: <RetweetOutlined />, label: "扩缩容" },
+      { key: "scale", icon: <RetweetOutlined />, label: "扩缩容", disabled: !canWrite },
       {
         key: "restart",
         icon: <ReloadOutlined />,
         label: "重启",
-        disabled: !active,
+        disabled: !active || !canWrite,
       },
       {
         key: "rollback",
         icon: <RollbackOutlined />,
         label: "回滚",
-        disabled: !active,
+        disabled: !active || !canWrite,
       },
       {
         key: active ? "disable" : "enable",
         icon: <StopOutlined />,
         label: active ? "禁用" : "启用",
+        disabled: !canWrite,
       },
       { type: "divider" },
-      { key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除" },
+      { key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除", disabled: !canWrite },
     ]);
   };
 
   const handleRowAction = (item: WorkloadListItem, key: string) => {
+    if (!canWrite && ['scale', 'restart', 'rollback', 'enable', 'disable', 'delete'].includes(key)) return;
     if (key === "describe") {
       setDetailTarget({ kind: "DaemonSet", id: item.id });
       return;
@@ -682,7 +689,7 @@ export default function DaemonSetsPage() {
       return;
     }
     if (key === "edit") {
-      openEditModal(item);
+      openEditor(resolveIdentity(item));
       return;
     }
     if (key === "scale") {
@@ -887,12 +894,6 @@ export default function DaemonSetsPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={
-            <ResourceAddButton
-              onClick={() => router.push(createWorkloadHref)}
-              aria-label="创建DaemonSet"
-            />
-          }
         />
 
         <Space
@@ -910,18 +911,11 @@ export default function DaemonSetsPage() {
             />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="workload-resource-state-alert"
-              type="error"
-              showIcon
-              title="守护进程集加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="DaemonSet" className="workload-resource-state-alert" query={{data,isError,error,isFetching:queryIsFetching,refetch}} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<WorkloadListItem>
+              queryState={{data,isLoading,isError,error,isFetching:queryIsFetching}}
               bordered
               rowKey="id"
               tableKey="workloads.daemonsets"
@@ -939,6 +933,7 @@ export default function DaemonSetsPage() {
                 resetPage();
               }}
               toolbarExtra={scopeFilterControl}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建DaemonSet" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建DaemonSet" /></>}
               sort={{ sortBy, sortOrder }}
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -1432,7 +1427,7 @@ export default function DaemonSetsPage() {
         </OpsFormSection>
       </OpsModalShell>
 
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

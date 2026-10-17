@@ -139,6 +139,11 @@ fi
 install -m 0755 "$RUNTIME_BIN" "$STAGE_DIR/runtime-gateway/runtime-gateway"
 
 cp -a "$ROOT_DIR/deploy/systemd" "$STAGE_DIR/deploy/systemd"
+mkdir -p "$STAGE_DIR/deploy/docker"
+# Copy only templates, never the operator's live .env or secrets.
+cp "$ROOT_DIR/deploy/docker/"*.yml "$STAGE_DIR/deploy/docker/"
+cp "$ROOT_DIR/deploy/docker/.env.example" "$STAGE_DIR/deploy/docker/.env.example"
+cp "$ROOT_DIR/VERSION" "$STAGE_DIR/VERSION"
 cp -a "$ROOT_DIR/scripts" "$STAGE_DIR/scripts"
 cp "$ROOT_DIR/deploy/systemd/env/control-api.env.example" "$STAGE_DIR/env/control-api.env.example"
 cp "$ROOT_DIR/deploy/systemd/env/runtime-gateway.env.example" "$STAGE_DIR/env/runtime-gateway.env.example"

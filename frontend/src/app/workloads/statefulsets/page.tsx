@@ -1,4 +1,8 @@
 "use client";
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
 
 import {
   DeleteOutlined,
@@ -339,6 +343,7 @@ function buildStatefulSetSpec(
 }
 
 export default function StatefulSetsPage() {
+  const openEditor = useResourceEditorNavigation();
   const workspace = useOptionalClusterWorkspace();
   const createWorkloadHref = useClusterWorkspaceHref("/workloads/create?kind=StatefulSet");
   const { message } = App.useApp();
@@ -349,7 +354,8 @@ export default function StatefulSetsPage() {
     namespace: initialNamespace,
     keyword: initialKeyword,
   } = readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const queryClient = useQueryClient();
   const [keyword, setKeyword] = useState(initialKeyword);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
@@ -371,7 +377,6 @@ export default function StatefulSetsPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<WorkloadListItem>({
-    defaultPageSize: 10,
   });
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -383,8 +388,7 @@ export default function StatefulSetsPage() {
   const [targetReplicas, setTargetReplicas] = useState(1);
   const [scaleConvergence, setScaleConvergence] =
     useState<ScaleConvergenceViewState | null>(null);
-  const [detailTarget, setDetailTarget] =
-    useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const now = useNowTicker();
 
   const queryKey = [
@@ -402,9 +406,9 @@ export default function StatefulSetsPage() {
     accessToken,
   ];
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, isFetching:queryIsFetching, refetch } = useResourceListQuery({
     queryKey,
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getWorkloadsByKind(
         "StatefulSet",
         {
@@ -417,6 +421,7 @@ export default function StatefulSetsPage() {
           sortOrder: sortOrder || undefined,
         },
         accessToken || undefined,
+        { signal },
       ),
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
@@ -712,30 +717,32 @@ export default function StatefulSetsPage() {
       { key: "describe", icon: <EyeOutlined />, label: "描述" },
       { key: "edit", icon: <EditOutlined />, label: "编辑" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
-      { key: "scale", icon: <RetweetOutlined />, label: "扩缩容" },
+      { key: "scale", icon: <RetweetOutlined />, label: "扩缩容", disabled: !canWrite },
       {
         key: "restart",
         icon: <ReloadOutlined />,
         label: "重启",
-        disabled: !active,
+        disabled: !active || !canWrite,
       },
       {
         key: "rollback",
         icon: <RollbackOutlined />,
         label: "回滚",
-        disabled: !active,
+        disabled: !active || !canWrite,
       },
       {
         key: active ? "disable" : "enable",
         icon: <StopOutlined />,
         label: active ? "禁用" : "启用",
+        disabled: !canWrite,
       },
       { type: "divider" },
-      { key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除" },
+      { key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除", disabled: !canWrite },
     ]);
   };
 
   const handleRowAction = (item: WorkloadListItem, key: string) => {
+    if (!canWrite && ['scale', 'restart', 'rollback', 'enable', 'disable', 'delete'].includes(key)) return;
     if (key === "describe") {
       setDetailTarget({ kind: "StatefulSet", id: item.id });
       return;
@@ -745,7 +752,7 @@ export default function StatefulSetsPage() {
       return;
     }
     if (key === "edit") {
-      openEditModal(item);
+      openEditor(resolveIdentity(item));
       return;
     }
     if (key === "scale") {
@@ -956,12 +963,6 @@ export default function StatefulSetsPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={
-            <ResourceAddButton
-              onClick={() => router.push(createWorkloadHref)}
-              aria-label="创建StatefulSet"
-            />
-          }
         />
 
         <Space
@@ -979,15 +980,7 @@ export default function StatefulSetsPage() {
             />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="workload-resource-state-alert"
-              type="error"
-              showIcon
-              title="有状态集加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="StatefulSet" className="workload-resource-state-alert" query={{data,isError,error,isFetching:queryIsFetching,refetch}} />
 
           {scaleConvergence ? (
             <Alert
@@ -1021,6 +1014,7 @@ export default function StatefulSetsPage() {
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<WorkloadListItem>
+              queryState={{data,isLoading,isError,error,isFetching:queryIsFetching}}
               bordered
               rowKey="id"
               tableKey="workloads.statefulsets"
@@ -1038,6 +1032,7 @@ export default function StatefulSetsPage() {
                 resetPage();
               }}
               toolbarExtra={scopeFilterControl}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建StatefulSet" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建StatefulSet" /></>}
               sort={{ sortBy, sortOrder }}
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -1528,7 +1523,7 @@ export default function StatefulSetsPage() {
         </OpsFormSection>
       </OpsModalShell>
 
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

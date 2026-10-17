@@ -26,28 +26,32 @@ const contracts = [
   },
   {
     path: "src/app/logs/page.tsx",
-    required: [
-      "OpsFrameShell",
-      "OpsSurface",
-      "logs-toolbar-card.ops-surface",
-      "logs-terminal-card.ops-surface",
-      "reconnectNow",
-    ],
+    required: ["LogsWorkbench"],
     forbidden: ["cyber-panel", "<Card", ".ant-card"],
   },
   {
     path: "src/app/terminal/page.tsx",
+    required: ["TerminalWorkbench"],
+    forbidden: ["cyber-panel", "<Card", "<Drawer"],
+  },
+  {
+    path: "src/components/runtime-workbench/logs-workbench.tsx",
+    required: ["OpsFrameShell", "OpsSurface", "logs-toolbar-card", "reconnectNow"],
+    forbidden: ["cyber-panel", "<Card", ".ant-card"],
+  },
+  {
+    path: "src/components/runtime-workbench/terminal-workbench.tsx",
     required: ["OpsFrameShell", "OpsIconActionButton", "TerminalConnectionStatus", "reconnect"],
     forbidden: ["cyber-panel", "<Card", "<Drawer"],
   },
   {
     path: "src/app/system/update/page.tsx",
-    required: ["ResourcePageHeader", "OpsSurface", "BusinessDetailDrawer", "ResourceTable"],
+    required: ["OpsSurface", "OpsIconActionButton", "installSystemUpdate", "rollbackSystemUpdate", "Modal.confirm"],
     forbidden: ["cyber-panel", "<Card"],
   },
   {
     path: "src/app/ai-assistant/page.tsx",
-    required: ["OpsSurface", "OpsDrawerShell", "OpsIconActionButton", "OpsCommandPreview", "Modal.confirm", "HIGH_RISK_ACTIONS"],
+    required: ["OpsSurface", "OpsDrawerShell", "OpsIconActionButton", "OpsCommandPreview", "Modal.confirm", "confirmHighRiskAction", "requiresApproval"],
     forbidden: ["cyber-panel", "<Card", "<Drawer", "<pre"],
   },
   {

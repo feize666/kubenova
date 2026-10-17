@@ -5,6 +5,7 @@ import { Input, Select } from "antd";
 import type { ColumnType, ColumnsType } from "antd/es/table";
 import type { SortOrder as AntdSortOrder } from "antd/es/table/interface";
 import { OpsFilterChip } from "@/components/ops";
+import { readTablePreferences as readStoragePreferences, writeTablePreferences as writeStoragePreferences, userTablePreferencesKey } from './preferences-storage';
 import type {
   TableColumnVisibilityPreference,
   TablePreferences,
@@ -69,6 +70,7 @@ export type HeadlampTableSortState = {
 
 export type HeadlampTableStateOptions<T extends object> = {
   tableKey: string;
+  preferenceUser?: string;
   columns: Array<HeadlampResourceTableColumn<T>>;
   columnSettings?: HeadlampTableColumnSetting[];
   filters?: HeadlampTableFilters;
@@ -97,32 +99,7 @@ export type HeadlampTableState<T extends object> = {
   resetColumnVisibility: () => void;
 };
 
-const TABLE_PREFERENCES_STORAGE_PREFIX = "resource-table-preferences:";
 const EMPTY_FILTERS: HeadlampTableFilters = {};
-
-function readStoragePreferences(tableKey: string): TablePreferences | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const rawValue = window.localStorage.getItem(`${TABLE_PREFERENCES_STORAGE_PREFIX}${tableKey}`);
-  if (!rawValue) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(rawValue) as TablePreferences;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoragePreferences(tableKey: string, preferences: TablePreferences) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(`${TABLE_PREFERENCES_STORAGE_PREFIX}${tableKey}`, JSON.stringify(preferences));
-}
 
 function isActiveFilterValue(value: unknown): boolean {
   if (Array.isArray(value)) {
@@ -302,6 +279,7 @@ function renderStackedColumnTitle<T extends object>(
 
 export function useHeadlampTableState<T extends object>({
   tableKey,
+  preferenceUser = '',
   columns,
   columnSettings,
   filters,
@@ -311,6 +289,7 @@ export function useHeadlampTableState<T extends object>({
   preferencesClient,
   sort,
 }: HeadlampTableStateOptions<T>): HeadlampTableState<T> {
+  const storageTableKey = userTablePreferencesKey(preferenceUser, tableKey);
   const columnSettingMap = useMemo(
     () => new Map((columnSettings ?? []).map((setting) => [setting.key, setting])),
     [columnSettings],
@@ -320,7 +299,7 @@ export function useHeadlampTableState<T extends object>({
     [columns],
   );
   const [preferences, setPreferences] = useState<TablePreferences>(() => {
-    const stored = readStoragePreferences(tableKey);
+    const stored = readStoragePreferences(storageTableKey);
     return {
       columnVisibility: normalizeColumnSettings(
         columns,
@@ -331,13 +310,19 @@ export function useHeadlampTableState<T extends object>({
     };
   });
   const preferencesDirtyRef = useRef(false);
+  const preferencesRevisionRef = useRef(0);
 
   useEffect(() => {
+    // Schema rerenders must not restart hydration after a local preference change.
+    if (preferencesRevisionRef.current !== 0) {
+      return;
+    }
     let canceled = false;
 
     async function loadRemotePreferences() {
-      const remotePreferences = await preferencesClient?.loadTablePreferences?.(tableKey);
-      if (canceled || !remotePreferences) {
+      let remotePreferences:TablePreferences|null|undefined;
+      try {remotePreferences=await preferencesClient?.loadTablePreferences?.(tableKey);} catch {return;}
+      if (canceled || !remotePreferences || preferencesRevisionRef.current !== 0) {
         return;
       }
       setPreferences((prev) => {
@@ -366,9 +351,9 @@ export function useHeadlampTableState<T extends object>({
       return;
     }
     preferencesDirtyRef.current = false;
-    writeStoragePreferences(tableKey, preferences);
-    void preferencesClient?.saveTablePreferences?.(tableKey, preferences);
-  }, [preferences, preferencesClient, tableKey]);
+    writeStoragePreferences(storageTableKey, preferences);
+    void preferencesClient?.saveTablePreferences?.(tableKey, preferences)?.catch(()=>{});
+  }, [preferences, preferencesClient, tableKey, storageTableKey]);
 
   const effectiveColumnVisibility = useMemo(
     () => normalizeColumnSettings(columns, undefined, preferences.columnVisibility, columnSettingMap),
@@ -392,6 +377,7 @@ export function useHeadlampTableState<T extends object>({
           return prev;
         }
         preferencesDirtyRef.current = true;
+        preferencesRevisionRef.current += 1;
         return {
           ...prev,
           columnVisibility: nextVisibility,
@@ -407,6 +393,7 @@ export function useHeadlampTableState<T extends object>({
         return prev;
       }
       preferencesDirtyRef.current = true;
+      preferencesRevisionRef.current += 1;
       return { ...prev, filterRowVisible: visible };
     });
   }, []);
@@ -436,6 +423,7 @@ export function useHeadlampTableState<T extends object>({
         return prev;
       }
       preferencesDirtyRef.current = true;
+      preferencesRevisionRef.current += 1;
       return {
         ...prev,
         columnVisibility: nextColumnVisibility,

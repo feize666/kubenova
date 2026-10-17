@@ -1,4 +1,7 @@
 "use client";
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,7 +12,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ResourceAddButton } from "@/components/resource-add-button";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -122,7 +125,6 @@ function parsePorts(input?: string): EndpointPort[] {
 
 export default function EndpointsPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -134,7 +136,7 @@ export default function EndpointsPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
@@ -151,10 +153,9 @@ export default function EndpointsPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<EndpointsResource>({
-    defaultPageSize: 10,
   });
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, isFetching:queryIsFetching, refetch } = useResourceListQuery({
     queryKey: [
       "network",
       "Endpoints",
@@ -239,7 +240,6 @@ export default function EndpointsPage() {
       setModalOpen(false);
       setCreateYaml("");
       await queryClient.invalidateQueries({ queryKey: ["network", "Endpoints"] });
-      await refetch();
     },
     onError: (err) => {
       void message.error(err instanceof Error ? err.message : "YAML 创建失败");
@@ -253,7 +253,6 @@ export default function EndpointsPage() {
       await queryClient.invalidateQueries({
         queryKey: ["network", "Endpoints"],
       });
-      await refetch();
     },
     onError: (err) => {
       void message.error(err instanceof Error ? err.message : "删除失败，请重试");
@@ -358,7 +357,7 @@ export default function EndpointsPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: EndpointsResource) =>
         row.id ? (
-          <Typography.Link onClick={() => { setDetailTarget({ kind: "Endpoints", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/endpoints/${encodeURIComponent(row.id)}`); }}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "Endpoints", id: row.id }); }}>
             {name}
           </Typography.Link>
         ) : (
@@ -405,6 +404,7 @@ export default function EndpointsPage() {
       fixed: "right",
       render: (_: unknown, row: EndpointsResource) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind:"Endpoints",name:row.name,namespace:row.namespace}}
           deleteLabel="删除"
           deleteTitle="删除 Endpoints"
           deleteContent={`确认删除 Endpoints「${row.name}」吗？此操作不可恢复。`}
@@ -474,17 +474,6 @@ export default function EndpointsPage() {
             </span>
           }
           description="查看 Service 后端地址集合、端口与实际连通目标。"
-          extra={<ResourceAddButton title="创建Endpoints" onClick={() => {
-              const nextClusterId = clusterId || clusterOptions[0]?.value || "";
-              const nextNamespace = namespace || "default";
-              form.resetFields();
-              form.setFieldsValue({ clusterId: nextClusterId, namespace: nextNamespace, ports: "http:80/TCP" });
-              setCreateMode("form");
-              setCreateYaml("");
-              setCreateYamlClusterId(nextClusterId);
-              setCreateYamlNamespace(nextNamespace);
-              setModalOpen(true);
-            }} />}
         />
 
         <Space
@@ -497,18 +486,12 @@ export default function EndpointsPage() {
             <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="network-resource-state-alert"
-              type="error"
-              showIcon
-              title="Endpoints 加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="Endpoints" className="network-resource-state-alert" query={{data,isError,error,isFetching:queryIsFetching,refetch}} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<EndpointsResource>
+              queryState={{data,isLoading,isError,error,isFetching:queryIsFetching}}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建Endpoints" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建Endpoints" /></>}
               rowKey="id"
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -602,7 +585,7 @@ export default function EndpointsPage() {
         />
       </OpsModalShell>
 
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

@@ -1,0 +1,21 @@
+.form { width: 100%; }
+.form :global(.ant-form-item) { margin-bottom: 20px; }
+.form :global(.ant-form-item-label) { flex: 0 0 164px; text-align: left; white-space: normal; padding-right: 16px; }
+.form :global(.ant-form-item-control) { min-width: 0; flex: 1; }
+.form :global(.ant-form-item-control-input-content) > :global(.ant-input),
+.form :global(.ant-form-item-control-input-content) > :global(.ant-input-number),
+.form :global(.ant-form-item-control-input-content) > :global(.ant-select) { max-width: 640px; }
+.section { border-top: 1px solid var(--ant-color-border-secondary, #e5e7eb); padding: 20px 0 4px; margin-top: 8px; }
+.section :global(.ant-form-item-label) { flex-basis: 140px; }
+.repeat { border-bottom: 1px solid var(--ant-color-border-secondary, #e5e7eb); padding: 14px 0; }
+.repeatHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(180px, 2fr) auto; align-items: start; gap: 8px; width: 100%; }
+.uploadRow { display: grid; grid-template-columns: minmax(100px, 1fr) 88px minmax(100px, 1fr); align-items: center; gap: 8px; padding: 8px 0; }
+.fileName { overflow-wrap: anywhere; }
+.sensitive :global(textarea) { -webkit-text-security: disc; }
+@media (max-width: 760px) {
+  .form :global(.ant-form-item-row) { display: block; }
+  .form :global(.ant-form-item-label) { padding: 0 0 6px; text-align: left; }
+  .row, .uploadRow { grid-template-columns: 1fr; }
+  .row > :last-child { justify-self: end; }
+}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import {
@@ -50,6 +50,8 @@ import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { resolveSafeRuntimeReturnTo } from "@/lib/api/runtime";
 import {
   RuntimeLogsSocket,
+  nextUnreadLogCount,
+  nextLogFollowOutput,
   type LogsConnectionStatus,
   type LogsReconnectState,
   type RuntimeLogItem,
@@ -129,6 +131,7 @@ const LEVEL_FILTER_OPTIONS: Array<{ label: string; value: SeverityFilter }> = [
 ];
 
 const FALLBACK_TERMINAL_OPTIONS = {
+  scrollback: 6000,
   fontFamily:
     "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
   fontSize: 13,
@@ -449,6 +452,40 @@ function writeTerminalBatch(
   );
 }
 
+function budgetTerminalHistory(
+  terminal: Terminal,
+  lines: RuntimeLogItem[],
+  options: { beautify: boolean; formatJson: boolean; includeTimestamp: boolean },
+  columns = terminal.cols,
+): void {
+  // Xterm counts physical rows, not records. Budget only the retained payload,
+  // including JSON newlines, wide characters and tab expansion before reflow.
+  const width = Math.max(1, columns);
+  let rows = 1;
+  for (const item of lines) {
+    for (const line of formatMetaLine({ item, ...options }).split(/\r?\n/)) {
+      let cells = 0;
+      for (const character of line) cells += character === "\t" ? 8 : 2;
+      rows += Math.max(1, Math.ceil(cells / width));
+    }
+  }
+  terminal.options.scrollback = Math.max(6000, rows);
+}
+
+function terminalLogicalLine(terminal: Terminal, index: number) {
+  const buffer = terminal.buffer.active;
+  let start = index;
+  while (start > 0 && buffer.getLine(start)?.isWrapped) start -= 1;
+  let end = start;
+  let text = "";
+  do {
+    const continued = buffer.getLine(end + 1)?.isWrapped;
+    text += buffer.getLine(end)?.translateToString(!continued) ?? "";
+    end += 1;
+  } while (end < buffer.length && buffer.getLine(end)?.isWrapped);
+  return { start, end, text };
+}
+
 function mapHistoryRecordsToRuntimeLogs(
   records: LogRecord[],
 ): RuntimeLogItem[] {
@@ -619,6 +656,10 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
     pickRefreshInterval(searchParams.get("refreshIntervalSeconds")),
   );
   const [follow, setFollow] = useState(initialTimeState.follow);
+  const [followOutput, setFollowOutput] = useState(true);
+  const [unreadLogCount, setUnreadLogCount] = useState(0);
+  const followOutputRef = useRef(true);
+  const pendingOutputWritesRef = useRef(0);
   const [previous, setPrevious] = useState(
     pickBool(searchParams.get("previous"), false),
   );
@@ -657,6 +698,8 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const rawLinesRef = useRef<RuntimeLogItem[]>([]);
+  const replayRunningRef = useRef(false);
+  const queuedReplayRef = useRef<{ source: RuntimeLogItem[]; generation: number } | null>(null);
 
   useEffect(() => {
     setContainer(routeContainer);
@@ -703,6 +746,7 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
     setTimestamps(pickBool(params.get("timestamps"), true));
     setSeverity([]);
     setAvailableContainers([]);
+    rawLinesRef.current = [];
     setRawLines([]);
     setLastLogTimestamp("");
     setEmptyReason("");
@@ -720,7 +764,7 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
     [currentQuery],
   );
 
-  const clusterQuery = useQuery({
+  const clusterQuery = useResourceListQuery({
     queryKey: ["clusters", "list", accessToken],
     queryFn: () =>
       getClusters(
@@ -728,6 +772,7 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
         accessToken!,
       ),
     enabled: !isInitializing && Boolean(accessToken),
+    retry: false,
   });
 
   const clusterMap = useMemo(
@@ -786,11 +831,25 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
+    const scrollSubscription = terminal.onScroll((viewportY) => {
+      const atBottom = viewportY >= terminal.buffer.active.baseY;
+      const nextFollow = nextLogFollowOutput(followOutputRef.current, viewportY, terminal.buffer.active.baseY, pendingOutputWritesRef.current > 0);
+      followOutputRef.current = nextFollow;
+      setFollowOutput(nextFollow);
+      if (atBottom && nextFollow) setUnreadLogCount(0);
+    });
 
     let rafId = 0;
     const fitTerminal = () => {
       if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => fitAddon.fit());
+      rafId = requestAnimationFrame(() => {
+        const columns = fitAddon.proposeDimensions()?.cols ?? terminal.cols;
+        const previousColumns = terminal.cols;
+        const localOptions = localLogOptionsRef.current;
+        budgetTerminalHistory(terminal, applySeverityFilter(rawLinesRef.current, localOptions.severity), localOptions.renderOptions, Math.min(columns, previousColumns));
+        fitAddon.fit();
+        if (terminal.cols !== previousColumns) replayToTerminalRef.current(rawLinesRef.current);
+      });
     };
     const resizeObserver =
       typeof ResizeObserver !== "undefined"
@@ -818,6 +877,9 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
       themeObserver?.disconnect();
       resizeObserver?.disconnect();
       window.removeEventListener("resize", onResize);
+      scrollSubscription.dispose();
+      replayRunningRef.current = false;
+      queuedReplayRef.current = null;
       terminalRef.current?.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -840,6 +902,12 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
     }),
     [beautifyEnabled, formatEnabled, timestamps],
   );
+  const localLogOptionsRef = useRef({ severity, renderOptions });
+  const terminalRenderOptionsRef = useRef(renderOptions);
+  const terminalSeverityRef = useRef(severity);
+  useLayoutEffect(() => {
+    localLogOptionsRef.current = { severity, renderOptions };
+  }, [severity, renderOptions]);
 
   const customTimeRange = useMemo<[Dayjs, Dayjs] | null>(() => {
     if (!sinceTime || !untilTime) return null;
@@ -886,43 +954,128 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
     (source: RuntimeLogItem[]) => {
       const terminal = terminalRef.current;
       if (!terminal) return;
-      terminal.clear();
-      const filtered = applySeverityFilter(source, severity);
-      writeTerminalBatch(terminal, filtered, renderOptions);
-      fitAddonRef.current?.fit();
-      if (searchText.trim()) {
-        const found = searchAddonRef.current?.findNext(searchText, {
-          regex: searchRegex,
-          caseSensitive: searchCaseSensitive,
-        });
-        setSearchResultText(found ? "已定位到匹配项" : "暂无结果");
-      } else {
-        setSearchResultText("输入关键字后开始查找");
+      const generation = streamGenerationRef.current;
+      if (replayRunningRef.current) {
+        queuedReplayRef.current = { source, generation };
+        return;
       }
+      replayRunningRef.current = true;
+      pendingOutputWritesRef.current += 1;
+      const finishReplay = () => {
+        if (terminalRef.current !== terminal) return;
+        pendingOutputWritesRef.current -= 1;
+        replayRunningRef.current = false;
+        const queued = queuedReplayRef.current;
+        queuedReplayRef.current = null;
+        if (queued?.generation === streamGenerationRef.current) replayToTerminalRef.current(queued.source);
+      };
+      // Reset must wait for prior writes; overlapping async writes can resurrect
+      // records already removed from the bounded business buffer.
+      terminal.write("", () => {
+      if (terminalRef.current !== terminal) return;
+      if (generation !== streamGenerationRef.current) {
+        finishReplay();
+        return;
+      }
+      const viewportY = terminal.buffer.active.viewportY;
+      const viewportLine = terminalLogicalLine(terminal, viewportY);
+      const viewportText = viewportLine.text;
+      const previousRenderOptions = terminalRenderOptionsRef.current;
+      let occurrence = 0;
+      for (let index = viewportLine.end; index < terminal.buffer.active.length;) {
+        const line = terminalLogicalLine(terminal, index);
+        if (line.text === viewportText) occurrence += 1;
+        index = line.end;
+      }
+      // A JSON record can span several logical lines; anchor to its record and line,
+      // not the physical row number, which changes when formatting is toggled.
+      const previousLines = applySeverityFilter(source, terminalSeverityRef.current).flatMap((item) =>
+        formatMetaLine({ item, ...previousRenderOptions }).split(/\r?\n/).map((text, lineIndex) => ({ item, text, lineIndex })),
+      );
+      const matchingLines = previousLines.filter((line) => line.text === viewportText);
+      const anchor = matchingLines[matchingLines.length - occurrence - 1];
+      const filtered = applySeverityFilter(source, severity);
+      const nextLines = filtered.flatMap((item) =>
+        formatMetaLine({ item, ...renderOptions }).split(/\r?\n/).map((text, lineIndex) => ({ item, text, lineIndex })),
+      );
+      const anchorLines = anchor ? nextLines.filter((line) => line.item === anchor.item) : [];
+      const nextAnchor = anchorLines[Math.min(anchor?.lineIndex ?? 0, anchorLines.length - 1)];
+      const anchorText = nextAnchor?.text ?? viewportText;
+      const nextOccurrence = nextAnchor
+        ? nextLines.slice(nextLines.indexOf(nextAnchor) + 1).filter((line) => line.text === anchorText).length
+        : occurrence;
+      const following = followOutputRef.current;
+      terminal.reset();
+      budgetTerminalHistory(terminal, filtered, renderOptions);
+      writeTerminalBatch(terminal, filtered, renderOptions);
+      terminalRenderOptionsRef.current = renderOptions;
+      terminalSeverityRef.current = severity;
+      terminal.write("", () => {
+        if (terminalRef.current !== terminal) return;
+        if (generation !== streamGenerationRef.current) {
+          finishReplay();
+          return;
+        }
+        if (following) terminal.scrollToBottom();
+        else {
+          const buffer = terminal.buffer.active;
+          let anchorLine = -1;
+          if (anchorText) {
+            const matches: number[] = [];
+            for (let index = 0; index < buffer.length;) {
+              const line = terminalLogicalLine(terminal, index);
+              if (line.text === anchorText) {
+                matches.push(index + Math.min(viewportY - viewportLine.start, line.end - line.start - 1));
+              }
+              index = line.end;
+            }
+            anchorLine = matches[matches.length - nextOccurrence - 1] ?? -1;
+          }
+          terminal.scrollToLine(anchorLine >= 0 ? anchorLine : Math.min(viewportY, buffer.baseY));
+        }
+        finishReplay();
+      });
+      fitAddonRef.current?.fit();
+      });
     },
-    [renderOptions, searchCaseSensitive, searchRegex, searchText, severity],
+    [renderOptions, severity],
   );
+  const replayToTerminalRef = useRef(replayToTerminal);
+  useLayoutEffect(() => {
+    replayToTerminalRef.current = replayToTerminal;
+  }, [replayToTerminal]);
 
-  useEffect(() => {
-    if (!searchVisible) {
-      return;
-    }
+  const runSearch = useCallback((direction: "next" | "prev") => {
     const query = searchText.trim();
+    const terminal = terminalRef.current;
+    const addon = searchAddonRef.current;
     if (!query) {
+      terminal?.clearSelection();
+      addon?.clearDecorations();
       setSearchResultText("输入关键字后开始查找");
       return;
     }
-    const addon = searchAddonRef.current;
     if (!addon) {
       setSearchResultText("查找组件未就绪");
       return;
     }
-    const found = addon.findNext(query, {
-      regex: searchRegex,
-      caseSensitive: searchCaseSensitive,
-    });
-    setSearchResultText(found ? "已定位到匹配项" : "暂无结果");
-  }, [searchVisible, searchText, searchRegex, searchCaseSensitive, rawLines]);
+    try {
+      if (searchRegex) new RegExp(query);
+      const options = { regex: searchRegex, caseSensitive: searchCaseSensitive };
+      const found = direction === "next"
+        ? addon.findNext(query, options)
+        : addon.findPrevious(query, options);
+      setSearchResultText(found ? "已定位到匹配项" : "暂无结果");
+    } catch {
+      terminal?.clearSelection();
+      addon.clearDecorations();
+      setSearchResultText("无效的正则表达式");
+    }
+  }, [searchText, searchRegex, searchCaseSensitive]);
+
+  useEffect(() => {
+    if (searchVisible) runSearch("next");
+  }, [searchVisible, runSearch]);
 
   useEffect(() => {
     const host = terminalHostRef.current;
@@ -1148,8 +1301,9 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
       setReconnectState(null);
 
       if (options?.resetLines) {
+        rawLinesRef.current = [];
         setRawLines([]);
-        terminalRef.current?.clear();
+        replayToTerminalRef.current([]);
       }
 
       const currentGeneration = streamGenerationRef.current;
@@ -1206,11 +1360,13 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
             }
           }
           if (currentGeneration !== streamGenerationRef.current) return;
-          const seedLines = mapHistoryRecordsToRuntimeLogs(seed.items);
+          const seedLines = mapHistoryRecordsToRuntimeLogs(seed.items).slice(-6000);
           setLastLogTimestamp(seed.lastLogTimestamp ?? "");
           setEmptyReason(seed.emptyReason ?? "");
+          rawLinesRef.current = seedLines;
           setRawLines(seedLines);
-          replayToTerminal(seedLines);
+          setUnreadLogCount(0);
+          replayToTerminalRef.current(seedLines);
           preloadRequestKeyRef.current = "";
         }
 
@@ -1323,11 +1479,31 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
           onLogs: (items) => {
             if (currentGeneration !== streamGenerationRef.current) return;
             if (items.length === 0) return;
-            setRawLines((current) => {
-              const next = [...current, ...items].slice(-6000);
-              const filtered = applySeverityFilter(items, severity);
-              writeTerminalBatch(terminalRef.current, filtered, renderOptions);
-              return next;
+            const combined = [...rawLinesRef.current, ...items];
+            const retained = combined.slice(-6000);
+            rawLinesRef.current = retained;
+            setRawLines(retained);
+            const localOptions = localLogOptionsRef.current;
+            const filtered = applySeverityFilter(items, localOptions.severity);
+            setUnreadLogCount((current) => nextUnreadLogCount(current, filtered.length, followOutputRef.current));
+            const terminal = terminalRef.current;
+            if (combined.length > 6000 || replayRunningRef.current) {
+              replayToTerminalRef.current(retained);
+              return;
+            }
+            if (terminal) budgetTerminalHistory(terminal, applySeverityFilter(retained, localOptions.severity), localOptions.renderOptions);
+            const viewportY = terminal?.buffer.active.viewportY ?? 0;
+            // Xterm markers follow the same line when bounded scrollback evicts older output.
+            const viewportMarker = terminal?.registerMarker(
+              viewportY - terminal.buffer.active.baseY - terminal.buffer.active.cursorY,
+            );
+            if (terminal) pendingOutputWritesRef.current += 1;
+            writeTerminalBatch(terminal, filtered, localOptions.renderOptions);
+            terminal?.write("", () => {
+              if (followOutputRef.current) terminal.scrollToBottom();
+              else terminal.scrollToLine(viewportMarker?.isDisposed ? 0 : viewportMarker?.line ?? viewportY);
+              viewportMarker?.dispose();
+              pendingOutputWritesRef.current -= 1;
             });
           },
           reconnect: {
@@ -1371,9 +1547,6 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
       effectivePrevious,
       fallbackFromPrevious,
       timestamps,
-      replayToTerminal,
-      severity,
-      renderOptions,
     ],
   );
 
@@ -1411,9 +1584,8 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
   ]);
 
   useEffect(() => {
-    rawLinesRef.current = rawLines;
-    replayToTerminal(rawLines);
-  }, [rawLines, severity, renderOptions, replayToTerminal]);
+    replayToTerminal(rawLinesRef.current);
+  }, [replayToTerminal]);
 
   useEffect(() => {
     if (rawLinesRef.current.length === 0 || !terminalRef.current) {
@@ -1439,6 +1611,13 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
     void connectStream({ resetLines: true, preloadHistory: true });
   };
 
+  const resumeOutputFollow = () => {
+    followOutputRef.current = true;
+    setFollowOutput(true);
+    setUnreadLogCount(0);
+    terminalRef.current?.scrollToBottom();
+  };
+
   useEffect(() => {
     if (refreshIntervalSeconds <= 0 || (follow && !effectivePrevious)) {
       return;
@@ -1450,8 +1629,10 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
   }, [connectStream, effectivePrevious, follow, refreshIntervalSeconds]);
 
   const clearAll = () => {
+    rawLinesRef.current = [];
     setRawLines([]);
-    terminalRef.current?.clear();
+    setUnreadLogCount(0);
+    replayToTerminalRef.current([]);
     setStreamError("");
   };
 
@@ -1467,30 +1648,6 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
     anchor.download = `${namespace}-${pod}-${container || "container"}-logs.txt`;
     anchor.click();
     URL.revokeObjectURL(url);
-  };
-
-  const runSearch = (direction: "next" | "prev") => {
-    const query = searchText.trim();
-    if (!query) {
-      return;
-    }
-    const addon = searchAddonRef.current;
-    if (!addon) {
-      return;
-    }
-    if (direction === "next") {
-      const found = addon.findNext(query, {
-        regex: searchRegex,
-        caseSensitive: searchCaseSensitive,
-      });
-      setSearchResultText(found ? "已定位到匹配项" : "暂无结果");
-    } else {
-      const found = addon.findPrevious(query, {
-        regex: searchRegex,
-        caseSensitive: searchCaseSensitive,
-      });
-      setSearchResultText(found ? "已定位到匹配项" : "暂无结果");
-    }
   };
 
   const exitBack = () => {
@@ -1814,7 +1971,7 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
                   <Switch
                     checked={follow}
                     disabled={!isFollowingNow}
-                    aria-label="实时跟随日志"
+                    aria-label="实时接收日志"
                     onChange={(checked) => {
                       if (!isFollowingNow) return;
                       setFollow(checked);
@@ -1822,7 +1979,23 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
                     }}
                     size="small"
                   />
-                  <span>跟随</span>
+                  <span>实时接收</span>
+                </div>
+
+                <div className="headlamp-log-switch">
+                  <Switch
+                    checked={followOutput}
+                    aria-label="跟随日志滚动"
+                    onChange={(checked) => {
+                      if (checked) resumeOutputFollow();
+                      else {
+                        followOutputRef.current = false;
+                        setFollowOutput(false);
+                      }
+                    }}
+                    size="small"
+                  />
+                  <span>滚动跟随</span>
                 </div>
 
                 <div className="headlamp-log-switch">
@@ -1866,7 +2039,7 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
                   <Tooltip title="查找">
                     <Popover
                       trigger="click"
-                      placement="bottomRight"
+                      placement="bottom"
                       open={searchVisible}
                       onOpenChange={setSearchVisible}
                       content={
@@ -1989,6 +2162,11 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
             className={`logs-terminal-frame logs-terminal-frame--${logsFrameState}`}
           >
             <div className="logs-terminal-host" ref={terminalHostRef} />
+            {unreadLogCount > 0 ? (
+              <Button className="logs-new-output" onClick={resumeOutputFollow} aria-label={`查看 ${unreadLogCount} 条新日志并恢复滚动跟随`}>
+                {unreadLogCount} 条新日志 · 回到底部
+              </Button>
+            ) : null}
             {emptyStateHint.visible ? (
               <div className="logs-empty-hint">
                 <Typography.Text strong>{emptyStateHint.title}</Typography.Text>
@@ -2220,6 +2398,13 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
         }
 
         /* Popovers render into document.body, so keep their controls explicitly themed. */
+        :global(.headlamp-search-popover) {
+          --logs-control-bg: var(--kn-surface);
+          --logs-control-border: var(--kn-border);
+          --logs-control-text: var(--kn-text);
+          --logs-control-muted: var(--kn-text-secondary);
+        }
+
         :global(.headlamp-time-popover .ant-select-selector),
         :global(.headlamp-time-popover .ant-input),
         :global(.headlamp-time-popover .ant-picker),
@@ -2362,6 +2547,13 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
           border: 1px solid rgba(35, 92, 255, 0.16);
           background: var(--logs-terminal-frame-bg);
           box-shadow: var(--logs-terminal-frame-shadow);
+        }
+
+        :global(.logs-new-output.ant-btn) {
+          position: absolute;
+          bottom: 20px;
+          right: 24px;
+          z-index: 2;
         }
 
         .logs-terminal-frame::before,
@@ -2605,7 +2797,8 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
           display: flex;
           align-items: center;
           gap: 8px;
-          min-width: 520px;
+          width: min(520px, calc(100vw - 48px));
+          min-width: 0;
           color: var(--logs-control-text);
         }
 
@@ -2789,7 +2982,7 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
           width: 100%;
           min-height: 58vh;
           max-height: 72vh;
-          background: #05080d !important;
+          background: var(--logs-terminal-bg) !important;
           overflow: hidden;
           padding: 14px;
         }
@@ -2929,7 +3122,6 @@ export default function LogsWorkbench({ query, onClose }: { query?: URLSearchPar
           }
 
           .headlamp-search-popover {
-            min-width: 300px;
             flex-wrap: wrap;
           }
 

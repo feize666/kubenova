@@ -2,6 +2,7 @@
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import {
+  CompressOutlined,
   ApiOutlined,
   AppstoreOutlined,
   ApartmentOutlined,
@@ -90,10 +91,6 @@ function activateOnKeyboard(event: KeyboardEvent<HTMLDivElement>) {
   event.currentTarget.click();
 }
 
-function sourceLabel(source?: string) {
-  return source ? source.replace(/[-_]/g, " ") : "Kubernetes";
-}
-
 function sharedResourceValue(
   node: TopologyRendererGraphNode,
   read: (resource: NonNullable<TopologyRendererGraphNode["resource"]>) => string | null | undefined,
@@ -165,7 +162,6 @@ function Glance({ graphNode, grouped = false }: { graphNode: TopologyRendererGra
       </div>
       <dl>
         <div><dt>命名空间</dt><dd>{sharedResourceValue(graphNode, (item) => item.namespace, "集群级")}</dd></div>
-        <div><dt>来源</dt><dd>{sharedResourceValue(graphNode, (item) => sourceLabel(item.source), "Kubernetes")}</dd></div>
         {summary ? <div><dt>摘要</dt><dd>{summary}</dd></div> : null}
       </dl>
       {grouped || aggregationCount > 0 ? (
@@ -286,6 +282,8 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
       ? "Component"
       : graphNode.groupKind === "isolated"
         ? "Isolated"
+        : graphNode.groupKind === "stack"
+          ? normalizeTopologyKind(graphNode.label)
       : graphNode.label));
   const title = graphNode.label ?? resource?.name ?? "Unknown resource";
   const viewState = data.viewState ?? "default";
@@ -296,6 +294,8 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
       ? "关联组件"
       : graphNode.groupKind === "isolated"
         ? "未关联资源"
+        : graphNode.groupKind === "stack"
+          ? "资源堆叠"
         : "资源集合";
   const groupClass = graphNode.groupKind ? `is-group-${graphNode.groupKind}` : undefined;
   const kindClass = `is-kind-${kindDomain(nodeKind)}`;
@@ -329,9 +329,24 @@ function ObjectNode({ data, selected }: NodeProps<Node<TopologyRendererNodeData>
       <div className={[
         "topology-kubejojo__node-card",
         isCollapsedGroup ? "topology-kubejojo__node-card--summary" : undefined,
+        graphNode.expandedStackId ? "has-expanded-stack-control" : undefined,
       ].filter(Boolean).join(" ")}>
         {hiddenHandle(Position.Top)}
         {hiddenHandle(Position.Bottom)}
+        {graphNode.expandedStackId ? (
+          <button
+            type="button"
+            className="topology-kubejojo__resource-stack-collapse"
+            aria-label={`折叠资源堆叠 ${graphNode.expandedStackLabel ?? nodeKind}`}
+            title={`折叠 ${graphNode.expandedStackLabel ?? nodeKind} 堆叠`}
+            onClick={(event) => {
+              event.stopPropagation();
+              data.onToggleStack?.(graphNode.expandedStackId!);
+            }}
+          >
+            <CompressOutlined aria-hidden="true" />
+          </button>
+        ) : null}
         {isCollapsedGroup ? (
           <div className="topology-kubejojo__summary">
             <div className="topology-kubejojo__summary-header">
@@ -398,7 +413,8 @@ function GroupNode({ data }: NodeProps<Node<TopologyRendererNodeData>>) {
   const subtitle = graphNode.subtitle ?? "Group";
   const isComponent = graphNode.groupKind === "component";
   const isIsolated = graphNode.groupKind === "isolated";
-  const groupType = isComponent ? "关联组件" : isIsolated ? "未关联资源" : subtitle;
+  const isStack = graphNode.groupKind === "stack";
+  const groupType = isComponent ? "关联组件" : isIsolated ? "未关联资源" : isStack ? "资源堆叠" : subtitle;
   const relationshipCount = representedRelationshipCount(graphNode);
   const groupClass = graphNode.groupKind ? `is-${graphNode.groupKind}` : undefined;
 
@@ -432,6 +448,11 @@ function GroupNode({ data }: NodeProps<Node<TopologyRendererNodeData>>) {
           <strong>{resourceCount} 资源 · {relationshipCount} 关系</strong>
           <span>{STATUS_META[status].label}</span>
         </span>
+        {isStack ? <button type="button" className="topology-kubejojo__stack-collapse"
+          aria-label={`折叠资源堆叠 ${title}`} title="折叠此资源堆叠"
+          onClick={event => { event.stopPropagation(); data.onToggleStack?.(graphNode.id); }}>
+          <CompressOutlined aria-hidden="true" />
+        </button> : null}
       </div>
       <Glance graphNode={graphNode} grouped />
     </div>

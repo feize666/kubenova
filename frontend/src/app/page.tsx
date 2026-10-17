@@ -25,6 +25,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useMemo } from "react";
 import { useAuth } from "@/components/auth-context";
+import { isPlatformAdmin } from "@/lib/console-routing";
 import {
   OpsFilterChip,
   OpsScopeSelector,
@@ -558,7 +559,8 @@ function ImpactMap({ impact }: { impact?: ServiceImpact }) {
 }
 
 export default function HomePage() {
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canViewObservability = isPlatformAdmin(role);
   const router = useRouter();
   const searchParams = useSearchParams();
   const clusterId = searchParams.get("clusterId")?.trim() || "";
@@ -584,10 +586,6 @@ export default function HomePage() {
     refetchInterval: 30_000,
   });
   const clusterHealth = useMemo(() => Object.fromEntries((healthQuery.data?.items ?? []).map((item) => [item.clusterId, item])), [healthQuery.data?.items]);
-  const latestProbeAt = useMemo(() => {
-    const values = (healthQuery.data?.items ?? []).map((item) => item.checkedAt).filter((value): value is string => Boolean(value));
-    return values.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
-  }, [healthQuery.data?.items]);
   const scopeOptions = useMemo<OpsScopeSelectorOption[]>(
     () =>
       (clustersQuery.data?.items ?? []).map((item) => ({
@@ -877,9 +875,6 @@ export default function HomePage() {
                 {stats.resourceUsage.note ??
                   "请先执行集群同步以获取真实 CPU/内存数据。"}
               </span>
-              <OpsFilterChip tone="neutral">
-                来源: {stats.resourceUsage.dataSource}
-              </OpsFilterChip>
             </Space>
           }
         />
@@ -900,7 +895,6 @@ export default function HomePage() {
         </div>
         <div className="ops-overview-context-bar__meta">
           <OpsStatusTag tone={riskSummary.riskLevel}>{riskSummary.riskLevel === "critical" ? "高风险" : riskSummary.riskLevel === "warning" ? "需关注" : riskSummary.riskLevel === "unknown" ? "数据不足" : "运行稳定"}</OpsStatusTag>
-          <span>{latestProbeAt ? `最近探测 ${formatAge(latestProbeAt)}` : "等待首次数据采集"}</span>
           <span>{clusterId ? "单集群视图" : "多集群全局视图"}</span>
           <button type="button" onClick={refreshOverview} disabled={statsQuery.isFetching || clustersQuery.isFetching || healthQuery.isFetching}>刷新数据</button>
         </div>
@@ -923,14 +917,14 @@ export default function HomePage() {
           <div className="ops-overview-quick-links">
             <Link href="/clusters" prefetch={false}><PlusOutlined /><span>创建集群<small>接入新的 Kubernetes 集群</small></span><ArrowRightOutlined /></Link>
             <Link href={formatScopedHref("/network/topology", clusterId)} prefetch={false}><NodeIndexOutlined /><span>资源拓扑<small>查看服务访问链路</small></span><ArrowRightOutlined /></Link>
-            <Link href={formatScopedHref("/monitoring", clusterId)} prefetch={false}><LineChartOutlined /><span>监控中心<small>查看指标与告警</small></span><ArrowRightOutlined /></Link>
-            <Link href={formatScopedHref("/logs", clusterId)} prefetch={false}><FileTextOutlined /><span>日志中心<small>检索集群运行日志</small></span><ArrowRightOutlined /></Link>
+            {canViewObservability ? <Link href={formatScopedHref("/monitoring", clusterId)} prefetch={false}><LineChartOutlined /><span>监控中心<small>查看指标与告警</small></span><ArrowRightOutlined /></Link> : null}
+            {canViewObservability ? <Link href={formatScopedHref("/logs", clusterId)} prefetch={false}><FileTextOutlined /><span>日志中心<small>检索集群运行日志</small></span><ArrowRightOutlined /></Link> : null}
           </div>
-          <div className="ops-overview-quick-rail__status"><span>数据状态</span><strong>{stats?.scope?.generatedAt ? "已同步" : "等待采集"}</strong><small>{stats?.scope?.generatedAt ? `最近采集 ${formatAge(stats.scope.generatedAt)}` : "首次采集完成后显示实时状态"}</small></div>
+          <div className="ops-overview-quick-rail__status"><span>数据状态</span><strong>{stats?.scope?.generatedAt ? "已同步" : "等待数据"}</strong></div>
           <div className="ops-overview-quick-rail__events">
             <div className="ops-overview-section-heading"><div><span>近况</span><h2>最近异常事件</h2></div></div>
-            {timelineItems.length ? timelineItems.slice(0, 5).map((item) => <Link href={formatScopedHref("/observability", clusterId)} prefetch={false} key={item.id} data-level={item.level}><i /><span><strong>{item.title}</strong><small>{item.source} · {item.time}</small></span><ArrowRightOutlined /></Link>) : <div className="ops-overview-empty">当前无异常事件</div>}
-            {timelineItems.length ? <Link className="ops-overview-quick-rail__all" href={formatScopedHref("/observability", clusterId)} prefetch={false}>查看全部事件 <ArrowRightOutlined /></Link> : null}
+            {canViewObservability && timelineItems.length ? timelineItems.slice(0, 5).map((item) => <Link href={formatScopedHref("/observability", clusterId)} prefetch={false} key={item.id} data-level={item.level}><i /><span><strong>{item.title}</strong><small>{item.source} · {item.time}</small></span><ArrowRightOutlined /></Link>) : <div className="ops-overview-empty">{canViewObservability ? "当前无异常事件" : "可观测性功能仅对超级管理员开放"}</div>}
+            {canViewObservability && timelineItems.length ? <Link className="ops-overview-quick-rail__all" href={formatScopedHref("/observability", clusterId)} prefetch={false}>查看全部事件 <ArrowRightOutlined /></Link> : null}
           </div>
         </aside>
       </section>

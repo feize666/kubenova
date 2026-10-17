@@ -71,11 +71,15 @@ export function createTablePreferencesClient(token: string | undefined): TablePr
       const request = getTablePreference<TablePreferences>(tableKey, token)
         .then((response) => {
           const value = response.value ?? null;
-          preferenceCache.set(tableKey, value);
+          if (preferenceCache.get(tableKey) === request) {
+            preferenceCache.set(tableKey, value);
+          }
           return value;
         })
         .catch(() => {
-          preferenceCache.set(tableKey, null);
+          if (preferenceCache.get(tableKey) === request) {
+            preferenceCache.set(tableKey, null);
+          }
           return null;
         });
       preferenceCache.set(tableKey, request);

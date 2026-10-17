@@ -1,4 +1,8 @@
 "use client";
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
 
 import {
   DeleteOutlined,
@@ -236,6 +240,7 @@ function extractScaleSnapshot(item: WorkloadItem): {
 }
 
 export default function DeploymentsPage() {
+  const openEditor = useResourceEditorNavigation();
   const { message } = App.useApp();
   const router = useRouter();
   const workspace = useOptionalClusterWorkspace();
@@ -247,7 +252,8 @@ export default function DeploymentsPage() {
     keyword: initialKeyword,
   } = readResourceFilterFromSearchParams(searchParams);
   const queryClient = useQueryClient();
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const now = useNowTicker();
   const {
     clusterId,
@@ -270,7 +276,6 @@ export default function DeploymentsPage() {
     handleTableChange,
   } = useAntdTableSortPagination<DeploymentRow>({
     storageKey: "workloads/deployments/table-sort",
-    defaultPageSize: 10,
     defaultSortBy: "createdAt",
     defaultSortOrder: "desc",
     allowedSortBy: [
@@ -287,8 +292,7 @@ export default function DeploymentsPage() {
       "createdAt",
     ],
   });
-  const [detailTarget, setDetailTarget] =
-    useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const [扩缩容行, set扩缩容行] = useState<DeploymentRow | null>(null);
   const [目标副本, set目标副本] = useState<number>(1);
   const [scaleConvergence, setScaleConvergence] =
@@ -314,9 +318,9 @@ export default function DeploymentsPage() {
     accessToken,
   ];
 
-  const query = useQuery({
+  const query = useResourceListQuery({
     queryKey: workloadsKey,
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getWorkloads(
         "deployments",
         {
@@ -329,6 +333,7 @@ export default function DeploymentsPage() {
           clusterId: clusterId || undefined,
         },
         accessToken!,
+        { signal },
       ),
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
@@ -800,31 +805,33 @@ export default function DeploymentsPage() {
     return buildResourceActionMenuItems([
       { key: "describe", icon: <EyeOutlined />, label: "描述" },
       { key: "edit", icon: <EditOutlined />, label: "编辑", disabled: !row.id },
-      { key: "scale", icon: <RetweetOutlined />, label: "扩缩容" },
+      { key: "scale", icon: <RetweetOutlined />, label: "扩缩容", disabled: !canWrite },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
       {
         key: "restart",
         icon: <ReloadOutlined />,
         label: "重启",
-        disabled: !active,
+        disabled: !active || !canWrite,
       },
       {
         key: "rollback",
         icon: <RollbackOutlined />,
         label: "回滚",
-        disabled: !active,
+        disabled: !active || !canWrite,
       },
       {
         key: active ? "disable" : "enable",
         icon: <StopOutlined />,
         label: active ? "禁用" : "启用",
+        disabled: !canWrite,
       },
       { type: "divider" },
-      { key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除" },
+      { key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除", disabled: !canWrite },
     ]);
   };
 
   const handleRowAction = (row: DeploymentRow, key: string) => {
+    if (!canWrite && ['scale', 'restart', 'rollback', 'enable', 'disable', 'delete'].includes(key)) return;
     if (key === "describe") {
       if (row.id) setDetailTarget({ kind: "Deployment", id: row.id });
       return;
@@ -834,7 +841,7 @@ export default function DeploymentsPage() {
       return;
     }
     if (key === "edit") {
-      openEditModal(row);
+      openEditor(解析资源标识(row));
       return;
     }
     if (key === "yaml") {
@@ -1087,12 +1094,6 @@ export default function DeploymentsPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={
-            <ResourceAddButton
-              onClick={openAddModal}
-              aria-label="创建Deployment"
-            />
-          }
         />
 
         <Space
@@ -1109,17 +1110,7 @@ export default function DeploymentsPage() {
               title="未检测到登录状态，请先登录后再操作。"
             />
           ) : null}
-          {query.isError ? (
-            <Alert
-              className="workload-resource-state-alert"
-              type="error"
-              showIcon
-              title="Deployments 加载失败"
-              description={
-                query.error instanceof Error ? query.error.message : "请求失败"
-              }
-            />
-          ) : null}
+          <ResourceQueryFeedback label="Deployment" className="workload-resource-state-alert" query={query} />
           {scaleConvergence ? (
             <Alert
               className="workload-resource-state-alert"
@@ -1152,6 +1143,7 @@ export default function DeploymentsPage() {
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<DeploymentRow>
+              queryState={query}
               bordered
               rowKey="key"
               tableKey="workloads.deployments"
@@ -1169,6 +1161,7 @@ export default function DeploymentsPage() {
                 resetPage();
               }}
               toolbarExtra={scopeFilterControl}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建Deployment" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建Deployment" /></>}
               sort={{ sortBy, sortOrder }}
               columns={antd列}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -1193,7 +1186,7 @@ export default function DeploymentsPage() {
         </Space>
       </OpsSurface>
 
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

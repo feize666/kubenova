@@ -1,4 +1,5 @@
 "use client";
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
 import {
   MinusCircleOutlined,
@@ -17,12 +18,14 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
 import { ConfigCountCell, ConfigVersionCell } from "@/components/configs/config-table-cells";
 import { ResourceTable } from "@/components/resource-table";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
 import type { HeadlampTableFilters, HeadlampResourceTableColumn } from "@/components/resource-table";
 import {
   matchLabelExpressions,
@@ -106,7 +109,6 @@ function readConfigMapDetail(raw: unknown): { data: Record<string, string>; labe
 
 export default function ConfigMapsPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -118,10 +120,9 @@ export default function ConfigMapsPage() {
   const [globalSearchInput, setGlobalSearchInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ConfigResourceItem>({
-      defaultPageSize: 10,
       storageKey: "configs/configmaps/table-sort",
       defaultSortBy: "updatedAt",
       defaultSortOrder: "desc",
@@ -138,7 +139,7 @@ export default function ConfigMapsPage() {
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<ConfigMapFormValues>();
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const listQuery = useResourceListQuery({
     queryKey: [
       "configs",
       "configmaps",
@@ -170,6 +171,7 @@ export default function ConfigMapsPage() {
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
+  const { data, isLoading, refetch } = listQuery;
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "all", accessToken],
@@ -435,7 +437,7 @@ export default function ConfigMapsPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: ConfigResourceItem) =>
         row.id ? (
-          <Typography.Link onClick={() => { setDetailTarget({ kind: "ConfigMap", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/configmap/${encodeURIComponent(row.id)}`); }}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "ConfigMap", id: row.id }); }}>
             {name}
           </Typography.Link>
         ) : (
@@ -492,6 +494,7 @@ export default function ConfigMapsPage() {
       align: "left",
       render: (_: unknown, row: ConfigResourceItem) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind:"ConfigMap",name:row.name,namespace:row.namespace}}
           deleteLabel="删除"
           deleteTitle="删除 ConfigMap"
           deleteContent={`确认删除 ConfigMap「${row.name}」吗？此操作不可恢复。`}
@@ -535,7 +538,6 @@ export default function ConfigMapsPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={<ResourceAddButton title="创建ConfigMap" onClick={handleOpenCreate} />}
         />
 
         <Space className="workload-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
@@ -548,18 +550,12 @@ export default function ConfigMapsPage() {
             />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="config-resource-state-alert"
-              type="error"
-              showIcon
-              title="ConfigMap 加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback className="config-resource-state-alert" label="ConfigMap" query={listQuery} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<ConfigResourceItem>
+              queryState={listQuery}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" title="创建ConfigMap" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" title="使用 YAML 创建ConfigMap" /></>}
               bordered
               tableKey="configs.configmaps"
               rowKey="id"
@@ -867,7 +863,7 @@ export default function ConfigMapsPage() {
           />
         )}
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

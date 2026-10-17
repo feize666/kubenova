@@ -8,6 +8,7 @@ import {
   UploadedFile,
   UseInterceptors,
   Param,
+  Optional,
   Post,
   Put,
   Req,
@@ -28,6 +29,8 @@ import type {
   CreateSessionInput,
 } from './types';
 import { AiProviderService } from './ai-provider.service';
+import { AiActionApprovalService } from './ai-action-approval.service';
+import { AiAssistantAccessService } from './ai-assistant-access.service';
 
 export interface CreateAiAssistantSessionRequest extends CreateSessionInput {
   message?: string;
@@ -45,6 +48,7 @@ export interface SendAiAssistantMessageRequest {
 
 export interface ExecuteAiActionRequest {
   action: AiActionExecuteInput;
+  approvalId?: string;
 }
 
 export interface ChatRequest {
@@ -234,7 +238,65 @@ export class AiAssistantController {
     private readonly aiAssistantService: AiAssistantService,
     private readonly aiActionExecutorService: AiActionExecutorService,
     private readonly aiProviderService: AiProviderService,
+    @Optional() private readonly aiActionApprovalService?: AiActionApprovalService,
+    @Optional() private readonly aiAssistantAccessService?: AiAssistantAccessService,
   ) {}
+
+  private async requireAiAssistantUse(
+    req: AiAssistantRequest,
+    context: { clusterId?: string; namespace?: string; mutation?: boolean; requireScope?: boolean } = {},
+  ): Promise<AiAssistantActor> {
+    const actor = extractActorFromRequest(req);
+    if (!this.aiAssistantAccessService) return requireAiAssistantAdmin(req);
+    const authorized = await this.aiAssistantAccessService.authorize({
+      userId: actor.id,
+      username: actor.username,
+      role: normalizePlatformRole(actor.role),
+    }, context);
+    return { id: authorized.userId, username: authorized.username, role: authorized.role };
+  }
+
+  private async authorizeAction(
+    req: AiAssistantRequest,
+    action: AiActionExecuteInput,
+  ): Promise<AiAssistantActor> {
+    const mutation = !action?.operation?.startsWith('query-');
+    const targets = action?.targets?.length ? action.targets : [action?.target ?? {}];
+    const optionNamespace = action?.options?.namespace?.trim();
+    // Authorization and execution must resolve to the same namespace. Query
+    // executors prefer options.namespace, whereas mutations use the target.
+    // Reject ambiguity instead of silently choosing a different resource scope.
+    for (const target of targets) {
+      const targetNamespace = (target.namespace ?? action?.target?.namespace)?.trim();
+      if (optionNamespace && targetNamespace && optionNamespace !== targetNamespace) {
+        throw new BadRequestException('命名空间参数不一致，请核对操作目标与查询条件');
+      }
+    }
+    let authorized: AiAssistantActor | undefined;
+    for (const target of targets) {
+      authorized = await this.requireAiAssistantUse(req, {
+        clusterId: target.clusterId ?? action?.target?.clusterId,
+        namespace: target.namespace ?? action?.target?.namespace ?? action?.options?.namespace,
+        mutation,
+        requireScope: true,
+      });
+    }
+    return authorized ?? this.requireAiAssistantUse(req, { mutation, requireScope: true });
+  }
+
+  @Get('access')
+  getAccess(@Req() req: AiAssistantRequest) {
+    if (!this.aiAssistantAccessService) {
+      const actor = requireAiAssistantAdmin(req);
+      return { allowed: true, fullAccess: true, scopes: [], actorId: actor.id };
+    }
+    const actor = extractActorFromRequest(req);
+    return this.aiAssistantAccessService.getAccess({
+      userId: actor.id,
+      username: actor.username,
+      role: normalizePlatformRole(actor.role),
+    });
+  }
 
   private isAutoQueryBridgeEnabled(): boolean {
     const raw = process.env.AI_ASSISTANT_AUTO_QUERY_BRIDGE;
@@ -345,8 +407,8 @@ export class AiAssistantController {
   }
 
   @Get('presets')
-  getPresets(@Req() req: AiAssistantRequest) {
-    requireAiAssistantAdmin(req);
+  async getPresets(@Req() req: AiAssistantRequest) {
+    await this.requireAiAssistantUse(req);
     return this.aiAssistantService.getPresetQuestions();
   }
 
@@ -412,8 +474,8 @@ export class AiAssistantController {
   }
 
   @Post('chat')
-  chat(@Body() body: ChatRequest, @Req() req: AiAssistantRequest) {
-    requireAiAssistantAdmin(req);
+  async chat(@Body() body: ChatRequest, @Req() req: AiAssistantRequest) {
+    await this.requireAiAssistantUse(req);
     const message = body?.message?.trim();
     if (!message) {
       throw new BadRequestException('message is required');
@@ -423,7 +485,7 @@ export class AiAssistantController {
 
   @Get('suggestions')
   async getSuggestions(@Req() req: AiAssistantRequest) {
-    requireAiAssistantAdmin(req);
+    await this.requireAiAssistantUse(req);
     return this.aiAssistantService.getSuggestions();
   }
 
@@ -492,12 +554,17 @@ export class AiAssistantController {
     @Body() body: CreateAiAssistantSessionRequest,
     @Req() req: AiAssistantRequest,
   ) {
-    const actor = requireAiAssistantAdmin(req);
+    const requestedActor = extractActorFromRequest(req);
+    const platformAdmin = ['admin', 'platform-admin'].includes(String(requestedActor.role ?? '').toLowerCase());
+    const actor = await this.requireAiAssistantUse(req, {
+      clusterId: body?.clusterId,
+      namespace: body?.namespace,
+    });
     const session = await this.aiAssistantService.createSession({
       ownerUserId: actor.id,
       title: body?.title,
       presetQuestionId: body?.presetQuestionId,
-      surface: body?.surface,
+      surface: platformAdmin ? body?.surface : 'console',
       attachments: body?.attachments,
       voiceInput: body?.voiceInput,
       clusterId: body?.clusterId,
@@ -521,26 +588,52 @@ export class AiAssistantController {
   }
 
   @Get('sessions')
-  listSessions(@Req() req: AiAssistantRequest) {
-    const actor = requireAiAssistantAdmin(req);
-    return this.aiAssistantService.listSessions(actor.id);
+  async listSessions(@Req() req: AiAssistantRequest) {
+    const actor = await this.requireAiAssistantUse(req);
+    const sessions = await this.aiAssistantService.listSessions(actor.id);
+    const visible: typeof sessions = [];
+    const isAdmin = ['admin', 'platform-admin'].includes(String(actor.role ?? '').toLowerCase());
+    for (const session of sessions) {
+      try {
+        if (session.surface === 'mini' && !isAdmin) continue;
+        await this.requireAiAssistantUse(req, {
+          clusterId: session.clusterContext?.clusterId,
+          namespace: session.clusterContext?.namespace,
+          requireScope: true,
+        });
+        visible.push(session);
+      } catch (error) {
+        // Revoked scopes must not leave historical cluster data visible.
+        if (!(error instanceof ForbiddenException)) throw error;
+      }
+    }
+    return visible;
   }
 
   @Get('sessions/:sessionId')
-  getSessionHistory(
+  async getSessionHistory(
     @Param('sessionId') sessionId: string,
     @Req() req: AiAssistantRequest,
   ) {
-    const actor = requireAiAssistantAdmin(req);
-    return this.aiAssistantService.getSession(actor.id, sessionId);
+    const actor = await this.requireAiAssistantUse(req);
+    const session = await this.aiAssistantService.getSession(actor.id, sessionId);
+    if (session.surface === 'mini' && !['admin', 'platform-admin'].includes(String(actor.role ?? '').toLowerCase())) {
+      throw new ForbiddenException('该历史会话包含全群集上下文，当前授权范围不可访问');
+    }
+    await this.requireAiAssistantUse(req, {
+      clusterId: session.clusterContext?.clusterId,
+      namespace: session.clusterContext?.namespace,
+      requireScope: true,
+    });
+    return session;
   }
 
   @Delete('sessions/:sessionId')
-  deleteSession(
+  async deleteSession(
     @Param('sessionId') sessionId: string,
     @Req() req: AiAssistantRequest,
   ) {
-    const actor = requireAiAssistantAdmin(req);
+    const actor = await this.requireAiAssistantUse(req);
     return this.aiAssistantService.deleteSession(actor.id, sessionId);
   }
 
@@ -550,7 +643,16 @@ export class AiAssistantController {
     @Body() body: SendAiAssistantMessageRequest,
     @Req() req: AiAssistantRequest,
   ) {
-    const actor = requireAiAssistantAdmin(req);
+    const baseActor = await this.requireAiAssistantUse(req);
+    const isAdmin = ['admin', 'platform-admin'].includes(String(baseActor.role ?? '').toLowerCase());
+    const previousSession = await this.aiAssistantService.getSession(baseActor.id, sessionId);
+    if (previousSession.surface === 'mini' && !isAdmin) {
+      throw new ForbiddenException('该历史会话包含全群集上下文，当前授权范围不可访问');
+    }
+    const actor = await this.requireAiAssistantUse(req, {
+      clusterId: body?.clusterId ?? previousSession.clusterContext?.clusterId,
+      namespace: body?.namespace ?? previousSession.clusterContext?.namespace,
+    });
     const message = body?.message?.trim();
     if (!message) {
       throw new BadRequestException('message is required');
@@ -586,14 +688,12 @@ export class AiAssistantController {
         : undefined;
 
       if (autoAction) {
-        await this.aiActionExecutorService.execute(
-          {
-            userId: actor.id,
-            username: actor.username,
-            role: normalizePlatformRole(actor.role),
-          },
-          autoAction,
-        );
+        const authorizedActor = await this.authorizeAction(req, autoAction);
+        await this.aiActionExecutorService.execute({
+          userId: authorizedActor.id,
+          username: authorizedActor.username,
+          role: normalizePlatformRole(authorizedActor.role),
+        }, autoAction);
         const refreshedSession = await this.aiAssistantService.getSession(
           actor.id,
           sessionId,
@@ -610,7 +710,7 @@ export class AiAssistantController {
 
   @Post('uploads')
   @UseInterceptors(FileInterceptor('file'))
-  uploadAttachment(
+  async uploadAttachment(
     @Req() req: AiAssistantRequest,
     @UploadedFile()
     file?: {
@@ -619,7 +719,7 @@ export class AiAssistantController {
       size: number;
     },
   ) {
-    requireAiAssistantAdmin(req);
+    await this.requireAiAssistantUse(req);
     if (!file) {
       throw new BadRequestException('file is required');
     }
@@ -637,27 +737,52 @@ export class AiAssistantController {
   }
 
   @Post('actions/execute')
-  executeAction(
+  async executeAction(
     @Req() req: AiAssistantRequest,
     @Body() body: ExecuteAiActionRequest,
   ) {
-    const actor = requireAiAssistantAdmin(req);
+    const actor = await this.authorizeAction(req, body?.action);
+    const executionActor = {
+      userId: actor.id,
+      username: actor.username,
+      role: normalizePlatformRole(actor.role),
+    };
+    if (this.aiActionApprovalService) {
+      return this.aiActionApprovalService.execute(
+        executionActor,
+        body?.action,
+        body?.approvalId,
+      );
+    }
+    if (!body?.action?.operation?.startsWith('query-')) {
+      throw new ForbiddenException('写操作审批服务不可用');
+    }
     return this.aiActionExecutorService.execute(
-      {
-        userId: actor.id,
-        username: actor.username,
-        role: normalizePlatformRole(actor.role),
-      },
+      executionActor,
       body?.action,
     );
   }
 
   @Post('actions/preview')
-  previewAction(
+  async previewAction(
     @Body() body: ExecuteAiActionRequest,
     @Req() req: AiAssistantRequest,
   ) {
-    requireAiAssistantAdmin(req);
-    return this.aiActionExecutorService.preview(body?.action);
+    const actor = await this.authorizeAction(req, body?.action);
+    if (!this.aiActionApprovalService) {
+      if (!body?.action?.operation?.startsWith('query-')) {
+        throw new ForbiddenException('写操作审批服务不可用');
+      }
+      return this.aiActionExecutorService.preview({
+        userId: actor.id,
+        username: actor.username,
+        role: normalizePlatformRole(actor.role),
+      }, body?.action);
+    }
+    return this.aiActionApprovalService.preview({
+      userId: actor.id,
+      username: actor.username,
+      role: normalizePlatformRole(actor.role),
+    }, body?.action);
   }
 }

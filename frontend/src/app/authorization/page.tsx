@@ -6,21 +6,23 @@ import { GroupManager } from "./group-manager";
 import { NativeAccessSettingsPanel } from "./native-access-settings";
 import UsersPage from "@/app/users/page";
 import { useAuth } from "@/components/auth-context";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
 import { Alert, Button, Popconfirm, Space, Table, Tabs, Tag, Tooltip, Typography } from "antd";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { getAccessGrants, revokeAccessGrant, type AccessGrantListResponse } from "@/lib/api/users";
 
 type Grant = AccessGrantListResponse["items"][number];
 const roleNames: Record<string, string> = { "cluster-admin": "集群管理员", operator: "运维人员", viewer: "只读用户" };
-const capabilityNames: Record<string, string> = { logs: "日志读取", exec: "终端执行", secrets: "Secret 访问", kubeconfig: "Kubeconfig" };
+const capabilityNames: Record<string, string> = { logs: "日志读取", exec: "终端执行", secrets: "Secret 访问", kubeconfig: "Kubeconfig", "ai-assistant:use": "AI 助手使用" };
 const formatDate = (value: string) => new Date(value).toLocaleString("zh-CN");
 
 function GrantList() {
   const [creating, setCreating] = useState(false);
   const { accessToken } = useAuth();
   const client = useQueryClient();
-  const grants = useQuery({
+  const grants = useResourceListQuery({
     queryKey: ["access-grants", accessToken],
     queryFn: () => getAccessGrants(undefined, accessToken!),
     enabled: Boolean(accessToken),
@@ -43,10 +45,10 @@ function GrantList() {
   return <Space direction="vertical" size="middle" style={{ width: "100%", minWidth: 0 }}>
     <Space><Button type="primary" icon={<PlusOutlined />} disabled={!accessToken} onClick={() => setCreating(true)}>新建授权</Button><Tooltip title="刷新授权列表"><Button aria-label="刷新授权列表" icon={<ReloadOutlined />} loading={grants.isFetching} onClick={() => void grants.refetch()} /></Tooltip></Space>
     {creating && accessToken && <CreateGrant token={accessToken} onClose={() => setCreating(false)} />}
-    {grants.isError && <Alert type="error" showIcon message="授权列表加载失败" action={<Button onClick={() => void grants.refetch()}>重试</Button>} />}
+    <ResourceQueryFeedback query={grants} label="授权列表" />
     {revoke.isError && <Alert type="error" showIcon message="撤销失败，授权状态未确认，请刷新后重试" />}
     {revoke.isSuccess && <Alert type="success" showIcon message="授权已撤销" />}
-    <Table<Grant> rowKey="id" size="middle" loading={grants.isLoading} dataSource={grants.isError ? [] : grants.data?.items ?? []}
+    <Table<Grant> rowKey="id" size="middle" loading={grants.isLoading} dataSource={grants.data?.items ?? []}
       scroll={{ x: 1100 }} pagination={{ pageSize: 10, hideOnSinglePage: true }} locale={{ emptyText: grants.isError ? "暂时无法读取授权" : "暂无集群访问授权" }}
       columns={[
         { title: "授权主体", key: "principal", width: 180, render: (_, grant) => <><Typography.Text>{grant.principal?.username ?? grant.principal?.name ?? "未知主体"}</Typography.Text><br /><Typography.Text type="secondary">{grant.principal?.type === "group" ? "用户组" : "用户"}</Typography.Text></> },

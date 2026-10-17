@@ -1,4 +1,8 @@
 "use client";
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
 
 import {
   DeleteOutlined,
@@ -132,6 +136,7 @@ interface FormValues {
 }
 
 export default function CronJobsPage() {
+  const openEditor = useResourceEditorNavigation();
   const { message } = App.useApp();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -140,7 +145,8 @@ export default function CronJobsPage() {
     namespace: initialNamespace,
     keyword: initialKeyword,
   } = readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const [keyword, setKeyword] = useState(initialKeyword);
@@ -163,10 +169,8 @@ export default function CronJobsPage() {
     getSortableColumnProps,
     handleTableChange,
   } = useAntdTableSortPagination<CronJobItem>({
-    defaultPageSize: 10,
   });
-  const [detailTarget, setDetailTarget] =
-    useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<CronJobItem | null>(null);
@@ -193,9 +197,9 @@ export default function CronJobsPage() {
     accessToken,
   ];
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, isFetching:queryIsFetching, refetch } = useResourceListQuery({
     queryKey,
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getWorkloadsByKind(
         "CronJob",
         {
@@ -208,6 +212,7 @@ export default function CronJobsPage() {
           sortOrder: sortOrder || undefined,
         },
         accessToken || undefined,
+        { signal },
       ),
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
@@ -460,10 +465,11 @@ export default function CronJobsPage() {
       { key: "edit", icon: <EditOutlined />, label: "编辑" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
       { type: "divider" },
-      { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true },
+      { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true, disabled: !canWrite },
     ]);
 
   const handleRowAction = (row: CronJobItem, key: string) => {
+    if (key === "delete" && !canWrite) return;
     if (key === "describe") {
       if (row.id) {
         setDetailTarget({ kind: "CronJob", id: row.id });
@@ -480,7 +486,7 @@ export default function CronJobsPage() {
       return;
     }
     if (key === "edit") {
-      openEditModal(row);
+      openEditor({clusterId:row.clusterId,namespace:row.namespace,kind:"CronJob",name:row.name});
       return;
     }
     if (key === "delete") {
@@ -662,12 +668,6 @@ export default function CronJobsPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={
-            <ResourceAddButton
-              onClick={openAddModal}
-              aria-label="创建CronJob"
-            />
-          }
         />
 
         <Space
@@ -685,18 +685,11 @@ export default function CronJobsPage() {
             />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="workload-resource-state-alert"
-              type="error"
-              showIcon
-              title="定时任务加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="CronJob" className="workload-resource-state-alert" query={{data,isError,error,isFetching:queryIsFetching,refetch}} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<CronJobItem>
+              queryState={{data,isLoading,isError,error,isFetching:queryIsFetching}}
               bordered
               rowKey="id"
               tableKey="workloads.cronjobs"
@@ -714,6 +707,7 @@ export default function CronJobsPage() {
                 resetPage();
               }}
               toolbarExtra={scopeFilterControl}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建CronJob" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建CronJob" /></>}
               sort={{ sortBy, sortOrder }}
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -880,7 +874,7 @@ export default function CronJobsPage() {
           </OpsFormSection>
         ) : null}
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

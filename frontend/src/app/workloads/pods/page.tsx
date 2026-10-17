@@ -1,4 +1,14 @@
 "use client";
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { isResourceAccessDenied } from '@/lib/query/visible-resource-data';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { BatchDeleteDialog, type BatchDeleteTarget } from '@/components/resource-table/batch-delete-dialog';
+import { captureSelectedBatchTargets } from '@/lib/table/batch-targets';
+import { guardBatchContext } from '@/lib/table/batch-operation';
+import { scopedPlaceholder } from '@/lib/query/scoped-placeholder';
+import { useScopedDeferredValue } from '@/hooks/use-scoped-deferred-value';
+import { PodRuntimeOverlay } from '@/components/runtime-workbench/pod-runtime-overlay';
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
 
 import {
   BugOutlined,
@@ -8,7 +18,7 @@ import {
   FileTextOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Space, Typography, message } from "antd";
+import { Alert, Button, Pagination, Space, Typography, message } from "antd";
 import type { MenuProps, TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -16,8 +26,10 @@ import {
   createContext,
   useCallback,
   useContext,
-  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -38,9 +50,8 @@ import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter"
 import { getClusters } from "@/lib/api/clusters";
 import { buildLogsRoute } from "@/lib/api/logs";
 import { deleteWorkload, getWorkloadsByKind } from "@/lib/api/workloads";
-import type { WorkloadListItem, WorkloadKindParam } from "@/lib/api/workloads";
+import type { WorkloadListItem, WorkloadListResponse, WorkloadKindParam } from "@/lib/api/workloads";
 import type {
-  ResourceDetailRequest,
   ResourceIdentity,
 } from "@/lib/api/resources";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
@@ -60,6 +71,7 @@ import {
 } from "@/hooks/use-resource-filter-url-state";
 import { OpsActionDropdown } from "@/components/ops/ops-action-dropdown";
 import { ResourceActionIsolation } from "@/components/resource-action-bar";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
 import { openOpsConfirm } from "@/components/ops/ops-confirm-modal";
 import { OpsFilterChip } from "@/components/ops/ops-filter-chip";
 import { OpsSurface } from "@/components/ops/ops-surface";
@@ -487,9 +499,10 @@ function textMatches(value: unknown, filterValue: string) {
 }
 
 export default function PodsPage() {
+  const openEditor = useResourceEditorNavigation();
   const router = useRouter();
+  const [runtimeTarget,setRuntimeTarget]=useState<{mode:'logs'|'terminal';podName:string;query:URLSearchParams}|null>(null);
   const workspace = useOptionalClusterWorkspace();
-  const createWorkloadHref = useClusterWorkspaceHref("/workloads/create?kind=Pod");
   const podsReturnHref = useClusterWorkspaceHref(POD_PATH);
   const logsHref = useClusterWorkspaceHref("/logs");
   const terminalHref = useClusterWorkspaceHref("/terminal");
@@ -499,7 +512,7 @@ export default function PodsPage() {
     namespace: initialNamespace,
     keyword: initialKeyword,
   } = readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, username, role } = useAuth();
   const {
     clusterId,
     namespace,
@@ -515,6 +528,9 @@ export default function PodsPage() {
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>(() => ({ phase: searchParams.get("phase") || "" }));
   const phaseFilter =
     typeof tableFilters.phase === "string" ? tableFilters.phase : "";
+  const selectionScope=JSON.stringify([username,clusterId,namespace,keyword,mergedFilters,tableFilters]);
+  const [podSelection,setPodSelection]=useState<{scope:string;keys:React.Key[];rows:PodRow[]}>({scope:'',keys:[],rows:[]});
+  const [batchDeleteTargets,setBatchDeleteTargets]=useState<BatchDeleteTarget[]|null>(null);
   const {
     sortBy,
     sortOrder,
@@ -525,7 +541,7 @@ export default function PodsPage() {
     handleTableChange,
   } = useAntdTableSortPagination<PodRow>({
     storageKey: "workloads/pods/table-sort",
-    defaultPageSize: [10, 20, 50, 100].includes(Number(searchParams.get("pageSize"))) ? Number(searchParams.get("pageSize")) : 10,
+    defaultPageSize: [10, 20, 25, 50, 100].includes(Number(searchParams.get("pageSize"))) ? Number(searchParams.get("pageSize")) : undefined,
     defaultPage: Math.min(100000, Number(searchParams.get("page")) || 1),
     defaultSortBy: "createdAt",
     defaultSortOrder: "desc",
@@ -544,15 +560,17 @@ export default function PodsPage() {
     ],
   });
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
-  const [detailTarget, setDetailTarget] =
-    useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const page = pagination.pageIndex + 1;
   const pageSize = pagination.pageSize;
+  const clusterListScope=accessToken?JSON.stringify(['clusters',accessToken]):'';
+  const podListScope=accessToken?JSON.stringify(['pods',accessToken,clusterId,namespace,keyword,phaseFilter,mergedFilters]):'';
 
   // 集群列表（供筛选下拉）
   const clustersQuery = useQuery({
     ...POD_LIST_QUERY_CACHE_OPTIONS,
-    placeholderData: (previousData) => previousData,
+    meta:{resourceScope:clusterListScope},
+    placeholderData: (previousData,previousQuery) => scopedPlaceholder(previousData,previousQuery,clusterListScope),
     queryKey: ["clusters", "list-for-pods", accessToken],
     queryFn: () =>
       getClusters(
@@ -580,9 +598,10 @@ export default function PodsPage() {
   );
 
   // 查询 Pod 列表
-  const podsQuery = useQuery({
+  const podsQuery = useResourceListQuery<WorkloadListResponse>({
     ...POD_LIST_QUERY_CACHE_OPTIONS,
-    placeholderData: (previousData) => previousData,
+    meta:{resourceScope:podListScope},
+    placeholderData: (previousData,previousQuery) => scopedPlaceholder(previousData,previousQuery,podListScope),
     queryKey: [
       "workloads",
       "pods",
@@ -597,7 +616,7 @@ export default function PodsPage() {
       sortOrder,
       accessToken,
     ],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getWorkloadsByKind(
         POD_KIND as WorkloadKindParam,
         {
@@ -611,19 +630,34 @@ export default function PodsPage() {
           ...(phaseFilter ? { state: phaseFilter } : {}),
         } as Parameters<typeof getWorkloadsByKind>[1],
         accessToken,
+        { signal },
       ),
     enabled: !isInitializing && Boolean(accessToken),
   });
   const tableBusy = podsQuery.isFetching;
+  const podDataScope=JSON.stringify([podListScope,isResourceAccessDenied(podsQuery.error)]);
+  const podViewScope=JSON.stringify([podDataScope,tableFilters]);
   const isTableLoading = podsQuery.isLoading && !podsQuery.data;
   const refetchPods = podsQuery.refetch;
   const podItems = podsQuery.data?.items ?? EMPTY_WORKLOAD_ITEMS;
 
+  // A denied cached read invalidates confirmed targets; a later 503 is not authorization.
+  const canBatchDelete=podsQuery.data!==undefined&&['admin','platform-admin','operator','cluster-operator'].includes(role.trim().toLowerCase());
+  const operationContext=useMemo(()=>({scope:selectionScope,token:accessToken,canDelete:canBatchDelete}),[selectionScope,accessToken,canBatchDelete]);
+  const currentOperationRef=useRef(operationContext);
+  useLayoutEffect(()=>{currentOperationRef.current=operationContext;},[operationContext]);
+  const confirmedOperationRef=useRef<typeof operationContext|null>(null);
+  const pageActiveRef=useRef(true);
+  useEffect(()=>{pageActiveRef.current=true;return()=>{pageActiveRef.current=false;};},[]);
+  const [selectionContext,setSelectionContext]=useState(operationContext);
+  if(selectionContext!==operationContext){setSelectionContext(operationContext);setPodSelection({scope:selectionScope,keys:[],rows:[]});setBatchDeleteTargets(null);}
+  const selectedPodKeys=podSelection.scope===selectionScope?podSelection.keys:[];
+
   const rows = useMemo<PodRow[]>(() => podItems.map(mapItemToRow), [podItems]);
-  const deferredRows = useDeferredValue(rows);
-  const deferredMergedFilters = useDeferredValue(mergedFilters);
-  const deferredTableFilters = useDeferredValue(tableFilters);
-  const deferredClusterMap = useDeferredValue(clusterMap);
+  const deferredRows = useScopedDeferredValue(rows,podDataScope);
+  const deferredMergedFilters = useScopedDeferredValue(mergedFilters,podViewScope);
+  const deferredTableFilters = useScopedDeferredValue(tableFilters,podViewScope);
+  const deferredClusterMap = useScopedDeferredValue(clusterMap,clusterListScope);
 
   // Extract known namespaces from loaded data for NamespaceSelect suggestions
   const knownNamespaces = useMemo(
@@ -664,7 +698,7 @@ export default function PodsPage() {
     deferredTableFilters,
     phaseFilter,
   ]);
-  const deferredTableData = useDeferredValue(tableData);
+  const deferredTableData = useScopedDeferredValue(tableData,podViewScope);
   const displayedRows = useMemo<PodRow[]>(() => {
     const rowsToSort = [...deferredTableData];
     if (!sortBy || !sortOrder) {
@@ -985,19 +1019,20 @@ export default function PodsPage() {
         render: (_: unknown, row: PodRow) => (
           <ResourceActionIsolation>
             <OpsActionDropdown
-              items={POD_ACTION_ITEMS}
+              items={[{key:'edit',label:'编辑'},...POD_ACTION_ITEMS.filter(item=>item?.key !== 'description').map(item => item?.key === 'delete' ? { ...item, disabled: !['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase()) } : item)]}
               onClick={({ key }) => {
+                if (key === 'edit') { openEditor(resolveIdentity(row)); return; }
                 if (key === "description") {
                   if (row.id) setDetailTarget({ kind: POD_KIND, id: row.id });
                   return;
                 }
                 if (key === "logs") {
-                  if (row.id) router.push(`${logsHref}?${buildLogsParams(row)}`);
+                  if (row.id) setRuntimeTarget({mode:'logs',podName:row.name,query:new URLSearchParams(buildLogsParams(row))});
                   return;
                 }
                 if (key === "terminal") {
                   if (row.id)
-                    router.push(`${terminalHref}?${buildTerminalParams(row)}`);
+                    setRuntimeTarget({mode:'terminal',podName:row.name,query:new URLSearchParams(buildTerminalParams(row))});
                   return;
                 }
                 if (key === "yaml") {
@@ -1029,6 +1064,8 @@ export default function PodsPage() {
       clusterMap,
       getSortableColumnProps,
       handleDelete,
+      openEditor,
+      setDetailTarget,
       logsHref,
       nameWidth,
       router,
@@ -1093,12 +1130,6 @@ export default function PodsPage() {
             </span>
           }
           description="查看和管理集群中运行的 Pod 实例。"
-          extra={
-            <ResourceAddButton
-              onClick={() => router.push(createWorkloadHref)}
-              aria-label="创建Pod"
-            />
-          }
         />
 
         <Space
@@ -1116,24 +1147,19 @@ export default function PodsPage() {
             />
           ) : null}
 
-          {podsQuery.isError ? (
-            <Alert
-              className="workload-resource-state-alert"
-              type="error"
-              showIcon
-              title="加载失败"
-              description={
-                podsQuery.error instanceof Error
-                  ? podsQuery.error.message
-                  : "获取 Pod 数据时发生错误"
-              }
-            />
-          ) : null}
+          <ResourceQueryFeedback label="Pod" className="workload-resource-state-alert" query={podsQuery} />
 
           <div className="pod-workbench__table-zone">
             <PodTimeProvider>
               <ResourceTable<PodRow>
+                queryState={podsQuery}
                 rowKey="key"
+                rowSelection={{
+                  selectedRowKeys:selectedPodKeys,
+                  preserveSelectedRowKeys:true,
+                  onChange:(keys,rows)=>setPodSelection({scope:selectionScope,keys,rows}),
+                  getCheckboxProps:row=>({disabled:!row.id}),
+                }}
                 tableKey={POD_TABLE_KEY}
                 className="pod-table"
                 bordered
@@ -1144,19 +1170,26 @@ export default function PodsPage() {
                 globalSearch={globalSearch}
                 filters={tableFilters}
                 onFiltersChange={handleFiltersChange}
-                toolbarExtra={scopeFilterControl}
+              toolbarExtra={scopeFilterControl}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建Pod" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建Pod" /></>}
                 sort={sortState}
                 loading={loadingState}
                 onChange={handleResourceTableChange}
-                pagination={getPaginationConfig(displayedTotal, tableBusy)}
+                pagination={false}
                 emptyDescription="暂无 Pod 数据。集群接入完成后，平台将自动同步 Pod 信息。"
               />
             </PodTimeProvider>
+            <div className="pod-selection-footer">
+              {selectedPodKeys.length>0 ? <Space wrap role="status"><Typography.Text>已选择 {selectedPodKeys.length} 个 Pod</Typography.Text><Button danger disabled={!canBatchDelete||!!batchDeleteTargets} title={!canBatchDelete?'当前角色无批量删除权限':undefined} onClick={()=>{const targets=captureSelectedBatchTargets(selectedPodKeys,podSelection.rows);if(targets){confirmedOperationRef.current=operationContext;setBatchDeleteTargets(targets);}else void message.warning('选中资源信息不完整，请刷新后重新选择');}}>批量删除</Button><Button onClick={()=>setPodSelection({scope:selectionScope,keys:[],rows:[]})}>取消选择</Button></Space> : <span/>}
+              <Pagination {...getPaginationConfig(displayedTotal, tableBusy)} responsive showLessItems />
+            </div>
           </div>
         </Space>
       </OpsSurface>
 
-      <ResourceDetailDrawer
+      {batchDeleteTargets&&<BatchDeleteDialog targets={batchDeleteTargets} execute={target=>guardBatchContext(confirmedOperationRef.current,()=>pageActiveRef.current?currentOperationRef.current:null,(confirmedTarget:BatchDeleteTarget)=>{if(!canBatchDelete||!accessToken)return Promise.reject(new Error('当前账号无删除权限'));if(!confirmedTarget.uid)return Promise.reject(new Error('Pod 身份尚未同步，请刷新后重新选择'));return deleteWorkload(confirmedTarget.id,accessToken,confirmedTarget.uid);})(target)} onClose={()=>setBatchDeleteTargets(null)} onComplete={results=>{if(!pageActiveRef.current||currentOperationRef.current!==operationContext)return;const succeeded=new Set(results.filter(item=>item.status==='succeeded').map(item=>item.target.id));setPodSelection(prev=>prev.scope!==selectionScope?prev:({...prev,keys:prev.rows.filter(row=>!succeeded.has(row.id)).map(row=>row.key),rows:prev.rows.filter(row=>!succeeded.has(row.id))}));void refetchPods();}}/>}
+      {runtimeTarget&&<PodRuntimeOverlay open mode={runtimeTarget.mode} podName={runtimeTarget.podName} query={runtimeTarget.query} onClose={()=>setRuntimeTarget(null)}/>}
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

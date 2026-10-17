@@ -7,7 +7,7 @@ describe('OIDC original enrollment freshness', () => {
   const actor = { userId: 'u', sessionId: 's', authzVersion: 1, subject: 'sub' };
   async function setup(age = 0, authAge = 0, context: Record<string, unknown> = {}) {
     const values = new Map<string, string>();
-    const store = new OidcTransactionStore({ set: async (k, v) => { values.set(k, v); return 'OK'; }, getdel: async k => { const v = values.get(k) ?? null; values.delete(k); return v; } } as never);
+    const store = new OidcTransactionStore({ set: async (k: string, v: string) => { values.set(k, v); return 'OK'; }, getdel: async (k: string) => { const v = values.get(k) ?? null; values.delete(k); return v; } } as never);
     const flow = new OidcFlowService(store);
     const requestedAt = Math.floor(Date.now() / 1000) - age;
     const { url } = await flow.begin(config, 'https://issuer.test/authorize', 'binding', { ...actor, requestedAt, ...context } as never);

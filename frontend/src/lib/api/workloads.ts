@@ -984,10 +984,10 @@ export function patchWorkloadById(id: string, body: WorkloadPatchPayload, token?
   });
 }
 
-export function deleteWorkload(id: string, token?: string) {
+export function deleteWorkload(id: string, token?: string, expectedUid?:string) {
   return apiRequest(`/api/workloads/${id}/actions`, {
     method: 'POST',
-    body: { action: 'delete' },
+    body: { action: 'delete', ...(expectedUid?{payload:{expectedUid}}:{}) },
     token,
   });
 }

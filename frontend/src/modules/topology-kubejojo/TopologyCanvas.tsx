@@ -2,6 +2,8 @@
 
 import {
   AimOutlined,
+  CompressOutlined,
+  ExpandOutlined,
   OneToOneOutlined,
   WarningOutlined,
   ZoomInOutlined,
@@ -53,6 +55,7 @@ type Props = {
   expandAll: boolean;
   displayMode?: "core" | "full";
   onFocus: (id: string | null) => void;
+  onCollapseAllStacks?: () => void;
   onSelectResource: (selection: KubejojoTopologySelection | null) => void;
   onOpen: (id: string) => void;
   onNavigate: (id: string) => void;
@@ -116,6 +119,13 @@ function countVisibleNodes(node: KubejojoGraphNode): number {
     + (node.nodes ?? []).reduce((total, child) => total + countVisibleNodes(child), 0);
 }
 
+function collectExpandableStackIds(node: KubejojoGraphNode): string[] {
+  const ids: string[] = [];
+  if (node.groupKind === "stack" && (node.nodes?.length ?? 0) > 0) ids.push(node.id);
+  for (const child of node.nodes ?? []) ids.push(...collectExpandableStackIds(child));
+  return ids;
+}
+
 function projectCanvasCapacity(
   resources: KubejojoResource[],
   relations: KubejojoRelation[],
@@ -123,6 +133,7 @@ function projectCanvasCapacity(
   focusedId: string | null,
   expandAll: boolean,
   displayMode: "core" | "full",
+  expandedStackIds: ReadonlySet<string>,
 ) {
   const mode = expandAll || Boolean(focusedId) ? "expanded" : "defaultCanvas";
   const renderedNodeLimit = TOPOLOGY_CAPACITY_LIMITS[mode].nodes;
@@ -140,7 +151,7 @@ function projectCanvasCapacity(
     );
     groupedGraph.capacity = projected.capacity;
     const focusedGroup = findKubejojoNode(groupedGraph, focusedId);
-    const graph = collapseKubejojoGraph(groupedGraph, focusedGroup?.id, expandAll);
+    const graph = collapseKubejojoGraph(groupedGraph, focusedGroup?.id, expandAll, expandedStackIds);
     const renderedNodeCount = countVisibleNodes(graph);
     if (renderedNodeCount <= renderedNodeLimit) {
       return { projected, groupedGraph, focusedGroup, graph, renderedNodeCount };
@@ -173,6 +184,7 @@ function Canvas({
   expandAll,
   displayMode = "core",
   onFocus,
+  onCollapseAllStacks,
   onSelectResource,
   onOpen,
   onNavigate,
@@ -187,6 +199,10 @@ function Canvas({
   const layoutRequest = useRef(0);
   const appliedLayoutRevision = useRef(0);
   const lastFitVersion = useRef(fitVersion);
+  const pendingViewport = useRef<ReturnType<typeof flow.getViewport> | null>(null);
+  const previousSceneId = useRef(focusedId);
+  const hasLayout = useRef(false);
+  const fitNextLayout = useRef(false);
   const [layout, setLayout] = useState<Layout>({ nodes: [], edges: [] });
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [aspectRatio, setAspectRatio] = useState(1.65);
@@ -194,6 +210,7 @@ function Canvas({
   const [layoutError, setLayoutError] = useState(false);
   const [layoutRetry, setLayoutRetry] = useState(0);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [expandedStackIds, setExpandedStackIds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     if (!selectedNodeId && !selectedEdgeId) return;
     const clearOutsideSelection = (event: PointerEvent) => {
@@ -207,14 +224,31 @@ function Canvas({
     return () => document.removeEventListener("pointerdown", clearOutsideSelection);
   }, [onSelectResource, selectedEdgeId, selectedNodeId]);
   const capacityProjection = useMemo(
-    () => projectCanvasCapacity(resources, relations, groupBy, focusedId, expandAll, displayMode),
-    [displayMode, expandAll, focusedId, groupBy, relations, resources],
+    () => projectCanvasCapacity(resources, relations, groupBy, focusedId, expandAll, displayMode, expandedStackIds),
+    [displayMode, expandAll, expandedStackIds, focusedId, groupBy, relations, resources],
   );
   const { projected, groupedGraph, focusedGroup, graph, renderedNodeCount } = capacityProjection;
+  // Stack cards can be nested below namespace, component, or workload groups.
+  // Scan the rendered graph instead of only the currently focused component so
+  // the bulk control is available at every canvas level.
+  const visibleStackIds = useMemo(
+    () => Array.from(new Set([
+      ...collectExpandableStackIds(graph),
+      ...(focusedGroup?.nodes ?? [])
+        .filter((node) => node.groupKind === "stack" && (node.nodes?.length ?? 0) > 0)
+        .map((node) => node.id),
+    ])),
+    [focusedGroup?.nodes, graph],
+  );
+  const hasExpandedStacks = visibleStackIds.some((id) => expandedStackIds.has(id))
+    || (expandAll && visibleStackIds.length > 0);
   const selectionPath = useMemo(
     () => getKubejojoSelectionPath(groupedGraph, focusedGroup?.id),
     [focusedGroup?.id, groupedGraph],
   );
+  // Only a drilled-in path is a relationship scene. A focused id can exist
+  // briefly while the aggregate canvas is resolving its next layout.
+  const isRelationshipScene = selectionPath.some((item) => item.kind === "component");
 
   useEffect(() => {
     const element = canvasRef.current;
@@ -234,9 +268,15 @@ function Canvas({
 
   useEffect(() => {
     const requestId = ++layoutRequest.current;
+    const sceneChanged = previousSceneId.current !== focusedId;
+    previousSceneId.current = focusedId;
     void layoutKubejojoGraph(graph, aspectRatio)
       .then((next) => {
         if (requestId === layoutRequest.current) {
+          const shouldFit = fitNextLayout.current;
+          pendingViewport.current = !sceneChanged && hasLayout.current && !shouldFit ? flow.getViewport() : null;
+          fitNextLayout.current = false;
+          hasLayout.current = next.nodes.length > 0;
           setLayout(next);
           setSelectedEdgeId((current) => current && next.edges.some((edge) => edge.id === current) ? current : null);
           setLayoutRevision(requestId);
@@ -245,11 +285,12 @@ function Canvas({
       })
       .catch(() => {
         if (requestId === layoutRequest.current) {
+          hasLayout.current = false;
           setLayout({ nodes: [], edges: [] });
           setLayoutError(true);
         }
       });
-  }, [aspectRatio, graph, layoutRetry]);
+  }, [aspectRatio, flow, focusedId, graph, layoutRetry]);
 
   const showActualSize = useCallback((duration = 180) => {
     setViewMode("actual");
@@ -273,7 +314,7 @@ function Canvas({
       await flow.fitView({
         padding: aspectRatio < 0.9 ? 0.16 : 0.08,
         duration,
-        minZoom: 0.2,
+        minZoom: 0.05,
         maxZoom: 1,
       });
       return;
@@ -287,7 +328,7 @@ function Canvas({
     const viewport = getCenteredTopologyViewport(
       bounds,
       frame.size,
-      { minZoom: 0.2, maxZoom: 1, padding: inset },
+      { minZoom: 0.05, maxZoom: 1, padding: inset },
     );
     if (viewport) await flow.setViewport({ ...viewport, y: viewport.y + frame.offsetY }, { duration });
   }, [aspectRatio, flow, layout.nodes]);
@@ -296,11 +337,14 @@ function Canvas({
     if (!layout.nodes.length || appliedLayoutRevision.current === layoutRevision) return;
     appliedLayoutRevision.current = layoutRevision;
     const frame = requestAnimationFrame(() => {
-      if (viewMode === "fit") fitGraph(0);
+      const viewport = pendingViewport.current;
+      pendingViewport.current = null;
+      if (viewport) void flow.setViewport(viewport, { duration: 0 });
+      else if (viewMode === "fit") fitGraph(0);
       else showActualSize(0);
     });
     return () => cancelAnimationFrame(frame);
-  }, [fitGraph, layout.nodes.length, layoutRevision, showActualSize, viewMode]);
+  }, [fitGraph, flow, layout.nodes.length, layoutRevision, showActualSize, viewMode]);
 
   useEffect(() => {
     if (fitVersion === lastFitVersion.current) return;
@@ -327,6 +371,16 @@ function Canvas({
       data: {
         ...node.data,
         onOpenResource: onNavigate,
+        onToggleStack: (id: string) => {
+          fitNextLayout.current = true;
+          setViewMode("fit");
+          setExpandedStackIds(current => {
+            const next = new Set(current);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+          });
+        },
         viewState: selectedEdgeId
           ? layout.edges.find((edge) => edge.id === selectedEdgeId && (edge.source === node.id || edge.target === node.id))
             ? "focused"
@@ -350,6 +404,11 @@ function Canvas({
       ...edge,
       data: {
         ...edge.data,
+        flowActive: Boolean(selectedNodeId && !selectedEdgeId &&
+          (edge.data?.relationIds ?? []).some((id) => {
+            const relation = relationById.get(id);
+            return relation?.source === selectedNodeId || relation?.target === selectedNodeId;
+          })),
         labelVisible: layout.edges.length <= 18,
         route: "bezier" as const,
         status: aggregateEdgeHealth(
@@ -365,6 +424,17 @@ function Canvas({
     setSelectedEdgeId(null);
     const graphNode = node.data.graphNode;
     if (graphNode.nodes?.length) {
+      if (graphNode.groupKind === "stack") {
+        fitNextLayout.current = true;
+        setViewMode("fit");
+        setExpandedStackIds(current => {
+          const next = new Set(current);
+          if (next.has(graphNode.id)) next.delete(graphNode.id);
+          else next.add(graphNode.id);
+          return next;
+        });
+        return;
+      }
       // Every folded card advertises 进入, so every folded card must enter.
       // Headlamp selects the group and promotes it to the root of the scene;
       // refusing scope/isolated groups left the affordance dead.
@@ -415,7 +485,7 @@ function Canvas({
             </button>
           </div>
         ) : null}
-        <div className="topology-kubejojo__zoom topology-kubejojo__controls" role="toolbar" aria-label="拓扑视图工具栏">
+        {isRelationshipScene ? <div className="topology-kubejojo__zoom topology-kubejojo__controls" role="toolbar" aria-label="拓扑视图工具栏">
           <button type="button" aria-label="缩小" onClick={() => { setViewMode("custom"); void flow.zoomOut({ duration: 180 }); }}>
             <ZoomOutOutlined />
           </button>
@@ -444,7 +514,33 @@ function Canvas({
             <AimOutlined />
             <span>适配全图</span>
           </button>
-        </div>
+          {visibleStackIds.length ? (
+            <button
+              type="button"
+              className={`topology-kubejojo__collapse-all${hasExpandedStacks ? " is-active" : ""}`}
+              aria-label={`${hasExpandedStacks ? "折叠" : "展开"}所有资源堆叠`}
+              aria-pressed={hasExpandedStacks}
+              title={`${hasExpandedStacks ? "折叠" : "展开"}所有资源堆叠`}
+              onClick={() => {
+                fitNextLayout.current = true;
+                setViewMode("fit");
+                if (hasExpandedStacks) {
+                  setExpandedStackIds((current) => {
+                    const next = new Set(current);
+                    visibleStackIds.forEach((id) => next.delete(id));
+                    return next;
+                  });
+                  onCollapseAllStacks?.();
+                  return;
+                }
+                setExpandedStackIds((current) => new Set([...current, ...visibleStackIds]));
+              }}
+            >
+              {hasExpandedStacks ? <CompressOutlined /> : <ExpandOutlined />}
+              <span>{hasExpandedStacks ? "折叠全部" : "展开全部"}</span>
+            </button>
+          ) : null}
+        </div> : null}
         {topologyRootLabel ? (
           <nav className="topology-kubejojo__focus topology-kubejojo__resource-path" aria-label="资源拓扑路径">
             <button
@@ -526,7 +622,7 @@ function Canvas({
           elementsSelectable={false}
           nodesFocusable={false}
           onlyRenderVisibleElements
-          minZoom={0.2}
+          minZoom={0.05}
           maxZoom={1.8}
           panOnDrag
           panOnScroll={false}

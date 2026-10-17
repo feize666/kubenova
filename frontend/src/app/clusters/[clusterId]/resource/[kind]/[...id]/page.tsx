@@ -1,17 +1,19 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useParams } from "next/navigation";
+import { hashKey, useQuery } from "@tanstack/react-query";
 import { Tabs, Spin, Alert } from "antd";
 import { useMemo, useCallback, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { MasterDetailShell } from "@/components/master-detail";
 import { getResourceDetail } from "@/lib/api/resources";
 import { getDetailTabs, renderTabContent } from "./detail-config";
+import { useReadAccess } from "@/lib/query/read-access-state";
+import { visibleDetailData } from "@/components/resource-detail/query-state";
+import { OpsDegradedState, OpsIconActionButton, OpsPermissionState } from "@/components/ops";
 
 export default function ResourceDetailPage() {
   const params = useParams<{ clusterId: string; kind: string; id: string[] }>();
-  const router = useRouter();
   const { accessToken } = useAuth();
   const [nestedTarget, setNestedTarget] = useState<{ kind: string; id: string } | null>(null);
 
@@ -23,14 +25,17 @@ export default function ResourceDetailPage() {
 
   const backPath = `/clusters/${encodeURIComponent(clusterId)}/overview`;
 
+  const detailQueryKey = ["resource-detail", kind, resourceId, accessToken];
   const detailQuery = useQuery({
-    queryKey: ["resource-detail", kind, resourceId, accessToken],
+    queryKey: detailQueryKey,
     queryFn: () => getResourceDetail({ kind, id: resourceId }, accessToken || undefined),
     enabled: Boolean(accessToken && kind && resourceId),
     retry: 1,
   });
 
-  const tabs = useMemo(() => getDetailTabs(kind, detailQuery.data ?? undefined), [kind, detailQuery.data]);
+  const permissionDenied = useReadAccess(hashKey(detailQueryKey), detailQuery);
+  const detail = visibleDetailData(detailQuery, permissionDenied);
+  const tabs = useMemo(() => getDetailTabs(kind, detail), [kind, detail]);
 
   // Close returns to previous page via native history, falls back to cluster overview
   const handleClose = useCallback(() => {
@@ -47,7 +52,6 @@ export default function ResourceDetailPage() {
     if (request.kind?.trim() && request.id?.trim()) setNestedTarget(request);
   }, []);
 
-  const detail = detailQuery.data;
   const displayKind = detail?.overview?.kind ?? kind;
   const displayName = detail?.overview?.name ?? resourceName;
   const namespace = detail?.overview?.namespace;
@@ -70,13 +74,17 @@ export default function ResourceDetailPage() {
       width={960}
       backPath={backPath}
     >
-      {detailQuery.isLoading ? (
+      {permissionDenied ? (
+        <OpsPermissionState title="无权查看该资源详情" description="服务端拒绝了当前资源读取请求。请检查集群访问授权后重试。" action={<OpsIconActionButton loading={detailQuery.isFetching} onClick={() => void detailQuery.refetch()}>重试</OpsIconActionButton>} />
+      ) : detailQuery.isLoading && !detail ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 80 }}>
           <Spin size="large" />
         </div>
-      ) : detailQuery.isError ? (
+      ) : detailQuery.isError && !detail ? (
         <Alert type="error" message="加载失败" description={String(detailQuery.error ?? "未知错误")} style={{ margin: 24 }} />
       ) : detail ? (
+        <>
+        {detailQuery.error ? <OpsDegradedState title="详情刷新失败，当前内容可能已过期" description="保留最近一次读取成功的详情，不会清空当前页面。" action={<OpsIconActionButton loading={detailQuery.isFetching} onClick={() => void detailQuery.refetch()}>重试</OpsIconActionButton>} /> : null}
         <Tabs
           items={tabs.map((tab) => ({
             key: tab.key,
@@ -86,6 +94,7 @@ export default function ResourceDetailPage() {
           className="master-detail-tabs"
           style={{ padding: "0 20px" }}
         />
+        </>
       ) : null}
     </MasterDetailShell>
     {nestedTarget ? (
@@ -114,23 +123,29 @@ function NestedResourceDetail({
   onClose: () => void;
   onNavigate: (target: { kind: string; id: string }) => void;
 }) {
+  const detailQueryKey = ["nested-resource-detail", clusterId, target.kind, target.id, accessToken];
   const detailQuery = useQuery({
-    queryKey: ["nested-resource-detail", clusterId, target.kind, target.id, accessToken],
+    queryKey: detailQueryKey,
     queryFn: () => getResourceDetail({ kind: target.kind, id: target.id }, accessToken || undefined),
     enabled: Boolean(accessToken && target.kind && target.id),
     retry: 1,
   });
-  const detail = detailQuery.data;
+  const permissionDenied = useReadAccess(hashKey(detailQueryKey), detailQuery);
+  const detail = visibleDetailData(detailQuery, permissionDenied);
   const tabs = useMemo(() => getDetailTabs(target.kind, detail), [target.kind, detail]);
   const title = detail ? `${detail.overview.kind} ${detail.overview.name}` : `${target.kind} ${target.id}`;
 
   return (
     <MasterDetailShell open onClose={onClose} title={title} subtitle={detail?.overview.namespace} width={960}>
-      {detailQuery.isLoading ? (
+      {permissionDenied ? (
+        <OpsPermissionState title="无权查看该资源详情" description="服务端拒绝了当前资源读取请求。请检查集群访问授权后重试。" action={<OpsIconActionButton loading={detailQuery.isFetching} onClick={() => void detailQuery.refetch()}>重试</OpsIconActionButton>} />
+      ) : detailQuery.isLoading && !detail ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 80 }}><Spin size="large" /></div>
-      ) : detailQuery.isError ? (
+      ) : detailQuery.isError && !detail ? (
         <Alert type="error" message="加载失败" description={String(detailQuery.error ?? "未知错误")} style={{ margin: 24 }} />
       ) : detail ? (
+        <>
+        {detailQuery.error ? <OpsDegradedState title="详情刷新失败，当前内容可能已过期" description="保留最近一次读取成功的详情，不会清空当前页面。" action={<OpsIconActionButton loading={detailQuery.isFetching} onClick={() => void detailQuery.refetch()}>重试</OpsIconActionButton>} /> : null}
         <Tabs
           items={tabs.map((tab) => ({
             key: tab.key,
@@ -143,6 +158,7 @@ function NestedResourceDetail({
           className="master-detail-tabs"
           style={{ padding: "0 20px" }}
         />
+        </>
       ) : null}
     </MasterDetailShell>
   );

@@ -5,15 +5,17 @@ import { resolveWorkspaceResourceHref } from "@/lib/cluster-workspace";
 
 type ClusterWorkspaceContextValue = {
   clusterId: string;
+  clusterName?: string;
 };
 
 const ClusterWorkspaceContext = createContext<ClusterWorkspaceContextValue | null>(null);
 
 export function ClusterWorkspaceProvider({
   clusterId,
+  clusterName,
   children,
 }: ClusterWorkspaceContextValue & { children: React.ReactNode }) {
-  const value = useMemo(() => ({ clusterId }), [clusterId]);
+  const value = useMemo(() => ({ clusterId, clusterName }), [clusterId,clusterName]);
   return (
     <ClusterWorkspaceContext.Provider value={value}>
       {children}

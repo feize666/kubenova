@@ -58,6 +58,13 @@ test("集群工作区菜单同一时间只展开一个资源域", () => {
   assert.deepEqual(resolveAccordionOpenKeys([]), []);
 });
 
+test("普通用户不显示开发中的可观测性菜单和资源巡检", () => {
+  const sections = getClusterWorkspaceNavigation("cluster-a", "viewer");
+  assert.equal(sections.some((section) => section.key === "observability"), false);
+  assert.equal(sections.flatMap((section) => section.items).some((item) => item.key === "inspection"), false);
+  assert.equal(getClusterWorkspaceNavigation("cluster-a", "platform-admin").some((section) => section.key === "observability"), true);
+});
+
 test("集群入口生成固定集群的 canonical 概览地址", () => {
   assert.equal(
     buildClusterWorkspaceHref(" ack-prod "),

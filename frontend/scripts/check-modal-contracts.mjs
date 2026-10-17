@@ -62,7 +62,7 @@ const representativeForms = [
       "OpsModalShell",
       "OpsFormSection",
       "confirmLoading",
-      "创建可登录 Kubenova",
+      "创建可登录 KubeNova",
     ],
   },
   {
@@ -94,8 +94,8 @@ const representativeForms = [
     path: "src/app/workloads/create/page.tsx",
     tokens: [
       "OpsFormSection",
-      "workload-create-workspace__footer",
-      "workload-create-workspace__yaml",
+      "editorStyles.footer",
+      "editorStyles.wizardFooter",
       "previewYamlQuery",
     ],
   },

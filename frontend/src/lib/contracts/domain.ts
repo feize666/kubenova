@@ -81,6 +81,14 @@ export interface ClusterDetailModel {
     cniPlugin: string | null;
     criRuntime: string | null;
     kubernetesVersion: string | null;
+    probe?: {
+      checkedAt?: string | null;
+      lastSuccessAt?: string | null;
+      runtimes?: Array<{ version: string; nodes: number }>;
+      components?: Array<{ name: string; plugin: string | null; images: string[] }>;
+      stale?: boolean;
+      error?: string | null;
+    };
   };
   metadata: {
     environment: string;

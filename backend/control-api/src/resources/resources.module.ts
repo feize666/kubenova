@@ -8,5 +8,6 @@ import { ResourcesService } from './resources.service';
   imports: [AuthModule, ClustersModule],
   controllers: [ResourcesController],
   providers: [ResourcesService],
+  exports: [ResourcesService],
 })
 export class ResourcesModule {}

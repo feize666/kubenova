@@ -1,0 +1,39 @@
+.editor {
+  height: clamp(320px, 62dvh, 760px);
+  min-height: 280px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  background: #101010;
+  color: #e5e5e5;
+  color-scheme: dark;
+}
+
+.editor:focus-within { border-color: #f0a45b; outline: 2px solid rgb(240 164 91 / 35%); outline-offset: 2px; }
+.editor :global(.cm-editor) { height: 100%; background: #101010; color: #e5e5e5; font-family: Menlo, Consolas, "DejaVu Sans Mono", monospace; font-size: 13px; line-height: 1.7; }
+.editor :global(.cm-scroller) { overflow: auto; font-family: inherit; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.editor :global(.cm-content) { padding-block: 14px; caret-color: #f7f7f7; font-variant-ligatures: none; letter-spacing: 0; }
+.editor :global(.cm-line) { padding-inline: 16px 24px; }
+.editor :global(.cm-gutters) { border-right: 1px solid #292929; background: #191919; color: #999; min-width: 48px; }
+.editor :global(.cm-activeLine), .editor :global(.cm-activeLineGutter) { background: rgb(255 255 255 / 5%); }
+.editor :global(.cm-foldGutter) { color: #aaa; }
+.editor :global(.cm-selectionBackground), .editor :global(.cm-content ::selection) { background: rgb(240 164 91 / 32%) !important; }
+.editor :global(.cm-cursor) { border-left-color: #f7f7f7; }
+.editor :global(.cm-tooltip), .editor :global(.cm-panels) { border-color: #4b4b4b; background: #171717; color: #f0f0f0; }
+.editor :global(.cm-search) { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 32px 8px 12px; max-width: 100%; font-size: 12px; }
+.editor :global(.cm-search label) { white-space: nowrap; }
+.editor :global(.cm-textfield) { max-width: min(220px, 100%); border: 1px solid #555; background: #101010; color: #eee; font: inherit; }
+.editor :global(.cm-button) { border: 1px solid #555; border-radius: 3px; background: #292929; color: #eee; font: inherit; }
+.string { color: #a9e875; }
+.number { color: #b8efb0; }
+.boolean { color: #cb9cff; }
+
+@media (max-width: 760px) {
+  .editor { height: clamp(280px, 64dvh, 620px); }
+  .editor :global(.cm-line) { padding-inline: 12px 18px; }
+}
+
+@media (forced-colors: active) {
+  .editor :global(.cm-editor), .editor :global(.cm-gutters) { background: Canvas; color: CanvasText; }
+}

@@ -1,6 +1,7 @@
 "use client";
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
-import { CopyOutlined, DownloadOutlined } from "@ant-design/icons";
+import { CopyOutlined } from "@ant-design/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Alert,
@@ -12,14 +13,17 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
 import { OpsFilterChip, OpsIconActionButton, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceTable } from "@/components/resource-table";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
 import { ResourceDetailDrawer } from "@/components/resource-detail/resource-detail-drawer";
+import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { getClusterDisplayName } from "@/lib/cluster-display-name";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -165,26 +169,8 @@ function maskToken(value?: string): string {
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
-function sanitizeFilenameSegment(value: string, fallback: string): string {
-  const normalized = value.trim().replace(/[\\/:*?"<>|\s]+/g, "-");
-  return normalized || fallback;
-}
-
-function downloadTextFile(content: string, filename: string) {
-  const blob = new Blob([content], { type: "application/x-yaml;charset=utf-8" });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
-}
-
 export default function ServiceAccountsPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -198,7 +184,6 @@ export default function ServiceAccountsPage() {
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ServiceAccountRecord>({
-      defaultPageSize: 10,
       storageKey: "configs/serviceaccounts/table-sort",
       defaultSortBy: "updatedAt",
       defaultSortOrder: "desc",
@@ -206,7 +191,6 @@ export default function ServiceAccountsPage() {
     });
 
   const [yamlOpen, setYamlOpen] = useState(false);
-  const [yamlValue, setYamlValue] = useState("");
   const [yamlTarget, setYamlTarget] = useState<DynamicResourceIdentity | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -221,7 +205,7 @@ export default function ServiceAccountsPage() {
   const [tokenRows, setTokenRows] = useState<SecretTokenRow[]>([]);
   const [tokenLoading, setTokenLoading] = useState(false);
   const [tokenTitle, setTokenTitle] = useState("");
-  const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
 
   const clustersQuery = useQuery({
     queryKey: ["serviceaccounts", "clusters", accessToken],
@@ -241,7 +225,7 @@ export default function ServiceAccountsPage() {
     enabled: Boolean(accessToken) && Boolean(createClusterId),
   });
 
-  const listQuery = useQuery({
+  const listQuery = useResourceListQuery({
     queryKey: [
       "serviceaccounts",
       "list",
@@ -303,31 +287,6 @@ export default function ServiceAccountsPage() {
     lastDiscoveryRefreshAtRef.current[clusterId] = now;
     refreshDiscoveryMutation.mutate();
   }, [accessToken, clusterId, refreshDiscoveryMutation]);
-
-  const openYamlMutation = useMutation({
-    mutationFn: (identity: DynamicResourceIdentity) => getDynamicResourceDetail(identity, accessToken ?? undefined),
-    onSuccess: (detail, identity) => {
-      setYamlTarget(identity);
-      setYamlValue(detail.yaml);
-      setYamlOpen(true);
-    },
-    onError: (error) => {
-      void message.error(error instanceof Error ? error.message : "读取 YAML 失败");
-    },
-  });
-
-  const applyYamlMutation = useMutation({
-    mutationFn: (payload: DynamicResourceIdentity & { yaml: string }) =>
-      updateDynamicResourceYaml({ ...payload, yaml: payload.yaml }, accessToken ?? undefined),
-    onSuccess: async () => {
-      void message.success("YAML 已应用");
-      setYamlOpen(false);
-      await listQuery.refetch();
-    },
-    onError: (error) => {
-      void message.error(error instanceof Error ? error.message : "应用 YAML 失败");
-    },
-  });
 
   const deleteMutation = useMutation({
     mutationFn: (identity: DynamicResourceIdentity) => deleteDynamicResource(identity, accessToken ?? undefined),
@@ -520,7 +479,7 @@ export default function ServiceAccountsPage() {
     if (!row.id) {
       return;
     }
-    openYamlMutation.mutate({
+    setYamlTarget({
       clusterId: row.clusterId,
       group: "",
       version: "v1",
@@ -528,16 +487,7 @@ export default function ServiceAccountsPage() {
       namespace: row.namespace,
       name: row.name,
     });
-  };
-
-  const handleDownloadYaml = () => {
-    if (!yamlTarget || !yamlValue.trim()) {
-      return;
-    }
-    const namespace = yamlTarget.namespace ? sanitizeFilenameSegment(yamlTarget.namespace, "default") : "cluster";
-    const resource = sanitizeFilenameSegment(yamlTarget.resource, "serviceaccount");
-    const name = sanitizeFilenameSegment(yamlTarget.name, "item");
-    downloadTextFile(yamlValue, `${namespace}-${resource}-${name}.yaml`);
+    setYamlOpen(true);
   };
 
   const handleOpenSecretTokenForRow = (row: ServiceAccountRecord) => {
@@ -589,7 +539,6 @@ export default function ServiceAccountsPage() {
                 label: row.name,
                 snapshot: { labels: row.labels },
               });
-              router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/serviceaccount/${encodeURIComponent(row.id)}`);
             }}
           >
             {name}
@@ -628,6 +577,7 @@ export default function ServiceAccountsPage() {
       fixed: "right",
       render: (_: unknown, row: ServiceAccountRecord) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind:"ServiceAccount",name:row.name,namespace:row.namespace}}
           deleteLabel="删除"
           deleteTitle="删除 ServiceAccount"
           deleteContent={`确认删除 ServiceAccount「${row.name}」吗？此操作不可恢复。`}
@@ -678,26 +628,6 @@ export default function ServiceAccountsPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={
-            <ResourceAddButton
-              title="创建ServiceAccount"
-              onClick={() => {
-                createForm.resetFields();
-                const nextClusterId = clusterId || clusterOptions[0]?.value || "";
-                const nextNamespace = namespace || "default";
-                createForm.setFieldsValue({
-                  clusterId: nextClusterId,
-                  namespace: nextNamespace,
-                  automountServiceAccountToken: true,
-                });
-                setCreateMode("form");
-                setCreateYaml("");
-                setCreateYamlClusterId(nextClusterId);
-                setCreateYamlNamespace(nextNamespace);
-                setCreateOpen(true);
-              }}
-            />
-          }
         />
 
         <Space className="workload-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
@@ -705,18 +635,12 @@ export default function ServiceAccountsPage() {
             <Alert className="config-resource-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
           ) : null}
 
-          {listQuery.isError ? (
-            <Alert
-              className="config-resource-state-alert"
-              type="error"
-              showIcon
-              title="ServiceAccount 列表加载失败"
-              description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
-            />
-          ) : null}
+          <ResourceQueryFeedback className="config-resource-state-alert" label="ServiceAccount" query={listQuery} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<ServiceAccountRecord>
+              queryState={listQuery}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" title="创建ServiceAccount" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" title="使用 YAML 创建ServiceAccount" /></>}
               bordered
               rowKey="id"
               columns={columns}
@@ -764,43 +688,14 @@ export default function ServiceAccountsPage() {
         </Space>
       </OpsSurface>
 
-      <OpsModalShell
-        className="config-resource-utility-modal"
-        title="YAML"
+      <ResourceYamlDrawer
         open={yamlOpen}
-        onCancel={() => setYamlOpen(false)}
-        onOk={() => {
-          if (!yamlTarget) return;
-          applyYamlMutation.mutate({ ...yamlTarget, yaml: yamlValue });
-        }}
-        okText="应用"
-        cancelText="取消"
-        width={860}
-        confirmLoading={applyYamlMutation.isPending}
-        footer={(_, { OkBtn, CancelBtn }) => (
-          <Space>
-            <OpsIconActionButton
-              icon={<DownloadOutlined />}
-              disabled={!yamlTarget || !yamlValue.trim()}
-              disabledReason={!yamlTarget || !yamlValue.trim() ? "没有可下载的 YAML" : undefined}
-              onClick={handleDownloadYaml}
-            >
-              下载 YAML
-            </OpsIconActionButton>
-            <CancelBtn />
-            <OkBtn />
-          </Space>
-        )}
-      >
-        <Input.TextArea
-          className="config-resource-yaml-editor"
-          value={yamlValue}
-          onChange={(event) => setYamlValue(event.target.value)}
-          autoSize={{ minRows: 18, maxRows: 28 }}
-          spellCheck={false}
-          style={{ fontFamily: "var(--kn-font-mono)" }}
-        />
-      </OpsModalShell>
+        onClose={() => setYamlOpen(false)}
+        identity={null}
+        dynamicIdentity={yamlTarget}
+        token={accessToken ?? undefined}
+        onUpdated={() => { void message.success("YAML 更新成功"); void listQuery.refetch(); }}
+      />
 
       <OpsModalShell
         title="新建 ServiceAccount"
@@ -975,7 +870,7 @@ export default function ServiceAccountsPage() {
           ]}
         />
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

@@ -40,7 +40,9 @@ describe('AuthService session lifetime policy', () => {
     const tokens = { createRefreshToken: () => 'refresh', hashToken: () => 'hash', resolveAccessTokenExpiry: () => expiresAt, resolveRefreshTokenExpiry: () => expiresAt, createAccessToken: () => 'access' };
     const identities = { resolve: jest.fn().mockResolvedValue({ id: 'u', email: 'local', name: null, role: 'user', isActive: true, authzVersion: 7 }) };
     const result = await new AuthService(repository as never, tokens as never, identities as never).loginExternal('https://issuer.test', 'subject');
-    expect(result?.user).toEqual({ id: 'u', username: 'local', displayName: 'local', role: 'user' });
+    expect(result).not.toBeNull();
+    if (!result || 'mfaRequired' in result) throw new Error('Expected an authenticated session without an MFA challenge');
+    expect(result.user).toEqual({ id: 'u', username: 'local', displayName: 'local', role: 'user' });
     expect(repository.createSession).toHaveBeenCalledWith(expect.objectContaining({ userId: 'u', authzVersion: 7 }));
     expect(identities.resolve).toHaveBeenCalledWith('https://issuer.test', 'subject');
   });

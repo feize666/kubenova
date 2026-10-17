@@ -373,6 +373,7 @@ export class SecurityService {
   }
 
   resolveEvent(actor: Actor | undefined, id: string): SecurityEvent {
+    assertWritePermission(actor);
     const event = this.events.find((e) => e.id === id);
     if (!event) {
       throw new NotFoundException('安全事件不存在');

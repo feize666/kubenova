@@ -66,8 +66,10 @@ import { ResourcePageHeader } from "@/components/resource-page-header";
 import {
   createSession,
   executeAction,
+  previewAction,
   deleteSession,
   getAiSuggestions,
+  getAiAssistantAccess,
   getPresetQuestions,
   listSessions,
   listAiProviders,
@@ -108,14 +110,6 @@ const AI_ASSISTANT_MESSAGES_CACHE_PREFIX = "kubenova.ai.assistant.messages.";
 const CHAT_WORKSPACE_DESKTOP_HEIGHT =
   "clamp(520px, calc(100vh - 240px), 720px)";
 const PAGE_QUERY_GC_TIME_MS = 5 * 60_000;
-const HIGH_RISK_ACTIONS = new Set<AiAssistantCanonicalOperation>([
-  "restart-workload",
-  "vm-power-on",
-  "vm-power-off",
-  "vm-restart",
-  "import-helm-repository-presets",
-]);
-
 interface BrowserSpeechRecognitionEvent {
   resultIndex: number;
   results: ArrayLike<{
@@ -186,6 +180,10 @@ function formatHighRiskActionPreview(action: AiActionExecuteRequest) {
   if (target.provider) lines.push(`provider: ${target.provider}`);
   if (target.vmId) lines.push(`vmId: ${target.vmId}`);
   if (target.reason) lines.push(`targetReason: ${target.reason}`);
+  if (target.manifest) {
+    lines.push("manifest:");
+    lines.push(target.manifest);
+  }
   if (action.reason) lines.push(`reason: ${action.reason}`);
   if (action.options && Object.keys(action.options).length > 0) {
     lines.push("options:");
@@ -462,6 +460,14 @@ export default function AiAssistantPage() {
   const searchParams = useSearchParams();
   const { accessToken, isInitializing, role } = useAuth();
   const isAdmin = role === "admin" || role === "platform-admin";
+  const aiAccessQuery = useQuery({
+    queryKey: ["ai-assistant", "access", accessToken],
+    queryFn: () => getAiAssistantAccess(accessToken || undefined),
+    enabled: !isInitializing && Boolean(accessToken) && !isAdmin,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const canUseAssistant = isAdmin || Boolean(aiAccessQuery.data?.allowed);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [sessionListCollapsed, setSessionListCollapsed] = useState(false);
@@ -512,7 +518,7 @@ export default function AiAssistantPage() {
     queryKey: ["ai-assistant", "presets"],
     queryFn: () => getPresetQuestions(accessToken || undefined),
     enabled:
-      deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+      deferredQueryReady && !isInitializing && Boolean(accessToken) && canUseAssistant,
     staleTime: 5 * 60_000,
     gcTime: PAGE_QUERY_GC_TIME_MS,
     refetchOnWindowFocus: false,
@@ -522,7 +528,7 @@ export default function AiAssistantPage() {
     queryKey: ["ai-assistant", "suggestions"],
     queryFn: () => getAiSuggestions(accessToken || undefined),
     enabled:
-      deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+      deferredQueryReady && !isInitializing && Boolean(accessToken) && canUseAssistant,
     staleTime: 20_000,
     gcTime: PAGE_QUERY_GC_TIME_MS,
     refetchOnWindowFocus: false,
@@ -538,7 +544,7 @@ export default function AiAssistantPage() {
       );
     },
     enabled:
-      deferredQueryReady && !isInitializing && Boolean(accessToken) && isAdmin,
+      deferredQueryReady && !isInitializing && Boolean(accessToken) && canUseAssistant,
     staleTime: 2 * 60_000,
     gcTime: PAGE_QUERY_GC_TIME_MS,
     refetchOnWindowFocus: false,
@@ -546,18 +552,32 @@ export default function AiAssistantPage() {
 
   useEffect(() => {
     if (requestedClusterId && requestedClusterId !== actionClusterId) {
-      setActionClusterId(requestedClusterId);
+      if (isAdmin || aiAccessQuery.data?.scopes.some(scope => scope.clusterId === requestedClusterId)) {
+        setActionClusterId(requestedClusterId);
+      }
     }
-  }, [actionClusterId, requestedClusterId]);
+  }, [actionClusterId, aiAccessQuery.data?.scopes, isAdmin, requestedClusterId]);
 
   useEffect(() => {
-    if (!actionClusterId && clustersData?.items?.length) {
+    if (isAdmin || !aiAccessQuery.data?.scopes.length) return;
+    const scopes = aiAccessQuery.data.scopes;
+    const preferred = scopes.find(scope => scope.clusterId === requestedClusterId) ?? scopes[0]!;
+    if (!requestedClusterId || !scopes.some(scope => scope.clusterId === requestedClusterId)) {
+      setActionClusterId(preferred.clusterId);
+    }
+    if (!preferred.namespaces.includes(alertForm.namespace)) {
+      setAlertForm(previous => ({ ...previous, namespace: preferred.namespaces[0] ?? "" }));
+    }
+  }, [aiAccessQuery.data, alertForm.namespace, isAdmin, requestedClusterId]);
+
+  useEffect(() => {
+    if (isAdmin && !actionClusterId && clustersData?.items?.length) {
       const preferred =
         clustersData.items.find((item) => item.hasKubeconfig !== false)?.id ??
         clustersData.items[0]!.id;
       setActionClusterId(preferred);
     }
-  }, [actionClusterId, clustersData?.items]);
+  }, [actionClusterId, clustersData?.items, isAdmin]);
 
   const {
     data: pingData,
@@ -643,13 +663,13 @@ export default function AiAssistantPage() {
   }, [activeProvider, pingData, vendorLabels]);
 
   useEffect(() => {
-    if (isInitializing || !accessToken || !isAdmin) {
+    if (isInitializing || !accessToken || !canUseAssistant) {
       setDeferredQueryReady(false);
       return;
     }
     const timeout = window.setTimeout(() => setDeferredQueryReady(true), 200);
     return () => window.clearTimeout(timeout);
-  }, [accessToken, isAdmin, isInitializing]);
+  }, [accessToken, canUseAssistant, isInitializing]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
@@ -771,7 +791,7 @@ export default function AiAssistantPage() {
     if (typeof window === "undefined") {
       return;
     }
-    if (isInitializing || !accessToken || !isAdmin) {
+    if (isInitializing || !accessToken || !canUseAssistant) {
       setCacheHydrated(false);
       return;
     }
@@ -860,7 +880,7 @@ export default function AiAssistantPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, isAdmin, isInitializing, syncSession]);
+  }, [accessToken, canUseAssistant, isInitializing, syncSession]);
 
   const handleNewSession = useCallback(async () => {
     if (!accessToken || creating) {
@@ -1345,12 +1365,13 @@ export default function AiAssistantPage() {
     (
       descriptor: AiActionDescriptor,
       action: AiActionExecuteRequest,
+      previewResult?: Awaited<ReturnType<typeof previewAction>>["result"],
     ): Promise<boolean> =>
       new Promise((resolve) => {
         let settled = false;
         Modal.confirm({
-          title: descriptor.confirmation?.title || "确认执行高风险动作",
-          okText: "确认执行",
+          title: descriptor.confirmation?.title || "确认执行此操作",
+          okText: "确认操作",
           cancelText: "取消",
           okButtonProps: { danger: true },
           content: (
@@ -1366,12 +1387,23 @@ export default function AiAssistantPage() {
                 content={formatHighRiskActionPreview(action)}
                 kind="approval"
                 language="Action"
-                title="高风险动作摘要"
+                title="操作摘要"
                 tone="danger"
                 wrap
               />
+              {previewResult?.length ? (
+                <OpsCommandPreview
+                  allowCopy={false}
+                  content={JSON.stringify(previewResult, null, 2)}
+                  kind="approval"
+                  language="JSON"
+                  title="服务端预览结果"
+                  tone="neutral"
+                  wrap
+                />
+              ) : null}
               <Typography.Text type="danger">
-                该操作可能造成业务波动，请确认目标后再继续。
+                请核对操作目标与影响范围。确认后系统将立即执行并记录审计信息。
               </Typography.Text>
             </Space>
           ),
@@ -1486,6 +1518,24 @@ export default function AiAssistantPage() {
           message.warning("该动作缺少资源名称，无法执行重启");
           return;
         }
+      } else if (op === "apply-resource-manifest") {
+        const clusterId = targetFromDescriptor.clusterId ?? actionClusterId;
+        const namespace = targetFromDescriptor.namespace ?? alertForm.namespace;
+        const manifest = targetFromDescriptor.manifest?.trim() ?? "";
+        if (!clusterId || !namespace) {
+          message.warning("应用资源清单需要集群和命名空间上下文");
+          return;
+        }
+        if (!manifest) {
+          message.warning("该动作缺少 YAML 清单，无法预览或执行");
+          return;
+        }
+        action.target = {
+          ...targetFromDescriptor,
+          clusterId,
+          namespace,
+          manifest,
+        };
       } else if (
         op === "vm-power-on" ||
         op === "vm-power-off" ||
@@ -1508,17 +1558,23 @@ export default function AiAssistantPage() {
         };
       }
 
-      if (HIGH_RISK_ACTIONS.has(op)) {
-        const confirmed = await confirmHighRiskAction(descriptor, action);
-        if (!confirmed) {
-          appendAssistantExecutionMessage(`动作已取消：${descriptor.label}`);
-          return;
-        }
-      }
-
       try {
         setActionLoadingId(descriptor.id);
-        const result = await executeAction(action, accessToken);
+        const requiresApproval = !op.startsWith("query-");
+        let approvalId: string | undefined;
+        if (requiresApproval) {
+          const preview = await previewAction(action, accessToken);
+          if (preview.status !== "ok" || !preview.approvalId) {
+            throw new Error(preview.error?.message ?? "服务端未能生成操作审批，请重试");
+          }
+          approvalId = preview.approvalId;
+          const confirmed = await confirmHighRiskAction(descriptor, action, preview.result);
+          if (!confirmed) {
+            appendAssistantExecutionMessage(`动作已取消：${descriptor.label}`);
+            return;
+          }
+        }
+        const result = await executeAction(action, accessToken, approvalId);
         let sessionRefreshed = false;
         if (currentSessionId) {
           try {
@@ -1670,20 +1726,22 @@ export default function AiAssistantPage() {
   );
   const clusterOptions = useMemo(
     () =>
-      (clustersData?.items ?? []).map((cluster) => ({
+      (clustersData?.items ?? [])
+        .filter(cluster => isAdmin || aiAccessQuery.data?.scopes.some(scope => scope.clusterId === cluster.id))
+        .map((cluster) => ({
         label: `${cluster.name} (${cluster.id})`,
         value: cluster.id,
       })),
-    [clustersData?.items],
+    [aiAccessQuery.data?.scopes, clustersData?.items, isAdmin],
   );
 
-  if (!isInitializing && !isAdmin) {
+    if (!isInitializing && !canUseAssistant && !aiAccessQuery.isFetching) {
     return (
       <OpsSurface variant="panel" padding="md">
         <Result
           status="403"
           title="无权限访问 KubeNova 中台"
-          subTitle="当前账号不是管理员，无法查看会话、建议与执行任何 AI 运维动作。"
+          subTitle="当前账号尚未获授 AI 助手权限，请联系管理员在访问控制中为用户或用户组添加授权。"
           extra={
             <OpsIconActionButton
               opsTone="primary"
@@ -1723,15 +1781,25 @@ export default function AiAssistantPage() {
             setAlertForm((prev) => ({ ...prev, severity: value }))
           }
         />
-        <Input
-          id="alert-namespace"
-          name="alert-namespace"
-          value={alertForm.namespace}
-          onChange={(e) =>
-            setAlertForm((prev) => ({ ...prev, namespace: e.target.value }))
-          }
-          placeholder="namespace"
-        />
+        {isAdmin ? (
+          <Input
+            id="alert-namespace"
+            name="alert-namespace"
+            value={alertForm.namespace}
+            onChange={(e) => setAlertForm((prev) => ({ ...prev, namespace: e.target.value }))}
+            placeholder="namespace"
+          />
+        ) : (
+          <Select
+            id="alert-namespace"
+            value={alertForm.namespace || undefined}
+            placeholder="选择已授权命名空间"
+            options={aiAccessQuery.data?.scopes
+              .find(scope => scope.clusterId === actionClusterId)?.namespaces
+              .map(namespace => ({ label: namespace, value: namespace }))}
+            onChange={(namespace) => setAlertForm((prev) => ({ ...prev, namespace }))}
+          />
+        )}
       </Space.Compact>
       <Space.Compact style={{ width: "100%" }}>
         <Select
@@ -2069,7 +2137,13 @@ export default function AiAssistantPage() {
                       id="ai-action-cluster"
                       style={{ width: 220, maxWidth: "100%" }}
                       value={actionClusterId || undefined}
-                      onChange={setActionClusterId}
+                      onChange={(clusterId) => {
+                        setActionClusterId(clusterId);
+                        if (!isAdmin) {
+                          const namespaces = aiAccessQuery.data?.scopes.find(scope => scope.clusterId === clusterId)?.namespaces ?? [];
+                          setAlertForm(previous => ({ ...previous, namespace: namespaces[0] ?? "" }));
+                        }
+                      }}
                       placeholder="选择集群"
                       options={clusterOptions}
                     />

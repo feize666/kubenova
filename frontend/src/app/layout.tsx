@@ -35,7 +35,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Script
           id="kubenova-theme-init"
           strategy="beforeInteractive"
-        >{`try{var m=localStorage.getItem('kubenova-theme-mode');document.documentElement.setAttribute('data-theme',m==='dark'||m==='light'?m:'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}`}</Script>
+        >{`try{var m=localStorage.getItem('kubenova-theme-mode');document.documentElement.setAttribute('data-theme',m==='dark'||m==='light'?m:matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}`}</Script>
         <AntdRegistry>
           <Providers>
             <AppShell>{children}</AppShell>

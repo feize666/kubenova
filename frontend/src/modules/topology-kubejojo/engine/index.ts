@@ -5,7 +5,6 @@ import { getElkEngine } from "./elk-engine";
 import {
   containerRelations,
   getKubejojoCacheKey,
-  getPartitionLayer as getKubejojoPartitionLayer,
   toElkGraph,
   toKubejojoLayout,
   type ElkGraph,
@@ -46,32 +45,18 @@ type CacheEntry = { layout: KubejojoLayout; timestamp: number };
 
 const layoutCache = new Map<string, CacheEntry>();
 
-/**
- * The partition column of a resource, expressed as its layout weight. Higher
- * values are drawn further left, which keeps the operator-facing order
- * Deployment -> ReplicaSet -> Pod -> Service -> Ingress.
- */
+/** Resource-kind priority used to stabilize graph and aggregate ordering. */
 export function getKubejojoAccessPathOrder(node: KubejojoGraphNode): number {
   return getKubejojoWeight(node);
 }
 
-/**
- * ELK partition of a node. Identical to the access-path order, exposed under
- * the name the layout adapter uses.
- */
-export function getKubejojoPartition(node: KubejojoGraphNode): number {
-  return getKubejojoPartitionLayer(node);
-}
-
 export function getKubejojoLayoutPolicy(hasEdges: boolean, aspectRatio: number): {
   algorithm: "layered" | "rectpacking";
-  direction: "RIGHT";
   aspectRatio: number;
 } {
   const ratio = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : DEFAULT_ASPECT_RATIO;
   return {
     algorithm: hasEdges ? "layered" : "rectpacking",
-    direction: "RIGHT",
     aspectRatio: ratio,
   };
 }
@@ -148,6 +133,7 @@ export function collapseKubejojoGraph(
   root: KubejojoGraphNode,
   focusedId?: string | null,
   expandAll = false,
+  expandedStackIds: ReadonlySet<string> = new Set(),
 ): KubejojoGraphNode {
   const resolved = findKubejojoNode(root, focusedId);
   const selected = resolved && resolved.id !== "root" ? resolved : undefined;
@@ -161,16 +147,25 @@ export function collapseKubejojoGraph(
   const isScope = selected?.groupKind === "scope";
   const revealedIds = isScope
     ? new Set<string>()
-    : new Set((selected?.nodes ?? []).map((node) => node.id));
+    : new Set((selected?.nodes ?? [])
+      .filter((node) => selected?.groupKind !== "component" || node.groupKind !== "stack")
+      .map((node) => node.id));
+  const selectedPath = selected ? findNodePath(root, selected.id) ?? [] : [];
+  const stackOwner = selected?.groupKind === "stack"
+    ? [...selectedPath.slice(0, -1)].reverse().find((node) => node.groupKind === "component")
+    : undefined;
 
   const clone = (node: KubejojoGraphNode): KubejojoGraphNode => {
     const isGroup = node.id !== "root" && Boolean(node.groupKind);
-    const sizeable = (node.nodes?.length ?? 0) > KUBEJOJO_COLLAPSE_THRESHOLD
+    const sizeable = node.groupKind === "component"
+      || (node.groupKind === "stack" && Boolean(node.collapsedPreferred))
+      || (node.nodes?.length ?? 0) > KUBEJOJO_COLLAPSE_THRESHOLD
       || (node.edges?.length ?? 0) > 0;
     const collapsed = Boolean(
       !expandAll
       && isGroup
       && sizeable
+      && !(node.groupKind === "stack" && expandedStackIds.has(node.id))
       && !ancestorIds.has(node.id)
       && !revealedIds.has(node.id),
     );
@@ -186,9 +181,36 @@ export function collapseKubejojoGraph(
     };
   };
 
-  const scene = selected && selected.groupKind
-    ? { ...root, nodes: selected.nodes, edges: selected.edges, overlayEdges: selected.overlayEdges }
-    : null;
+  const expandedStackMembers = (node: KubejojoGraphNode) =>
+    (node.nodes ?? []).flatMap((child) =>
+      // `expandAll` and an individual stack toggle must produce the same
+      // graph shape. Leaving an expanded stack as a nested ELK container makes
+      // its cards visible while the edges still terminate at the hidden stack
+      // boundary, which is the source of the broken Pod -> Service rails.
+      child.groupKind === "stack" && (expandAll || expandedStackIds.has(child.id))
+        ? (child.nodes ?? []).map((member, index) => index === 0
+          ? { ...member, expandedStackId: child.id, expandedStackLabel: child.label ?? child.subtitle ?? "资源" }
+          : member)
+        : [child],
+    );
+  const scene = stackOwner && selected
+    ? {
+      ...root,
+      nodes: [
+        ...(stackOwner.nodes ?? []).filter((node) => node.id !== selected.id),
+        ...(selected.nodes ?? []),
+      ],
+      edges: stackOwner.edges,
+      overlayEdges: stackOwner.overlayEdges,
+    }
+    : selected && selected.groupKind
+      ? {
+        ...root,
+        nodes: selected.groupKind === "component" ? expandedStackMembers(selected) : selected.nodes,
+        edges: selected.edges,
+        overlayEdges: selected.overlayEdges,
+      }
+      : null;
   const visible = scene ?? (selected
     ? { ...root, nodes: [selected], edges: root.edges }
     : root);
@@ -212,7 +234,7 @@ export function clearKubejojoLayoutCache(): void {
 }
 
 /**
- * Runs the layered layout and converts the result for React Flow.
+ * Runs the layered spline layout and converts the result for React Flow.
  *
  * The ELK pass is the most expensive step in the pipeline, so a short-lived
  * cache keeps group paging and re-renders instant. The key covers node ids,

@@ -13,6 +13,7 @@ import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter"
 import { ApiError } from "@/lib/api/client";
 import { canQueryLogCenter, eligibleLogSources, listLogCenterSources, logQueryWindow, queryLogCenter, type LogCenterQuery, type LogCenterRow, type LogTimeRange } from "@/lib/api/log-center";
 import { buildClusterResourceHref } from "@/lib/cluster-workspace";
+import { isPlatformAdmin } from "@/lib/console-routing";
 import styles from "./log-center-page.module.css";
 import { LogCollectionPreview } from "./log-collection-preview";
 
@@ -111,6 +112,7 @@ export default function LogCenterPage() {
   const workspace = useOptionalClusterWorkspace();
   const { accessToken, role, isInitializing } = useAuth();
   if (isInitializing) return <OpsState kind="loading" title="正在验证访问权限" />;
+  if (!isPlatformAdmin(role)) return <OpsState kind="permission" title="仅超级管理员可访问日志中心" description="可观测性中心仍在开发中，当前仅对超级管理员开放。" />;
   if (!accessToken) return <div className={styles.page}><OpsPageHeader title="日志中心" surface={false} /><OpsState kind="permission" title="请登录后访问日志中心" /></div>;
   if (!workspace?.clusterId) return <OpsState kind="disabled" title="请从集群工作区打开日志中心" />;
   return <ClusterLogCenter key={`${workspace.clusterId}:${accessToken}:${role}`} clusterId={workspace.clusterId} token={accessToken} role={role} />;

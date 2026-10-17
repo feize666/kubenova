@@ -35,7 +35,7 @@ services:
     container_name: kubenova-control-api
     restart: unless-stopped
     env_file:
-      - .env
+      - ${KUBENOVA_COMPOSE_ENV_FILE:-.env}
     environment:
       NODE_ENV: production
       PORT: 4000
@@ -91,7 +91,7 @@ services:
     container_name: kubenova-runtime-gateway
     restart: unless-stopped
     env_file:
-      - .env
+      - ${KUBENOVA_COMPOSE_ENV_FILE:-.env}
     environment:
       PORT: 4100
       NODE_ENV: production
@@ -116,7 +116,7 @@ services:
     container_name: kubenova-frontend
     restart: unless-stopped
     env_file:
-      - .env
+      - ${KUBENOVA_COMPOSE_ENV_FILE:-.env}
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0

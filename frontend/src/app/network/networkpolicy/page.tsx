@@ -1,8 +1,11 @@
 "use client";
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Form, Input, Select, Space, Typography, message } from "antd";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceAddButton } from "@/components/resource-add-button";
@@ -94,7 +97,6 @@ function isSimpleNetworkPolicySpec(spec: NetworkPolicyResource["spec"]) {
 
 export default function NetworkPolicyPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -106,7 +108,7 @@ export default function NetworkPolicyPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
@@ -124,10 +126,9 @@ export default function NetworkPolicyPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<NetworkPolicyResource>({
-    defaultPageSize: 10,
   });
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, isFetching:queryIsFetching, refetch } = useResourceListQuery({
     queryKey: [
       "network",
       "NetworkPolicy",
@@ -428,7 +429,7 @@ export default function NetworkPolicyPage() {
       ellipsis: true,
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: NetworkPolicyResource) =>
-        row.id ? <Typography.Link onClick={() => { setDetailTarget({ kind: "NetworkPolicy", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/networkpolicy/${encodeURIComponent(row.id)}`); }}>{name}</Typography.Link> : name,
+        row.id ? <Typography.Link onClick={() => { setDetailTarget({ kind: "NetworkPolicy", id: row.id }); }}>{name}</Typography.Link> : name,
     },
     {
       title: "集群",
@@ -473,6 +474,7 @@ export default function NetworkPolicyPage() {
       fixed: "right",
       render: (_: unknown, row: NetworkPolicyResource) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind:"NetworkPolicy",name:row.name,namespace:row.namespace}}
           deleteLabel="删除"
           deleteTitle="删除 NetworkPolicy"
           deleteContent={`确认删除 NetworkPolicy「${row.name}」吗？此操作不可恢复。`}
@@ -619,7 +621,6 @@ export default function NetworkPolicyPage() {
             </span>
           }
           description="管理 Kubernetes NetworkPolicy 访问控制策略。"
-          extra={<ResourceAddButton title="创建NetworkPolicy" onClick={handleOpenCreate} />}
         />
 
         <Space
@@ -632,18 +633,12 @@ export default function NetworkPolicyPage() {
             <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="network-resource-state-alert"
-              type="error"
-              showIcon
-              title="NetworkPolicy 加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="NetworkPolicy" className="network-resource-state-alert" query={{data,isError,error,isFetching:queryIsFetching,refetch}} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<NetworkPolicyResource>
+              queryState={{data,isLoading,isError,error,isFetching:queryIsFetching}}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" title="创建NetworkPolicy" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" title="使用 YAML 创建NetworkPolicy" /></>}
               rowKey="id"
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -785,7 +780,7 @@ export default function NetworkPolicyPage() {
         )}
       </OpsModalShell>
 
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

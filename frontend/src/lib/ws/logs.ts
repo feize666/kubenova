@@ -6,6 +6,14 @@ import {
 
 export type LogsConnectionStatus = "未连接" | "连接中" | "重连中" | "已连接" | "连接异常";
 
+export function nextUnreadLogCount(current: number, incoming: number, following: boolean): number {
+  return following ? 0 : current + incoming;
+}
+
+export function nextLogFollowOutput(current: boolean, viewportY: number, baseY: number, programmatic: boolean): boolean {
+  return programmatic ? current : viewportY >= baseY;
+}
+
 export interface RuntimeLogItem {
   id: string;
   text: string;
@@ -142,6 +150,10 @@ function parseJsonPayload(payload: RuntimeLogPayload): RuntimeLogItem[] {
 function parseRawMessage(raw: unknown): RuntimeLogItem[] {
   if (raw instanceof ArrayBuffer) {
     return parseRawMessage(new TextDecoder().decode(raw));
+  }
+
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return parseJsonPayload(raw as RuntimeLogPayload);
   }
 
   if (typeof raw !== "string") {
@@ -304,7 +316,7 @@ export class RuntimeLogsSocket {
           const frame = JSON.parse(event.data) as { event?: unknown; data?: unknown; payload?: unknown; type?: unknown };
           const eventName = typeof frame.event === "string" ? frame.event : typeof frame.type === "string" ? frame.type : "";
           if (eventName && RuntimeLogsSocket.isTerminalStateMessage(eventName)) {
-            const payload = frame.data ?? frame.payload;
+            const payload = frame.data ?? frame.payload ?? frame;
             const items = RuntimeLogsSocket.parseSocketMessage(eventName, payload);
             if (items.length > 0) {
               this.options.onLogs?.(items);
@@ -312,7 +324,7 @@ export class RuntimeLogsSocket {
             return;
           }
           if (eventName) {
-            const payload = frame.data ?? frame.payload;
+            const payload = frame.data ?? frame.payload ?? frame;
             const items = RuntimeLogsSocket.parseSocketMessage(eventName, payload);
             if (items.length > 0) {
               this.options.onLogs?.(items);

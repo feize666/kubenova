@@ -1,0 +1,11 @@
+services:
+  control-api:
+    env_file:
+      - ${KUBENOVA_UPDATE_CLIENT_ENV_FILE:?Install the host update executor first}
+    volumes:
+      - type: bind
+        source: ${KUBENOVA_UPDATE_RUNTIME_DIR:?Install the host update executor first}
+        target: /run/kubenova-update
+        read_only: true
+        bind:
+          create_host_path: false

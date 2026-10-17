@@ -17,8 +17,18 @@ import process from "node:process";
 
 const DEFAULT_ARTIFACT_ROOT = "/case/temp/kubenova/ui-tech-smoke";
 const ARTIFACT_ROOT = process.env.UI_TECH_ARTIFACT_DIR || DEFAULT_ARTIFACT_ROOT;
-const DEFAULT_RUNTIME_QUERY =
-  "clusterId=local&namespace=default&pod=smoke-pod&container=smoke-container&clusterName=local";
+const smokeClusterId = process.env.UI_TECH_CLUSTER_ID || "local";
+const smokeNamespace = process.env.UI_TECH_NAMESPACE || "default";
+const smokeClusterName = process.env.UI_TECH_CLUSTER_NAME || smokeClusterId;
+const smokePod = process.env.UI_TECH_POD || "smoke-pod";
+const smokeContainer = process.env.UI_TECH_CONTAINER || "smoke-container";
+const DEFAULT_RUNTIME_QUERY = new URLSearchParams({
+  clusterId: smokeClusterId,
+  namespace: smokeNamespace,
+  pod: smokePod,
+  container: smokeContainer,
+  clusterName: smokeClusterName,
+}).toString();
 const cliOptions = parseCliOptions(process.argv.slice(2));
 
 const baseUrl = normalizeBaseUrl(cliOptions.baseUrl || process.env.UI_TECH_BASE_URL || "http://localhost:3000");
@@ -48,7 +58,7 @@ const allRoutes = [
   },
   {
     id: "overview-scoped",
-    path: "/?clusterId=local",
+    path: `/?clusterId=${encodeURIComponent(smokeClusterId)}`,
     texts: ["集群概览", "集群资源概览", "单集群视图"],
     shellSelector: ".ops-overview-shell",
     toolbarSelector: ".ops-overview-header",
@@ -58,7 +68,7 @@ const allRoutes = [
   {
     id: "terminal",
     path: `/terminal?${DEFAULT_RUNTIME_QUERY}&source=smoke`,
-    texts: ["Pod 终端工作区", "default / smoke-pod", "异常", "网关"],
+    texts: ["Pod 终端工作区", `${smokeNamespace} / ${smokePod}`, "网关"],
     shellSelector: ".ops-frame-shell",
     toolbarSelector: ".ops-frame-shell__toolbar",
     chipSelector: ".ops-frame-shell__status .ops-status-tag",
@@ -68,7 +78,7 @@ const allRoutes = [
   {
     id: "logs",
     path: `/logs?${DEFAULT_RUNTIME_QUERY}&tailLines=100&follow=false&timeMode=quick&from=now-15m&to=now`,
-    texts: ["Pod 日志工作区", "default / smoke-pod / smoke-container", "Paused", "行 100"],
+    texts: ["Pod 日志工作区", `${smokeNamespace} / ${smokePod} / ${smokeContainer}`, "Paused", "行 100"],
     shellSelector: ".ops-frame-shell",
     toolbarSelector: ".ops-frame-shell__toolbar",
     chipSelector: ".ops-frame-shell__status .ops-status-tag",
@@ -77,7 +87,7 @@ const allRoutes = [
   },
   {
     id: "pods",
-    path: "/workloads/pods?clusterId=local&namespace=default",
+    path: `/workloads/pods?clusterId=${encodeURIComponent(smokeClusterId)}&namespace=${encodeURIComponent(smokeNamespace)}`,
     texts: ["Pod", "查看和管理集群中运行的 Pod 实例", "资源范围"],
     shellSelector: ".resource-table-shell",
     toolbarSelector: ".resource-table-toolbar",
@@ -88,7 +98,7 @@ const allRoutes = [
   },
   {
     id: "deployments",
-    path: "/workloads/deployments?clusterId=local&namespace=default",
+    path: `/workloads/deployments?clusterId=${encodeURIComponent(smokeClusterId)}&namespace=${encodeURIComponent(smokeNamespace)}`,
     texts: ["Deployment", "管理无状态应用发布", "资源范围"],
     shellSelector: ".resource-table-shell",
     toolbarSelector: ".resource-table-toolbar",
@@ -96,11 +106,11 @@ const allRoutes = [
     statusSelector: ".resource-table-toolbar-actions",
     evidenceState: "table",
     createTriggerSelector: 'button[aria-label="创建Deployment"]',
-    overlayChecks: ["scope-popover", "table-search-popover", "table-column-popover", "create-route", "row-dropdown-yaml"],
+    overlayChecks: ["scope-popover", "table-search-popover", "table-column-popover", "create-route", "row-dropdown-yaml", "resource-detail"],
   },
   {
     id: "namespaces",
-    path: "/namespaces?clusterId=local",
+    path: `/namespaces?clusterId=${encodeURIComponent(smokeClusterId)}`,
     texts: ["Namespace", "统一管理名称空间", "资源范围"],
     shellSelector: ".resource-table-shell",
     toolbarSelector: ".resource-table-toolbar",
@@ -111,7 +121,7 @@ const allRoutes = [
   },
   {
     id: "nodes",
-    path: "/clusters/nodes?clusterId=local",
+    path: `/clusters/nodes?clusterId=${encodeURIComponent(smokeClusterId)}`,
     texts: ["Node", "查看集群工作节点", "集群"],
     shellSelector: ".resource-table-shell",
     toolbarSelector: ".resource-table-toolbar",
@@ -129,23 +139,35 @@ const allRoutes = [
     statusSelector: ".resource-table-toolbar-actions",
     evidenceState: "table",
     createTriggerSelector: 'button[aria-label="创建集群"]',
+    createFieldSelector: '.ops-modal-shell input[placeholder="例如：prod-cluster-01"]',
+    createFooterSelector: '.ops-modal-shell .ant-modal-footer',
     overlayChecks: ["table-search-popover", "table-column-popover", "create-modal"],
   },
   {
+    id: "handbook",
+    path: "/handbook",
+    texts: ["使用手册", "权限说明", "登录与快速开始"],
+    shellSelector: ".handbook-page",
+    toolbarSelector: ".handbook-page__intro",
+    chipSelector: ".handbook-page .ant-collapse-header",
+    statusSelector: ".handbook-page__sections",
+    evidenceState: "workbench",
+  },
+  {
     id: "topology",
-    path: "/network/topology?clusterId=local&namespace=default",
+    path: `/network/topology?clusterId=${encodeURIComponent(smokeClusterId)}&namespace=${encodeURIComponent(smokeNamespace)}`,
     texts: ["资源拓扑", "单集群工作负载", "资源域"],
     shellSelector: ".resource-map-shell",
-    toolbarSelector: ".resource-map-toolbar",
-    chipSelector: ".topology-source-filter-trigger",
-    statusSelector: ".resource-map-toolbar__secondary",
+    toolbarSelector: ".topology-headlamp-toolbar",
+    chipSelector: ".topology-domain-menu, .topology-group-chips",
+    statusSelector: ".topology-headlamp-toolbar, .resource-map-canvas-state",
     canvasStateSelector: ".resource-map-canvas-state",
     evidenceState: "workbench",
   },
   {
     id: "ai-assistant",
     path: "/ai-assistant",
-    texts: ["AI 助手", "ChatOps", "模型中转站", "ChatOps 会话中"],
+    texts: ["AI 助手", "ChatOps", "AI 模型", "ChatOps 会话中"],
     shellSelector: ".ops-workbench-shell--ai",
     toolbarSelector: ".ai-assistant-chat-surface",
     chipSelector: ".ai-assistant-status-chip, .ops-status-tag",
@@ -309,7 +331,14 @@ function readNonNegativeInt(name, fallback) {
 }
 
 function routeUrl(route) {
-  return `${baseUrl}${route.path}`;
+  const url = new URL(route.path, baseUrl);
+  if (process.env.UI_TECH_CLUSTER_ID && url.searchParams.has("clusterId")) {
+    url.searchParams.set("clusterId", process.env.UI_TECH_CLUSTER_ID);
+  }
+  if (process.env.UI_TECH_NAMESPACE && url.searchParams.has("namespace")) {
+    url.searchParams.set("namespace", process.env.UI_TECH_NAMESPACE);
+  }
+  return url.toString();
 }
 
 async function pageTextSnippet(page) {
@@ -339,7 +368,9 @@ function readAuthSnapshot(payload) {
   };
 }
 
+let apiAuthSnapshot;
 async function authenticateViaApi(page) {
+  if (!apiAuthSnapshot) {
   const loginApiUrl = `${baseUrl}/api/v1/auth/login`;
   let response;
   try {
@@ -362,7 +393,9 @@ async function authenticateViaApi(page) {
     fail(`API 登录失败: url=${loginApiUrl} status=${response.status} body=${JSON.stringify(payload).slice(0, 300)}`);
   }
 
-  const snapshot = readAuthSnapshot(payload);
+  apiAuthSnapshot = readAuthSnapshot(payload);
+  }
+  const snapshot = apiAuthSnapshot;
   await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout });
   await page.evaluate((auth) => {
     const entries = [
@@ -428,15 +461,23 @@ function isAllowedConsoleIssue(issue) {
     return true;
   }
   const isResourceApiNotFound =
+    process.env.UI_TECH_ALLOW_BACKEND_DEGRADATION === "1" &&
     brief.includes("404") &&
     (
       brief.includes("/api/workloads") ||
       brief.includes("/api/namespaces") ||
       brief.includes("/api/clusters") ||
+      brief.includes("/api/resources/discovery/catalog") ||
       brief.includes("/api/helm") ||
       brief.includes("/api/dashboard")
     );
   if (isResourceApiNotFound) {
+    return true;
+  }
+  // Local UI smoke runs may not have a control-api connected to a cluster;
+  // topology summary degradation is rendered by the page and is not a UI
+  // browser error in that fixture-free mode.
+  if (process.env.UI_TECH_ALLOW_BACKEND_DEGRADATION === "1" && brief.includes("/api/topology/summary") && brief.includes("503")) {
     return true;
   }
   const isRuntimeOrLogs =
@@ -453,7 +494,7 @@ function isAllowedConsoleIssue(issue) {
     brief.includes("kubeconfig") ||
     brief.includes("kube config") ||
     brief.includes("凭据");
-  return isRuntimeOrLogs && isExpectedDegrade;
+  return process.env.UI_TECH_ALLOW_BACKEND_DEGRADATION === "1" && isRuntimeOrLogs && isExpectedDegrade;
 }
 
 function installIssueCapture(page, viewportName) {
@@ -550,6 +591,14 @@ async function assertOverlayVisible(page, viewport, route, selector, label) {
       if (!(await overlay.isVisible().catch(() => false))) {
         continue;
       }
+      await overlay.evaluate(async element => {
+        const animations = [];
+        for (let node = element; node; node = node.parentElement) {
+          animations.push(...node.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity));
+        }
+        await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
+      });
+      if (!(await overlay.isVisible().catch(() => false))) continue;
       const box = await overlay.boundingBox();
       if (!box) {
         continue;
@@ -603,7 +652,7 @@ async function probePopover(page, viewport, route, theme, config) {
 
 async function probeButtonOverlay(page, viewport, route, theme, config) {
   const trigger = config.trigger
-    ? page.locator(config.trigger).first()
+    ? page.locator(config.trigger).filter({ visible: true }).first()
     : page.getByRole("button", { name: config.roleName }).first();
   if (!(await locatorUsable(trigger))) {
     info(`${viewport.name}/${route.id} 跳过 ${config.state}: trigger 不可用`);
@@ -611,7 +660,35 @@ async function probeButtonOverlay(page, viewport, route, theme, config) {
   }
   await trigger.click();
   await assertOverlayVisible(page, viewport, route, config.overlay, config.state);
-  await saveRouteScreenshot(page, viewport.name, route.id, theme, config.state);
+  if (config.requiredField && !(await page.locator(config.requiredField).isVisible().catch(() => false))) {
+    fail(`[${viewport.name}/${route.id}] 浮层虽然存在但目标表单字段不可见: ${config.requiredField}`);
+  }
+  if (config.requiredFooter) {
+    const footer = page.locator(config.requiredFooter).last();
+    const bounds = await footer.boundingBox();
+    if (!bounds || bounds.y < -1 || bounds.y + bounds.height > viewport.height + 1) {
+      const metrics = await page.locator('.ops-modal-shell:visible').last().evaluate(element => {
+        const modal=element.querySelector('.ant-modal-content');
+        const body=element.querySelector('.ant-modal-body');
+        const footer=element.querySelector('.ant-modal-footer');
+        return {classes:element.className,parents:[element.parentElement?.className,element.parentElement?.parentElement?.className],children:[...element.children].map(child=>child.className),parts:Object.fromEntries([['root',element],['content',modal],['body',body],['footer',footer]].map(([key,node])=>{
+          if(!node)return [key,null];
+          const rect=node.getBoundingClientRect(),style=getComputedStyle(node);
+          return [key,{y:rect.y,height:rect.height,maxHeight:style.maxHeight,overflow:style.overflow,flex:style.flex}];
+        }))};
+      });
+      fail(`[${viewport.name}/${route.id}] 浮层操作栏超出视口: footer=${JSON.stringify(bounds)} metrics=${JSON.stringify(metrics)} viewport=${viewport.width}x${viewport.height}`);
+    }
+  }
+  if (config.requiredField && saveArtifacts) {
+    await mkdir(ARTIFACT_ROOT, { recursive: true });
+    const filename = screenshotFilename(route.id, theme, viewport.name, config.state);
+    const modal = page.locator(config.overlay).filter({ visible: true }).last();
+    await modal.screenshot({ path: join(ARTIFACT_ROOT, filename), animations: "disabled" });
+    info(`浮层截图已写入 ${join(ARTIFACT_ROOT, filename)}`);
+  } else {
+    await saveRouteScreenshot(page, viewport.name, route.id, theme, config.state);
+  }
   await closeFloatingLayer(page);
   return true;
 }
@@ -627,12 +704,17 @@ async function probeCreateRoute(page, viewport, route, theme) {
   const beforeUrl = page.url();
   await trigger.click();
   try {
-    await page.waitForURL(/\/workloads\/create|\/create/, { timeout: 5000 });
+    await page.waitForURL(/\/workloads\/create|\/resources\/editor|\/create/, { timeout: 5000 });
   } catch (error) {
     fail(`[${viewport.name}/${route.id}] 创建入口未跳转到创建页`, error);
   }
+  await page.waitForFunction(() => {
+    const text = document.body.innerText;
+    return text.includes("Deployment") || text.includes("编辑上下文暂不可用");
+  }, null, { timeout });
   const bodyText = (await page.locator("body").innerText({ timeout })).replace(/\s+/g, " ");
-  for (const text of ["创建", "Deployment"]) {
+  const requiredCreateText = bodyText.includes("编辑上下文暂不可用") ? ["资源编辑器"] : ["创建", "Deployment"];
+  for (const text of requiredCreateText) {
     if (!bodyText.includes(text)) {
       fail(`[${viewport.name}/${route.id}] 创建页缺少关键文案: "${text}" body="${bodyText.slice(0, 500)}"`);
     }
@@ -640,27 +722,33 @@ async function probeCreateRoute(page, viewport, route, theme) {
   await saveRouteScreenshot(page, viewport.name, route.id, theme, "create-route");
   await page.goto(beforeUrl, { waitUntil: "domcontentloaded", timeout });
   await page.locator(route.shellSelector).first().waitFor({ state: "visible", timeout });
+  await page.waitForTimeout(Math.min(settleMs, 1000));
   return true;
 }
 
 async function probeOptionalRowDropdownAndYaml(page, viewport, route, theme) {
-  const trigger = page.locator('button[aria-label="操作"], button[aria-label="更多操作"], button[aria-label$="更多操作"]').first();
+  const trigger = page.locator('button[aria-label="操作"]:visible, button[aria-label="更多操作"]:visible, button[aria-label$="更多操作"]:visible').first();
+  await trigger.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
   if (!(await locatorUsable(trigger))) {
     info(`${viewport.name}/${route.id} 跳过 row-dropdown-yaml: 无可用行操作`);
     return false;
   }
   await trigger.click();
-  await assertOverlayVisible(page, viewport, route, ".ant-dropdown", "row-dropdown");
+  await page.locator('.ant-dropdown:visible').first().waitFor({ state: 'visible', timeout: 1000 });
   await saveRouteScreenshot(page, viewport.name, route.id, theme, "row-dropdown");
 
-  const yamlItem = page.getByRole("menuitem", { name: /YAML/i }).first();
-  if (!(await locatorUsable(yamlItem))) {
-    info(`${viewport.name}/${route.id} 跳过 yaml-drawer: 行菜单无 YAML 项`);
-    await closeFloatingLayer(page);
-    return true;
+  const yamlItem = page.locator('.ant-dropdown:not(.ant-dropdown-hidden) [role="menuitem"]').filter({ hasText: /^YAML$/ }).first();
+  await yamlItem.click({ timeout: 3000 });
+  await assertOverlayVisible(page, viewport, route, ".ops-drawer-shell--resource, .ops-drawer-shell--editor, .ant-drawer-content", "yaml-drawer");
+  await page.getByText('正在读取 YAML', { exact: true }).waitFor({ state: 'hidden', timeout });
+  const drawer = page.locator('.ops-drawer-shell--resource:visible').last();
+  if (await drawer.locator('.ant-alert-error, .ant-alert-warning').count()) {
+    fail(`[${viewport.name}/${route.id}] YAML 读取失败: ${await drawer.innerText()}`);
   }
-  await yamlItem.click();
-  await assertOverlayVisible(page, viewport, route, ".ops-drawer-shell--editor, .ant-drawer-content", "yaml-drawer");
+  await drawer.getByRole('button', { name: /复制/ }).waitFor({ state: 'visible', timeout });
+  if (!(await drawer.getByRole('button', { name: /复制/ }).isEnabled())) {
+    fail(`[${viewport.name}/${route.id}] YAML 内容未就绪，复制操作仍不可用`);
+  }
   await saveRouteScreenshot(page, viewport.name, route.id, theme, "yaml-drawer");
   await closeFloatingLayer(page);
   return true;
@@ -669,6 +757,154 @@ async function probeOptionalRowDropdownAndYaml(page, viewport, route, theme) {
 async function assertOverlayChecks(page, route, viewport, theme) {
   const checks = route.overlayChecks ?? [];
   for (const check of checks) {
+    if (check === 'resource-detail') {
+      const preferredName = process.env.UI_TECH_DETAIL_NAME?.trim();
+      const name = preferredName
+        ? page.locator(`.resource-table tbody a.ant-typography:visible, .ops-mobile-resource-card__title a.ant-typography:visible, .ops-mobile-resource-card.is-interactive:visible`).filter({ hasText: preferredName }).first()
+        : page.locator('.resource-table tbody a.ant-typography:visible, .ops-mobile-resource-card__title a.ant-typography:visible, .ops-mobile-resource-card.is-interactive:visible').first();
+      if (!await name.count()) { info(`${viewport.name}/${route.id} 跳过详情: 未找到目标工作负载`); continue; }
+      const before = new URL(page.url()).pathname;
+      await name.click();
+      const drawer = page.locator('.resource-detail-drawer-wrapper:visible').last();
+      await drawer.waitFor({ state: 'visible', timeout });
+      await drawer.getByText('正在加载资源详情', { exact: true }).waitFor({ state: 'hidden', timeout });
+      if ((await drawer.innerText()).includes('资源详情加载失败')) fail(`[${viewport.name}/${route.id}] 真实详情读取失败`);
+      if (route.id === 'deployments') {
+        const accessResponse = page.waitForResponse(response => response.url().includes('/resources/access/context'), { timeout });
+        for (const tabName of ['Pod 列表', '访问方式']) {
+          await drawer.getByRole('tab', { name: tabName, exact: true }).click();
+          if (tabName === 'Pod 列表') {
+            await drawer.getByText('加载 Pod 列表...', { exact: true }).waitFor({ state: 'hidden', timeout });
+            await drawer.locator('.ant-table-tbody .ant-typography:visible').first().waitFor({ state: 'visible', timeout });
+          }
+          if (tabName === '访问方式') {
+            await drawer.getByText('正在读取访问资源及真实关联关系…', { exact: true }).waitFor({ state: 'hidden', timeout });
+            const response = await accessResponse;
+            const payload = await response.json();
+            const data = payload.data ?? payload;
+            info(`${viewport.name}/${route.id} access status=${response.status()} lists=${JSON.stringify(data.lists?.map(row => ({ kind: row.kind, count: row.items?.length, incomplete: row.incomplete, error: row.error })))}`);
+            if (!response.ok() || data.lists?.some(row => row.incomplete)) fail(`[${viewport.name}/${route.id}] 访问资源读取不完整，不能完成关联验收`);
+            const workloads = data.lists?.find(row => row.kind === 'Deployment')?.items ?? [];
+            const services = data.lists?.find(row => row.kind === 'Service')?.items ?? [];
+            const candidates = workloads.filter(workload => services.some(service => {
+              const selector = service.spec?.selector ?? {};
+              const labels = workload.spec?.template?.metadata?.labels ?? {};
+              return Object.keys(selector).length && Object.entries(selector).every(([key, value]) => labels[key] === value);
+            })).map(workload => workload.metadata.name);
+            info(`${viewport.name}/${route.id} 有真实 selector 关联服务的 Deployment: ${candidates.join(', ') || '未发现'}`);
+          }
+          const content = await drawer.innerText();
+          if (/加载失败|读取失败|请求失败/.test(content)) fail(`[${viewport.name}/${route.id}] ${tabName} 读取失败`);
+          info(`${viewport.name}/${route.id} ${tabName}真实内容: ${content.replace(/\s+/g, ' ').slice(-900)}`);
+        }
+        if (preferredName) {
+          const service = drawer.locator('.ant-table-tbody a:visible').first();
+          const serviceName = (await service.innerText()).trim();
+          if (!serviceName) fail(`[${viewport.name}/${route.id}] 关联 Service 名称为空`);
+          await service.click();
+          const serviceDrawer = page.locator('.resource-detail-drawer-wrapper').filter({ has: page.getByText(`Service 详情 · ${serviceName}`, { exact: true }) }).filter({ visible: true }).last();
+          await serviceDrawer.waitFor({ state: 'visible', timeout });
+          await serviceDrawer.getByText('正在加载资源详情', { exact: true }).waitFor({ state: 'hidden', timeout });
+          if ((await serviceDrawer.innerText()).includes('资源详情加载失败')) fail(`[${viewport.name}/${route.id}] 关联 Service 跳转读取失败`);
+          await closeFloatingLayer(page);
+          await name.click();
+          const workloadDrawer = page.locator('.resource-detail-drawer-wrapper:visible').last();
+          await workloadDrawer.getByRole('tab', { name: 'Pod 列表', exact: true }).click();
+          await workloadDrawer.getByText('加载 Pod 列表...', { exact: true }).waitFor({ state: 'hidden', timeout });
+          const pod = workloadDrawer.locator('.ant-table-tbody a:visible').first();
+          await pod.waitFor({ state: 'visible', timeout });
+          const podName = (await pod.innerText()).trim();
+          await pod.click();
+          const podDrawer = page.locator('.resource-detail-drawer-wrapper').filter({ has: page.getByText(`Pod 详情 · ${podName}`, { exact: true }) }).filter({ visible: true }).last();
+          await podDrawer.waitFor({ state: 'visible', timeout });
+          await podDrawer.getByText('正在加载资源详情', { exact: true }).waitFor({ state: 'hidden', timeout });
+          if ((await podDrawer.innerText()).includes('资源详情加载失败')) fail(`[${viewport.name}/${route.id}] Pod 名称跳转读取失败`);
+          if (process.env.UI_TECH_LIVE_LOGS === '1') {
+            let receivedLogFrames = 0;
+            const logFrameTypes = {};
+            const streamLogSignatures = [];
+            let streamLogShape;
+            const logSockets = new Set();
+            const captureLogsSocket = socket => {
+              if (/logs|runtime/.test(socket.url())) {
+                logSockets.add(socket);
+                socket.on('close', () => logSockets.delete(socket));
+                socket.on('framereceived', frame => {
+                  receivedLogFrames += 1;
+                  try {
+                    const payload = JSON.parse(String(frame.payload));
+                    const type = payload.type ?? payload.data?.type ?? payload.payload?.type;
+                    if (['log', 'system', 'error', 'metadata'].includes(type)) logFrameTypes[type] = (logFrameTypes[type] ?? 0) + 1;
+                    if (type === 'log') {
+                      const message = payload.content ?? payload.message ?? payload.data?.content ?? payload.data?.message ?? payload.payload?.content ?? payload.payload?.message;
+                      const timestamp = payload.timestamp ?? payload.data?.timestamp ?? payload.payload?.timestamp;
+                      if (!streamLogShape) streamLogShape = { keys:Object.keys(payload), dataKeys:payload.data&&typeof payload.data==='object'?Object.keys(payload.data):[], payloadKeys:payload.payload&&typeof payload.payload==='object'?Object.keys(payload.payload):[], messageType:typeof message, messageLength:typeof message==='string'?message.length:undefined, timestampType:typeof timestamp };
+                      if (typeof message === 'string') streamLogSignatures.push({ signature: `${timestamp ?? ''}|${message.trim()}`, message: message.trim() });
+                    }
+                  } catch {}
+                });
+              }
+            };
+            page.on('websocket', captureLogsSocket);
+            const historyResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/logs') && response.request().method() === 'GET', { timeout });
+            await podDrawer.getByRole('tab', { name: '日志', exact: true }).click();
+            const logs = page.locator('.ant-modal:visible').last();
+            await logs.waitFor({ state: 'visible', timeout });
+            await logs.getByText('已连接', { exact: true }).first().waitFor({ state: 'visible', timeout });
+            const history = await historyResponse;
+            const historyPayload = await history.json();
+            const historyData = historyPayload.data ?? historyPayload;
+            if (!history.ok() || !Array.isArray(historyData.items)) fail(`[${viewport.name}/${route.id}] 日志历史响应无效`);
+            const historySignatures = new Set(historyData.items.map(item => `${item.timestamp ?? ''}|${String(item.message ?? '').trim()}`));
+            const historyMessages = new Set(historyData.items.map(item => String(item.message ?? '').trim()));
+            info(`${viewport.name}/${route.id} 真实日志历史读取 ${historyData.items.length} 条（不输出正文）`);
+            const logFramesAtReady = logFrameTypes.log ?? 0;
+            const liveObservationMs = Number.parseInt(process.env.UI_TECH_LOG_SETTLE_MS || '0', 10);
+            if (Number.isFinite(liveObservationMs) && liveObservationMs > 0) {
+              await page.waitForTimeout(Math.min(liveObservationMs, 15000));
+            }
+            const liveLogDelta = (logFrameTypes.log ?? 0) - logFramesAtReady;
+            const historyOverlap = streamLogSignatures.filter(record =>
+              historySignatures.has(record.signature) || historyMessages.has(record.message) ||
+              [...historyMessages].some(message => message && record.message.includes(message))
+            ).length;
+            const unmatchedStreamRecords = streamLogSignatures.length - historyOverlap;
+            info(`${viewport.name}/${route.id} 真实日志 WebSocket 接收帧数 ${receivedLogFrames}（不输出正文）`);
+            info(`${viewport.name}/${route.id} 日志帧类型数量 ${JSON.stringify(logFrameTypes)}`);
+            if (process.env.UI_TECH_REQUIRE_LIVE_LOG_DELTA === '1' && liveLogDelta <= 0) {
+              fail(`[${viewport.name}/${route.id}] 观察${liveObservationMs}ms后未收到新的日志帧`);
+            }
+            info(`${viewport.name}/${route.id} WS日志记录签名：历史重叠 ${historyOverlap}，未匹配历史 ${unmatchedStreamRecords}（不输出正文）`);
+            info(`${viewport.name}/${route.id} 日志结构（无正文）：WS ${JSON.stringify(streamLogShape)}，REST ${JSON.stringify(historyData.items[0] ? { keys:Object.keys(historyData.items[0]), messageType:typeof historyData.items[0].message, messageLength:String(historyData.items[0].message??'').length, timestampType:typeof historyData.items[0].timestamp } : null)}`);
+            if (process.env.UI_TECH_REQUIRE_LIVE_LOG_DELTA === '1' && unmatchedStreamRecords <= 0) {
+              fail(`[${viewport.name}/${route.id}] WebSocket 日志帧全部与历史记录重叠，不能证明实时新增`);
+            }
+            if (liveObservationMs > 0) info(`${viewport.name}/${route.id} 日志连接后新增帧 ${liveLogDelta}，观察时长 ${Math.min(liveObservationMs, 15000)}ms`);
+            await logs.getByRole('button', { name: 'Close', exact: true }).click();
+            await podDrawer.waitFor({ state: 'visible', timeout });
+            const closeDeadline = Date.now() + 5000;
+            while (logSockets.size && Date.now() < closeDeadline) await page.waitForTimeout(50);
+            if (logSockets.size) fail(`[${viewport.name}/${route.id}] 日志关闭后 WebSocket 未关闭`);
+            page.off('websocket', captureLogsSocket);
+            if (new URL(page.url()).pathname !== before) fail(`[${viewport.name}/${route.id}] 日志关闭离开原页面`);
+          }
+          if (process.env.UI_TECH_LIVE_TERMINAL === '1') {
+            await podDrawer.getByRole('tab', { name: '终端', exact: true }).click();
+            const terminal = page.locator('.ant-modal:visible').last();
+            await terminal.waitFor({ state: 'visible', timeout });
+            await terminal.getByText('已连接', { exact: true }).first().waitFor({ state: 'visible', timeout });
+            await terminal.getByRole('button', { name: /断开/ }).click();
+            await terminal.getByText('已断开', { exact: true }).first().waitFor({ state: 'visible', timeout });
+            await terminal.getByRole('button', { name: 'Close', exact: true }).click();
+            await podDrawer.waitFor({ state: 'visible', timeout });
+            if (new URL(page.url()).pathname !== before) fail(`[${viewport.name}/${route.id}] 终端关闭离开原页面`);
+          }
+        }
+      }
+      if (new URL(page.url()).pathname !== before) fail(`[${viewport.name}/${route.id}] 详情切走背景列表`);
+      await closeFloatingLayer(page);
+      continue;
+    }
     if (check === "scope-popover") {
       await probePopover(page, viewport, route, theme, {
         state: "scope-popover",
@@ -678,6 +914,14 @@ async function assertOverlayChecks(page, route, viewport, theme) {
       continue;
     }
     if (check === "table-search-popover") {
+      const search = page.getByRole('textbox', { name: '搜索资源' }).filter({ visible: true }).first();
+      if (await search.count()) {
+        const before = new URL(page.url()).pathname;
+        await search.fill('kubenova-smoke-no-match');
+        await search.fill('');
+        if (new URL(page.url()).pathname !== before) fail(`[${viewport.name}/${route.id}] 列表搜索离开当前资源页面`);
+        continue;
+      }
       await probePopover(page, viewport, route, theme, {
         state: "search-popover",
         trigger: 'button[aria-label="搜索"]',
@@ -699,6 +943,8 @@ async function assertOverlayChecks(page, route, viewport, theme) {
         trigger: route.createTriggerSelector,
         roleName: /创建/,
         overlay: ".ops-modal-shell, .ant-modal-content, .ant-modal",
+        requiredField: route.createFieldSelector,
+        requiredFooter: route.createFooterSelector,
       });
       continue;
     }
@@ -772,7 +1018,8 @@ async function saveRouteScreenshot(page, viewportName, routeId, theme, state, su
   if (!saveArtifacts) return;
   await mkdir(ARTIFACT_ROOT, { recursive: true });
   const filename = screenshotFilename(routeId, theme, viewportName, state, suffix);
-  await page.screenshot({ path: join(ARTIFACT_ROOT, filename), fullPage: true });
+  const capturesOverlay = /modal|drawer|popover|dropdown|yaml/.test(state);
+  await page.screenshot({ path: join(ARTIFACT_ROOT, filename), fullPage: !capturesOverlay });
   info(`截图已写入 ${join(ARTIFACT_ROOT, filename)}`);
 }
 
@@ -823,6 +1070,8 @@ function resolveChromiumExecutable() {
     "/usr/bin/chromium-browser",
     "/opt/google/chrome/chrome",
     "/opt/google/chrome/chrome-real",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
   ].filter(Boolean);
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }

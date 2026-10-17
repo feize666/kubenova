@@ -1,8 +1,35 @@
 jest.mock('@kubernetes/client-node', () => ({}));
 
 import { ClusterHealthService } from './cluster-health.service';
+import { detectCni, detectRuntimes } from './platform-detection';
 
 describe('ClusterHealthService', () => {
+  it('detects CNI components and counts node runtimes', () => {
+    expect(detectRuntimes([
+      { status: { nodeInfo: { containerRuntimeVersion: 'containerd://2.0' } } },
+      { status: { nodeInfo: { containerRuntimeVersion: 'containerd://2.0' } } },
+    ] as any)).toEqual([{ version: 'containerd://2.0', nodes: 2 }]);
+    expect(detectCni([{ metadata: { name: 'terway-abc' }, spec: { containers: [{ image: 'aliyun/terway:v1' }] } }] as any).cniPlugin).toBe('Terway');
+  });
+
+  it('preserves CNI on permission failure while updating runtime', async () => {
+    const service = createService() as any;
+    service.clustersService.getKubeconfig.mockResolvedValue('config');
+    service.k8sClientService.getCoreApi = jest.fn().mockReturnValue({
+      listNode: jest.fn().mockResolvedValue({ items: [{ status: { nodeInfo: { containerRuntimeVersion: 'containerd://2.0' } } }] }),
+      listNamespacedPod: jest.fn().mockRejectedValue({ code: 403 }),
+    });
+    expect(await service.probePlatform('c1', { cniPlugin: 'Calico' })).toMatchObject({
+      cniPlugin: 'Calico', criRuntime: 'containerd 2.0（1 节点）', stale: true, error: 'CNI权限不足，无法更新',
+    });
+  });
+
+  it('refreshes platform inventory even when liveness is fresh', async () => {
+    const service = createService() as any;
+    service.clustersService.list = jest.fn().mockResolvedValue({ items: [{ id: 'c1', state: 'active', hasKubeconfig: true }] });
+    service.prisma.clusterHealthSnapshot.findMany.mockResolvedValue([{ clusterId: 'c1', checkedAt: new Date(), detailJson: { platformProbe: { checkedAt: new Date(Date.now() - 660_000).toISOString() } } }]);
+    expect(await service.listClustersNeedingBackgroundProbe()).toEqual(['c1']);
+  });
   function createService() {
     const prisma = {
       clusterHealthSnapshot: {

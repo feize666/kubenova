@@ -4,6 +4,7 @@ import { Drawer } from "antd";
 import type { DrawerProps } from "antd";
 import type { CSSProperties, ReactNode, RefObject } from "react";
 import { OpsState, type OpsStateKind } from "./ops-state";
+import { drawerWrapperWidth } from './drawer-width';
 
 export type OpsDrawerShellProps = Omit<DrawerProps, "children"> & {
   children: ReactNode;
@@ -13,6 +14,7 @@ export type OpsDrawerShellProps = Omit<DrawerProps, "children"> & {
   stateTitle?: ReactNode;
   variant?: "resource" | "detail" | "editor" | "workbench" | "business" | "inspector";
   widthPx?: number;
+  fullscreen?: boolean;
   footerActions?: ReactNode;
   returnFocusRef?: RefObject<HTMLElement | null>;
 };
@@ -29,6 +31,7 @@ const VARIANT_WIDTH: Record<NonNullable<OpsDrawerShellProps["variant"]>, number>
 export function OpsDrawerShell({
   children,
   className,
+  rootClassName,
   classNames,
   styles,
   bodyClassName,
@@ -37,6 +40,7 @@ export function OpsDrawerShell({
   stateTitle,
   variant = "detail",
   widthPx,
+  fullscreen=false,
   footerActions,
   returnFocusRef,
   afterOpenChange,
@@ -48,17 +52,12 @@ export function OpsDrawerShell({
     typeof styles === "function" ? {} : (styles as Record<string, CSSProperties | undefined> | undefined);
 
   const resolvedWidth = widthPx ?? VARIANT_WIDTH[variant];
-  const inspectorMaxWidth = Math.min(Math.max(resolvedWidth, 384), 460);
-  const resolvedWrapperWidth =
-    variant === "inspector"
-      ? `min(100vw, clamp(384px, 32vw, ${inspectorMaxWidth}px))`
-      : variant === "resource"
-        ? `min(100vw, ${resolvedWidth}px)`
-        : `min(100vw, ${resolvedWidth}px, max(50vw, 720px))`;
+  const resolvedWrapperWidth = drawerWrapperWidth(variant,resolvedWidth,fullscreen);
 
   return (
     <Drawer
       {...props}
+      rootClassName={["ops-drawer-shell-root", rootClassName].filter(Boolean).join(" ")}
       className={["ops-drawer-shell", `ops-drawer-shell--${variant}`, `ops-drawer-shell--state-${state}`, footerActions ? "ops-drawer-shell--has-footer" : undefined, className].filter(Boolean).join(" ")}
       classNames={{
         ...semanticClassNames,

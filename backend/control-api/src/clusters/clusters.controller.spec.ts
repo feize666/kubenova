@@ -556,7 +556,7 @@ describe('ClustersController', () => {
     ['nodes', 'nodes', 'listNodes'],
     ['health', 'healthCheck', 'getLegacyHealthResult'],
     ['sync status', 'syncStatus', 'findById'],
-  ])(
+  ] as const)(
     'authorizes %s reads before downstream work',
     async (_label, method, downstream) => {
       const h = createController();
@@ -565,11 +565,11 @@ describe('ClustersController', () => {
         new NotFoundException(),
       );
       await expect(
-        h.controller[method](
-          { headers: {}, user: { user: { id: 'u1', role: 'user' } } },
+        Reflect.apply(h.controller[method], h.controller, [
+          { headers: {}, user: { user: { id: 'u1', role: 'read-only' } } },
           createResponse(),
           'cluster-a',
-        ),
+        ]),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(
         h.clustersService[downstream] ?? h.clusterHealthService[downstream],

@@ -1,5 +1,19 @@
 export type TerminalConnectionStatus = "connecting" | "connected" | "disconnected";
 
+// Initial entry and explicit user actions may connect; a lost shell is never restarted automatically.
+export function shouldConnectTerminal(isAutoReconnect: boolean): boolean {
+  return !isAutoReconnect;
+}
+
+export function canManuallyReconnect(input: {
+  status: TerminalConnectionStatus;
+  blocked: boolean;
+  hasTarget: boolean;
+  newSession?: boolean;
+}): boolean {
+  return input.status !== "connecting" && (!input.blocked || input.newSession === true) && input.hasTarget;
+}
+
 export type TerminalTarget = {
   clusterId: string;
   namespace: string;
@@ -244,6 +258,7 @@ export function redactGatewayWsDisplay(input: string): string {
 export async function connectWsWithCandidates(
   candidates: string[],
   onSocketReady: (socket: WebSocket) => void,
+  signal?: AbortSignal,
 ): Promise<WebSocket> {
   if (candidates.length === 0) {
     throw new Error("未找到可用的 WebSocket 地址");
@@ -251,10 +266,12 @@ export async function connectWsWithCandidates(
 
   let lastError: unknown = null;
   for (const candidate of candidates) {
+    if (signal?.aborted) throw new DOMException("WebSocket connection canceled", "AbortError");
     try {
-      const socket = await connectSingleWsCandidate(candidate, onSocketReady);
+      const socket = await connectSingleWsCandidate(candidate, onSocketReady, signal);
       return socket;
     } catch (error) {
+      if (signal?.aborted) throw error;
       lastError = error;
     }
   }
@@ -264,6 +281,7 @@ export async function connectWsWithCandidates(
 function connectSingleWsCandidate(
   candidate: string,
   onSocketReady: (socket: WebSocket) => void,
+  signal?: AbortSignal,
 ): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -276,6 +294,7 @@ function connectSingleWsCandidate(
         clearTimeout(timer);
         timer = null;
       }
+      signal?.removeEventListener("abort", handleAbort);
       if (result.socket) {
         resolve(result.socket);
       } else {
@@ -284,6 +303,14 @@ function connectSingleWsCandidate(
     };
 
     let socket: WebSocket;
+    const handleAbort = () => {
+      finish({ error: new DOMException("WebSocket connection canceled", "AbortError") });
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onerror = null;
+      socket.onclose = null;
+      if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) socket.close();
+    };
     try {
       socket = new WebSocket(candidate);
     } catch (error) {
@@ -335,6 +362,8 @@ function connectSingleWsCandidate(
         ),
       });
     };
+    signal?.addEventListener("abort", handleAbort, { once: true });
+    if (signal?.aborted) handleAbort();
   });
 }
 
@@ -422,7 +451,7 @@ function decodeBase64Text(value?: string): string {
 }
 
 function parseFrame(frame: ParsedFrame): TerminalParsedMessage {
-  const text = decodeBase64Text(frame.contentB64) || stringifyUnknown(frame.content);
+  const text = frame.state === "keepalive" ? "" : decodeBase64Text(frame.contentB64) || stringifyUnknown(frame.content);
   if (text === "\u001bc") {
     return {
       kind: "control",

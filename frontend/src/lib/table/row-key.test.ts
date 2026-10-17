@@ -23,7 +23,7 @@ test("anonymous audit rows remain distinct and stable after sorting or filtering
 test("Ant Design renders the shared row key without index deprecation warnings", (t) => {
   const errors: string[] = [];
   t.mock.method(console, "error", (...args: unknown[]) => errors.push(args.map(String).join(" ")));
-  const html = renderToString(createElement(Table, {
+  const html = renderToString(createElement(Table<{ id: string }>, {
     columns: [{ dataIndex: "id", title: "ID" }],
     dataSource: [{ id: "first" }, { id: "second" }],
     rowKey: getStableResourceRowKey,

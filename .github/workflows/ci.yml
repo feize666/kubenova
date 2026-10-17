@@ -38,6 +38,7 @@ jobs:
         run: |
           node scripts/release-version.mjs "$RELEASE_TAG"
           node --test scripts/release-version.test.mjs
+          KUBENOVA_TEST_COMPOSE=1 node --test scripts/init-compose-env.test.mjs scripts/install-update-executor.test.mjs scripts/update-executor.test.mjs
           bash scripts/release-check.sh
           node scripts/check-release-switch.mjs
       - name: Refuse to overwrite an already published release
@@ -74,10 +75,86 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
+          node --test scripts/run-node-tests.test.mjs
+          node --test scripts/filter-regression-matrix.test.mjs
+          node --test scripts/ui-tech-smoke.test.mjs
+          node --import tsx --test src/app/network/gateway-api/search-behavior.test.mjs
           node scripts/run-node-tests.mjs src/lib/system-update-guide.test.ts src/lib/table/row-key.test.ts src/modules/topology-kubejojo/engine/endpoint-links.test.ts
+          node scripts/run-node-tests.mjs src/hooks/use-resource-selection.test.ts src/components/resource-table/batch-delete-dialog.test.ts src/lib/table/mobile-selection.test.ts src/lib/table/batch-targets.test.ts src/lib/table/batch-operation.test.ts src/lib/table/batch-context.test.ts
+          node scripts/run-node-tests.mjs src/lib/query/scoped-placeholder.test.ts src/hooks/use-scoped-deferred-value.test.ts src/lib/query/active-refresh.test.ts
+          node scripts/run-node-tests.mjs src/hooks/use-resource-list-query.test.ts src/app/workloads/workload-query-refresh.test.ts src/app/network/resource-list-refresh.test.ts src/lib/table/pagination.test.ts
+          node scripts/run-node-tests.mjs src/app/storage/storage-config-query-refresh.test.ts src/app/clusters/cluster-list-refresh.test.ts src/lib/api/clusters-pagination.test.ts src/app/network/remaining-resource-refresh.test.ts src/components/resource-table/query-state.test.ts
+          node scripts/run-node-tests.mjs src/lib/query/read-access-state.test.ts src/components/resource-detail/detail-read-access.test.ts src/components/resource-detail/query-state.test.ts src/components/resource-editor/editor-read-state.test.ts src/components/resource-editor/editor-leave-guard.test.ts src/lib/resource-editor-drafts.test.ts src/lib/ws/runtime-controls.test.ts
+          node scripts/run-node-tests.mjs src/lib/ws/logs-protocol.test.ts
+          node scripts/run-node-tests.mjs src/lib/api/table-preferences.test.ts
+          node scripts/run-node-tests.mjs src/components/realtime-sync-utils.test.ts
+          node scripts/run-node-tests.mjs src/components/resource-detail/pod-relations.test.ts src/components/resource-detail/detail-pod-list.test.ts
+          node scripts/run-node-tests.mjs src/components/resource-editor/native-references-read-access.test.ts src/app/authorization/grant-candidates.test.ts
+          node scripts/run-node-tests.mjs src/app/network/resource-filter-first-frame.test.ts
+          node --test src/lib/table/headlamp-table-preferences.test.mjs
+          npx playwright install --with-deps chromium
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/authorization/grant-mutations.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/authorization/authorization-read.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/authorization/native-settings-read.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node scripts/run-node-tests.mjs src/modules/topology-kubejojo/topology-surface.test.ts
+          node --test scripts/workspace-theme-regression.test.mjs
+          node --test scripts/resource-table-geometry.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/resource-table/table-keyboard-browser.test.mjs
+          YAML_EDITOR_BROWSER_CHANNEL=chromium node --test src/components/resource-editor/resource-editor-yaml.test.mjs
+          YAML_EDITOR_BROWSER_CHANNEL=chromium node --test src/components/resource-yaml-drawer.test.mjs
+          YAML_EDITOR_BROWSER_CHANNEL=chromium node --test src/components/resource-editor/editor-conflict-browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/resource-editor/editor-candidates-read.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/resource-table/batch-delete-dialog-browser.test.mjs
+          YAML_EDITOR_BROWSER_CHANNEL=chromium node --test src/components/resource-editor/editor-create-drafts-browser.test.mjs
+          YAML_EDITOR_BROWSER_CHANNEL=chromium node --test src/components/resource-editor/editor-schema-read.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/workloads/pod-batch-access.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/runtime-workbench/logs-workbench.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/runtime-workbench/terminal-workbench.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/navigation-theme-browser.test.mjs
+          node --test src/components/navigation-utility-focus.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/ai-assistant/floating-assistant.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/ai-assistant/reduced-motion.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/ops/drawer-motion.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/resource-detail/detail-pod-list.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/namespace-read-access.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/resource-detail/workload-access-read.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/security/security-read-access.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/clusters/health-detail-read.browser.test.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/cluster-detail-drawer.browser.test.mjs
           node scripts/check-topology-interactions.mjs
+          node scripts/check-navigation.mjs
+          node scripts/check-cluster-route-contracts.mjs
+          node scripts/check-workload-route-contracts.mjs
+          node scripts/check-list-toolbar-contracts.mjs
+          node scripts/check-resource-page-surface-contracts.mjs
           npx eslint src/app/system/update/page.tsx src/lib/system-update-guide.ts
           npm run build:stable
+      - name: Verify built resource details and editor matrix
+        working-directory: frontend
+        env:
+          RESOURCE_BROWSER_CHANNEL: chromium
+          LOCAL_SHELL_URL: http://127.0.0.1:3000
+        run: |
+          HOSTNAME=127.0.0.1 PORT=3000 node .next/standalone/server.js > "$RUNNER_TEMP/frontend-ui-qa.log" 2>&1 &
+          ui_server_pid=$!
+          trap 'kill "$ui_server_pid" 2>/dev/null || true' EXIT
+          node --input-type=module -e 'for(let attempt=0;attempt<60;attempt++){try{const response=await fetch("http://127.0.0.1:3000/login");if(response.ok)process.exit(0);}catch{}await new Promise(resolve=>setTimeout(resolve,500));}throw new Error("Built frontend did not become ready");'
+          node scripts/detail-relations-integration.mjs
+          node scripts/list-entry-matrix.mjs
+          RESOURCE_ENTRY_QA_KINDS=Deployment,Service,Namespace,IngressClass,ResourceQuota,LimitRange,HorizontalPodAutoscaler node scripts/resource-create-entry-matrix.mjs
+          RESOURCE_ENTRY_QA_KINDS=VerticalPodAutoscaler,GatewayClass,Gateway,HTTPRoute node scripts/resource-create-entry-matrix.mjs
+          node scripts/gateway-vpa-create-entry.mjs
+          node scripts/resource-edit-entry-matrix.mjs
+          RESOURCE_ENTRY_QA_READONLY=1 node scripts/resource-edit-entry-matrix.mjs
+          LOCAL_HEALTH_URL=http://127.0.0.1:3000 node --test src/app/clusters/health-detail-read.browser.test.mjs
+          node scripts/detail-resource-matrix.mjs
+          RESOURCE_BROWSER_CHANNEL=chromium node --test scripts/filter-regression-ui.test.mjs
+          node scripts/resource-editor-conflict-route.mjs
+          node scripts/authorization-read-route.mjs
+          node scripts/editor-schema-read-route.mjs
+          node scripts/resource-editor-integration.mjs
+          node scripts/logs-history-integration.mjs
+          node --test src/components/navigation-theme-browser.test.mjs
       - name: Test runtime gateway
         working-directory: backend/runtime-gateway
         run: go test ./...

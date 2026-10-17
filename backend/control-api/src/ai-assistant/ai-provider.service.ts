@@ -268,7 +268,7 @@ export class AiProviderService {
       ? provider.configJson as Record<string, unknown>
       : {};
     const timeoutMs = Number.isFinite(Number(config.timeoutMs)) ? Math.max(3_000, Number(config.timeoutMs)) : 30_000;
-    const maxTokens = Number.isFinite(Number(config.maxTokens)) ? Math.max(128, Number(config.maxTokens)) : 2_048;
+    const maxTokens = Number.isFinite(Number(config.maxTokens)) ? Math.min(2_048, Math.max(128, Number(config.maxTokens))) : 1_024;
     const content = await this.requestProvider(provider, messages, timeoutMs, maxTokens);
     return { content, providerId: provider.id, agentId: agent?.id };
   }
@@ -302,7 +302,7 @@ export class AiProviderService {
       ? provider.configJson as Record<string, unknown>
       : {};
     const timeoutMs = Number.isFinite(Number(config.timeoutMs)) ? Math.max(3_000, Number(config.timeoutMs)) : 30_000;
-    const maxTokens = Number.isFinite(Number(config.maxTokens)) ? Math.max(128, Number(config.maxTokens)) : 2_048;
+    const maxTokens = Number.isFinite(Number(config.maxTokens)) ? Math.min(2_048, Math.max(128, Number(config.maxTokens))) : 1_024;
     const vendor = provider.vendor as string;
 
     if (!OPENAI_SSE_VENDORS.has(vendor)) {
@@ -327,6 +327,7 @@ export class AiProviderService {
           messages,
           max_tokens: maxTokens,
           temperature: 0.2,
+          enable_thinking: false,
           stream: true,
         }),
         signal: controller.signal,
@@ -386,12 +387,12 @@ export class AiProviderService {
     try {
       let url = `${this.normalizeUrl(provider.baseUrl)}/chat/completions`;
       let headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      let body: unknown = { model: provider.modelName, messages, max_tokens: maxTokens, temperature: 0.2 };
+      let body: unknown = { model: provider.modelName, messages, max_tokens: maxTokens, temperature: 0.2, enable_thinking: false };
       if (key) headers.Authorization = `Bearer ${key}`;
       if (vendor === 'anthropic') {
         url = `${this.normalizeUrl(provider.baseUrl)}/messages`;
         headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' };
-        body = { model: provider.modelName, max_tokens: maxTokens, messages: messages.filter((item) => item.role !== 'system') };
+        body = { model: provider.modelName, max_tokens: maxTokens, messages: messages.filter((item) => item.role !== 'system'), enable_thinking: false };
       } else if (vendor === 'gemini') {
         url = `${this.normalizeUrl(provider.baseUrl)}/models/${provider.modelName}:generateContent?key=${encodeURIComponent(key)}`;
         headers = { 'Content-Type': 'application/json' };

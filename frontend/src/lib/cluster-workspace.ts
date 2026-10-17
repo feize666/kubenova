@@ -24,6 +24,7 @@ export type ClusterWorkspaceNavigationSection = {
   key: string;
   label: string;
   items: ClusterWorkspaceNavigationItem[];
+  requiredRole?: "admin";
 };
 
 export const CLUSTER_WORKSPACE_RESOURCE_PATHS = [
@@ -40,8 +41,10 @@ export const CLUSTER_WORKSPACE_RESOURCE_PATHS = [
   "workloads/autoscaling/hpa",
   "workloads/autoscaling/vpa",
   "workloads/create",
+  "resources/editor",
   "network/services",
   "network/ingress",
+  "network/ingressclasses",
   "network/endpoints",
   "network/endpointslices",
   "network/networkpolicy",
@@ -249,6 +252,7 @@ export function filterClusterScopedColumns<T extends object>(
 
 export function getClusterWorkspaceNavigation(
   clusterId: string,
+  role = "admin",
 ): ClusterWorkspaceNavigationSection[] {
   const item = (
     key: string,
@@ -298,6 +302,7 @@ export function getClusterWorkspaceNavigation(
       items: [
         item("services", "Service", "network/services"),
         item("ingress", "Ingress", "network/ingress"),
+        item("ingressclasses", "IngressClass", "network/ingressclasses"),
         item("endpoints", "Endpoint", "network/endpoints"),
         item("endpointslices", "EndpointSlice", "network/endpointslices"),
         item("networkpolicy", "NetworkPolicy", "network/networkpolicy"),
@@ -327,6 +332,7 @@ export function getClusterWorkspaceNavigation(
     {
       key: "observability",
       label: "可观测性中心",
+      requiredRole: "admin" as const,
       items: [
         item("monitoring", "Prometheus 监控", "monitoring"),
         item("log-center", "日志中心", "log-center"),
@@ -337,9 +343,14 @@ export function getClusterWorkspaceNavigation(
       key: "operations",
       label: "运维能力",
       items: [
-        item("inspection", "资源巡检", "inspection"),
+        ...(isPlatformAdminRole(role) ? [item("inspection", "资源巡检", "inspection")] : []),
         item("aiops", "AI 助手", "aiops"),
       ],
     },
-  ];
+  ].filter((section) => !section.requiredRole || isPlatformAdminRole(role));
+}
+
+function isPlatformAdminRole(role: string) {
+  const normalized = role.trim().toLowerCase();
+  return normalized === "admin" || normalized === "platform-admin";
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
 import { useEffect, useState } from "react";
 import { Space, message } from "antd";
 import { useAuth } from "@/components/auth-context";
@@ -9,6 +9,9 @@ import type { ClusterTableRecord } from "@/app/clusters/page";
 import { DetailDescriptions, DetailSection } from "./resource-detail/section-primitives";
 import { StatusTag } from "./status-tag";
 import { OpsDegradedState, OpsDrawerShell, OpsEmptyState, OpsErrorState, OpsIconActionButton, OpsLoadingState, openOpsConfirm } from "@/components/ops";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
+import { hashKey } from "@tanstack/react-query";
+import { useReadAccess } from "@/lib/query/read-access-state";
 
 type ClusterDetailDrawerProps = {
   open: boolean;
@@ -85,8 +88,9 @@ export function ClusterDetailDrawer({
   const fallbackRuntimeStatus = runtimeStatus ?? cluster?.status;
   const isOfflineView = isOfflineClusterSnapshot(cluster, fallbackRuntimeStatus);
   const fallbackOfflineMode = fallbackRuntimeStatus === "offline-mode" || cluster?.hasKubeconfig === false;
-  const query = useQuery({
-    queryKey: ["clusters", "detail", clusterId, token],
+  const queryKey = ["clusters", "detail", clusterId, token];
+  const query = useResourceListQuery({
+    queryKey,
     queryFn: () => getClusterDetail(clusterId, token),
     enabled: open && Boolean(clusterId) && !isOfflineView,
   });
@@ -94,8 +98,10 @@ export function ClusterDetailDrawer({
   const nodeItems = query.data?.nodeSummary.items ?? [];
   const nodeSummaryDegraded = Boolean(query.data?.nodeSummary.degraded);
   const nodeSummaryDegradationReason = query.data?.nodeSummary.degradationReason;
-  const canExportKubeconfig = cluster?.hasKubeconfig && role !== "read-only";
-  const showFallbackSnapshot = Boolean(cluster) && !query.data;
+  const accessDenied = useReadAccess(hashKey(queryKey), query);
+  const staleDetail = Boolean(query.error && query.data);
+  const canExportKubeconfig = cluster?.hasKubeconfig && role !== "read-only" && Boolean(query.data) && !query.isError && !query.isFetching && !accessDenied;
+  const showFallbackSnapshot = Boolean(cluster) && !query.data && !query.error && !accessDenied;
   const detailOfflineMode = query.data?.runtimeStatus === "offline-mode" || cluster?.hasKubeconfig === false;
   const shouldShowDetailOfflineNotice = isOfflineRuntimeStatus(query.data?.runtimeStatus) || detailOfflineMode;
 
@@ -116,7 +122,7 @@ export function ClusterDetailDrawer({
   };
 
   const handleExportKubeconfig = () => {
-    if (!clusterId || !token || exporting) return;
+    if (!clusterId || !token || exporting || !canExportKubeconfig) return;
     const displayName = query.data?.displayName || cluster?.name || "当前集群";
 
     openOpsConfirm({
@@ -166,8 +172,8 @@ export function ClusterDetailDrawer({
       extra={
         isOfflineView ? null : (
           <Space>
-            {canExportKubeconfig ? (
-              <OpsIconActionButton onClick={handleExportKubeconfig} loading={exporting} disabled={!clusterId || !token}>
+            {cluster?.hasKubeconfig && role !== "read-only" ? (
+              <OpsIconActionButton onClick={handleExportKubeconfig} loading={exporting} disabled={!clusterId || !token || !canExportKubeconfig}>
                 导出 kubeconfig
               </OpsIconActionButton>
             ) : null}
@@ -182,11 +188,13 @@ export function ClusterDetailDrawer({
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 24 }}>
         {!cluster ? (
           <OpsEmptyState title="未选择集群" description="从集群列表选择一条记录后查看详情。" />
+        ) : accessDenied ? (
+          query.isError ? <ResourceQueryFeedback label="集群详情" query={query} /> : <OpsErrorState title="集群详情不可用" description="当前资源内容已隐藏，请检查登录状态和访问授权后重试。" />
         ) : isOfflineView ? (
           renderOfflineClusterNotice(fallbackOfflineMode ? "offline-mode" : "offline")
         ) : query.isLoading && !query.data && !detailTimedOut ? (
           <OpsLoadingState title="正在加载集群详情" description="正在读取集群基础信息、节点概览与健康状态。" />
-        ) : query.error instanceof Error ? (
+        ) : query.error instanceof Error && !query.data ? (
           <OpsErrorState
             title="集群详情加载失败"
             description={query.error.message}
@@ -198,6 +206,7 @@ export function ClusterDetailDrawer({
           />
         ) : query.data ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+            {staleDetail ? <ResourceQueryFeedback label="集群详情" query={query} /> : null}
             {shouldShowDetailOfflineNotice
               ? renderOfflineClusterNotice(detailOfflineMode ? "offline-mode" : "offline")
               : null}
@@ -253,6 +262,7 @@ export function ClusterDetailDrawer({
                 items={[
                   { key: "cniPlugin", label: "CNI 网络插件", value: query.data.platform.cniPlugin ?? "—" },
                   { key: "criRuntime", label: "CRI 运行时", value: query.data.platform.criRuntime ?? "—" },
+                  { key: "platformProbe", label: "自动探测", value: query.data.platform.probe?.stale ? `可能已过期：${query.data.platform.probe.error || "等待后台更新"}` : query.data.platform.probe?.checkedAt ? new Date(query.data.platform.probe.checkedAt).toLocaleString() : "等待后台探测" },
                   { key: "kubernetesVersion", label: "K8s 版本", value: query.data.platform.kubernetesVersion ?? "—" },
                   { key: "environment", label: "环境", value: query.data.metadata.environment },
                   { key: "provider", label: "供应商", value: query.data.metadata.provider },

@@ -132,9 +132,8 @@ function compareResources(left: CapacityResource, right: CapacityResource): numb
  * carries one.
  *
  * Aggregates must not invent a weight. Most resources rely on the kind table,
- * and writing `Math.max(...) === 0` onto the aggregate would make the layout
- * treat the bucket as the shared default column instead of inheriting the
- * weighted average of its members.
+ * and writing `Math.max(...) === 0` onto the aggregate would mask the semantic
+ * priority inherited from its member kinds.
  */
 function aggregateExplicitWeight(members: readonly CapacityResource[]): number | undefined {
   return members.reduce<number | undefined>((current, resource) => {

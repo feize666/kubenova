@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback } from "react";
 import type { ReactNode } from "react";
-import { Alert, Button, Empty, Input, Modal, Space, Spin, Table, Tag, Typography } from "antd";
+import { Alert, Button, Empty, Input, Space, Spin, Table, Tag, Typography } from "antd";
 import {
   CodeOutlined,
   ContainerOutlined,
@@ -15,13 +15,14 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
-import dynamic from "next/dynamic";
+import { PodRuntimeOverlay } from '@/components/runtime-workbench/pod-runtime-overlay';
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
+import { WorkloadAccess } from "@/components/resource-detail/workload-access";
 
-const LogsWorkbench = dynamic(() => import("@/components/runtime-workbench/logs-workbench"), { ssr: false });
-const TerminalWorkbench = dynamic(() => import("@/components/runtime-workbench/terminal-workbench"), { ssr: false });
 import { getResourceYaml } from "@/lib/api/resources";
 import { getWorkloadsByKind, type WorkloadListItem } from "@/lib/api/workloads";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
+import { belongsToOwner, collectPaginatedWorkloads, selectorMatches } from "./pod-relations";
 import { buildLogsRoute } from "@/lib/api/logs";
 import { buildTerminalRoute } from "@/lib/workloads/terminal";
 import type { ResourceDetailResponse } from "@/lib/api/resources";
@@ -70,6 +71,7 @@ const DETAIL_TAB_MAP: Record<string, DetailTab[]> = {
   ],
   cronjob: [
     { key: "overview", label: "概览" },
+    { key: "pods", label: "Pod 列表" },
     { key: "yaml", label: "YAML" },
   ],
   pod: [
@@ -132,10 +134,14 @@ const DETAIL_TAB_MAP: Record<string, DetailTab[]> = {
 
 export function getDetailTabs(kind: string, detail?: ResourceDetailResponse): DetailTab[] {
   const key = (kind ?? "").trim().toLowerCase();
-  return DETAIL_TAB_MAP[key] ?? [
+  const tabs = DETAIL_TAB_MAP[key] ?? [
     { key: "overview", label: "概览" },
     { key: "yaml", label: "YAML" },
   ];
+  if (["deployment", "statefulset", "daemonset", "replicaset", "job", "cronjob"].includes(key)) {
+    return [...tabs.slice(0, -1), { key: "access", label: "访问方式" }, ...tabs.slice(-1)];
+  }
+  return tabs;
 }
 
 export function renderTabContent(
@@ -150,6 +156,8 @@ export function renderTabContent(
   const clusterMap = ctx.clusterMap;
 
   switch (tabKey) {
+    case "access":
+      return <WorkloadAccess detail={detail} onNavigateRequest={onNavigateRequest}/>;
     case "overview":
       return (
         <div style={{ padding: "16px 0" }}>
@@ -184,6 +192,7 @@ export function renderTabContent(
           namespace={namespace || ""}
           ownerKind={kind}
           ownerName={name}
+          ownerUid={String(detail.rawStatus?.uid ?? (detail.rawStatus?.metadata as Record<string, unknown> | undefined)?.uid ?? "")}
           ownerSelector={readSelector(detail.rawSpec)}
           onNavigate={(podId: string, _podNs: string, _podName: string) => {
             if (onNavigateRequest && podId) {
@@ -313,50 +322,53 @@ const POD_PHASE_COLORS: Record<string, string> = {
 
 // --- PodListTabContent ---
 
-function readSelector(rawSpec: Record<string, unknown> | undefined): Record<string, string> {
+function readSelector(rawSpec: Record<string, unknown> | undefined): Record<string, unknown> {
   const selector = rawSpec?.selector;
-  if (!selector || typeof selector !== "object" || Array.isArray(selector)) return {};
-  const matchLabels = (selector as Record<string, unknown>).matchLabels;
-  if (!matchLabels || typeof matchLabels !== "object" || Array.isArray(matchLabels)) return {};
-  return Object.fromEntries(Object.entries(matchLabels).filter(([, value]) => typeof value === "string")) as Record<string, string>;
+  return selector && typeof selector === "object" && !Array.isArray(selector) ? selector as Record<string, unknown> : {};
 }
 
 function PodListTabContent({
-  clusterId, namespace, ownerKind, ownerName, ownerSelector, onNavigate,
-}: { clusterId: string; namespace: string; ownerKind: string; ownerName: string; ownerSelector: Record<string, string>; onNavigate: (podId: string, podNs: string, podName: string) => void }) {
+  clusterId, namespace, ownerKind, ownerName, ownerUid, ownerSelector, onNavigate,
+}: { clusterId: string; namespace: string; ownerKind: string; ownerName: string; ownerUid: string; ownerSelector: Record<string, unknown>; onNavigate: (podId: string, podNs: string, podName: string) => void }) {
   const { accessToken } = useAuth();
   const [keyword, setKeyword] = useState("");
-  const podsQuery = useQuery({
-    queryKey: ["detail-pod-list", clusterId, namespace, ownerKind, ownerName, keyword, accessToken],
-    queryFn: () => getWorkloadsByKind("Pod", { clusterId, namespace, keyword: keyword || undefined, pageSize: 200 }, accessToken || undefined),
-    enabled: Boolean(accessToken && clusterId),
-    retry: 1,
+  const ownerKindLower = ownerKind.toLowerCase();
+  const podsQuery = useResourceListQuery({
+    queryKey: ["detail-pod-relations", clusterId, namespace, ownerKindLower, ownerName, ownerUid, accessToken],
+    queryFn: async ({ signal }) => {
+      const read = (kind: "Pod" | "ReplicaSet" | "Job") => collectPaginatedWorkloads((page) => getWorkloadsByKind(kind, {
+        clusterId, namespace, page, pageSize: 200,
+      }, accessToken || undefined, { signal }));
+      const intermediaryKind = ownerKindLower === "deployment" ? "ReplicaSet" : ownerKindLower === "cronjob" ? "Job" : undefined;
+      // Publish one complete read: an owner-list denial also hides cached pods.
+      const [pods, owners] = await Promise.all([read("Pod"), intermediaryKind ? read(intermediaryKind) : Promise.resolve([])]);
+      return { pods, owners };
+    },
+    enabled: Boolean(accessToken && clusterId && namespace),
+    // Returning to this tab must reconcile membership even when the shell
+    // disables cache refetch on mount. Keep the authorized snapshot meanwhile.
+    refetchOnMount: "always",
+    // Do not retry permission failures into a later 503: the read-access guard
+    // must observe the original denial and keep cached rows hidden.
+    retry: false,
   });
-  const allPods = podsQuery.data?.items ?? [];
+  const allPods = podsQuery.data?.pods ?? [];
+  const relationResources = podsQuery.data?.owners ?? [];
 
   const filtered = useMemo(() => {
     const keywordLower = keyword?.trim().toLowerCase() || "";
-    const kindLower = ownerKind.toLowerCase();
     return allPods.filter((pod: WorkloadListItem) => {
+      if (pod.clusterId !== clusterId || pod.namespace !== namespace) return false;
       const statusJson = (pod as any).statusJson && typeof (pod as any).statusJson === "object"
         ? (pod as any).statusJson : {};
       // The list endpoint stores Kubernetes ownerReferences in statusJson.
       const ownerRefs: any[] = (pod as any).ownerRefs ?? statusJson.ownerRefs ?? statusJson.ownerReferences ?? statusJson.metadata?.ownerReferences ?? [];
 
       let matchesOwner = false;
-      if (ownerRefs.length > 0) {
-        matchesOwner = ownerRefs.some(
-          (ref: any) => ref.name === ownerName && (ref.kind || "").toLowerCase() === kindLower
-        );
-      }
-      if (!matchesOwner && Object.keys(ownerSelector).length > 0) {
-        const labels: Record<string, string> = (pod as any).labels ?? {};
-        matchesOwner = Object.entries(ownerSelector).every(([key, value]) => labels[key] === value);
-      }
-      if (!matchesOwner) {
-        const labels: Record<string, string> = (pod as any).labels ?? {};
-        const app = labels["app"] || labels["app.kubernetes.io/name"] || labels["name"] || "";
-        matchesOwner = app === ownerName;
+      const owner = { kind: ownerKind, name: ownerName, namespace, clusterId, statusJson: { uid: ownerUid } };
+      if (ownerRefs.length > 0) matchesOwner = belongsToOwner(pod as WorkloadListItem, owner, relationResources as WorkloadListItem[]);
+      if (!matchesOwner && ownerRefs.length === 0 && Object.keys(ownerSelector).length > 0) {
+        matchesOwner = selectorMatches((pod as any).labels ?? {}, ownerSelector);
       }
       if (!matchesOwner) return false;
       if (keywordLower) {
@@ -364,10 +376,10 @@ function PodListTabContent({
       }
       return true;
     });
-  }, [allPods, ownerKind, ownerName, ownerSelector, keyword]);
+  }, [allPods, ownerKind, ownerName, ownerUid, namespace, clusterId, ownerSelector, keyword, relationResources]);
 
-  if (podsQuery.isLoading) return <div style={{ display: "flex", justifyContent: "center", padding: 80 }}><Spin size="large" /></div>;
-  if (podsQuery.isError) return <Alert type="error" message="加载 Pod 列表失败" description={String(podsQuery.error ?? "未知错误")} style={{ margin: 24 }} />;
+  if (podsQuery.isLoading && !podsQuery.data) return <div style={{ display: "flex", justifyContent: "center", padding: 80 }}><Spin size="large" /></div>;
+  if (podsQuery.data === undefined && podsQuery.error) return <Alert type="error" message="加载 Pod 列表失败" description={String(podsQuery.error)} style={{ margin: 24 }} />;
 
   const columns = [
     {
@@ -413,6 +425,7 @@ function PodListTabContent({
 
   return (
     <div style={{ padding: "8px 0" }}>
+      {podsQuery.error ? <Alert type="warning" message="Pod 列表刷新失败" description={String(podsQuery.error)} style={{ marginBottom: 16 }} /> : null}
       <div style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Input prefix={<SearchOutlined />} placeholder="搜索 Pod 名称..." size="small" style={{ width: 260 }} value={keyword}
@@ -444,7 +457,7 @@ function ContainersTabContent({ detail }: { detail: ResourceDetailResponse }) {
             {(container.ports ?? []).length > 0 && <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>端口</Typography.Text><div style={{ marginTop: 4 }}>{(container.ports ?? []).map((p: any, i: number) => <Typography.Text key={i} code style={{ fontSize: 12, marginRight: 8 }}>{p.containerPort}{p.protocol ? "/" + p.protocol : ""}{p.name ? " (" + p.name + ")" : ""}</Typography.Text>)}</div></div>}
             {Object.keys(container.resources ?? {}).length > 0 && <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>资源限制</Typography.Text><div style={{ marginTop: 4 }}>{Object.entries(container.resources).map(([key, value]: [string, any]) => <Typography.Text key={key} code style={{ fontSize: 12, marginRight: 8 }}>{key}: {typeof value === "object" ? JSON.stringify(value) : String(value)}</Typography.Text>)}</div></div>}
           </div>
-          {(container.env ?? []).length > 0 && <div style={{ marginTop: 12 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>环境变量 ({(container.env ?? []).length})</Typography.Text><div style={{ marginTop: 4, background: "var(--kn-fill-secondary, #f7f8fa)", borderRadius: 4, padding: "4px 8px", maxHeight: 160, overflow: "auto" }}>{(container.env ?? []).map((e: any, i: number) => <div key={i} style={{ fontSize: 12, fontFamily: "monospace", lineHeight: 1.8 }}><Typography.Text>{e.name ?? "-"}</Typography.Text>{e.value !== undefined ? <Typography.Text code style={{ marginLeft: 8 }}>{e.value}</Typography.Text> : e.valueFrom ? <Typography.Text type="secondary" style={{ marginLeft: 8 }}>(from: {Object.keys(e.valueFrom).join(", ")})</Typography.Text> : null}</div>)}</div></div>}
+          {(container.env ?? []).length > 0 && <div style={{ marginTop: 12 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>环境变量 ({(container.env ?? []).length})</Typography.Text><div style={{ marginTop: 4, background: "var(--kn-surface-subtle)", borderRadius: 4, padding: "4px 8px", maxHeight: 160, overflow: "auto" }}>{(container.env ?? []).map((e: any, i: number) => <div key={i} style={{ fontSize: 12, fontFamily: "monospace", lineHeight: 1.8 }}><Typography.Text>{e.name ?? "-"}</Typography.Text>{e.value !== undefined ? <Typography.Text code style={{ marginLeft: 8 }}>{e.value}</Typography.Text> : e.valueFrom ? <Typography.Text type="secondary" style={{ marginLeft: 8 }}>(from: {Object.keys(e.valueFrom).join(", ")})</Typography.Text> : null}</div>)}</div></div>}
           {(container.volumeMounts ?? []).length > 0 && <div style={{ marginTop: 12 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>挂载卷 ({(container.volumeMounts ?? []).length})</Typography.Text><div style={{ marginTop: 4 }}>{(container.volumeMounts ?? []).map((vm: any, i: number) => <Typography.Text key={i} code style={{ fontSize: 12, marginRight: 12 }}>{vm.name}: {vm.mountPath}{vm.readOnly ? " (ro)" : ""}</Typography.Text>)}</div></div>}
         </div>
       ))}
@@ -463,12 +476,7 @@ function RuntimeTabContent({ mode, clusterId, namespace, podName, containers }: 
   const label = mode === "logs" ? "日志" : "终端";
   return <>
     <Button onClick={() => setOpen(true)}>打开{label}</Button>
-    <Modal open={open} title={podName + " · " + label} onCancel={close} footer={null}
-      width="100vw" style={{ top: 0, maxWidth: "100vw", margin: 0, paddingBottom: 0 }}
-      styles={{ container: { height: "100dvh", borderRadius: 0, display: "flex", flexDirection: "column" }, body: { flex: 1, minHeight: 0, overflow: "auto" } }}
-      destroyOnHidden>
-      {open ? mode === "logs" ? <LogsWorkbench query={query} onClose={close} /> : <TerminalWorkbench query={query} onClose={close} /> : null}
-    </Modal>
+    <PodRuntimeOverlay open={open} mode={mode} podName={podName} query={query} onClose={close}/>
   </>;
 }
 
@@ -495,12 +503,12 @@ function DataTabContent({ detail }: { detail: ResourceDetailResponse }) {
         const truncated = isBinary && displayValue.length > 512 ? displayValue.slice(0, 512) + "\n..." : displayValue;
         return (
           <div key={key ?? index} style={{ marginBottom: 12, border: "1px solid var(--kn-border, #e8e8e8)", borderRadius: 8, overflow: "hidden" }}>
-            <div style={{ padding: "8px 16px", background: "var(--kn-fill-secondary, #f7f8fa)", borderBottom: "1px solid var(--kn-border, #e8e8e8)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ padding: "8px 16px", background: "var(--kn-surface-subtle)", borderBottom: "1px solid var(--kn-border, #e8e8e8)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <Typography.Text strong style={{ fontSize: 13 }}>{key}</Typography.Text>
               <Space size={4}><Typography.Text type="secondary" style={{ fontSize: 11 }}>{displayValue.length} 字符</Typography.Text>
                 <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => navigator.clipboard.writeText(displayValue).catch(() => {})} /></Space>
             </div>
-            <pre style={{ margin: 0, padding: "12px 16px", fontSize: 12, lineHeight: 1.6, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: isBinary ? 256 : undefined, overflow: "auto", color: "var(--kn-text-primary, #1a1a1a)" }}>{truncated}</pre>
+            <pre style={{ margin: 0, padding: "12px 16px", fontSize: 12, lineHeight: 1.6, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: isBinary ? 256 : undefined, overflow: "auto", color: "var(--kn-text)" }}>{truncated}</pre>
           </div>
         );
       })}

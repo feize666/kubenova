@@ -1,8 +1,11 @@
 "use client";
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Form, Input, InputNumber, Select, Space, Typography, message } from "antd";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ResourceClusterNamespaceFilters } from "@/components/resource-cluster-namespace-filters";
@@ -13,6 +16,7 @@ import { ResourceDetailDrawer } from "@/components/resource-detail/resource-deta
 import { ResourcePageHeader } from "@/components/resource-page-header";
 import { ResourceTable } from "@/components/resource-table";
 import { ResourceRowActions } from "@/components/resource-row-actions";
+import { matchLabelExpressions, parseResourceSearchInput } from "@/components/resource-action-bar";
 import { OpsFilterChip, OpsFormSection, OpsModalShell, OpsSurface } from "@/components/ops";
 import { ResourceCreateMethodTabs, type ResourceCreateMode } from "@/components/resource-create-method-tabs";
 import type { ResourceDetailDrawerProps } from "@/components/resource-detail";
@@ -250,7 +254,6 @@ interface HttpRouteFormValues {
 
 export default function GatewayApiPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -263,7 +266,7 @@ export default function GatewayApiPage() {
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const [kind, setKind] = useState<GatewayKindKey>(() => readGatewayKindFromSearchParams(searchParams));
-  const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [dynamicYamlTarget, setDynamicYamlTarget] = useState<DynamicResourceIdentity | null>(null);
   const [yamlOpen, setYamlOpen] = useState(false);
@@ -284,7 +287,6 @@ export default function GatewayApiPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<GatewayRow>({
-    defaultPageSize: 10,
   });
 
   const baseKindMeta = GATEWAY_KIND_META[normalizeGatewayKindKey(kind)] ?? GATEWAY_KIND_META.gatewayclass;
@@ -342,7 +344,7 @@ export default function GatewayApiPage() {
   );
   const kindMeta = gatewayKindMap.get(normalizeGatewayKindKey(kind)) ?? baseKindMeta;
 
-  const listQuery = useQuery({
+  const listQuery = useResourceListQuery({
     queryKey: [
       "gateway-api",
       kind,
@@ -582,13 +584,7 @@ export default function GatewayApiPage() {
     () =>
       rows.filter(
         (item) =>
-          (mergedFilters.length === 0
-            ? true
-            : mergedFilters.every((filter) =>
-                Object.entries(item.labels ?? {}).some(([key, value]) =>
-                  `${key}=${value}`.toLowerCase().includes(filter.toLowerCase()),
-                ),
-              )) &&
+          matchLabelExpressions(item.labels ?? {}, mergedFilters) &&
           textMatches(item.name, getTextFilter(tableFilters, "name")) &&
           textMatches(getClusterDisplayName(clusterMap, item.clusterId), getTextFilter(tableFilters, "clusterId")) &&
           textMatches(item.namespace || "-", getTextFilter(tableFilters, "namespace")) &&
@@ -605,23 +601,17 @@ export default function GatewayApiPage() {
   );
 
   const handleSearch = () => {
-    const parsed = keywordInput
-      .split(/\s+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const parsed = parseResourceSearchInput(keywordInput);
     resetPage();
-    setMergedFilters(parsed);
-    setKeyword(parsed.filter((item) => !item.includes("=")).join(" "));
+    setMergedFilters(parsed.labelExpressions);
+    setKeyword(parsed.keyword);
   };
   const handleGlobalSearchChange = (value: string) => {
-    const parsed = value
-      .split(/\s+/)
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const parsed = parseResourceSearchInput(value);
     setKeywordInput(value);
     resetPage();
-    setMergedFilters(parsed);
-    setKeyword(parsed.filter((item) => !item.includes("=")).join(" "));
+    setMergedFilters(parsed.labelExpressions);
+    setKeyword(parsed.keyword);
   };
   const urlExtraParams = useMemo(() => ({ kind }), [kind]);
   useSyncResourceFilterUrlState({
@@ -980,7 +970,7 @@ export default function GatewayApiPage() {
       render: (value: string, row) =>
         row.id ? (
           <Typography.Link
-            onClick={() => { const dt = buildGatewayDynamicDetailTarget(kindMeta, row); setDetailTarget(dt); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/dynamic/${encodeURIComponent(dt.id)}`); }}
+            onClick={() => { const dt = buildGatewayDynamicDetailTarget(kindMeta, row); setDetailTarget(dt); }}
           >
             {value}
           </Typography.Link>
@@ -1028,6 +1018,7 @@ export default function GatewayApiPage() {
       fixed: "right",
       render: (_: unknown, row) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind:kindMeta.title,name:row.name,namespace:row.namespace,apiVersion:"gateway.networking.k8s.io/"+kindMeta.version,resource:kindMeta.resource}}
           deleteLabel="删除"
           deleteTitle={`删除 ${kindMeta.title}`}
           deleteContent={`确认删除 ${kindMeta.title}「${row.name}」吗？此操作不可恢复。`}
@@ -1084,14 +1075,6 @@ export default function GatewayApiPage() {
           titleZh="Gateway API"
           titleEn="Gateway API"
           description="管理 Gateway API 资源。"
-          extra={
-            <ResourceAddButton
-              compact={false}
-              label="新增资源"
-              disabled={!canCreate}
-              onClick={handleOpenCreate}
-            />
-          }
         />
 
         <Space
@@ -1145,18 +1128,15 @@ export default function GatewayApiPage() {
             <Alert className="network-resource-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
           ) : null}
 
-          {listQuery.isError ? (
-            <Alert
-              className="network-resource-state-alert"
-              type="error"
-              showIcon
-              title={`${kindMeta.title} 列表加载失败`}
-              description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label={kindMeta.title} className="network-resource-state-alert" query={listQuery} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<GatewayRow>
+              queryState={listQuery}
+              toolbarPrimary={<>
+                {isStructuredGatewayKind(kind) ? <ResourceAddButton editorKind={kindMeta.title} editorApiVersion={`gateway.networking.k8s.io/${kindMeta.version}`} editorResource={kindMeta.resource} compact={false} label="创建" disabled={!canCreate} title={`创建 ${kindMeta.title}`} /> : null}
+                <ResourceAddButton editorKind={kindMeta.title} editorApiVersion={`gateway.networking.k8s.io/${kindMeta.version}`} editorResource={kindMeta.resource} compact={false} label="YAML 创建" editorMode="yaml" disabled={!canCreate} title={`使用 YAML 创建 ${kindMeta.title}`} />
+              </>}
               rowKey="id"
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -1193,7 +1173,7 @@ export default function GatewayApiPage() {
         </Space>
       </OpsSurface>
 
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

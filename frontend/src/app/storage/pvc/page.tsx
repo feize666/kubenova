@@ -1,4 +1,8 @@
 "use client";
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
 
 import {
   DeleteOutlined,
@@ -18,7 +22,7 @@ import {
   message,
 } from "antd";
 import type { MenuProps } from "antd";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -133,12 +137,13 @@ const ACCESS_MODE_OPTIONS = [
 ];
 
 export default function PvcPage() {
+  const openEditor = useResourceEditorNavigation();
   const workspace = useOptionalClusterWorkspace();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onClusterChange, onNamespaceChange } =
@@ -156,9 +161,8 @@ export default function PvcPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<StorageResource>({
-    defaultPageSize: 10,
   });
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -173,7 +177,7 @@ export default function PvcPage() {
   const [resizeForm] = Form.useForm<PvcResizeFormValues>();
   const [bindForm] = Form.useForm<PvcBindFormValues>();
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const listQuery = useResourceListQuery({
     queryKey: [
       "storage",
       "PVC",
@@ -205,6 +209,7 @@ export default function PvcPage() {
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
+  const { data, isLoading, refetch } = listQuery;
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "all", accessToken],
@@ -450,7 +455,7 @@ export default function PvcPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: StorageResource) =>
         row.id ? (
-          <Typography.Link onClick={() => { setDetailTarget({ kind: "PersistentVolumeClaim", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/persistentvolumeclaim/${encodeURIComponent(row.id)}`); }}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "PersistentVolumeClaim", id: row.id }); }}>
             {name}
           </Typography.Link>
         ) : (
@@ -514,11 +519,11 @@ export default function PvcPage() {
       fixed: "right",
       render: (_: unknown, row: StorageResource) => {
         const items: MenuProps["items"] = buildResourceActionMenuItems([
-          { key: "expand", icon: <ExpandOutlined />, label: "扩容" },
-          { key: "bind", icon: <LinkOutlined />, label: "绑定" },
+          { key: "expand", icon: <ExpandOutlined />, label: "扩容", disabled: !canWrite },
+          { key: "bind", icon: <LinkOutlined />, label: "绑定", disabled: !canWrite },
           { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
           { type: "divider" },
-          { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true },
+          { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true, disabled: !canWrite },
         ]);
         const identity = {
           clusterId: row.clusterId,
@@ -532,8 +537,10 @@ export default function PvcPage() {
             placement="bottomRight"
             classNames={{ root: POD_ACTION_MENU_CLASS }}
             menu={{
-              items,
+              items: [{key:'edit',label:'编辑'},...(items??[])],
               onClick: ({ key }) => {
+                if (!canWrite && key !== 'yaml' && key !== 'edit') return;
+                if (key === 'edit') { openEditor(identity); return; }
                 if (key === "expand") {
                   handleOpenResize(row);
                   return;
@@ -623,7 +630,6 @@ export default function PvcPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={<ResourceAddButton title="创建PVC" onClick={handleOpenCreate} />}
         />
 
         <Space
@@ -636,18 +642,11 @@ export default function PvcPage() {
             <Alert className="storage-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="storage-resource-state-alert"
-              type="error"
-              showIcon
-              title="持久卷声明加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback className="storage-resource-state-alert" label="持久卷声明" query={listQuery} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<StorageResource>
+              queryState={listQuery}
               rowKey="id"
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -664,6 +663,7 @@ export default function PvcPage() {
                 resetPage();
               }}
               toolbarExtra={scopeFilterControl}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" title="创建PVC" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" title="使用 YAML 创建PVC" /></>}
               sort={{ sortBy, sortOrder }}
               dataSource={tableData}
               bordered
@@ -831,7 +831,7 @@ export default function PvcPage() {
           </OpsFormSection>
         </Form>
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

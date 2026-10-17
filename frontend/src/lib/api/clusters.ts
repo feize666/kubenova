@@ -32,7 +32,7 @@ export async function getClusters(
     return true;
   });
   if (!params.selectableOnly) {
-    return { ...result, items: visibleItems, total: visibleItems.length, selectableUnavailable: false };
+    return { ...result, items: visibleItems, selectableUnavailable: false };
   }
   try {
     const health = await getClusterHealthList(
@@ -130,10 +130,11 @@ export async function getClusterDetail(id: string, token?: string): Promise<Clus
   });
 }
 
-export async function getClusterNodes(id: string, token?: string): Promise<ClusterNodeListModel> {
+export async function getClusterNodes(id: string, token?: string, requestOptions: ApiRequestSignalOptions = {}): Promise<ClusterNodeListModel> {
   return apiRequest<ClusterNodeListModel>(`/api/clusters/${id}/nodes`, {
     method: "GET",
     token,
+    signal: requestOptions.signal,
   });
 }
 

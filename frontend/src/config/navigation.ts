@@ -182,6 +182,15 @@ export const navSections: NavSection[] = [
         domain: "network",
       },
       {
+        key: "network-ingressclasses",
+        path: "/network/ingressclasses",
+        label: "IngressClass（入口类）",
+        canonicalNameEn: "IngressClass",
+        canonicalNameZh: "入口类",
+        description: "管理集群级 Ingress 控制器类型、默认类与参数引用。",
+        domain: "network",
+      },
+      {
         key: "network-networkpolicy",
         path: "/network/networkpolicy",
         label: "NetworkPolicy（网络策略）",
@@ -325,9 +334,10 @@ export const navSections: NavSection[] = [
   {
     key: "section-observability",
     label: "可观测性",
+    requiredRole: "admin",
     items: [
       { key: "observability-center", path: "/observability", label: "可观测性中心", requiredRole: "admin" },
-      { key: "inspection", path: "/inspection", label: "资源巡检" },
+      { key: "inspection", path: "/inspection", label: "资源巡检", requiredRole: "admin" },
     ],
   },
   {
@@ -336,7 +346,7 @@ export const navSections: NavSection[] = [
     requiredRole: "admin",
     items: [
       { key: "aiops-center", path: "/aiops", label: "事故中台", requiredRole: "admin" },
-      { key: "ai-assistant", path: "/ai-assistant", label: "AI 助手", requiredRole: "admin" },
+      { key: "ai-assistant", path: "/ai-assistant", label: "AI 助手" },
     ],
   },
   {

@@ -14,6 +14,7 @@ import {
   ClustersService,
 } from './clusters.service';
 import { K8sClientService } from './k8s-client.service';
+import { detectCni, detectRuntimes } from './platform-detection';
 
 export type HealthProbeSource = 'auto' | 'manual' | 'event';
 export type RuntimeStatus =
@@ -410,16 +411,19 @@ export class ClusterHealthService {
       select: {
         clusterId: true,
         checkedAt: true,
+        detailJson: true,
       },
     });
     const snapshotMap = new Map(
-      rows.map((row) => [row.clusterId, row.checkedAt]),
+      rows.map((row) => [row.clusterId, row]),
     );
     const staleBoundary = Date.now() - maxAgeMs;
     return targets
       .filter((item) => {
-        const checkedAt = snapshotMap.get(item.id);
-        return !checkedAt || checkedAt.getTime() < staleBoundary;
+        const snapshot = snapshotMap.get(item.id);
+        const platform = this.parseDetail(snapshot?.detailJson)?.platformProbe as Record<string, unknown> | undefined;
+        const platformTime = Date.parse(String(platform?.checkedAt ?? ''));
+        return !snapshot || snapshot.checkedAt.getTime() < staleBoundary || !Number.isFinite(platformTime) || platformTime < staleBoundary;
       })
       .map((item) => item.id);
   }
@@ -579,6 +583,17 @@ export class ClusterHealthService {
       }
     }
 
+    const previous = await this.prisma.clusterHealthSnapshot.findUnique({ where: { clusterId }, select: { detailJson: true } });
+    const previousDetail = this.parseDetail(previous?.detailJson) ?? {};
+    const previousPlatform = previousDetail.platformProbe as Record<string, unknown> | undefined;
+    let platformProbe = previousPlatform;
+    if (payload.ok && (!previousPlatform?.checkedAt || Date.now() - Date.parse(String(previousPlatform.checkedAt)) >= 10 * 60_000)) {
+      platformProbe = await this.probePlatform(clusterId, previousPlatform);
+    } else if (!payload.ok && previousPlatform) {
+      platformProbe = { ...previousPlatform, stale: true, error: payload.reason ?? '集群连接不可用' };
+    }
+    if (platformProbe) payload.detailJson = { ...payload.detailJson, platformProbe, cniPlugin: platformProbe.cniPlugin, criRuntime: platformProbe.criRuntime };
+
     const row = await this.prisma.clusterHealthSnapshot.upsert({
       where: { clusterId },
       create: {
@@ -630,6 +645,42 @@ export class ClusterHealthService {
       detailJson: this.parseDetail(row.detailJson),
       isStale: this.isStale(row.checkedAt),
     };
+  }
+
+  private async probePlatform(clusterId: string, previous?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const checkedAt = new Date().toISOString();
+    try {
+      const kubeconfig = await this.clustersService.getKubeconfig(clusterId);
+      if (!kubeconfig) throw new Error('集群未配置连接凭据');
+      const core = this.k8sClientService.getCoreApi(kubeconfig);
+      const results = await Promise.allSettled([
+        this.withTimeout(core.listNode(), 5000),
+        this.withTimeout(core.listNamespacedPod({ namespace: 'kube-system' }), 5000),
+      ]);
+      const errors: string[] = [];
+      let runtimes = previous?.runtimes;
+      let criRuntime = previous?.criRuntime;
+      let cniPlugin = previous?.cniPlugin;
+      let components = previous?.components;
+      if (results[0].status === 'fulfilled') {
+        const detected = detectRuntimes(results[0].value.items);
+        runtimes = detected;
+        criRuntime = detected.map(r => `${r.version.replace('://', ' ')}（${r.nodes} 节点）`).join(' · ') || '未识别';
+      } else errors.push(this.platformError(results[0].reason, '容器运行时'));
+      if (results[1].status === 'fulfilled') {
+        const detected = detectCni(results[1].value.items);
+        cniPlugin = detected.cniPlugin;
+        components = detected.components;
+      } else errors.push(this.platformError(results[1].reason, 'CNI'));
+      return { checkedAt, lastSuccessAt: errors.length ? previous?.lastSuccessAt ?? null : checkedAt, cniPlugin, criRuntime, runtimes, components, stale: errors.length > 0, error: errors.join('；') || null };
+    } catch (error) {
+      return { ...previous, checkedAt, stale: true, error: this.platformError(error, '平台信息') };
+    }
+  }
+
+  private platformError(error: unknown, field: string): string {
+    const status = (error as { code?: number; statusCode?: number })?.code ?? (error as { statusCode?: number })?.statusCode;
+    return status === 403 ? `${field}权限不足，无法更新` : `${field}探测失败：${error instanceof Error ? error.message : '请求失败'}`;
   }
 
   private async requireCluster(

@@ -4,7 +4,7 @@
  *
  * 覆盖目标：
  * 1) URL 恢复：clusterId/namespace/keyword
- * 2) 触发取数：点击“查询”后，XHR/FETCH 请求包含筛选参数
+ * 2) 触发取数：搜索变更后，目标列表请求包含筛选参数且返回成功
  *
  * 运行：
  *   FILTER_BASE_URL=http://127.0.0.1:3000 \
@@ -37,6 +37,9 @@ const keyword = process.env.FILTER_KEYWORD || "codex-filter-e2e";
  * @property {string} title
  * @property {string} path
  * @property {Scope} scope
+ * @property {string} endpoint
+ * @property {Record<string, string>} [params] 资源种类或动态资源身份
+ * @property {"client"} [keywordMode] 仅前端搜索的列表不要求 API keyword
  */
 
 /** @type {CaseItem[]} */
@@ -48,7 +51,6 @@ const ALL_CASES = [
   { id: "workloads-replicasets", title: "Workloads / ReplicaSets", path: "/workloads/replicasets", scope: "cluster-namespace" },
   { id: "workloads-jobs", title: "Workloads / Jobs", path: "/workloads/jobs", scope: "cluster-namespace" },
   { id: "workloads-cronjobs", title: "Workloads / CronJobs", path: "/workloads/cronjobs", scope: "cluster-namespace" },
-  { id: "workloads-helm", title: "Workloads / Helm", path: "/workloads/helm", scope: "cluster-namespace" },
   { id: "workloads-autoscaling-hpa", title: "Workloads / Autoscaling HPA", path: "/workloads/autoscaling/hpa", scope: "cluster-namespace" },
   { id: "workloads-autoscaling-vpa", title: "Workloads / Autoscaling VPA", path: "/workloads/autoscaling/vpa", scope: "cluster-namespace" },
   { id: "network-services", title: "Network / Services", path: "/network/services", scope: "cluster-namespace" },
@@ -56,7 +58,6 @@ const ALL_CASES = [
   { id: "network-endpointslices", title: "Network / EndpointSlices", path: "/network/endpointslices", scope: "cluster-namespace" },
   { id: "network-networkpolicy", title: "Network / NetworkPolicy", path: "/network/networkpolicy", scope: "cluster-namespace" },
   { id: "network-ingress", title: "Network / Ingress", path: "/network/ingress", scope: "cluster-namespace" },
-  { id: "network-ingressroute", title: "Network / IngressRoute", path: "/network/ingressroute", scope: "cluster-namespace" },
   { id: "network-gateway-api", title: "Network / Gateway API", path: "/network/gateway-api", scope: "cluster-namespace" },
   { id: "storage-pv", title: "Storage / PV", path: "/storage/pv", scope: "cluster-only" },
   { id: "storage-pvc", title: "Storage / PVC", path: "/storage/pvc", scope: "cluster-namespace" },
@@ -67,6 +68,34 @@ const ALL_CASES = [
   { id: "security-events", title: "Security / Events", path: "/security", scope: "cluster-namespace" },
   { id: "namespaces", title: "Namespaces", path: "/namespaces", scope: "cluster-only" },
 ];
+
+// Match the actual list contract, never an incidental request with similar filters.
+const CASE_REQUESTS = {
+  "workloads-deployments": { endpoint: "/api/workloads", params: { kind: "Deployment" } },
+  "workloads-pods": { endpoint: "/api/workloads", params: { kind: "Pod" } },
+  "workloads-statefulsets": { endpoint: "/api/workloads", params: { kind: "StatefulSet" } },
+  "workloads-daemonsets": { endpoint: "/api/workloads", params: { kind: "DaemonSet" } },
+  "workloads-replicasets": { endpoint: "/api/workloads", params: { kind: "ReplicaSet" } },
+  "workloads-jobs": { endpoint: "/api/workloads", params: { kind: "Job" } },
+  "workloads-cronjobs": { endpoint: "/api/workloads", params: { kind: "CronJob" } },
+  "workloads-autoscaling-hpa": { endpoint: "/api/autoscaling/policies", params: { type: "HPA" } },
+  "workloads-autoscaling-vpa": { endpoint: "/api/autoscaling/policies", params: { type: "VPA" } },
+  "network-services": { endpoint: "/api/network", params: { kind: "Service" } },
+  "network-endpoints": { endpoint: "/api/network", params: { kind: "Endpoints" } },
+  "network-endpointslices": { endpoint: "/api/network", params: { kind: "EndpointSlice" } },
+  "network-networkpolicy": { endpoint: "/api/network", params: { kind: "NetworkPolicy" } },
+  "network-ingress": { endpoint: "/api/network", params: { kind: "Ingress" } },
+  "network-gateway-api": { endpoint: "/api/resources/dynamic", params: { group: "gateway.networking.k8s.io", resource: "gateways" } },
+  "storage-pv": { endpoint: "/api/storage", params: { kind: "PV" } },
+  "storage-pvc": { endpoint: "/api/storage", params: { kind: "PVC" } },
+  "storage-sc": { endpoint: "/api/storage", params: { kind: "SC" } },
+  "configs-configmaps": { endpoint: "/api/configs", params: { kind: "ConfigMap" } },
+  "configs-secrets": { endpoint: "/api/configs", params: { kind: "Secret" } },
+  "configs-serviceaccounts": { endpoint: "/api/resources/dynamic", params: { resource: "serviceaccounts", version: "v1" } },
+  "security-events": { endpoint: "/api/security/events", keywordMode: "client" },
+  namespaces: { endpoint: "/api/namespaces" },
+};
+for (const item of ALL_CASES) Object.assign(item, CASE_REQUESTS[item.id]);
 
 function info(message) {
   console.log(`[filters-matrix] ${message}`);
@@ -104,6 +133,8 @@ function resolveChromiumExecutable() {
   return [
     process.env.CHROME_BIN,
     process.env.CHROMIUM_BIN,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
     "/usr/bin/google-chrome",
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
@@ -166,27 +197,28 @@ function requestHasParam(request, key, expectedValue) {
     // ignore json parse error
   }
 
-  const normalized = decodeURIComponent(postData).toLowerCase();
-  const needle = `${key.toLowerCase()}=${expectedValue.toLowerCase()}`;
-  const jsonNeedle = `"${key.toLowerCase()}":"${expectedValue.toLowerCase()}"`;
-  return normalized.includes(needle) || normalized.includes(jsonNeedle);
+  return false;
 }
 
-function captureApiRequests(page) {
-  const requests = [];
-  const listener = (request) => {
-    const type = request.resourceType();
-    if (type === "xhr" || type === "fetch") {
-      requests.push(request);
-    }
-  };
-  page.on("request", listener);
-  return {
-    requests,
-    stop() {
-      page.off("request", listener);
-    },
-  };
+function requestMatchesCase(request, testCase, sample, expectedKeyword) {
+  if (request.method() !== "GET" || new URL(request.url()).pathname !== testCase.endpoint) return false;
+  if (!["xhr", "fetch"].includes(request.resourceType())) return false;
+  const required = { ...testCase.params, clusterId: sample.clusterId };
+  if (testCase.scope === "cluster-namespace") required.namespace = sample.namespace;
+  if (testCase.keywordMode !== "client") required.keyword = expectedKeyword;
+  return Object.entries(required).every(([key, value]) => requestHasParam(request, key, value));
+}
+
+async function assertSuccessfulListResponse(response, testCase) {
+  if (!response.ok()) fail(`[${testCase.id}] 列表响应失败: HTTP ${response.status()}`);
+  const payload = await response.json();
+  if (payload?.success === false || payload?.error) fail(`[${testCase.id}] 列表响应包含错误`);
+  const data = payload && typeof payload === "object" && "data" in payload ? payload.data : payload;
+  if (!data || !Array.isArray(data.items)) fail(`[${testCase.id}] 列表响应缺少 items 数组`);
+}
+
+function isConcreteNamespace(name) {
+  return Boolean(name?.trim()) && !["全部命名空间", "全部名称空间"].includes(name.trim());
 }
 
 async function waitForPageReady(page) {
@@ -282,9 +314,10 @@ async function resolveSampleClusterAndNamespace(page) {
     await scopeTrigger.click();
   }
 
-  const clusterSelect = page.locator(".resource-filter-select").first();
+  const clusterSelect = page.locator(".resource-scope-filter-panel .resource-filter-select").first();
   await clusterSelect.click();
   const clusterOptions = page.locator(".ant-select-dropdown:visible .ant-select-item-option[title]");
+  await clusterOptions.filter({ hasText: /^(?!全部集群$).+/ }).first().waitFor({ state: "visible", timeout });
   const clusterCount = await clusterOptions.count();
   if (clusterCount <= 1) {
     fail("集群选项不足，无法回归");
@@ -295,48 +328,51 @@ async function resolveSampleClusterAndNamespace(page) {
     const name = (await clusterOptions.nth(i).innerText()).trim();
     if (name && name !== "全部集群") {
       clusterName = name;
+      await clusterOptions.nth(i).click();
       break;
     }
   }
   if (!clusterName) fail("未找到可用集群选项");
 
-  await page.locator(".ant-select-dropdown:visible .ant-select-item-option", { hasText: clusterName }).first().click();
   await page.waitForTimeout(300);
-  const applyButton = page.getByRole("button", { name: "应用", exact: true }).first();
+  const applyButton = page.getByRole("button", { name: /^应\s*用$/ }).first();
   if ((await applyButton.count()) > 0) {
     await applyButton.click();
   }
-  await page.waitForFunction(() => Boolean(new URL(window.location.href).searchParams.get("clusterId")), { timeout });
+  await page.waitForFunction(() => Boolean(new URL(window.location.href).searchParams.get("clusterId")), null, { timeout });
   const clusterId = new URL(page.url()).searchParams.get("clusterId") || "";
   if (!clusterId) fail("未能解析 clusterId");
 
   if ((await scopeTrigger.count()) > 0) {
     await scopeTrigger.click();
   }
-  const namespaceSelect = page.locator(".resource-filter-select--namespace").first();
-  await namespaceSelect.click();
-  const namespaceOptions = page.locator(".ant-select-dropdown:visible .ant-select-item-option[title]");
-  const namespaceCount = await namespaceOptions.count();
-  if (namespaceCount <= 1) {
-    fail(`集群 ${clusterName} 下无可用 namespace`);
+  const namespaceList = page.getByRole("listbox", { name: "命名空间列表", exact: true });
+  let namespaceOptions;
+  if (await namespaceList.isVisible()) {
+    namespaceOptions = namespaceList.getByRole("option");
+  } else {
+    await page.locator(".resource-filter-select--namespace").first().click();
+    namespaceOptions = page.locator(".ant-select-dropdown:visible .ant-select-item-option[title]");
   }
+  await namespaceOptions.filter({ hasText: /^(?!全部(?:命名|名称)空间$).+/ }).first().waitFor({ state: "visible", timeout });
+  const namespaceCount = await namespaceOptions.count();
 
   let namespaceName = "";
   for (let i = 0; i < namespaceCount; i += 1) {
     const name = (await namespaceOptions.nth(i).innerText()).trim();
-    if (name && name !== "全部名称空间") {
+    if (isConcreteNamespace(name)) {
       namespaceName = name;
+      await namespaceOptions.nth(i).click();
       break;
     }
   }
   if (!namespaceName) fail("未找到可用 namespace");
 
-  await page.locator(".ant-select-dropdown:visible .ant-select-item-option", { hasText: namespaceName }).first().click();
-  const namespaceApplyButton = page.getByRole("button", { name: "应用", exact: true }).first();
+  const namespaceApplyButton = page.getByRole("button", { name: /^应\s*用$/ }).first();
   if ((await namespaceApplyButton.count()) > 0) {
     await namespaceApplyButton.click();
   }
-  await page.waitForFunction(() => Boolean(new URL(window.location.href).searchParams.get("namespace")), { timeout });
+  await page.waitForFunction(() => Boolean(new URL(window.location.href).searchParams.get("namespace")), null, { timeout });
   const namespace = new URL(page.url()).searchParams.get("namespace") || "";
   if (!namespace) fail("未能解析 namespace");
 
@@ -345,21 +381,15 @@ async function resolveSampleClusterAndNamespace(page) {
 }
 
 async function locateKeywordInput(page) {
-  const byPlaceholder = page.locator('input[placeholder*="搜索"]');
-  if ((await byPlaceholder.count()) > 0) {
-    return byPlaceholder.first();
-  }
-  const fallback = page.locator(".ant-input-affix-wrapper input");
-  if ((await fallback.count()) > 0) {
-    return fallback.first();
-  }
-  fail("未找到搜索输入框");
+  const input = page.locator('input[aria-label="搜索资源"], input.resource-table-global-search, .resource-table-global-search input').filter({ visible: true }).first();
+  await input.waitFor({ state: "visible", timeout });
+  return input;
 }
 
 async function clickSearchButton(page) {
   const button = page.getByRole("button", { name: "查询", exact: true }).first();
   if ((await button.count()) === 0) {
-    fail("未找到查询按钮");
+    return;
   }
   await button.click();
 }
@@ -371,6 +401,7 @@ async function assertUrlRestore(page, testCase, sample) {
   if (testCase.scope === "cluster-namespace") {
     targetUrl.searchParams.set("namespace", sample.namespace);
   }
+  if (testCase.id === "network-gateway-api") targetUrl.searchParams.set("kind", "gateway");
 
   await page.goto(targetUrl.toString(), { waitUntil: "domcontentloaded", timeout });
   await waitForPageReady(page);
@@ -394,33 +425,26 @@ async function assertUrlRestore(page, testCase, sample) {
 }
 
 async function assertFetchTriggeredByFilters(page, testCase, sample) {
-  const collector = captureApiRequests(page);
-  try {
+  // A distinct keyword guarantees onChange even after URL restoration.
+  const nextKeyword = `${keyword}-changed`;
+  const responsePromise = page.waitForResponse(
+    response => requestMatchesCase(response.request(), testCase, sample, nextKeyword),
+    { timeout },
+  );
+  // Attach rejection handling before interacting, so UI errors cannot leave a rejected waiter.
+  const resultPromise = responsePromise.then(response => ({ response }), error => ({ error }));
+  if (testCase.keywordMode === "client") {
+    info(`[${testCase.id}] keyword 为前端过滤，仅验证范围列表请求`);
+    await page.reload({ waitUntil: "domcontentloaded", timeout });
+    await (await locateKeywordInput(page)).fill(nextKeyword);
+  } else {
+    await (await locateKeywordInput(page)).fill(nextKeyword);
     await clickSearchButton(page);
-    await page.waitForTimeout(1200);
-
-    if (!collector.requests.length) {
-      fail(`[${testCase.id}] 点击查询后未捕获到任何 XHR/FETCH`);
-    }
-
-    const matched = collector.requests.find((request) => {
-      const hasCluster = requestHasParam(request, "clusterId", sample.clusterId);
-      const hasKeyword = requestHasParam(request, "keyword", keyword);
-      const hasNamespace =
-        testCase.scope === "cluster-namespace" ? requestHasParam(request, "namespace", sample.namespace) : true;
-      return hasCluster && hasKeyword && hasNamespace;
-    });
-
-    if (!matched) {
-      const preview = collector.requests
-        .slice(0, 6)
-        .map((request) => request.url())
-        .join(" | ");
-      fail(`[${testCase.id}] 未发现包含筛选参数的取数请求。采样请求: ${preview || "无"}`);
-    }
-  } finally {
-    collector.stop();
   }
+  const result = await resultPromise;
+  if (result.error) fail(`[${testCase.id}] 未捕获目标列表响应 ${testCase.endpoint}: ${describeError(result.error)}`);
+  await assertSuccessfulListResponse(result.response, testCase);
+  await page.waitForFunction(expected => new URL(window.location.href).searchParams.get("keyword") === expected, nextKeyword, { timeout });
 }
 
 async function runCase(page, testCase, sample) {

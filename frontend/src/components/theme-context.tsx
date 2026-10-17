@@ -27,7 +27,7 @@ function readBrowserThemeMode(): ThemeMode {
   if (saved === "dark" || saved === "light") {
     return saved;
   }
-  return "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export function useThemeMode() {

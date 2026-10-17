@@ -11,7 +11,6 @@ const failures = [];
 const surfaceRoutes = [
   "src/app/network/services/page.tsx",
   "src/app/network/ingress/page.tsx",
-  "src/app/network/ingressroute/page.tsx",
   "src/app/network/endpoints/page.tsx",
   "src/app/network/endpointslices/page.tsx",
   "src/app/network/networkpolicy/page.tsx",
@@ -41,7 +40,6 @@ for (const path of surfaceRoutes) {
 const modalShellRoutes = [
   "src/app/network/services/page.tsx",
   "src/app/network/ingress/page.tsx",
-  "src/app/network/ingressroute/page.tsx",
   "src/app/network/endpoints/page.tsx",
   "src/app/network/endpointslices/page.tsx",
   "src/app/network/networkpolicy/page.tsx",

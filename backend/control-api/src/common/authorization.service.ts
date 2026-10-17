@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../platform/database/prisma.service';
 
-export type AuthorizationCapability = 'logs' | 'exec' | 'secrets' | 'kubeconfig';
+export type AuthorizationCapability = 'logs' | 'exec' | 'secrets' | 'kubeconfig' | 'ai-assistant:use';
 export type AuthorizationRole = 'cluster-admin' | 'operator' | 'viewer';
 
 export interface AuthorizationRequest {
@@ -18,6 +18,7 @@ export interface AuthorizationDecision {
   reasonCode: string;
   grantIds: string[];
   expiresAt: Date | null;
+  role?: AuthorizationRole;
 }
 
 type Grant = {
@@ -40,7 +41,7 @@ type AuthorizationPrisma = {
 };
 
 const roles = new Set<AuthorizationRole>(['cluster-admin', 'operator', 'viewer']);
-const capabilities = new Set<AuthorizationCapability>(['logs', 'exec', 'secrets', 'kubeconfig']);
+const capabilities = new Set<AuthorizationCapability>(['logs', 'exec', 'secrets', 'kubeconfig', 'ai-assistant:use']);
 
 @Injectable()
 export class AuthorizationService {
@@ -62,7 +63,12 @@ export class AuthorizationService {
     });
     if (!matching.length) return this.deny('GRANT_NOT_FOUND');
     const expiresAt = matching.reduce<Date | null>((earliest, grant) => !grant.expiresAt ? earliest : !earliest || grant.expiresAt < earliest ? grant.expiresAt : earliest, null);
-    return { allowed: true, reasonCode: 'GRANT_MATCHED', grantIds: matching.map(grant => grant.id), expiresAt };
+    const role = matching.reduce<AuthorizationRole>((best, grant) => {
+      const rank: Record<AuthorizationRole, number> = { viewer: 0, operator: 1, 'cluster-admin': 2 };
+      const candidate = grant.role as AuthorizationRole;
+      return rank[candidate] > rank[best] ? candidate : best;
+    }, 'viewer');
+    return { allowed: true, reasonCode: 'GRANT_MATCHED', grantIds: matching.map(grant => grant.id), expiresAt, role };
   }
 
   async listEffectiveGrants(userId: string, now = new Date(), clusterId?: string): Promise<Grant[]> {

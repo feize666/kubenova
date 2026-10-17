@@ -327,7 +327,7 @@ export class UsersService {
     const role = text(input.role);
     if (Boolean(userId) === Boolean(groupId) || !clusterId || !['cluster-admin', 'operator', 'viewer'].includes(role)) throw new BadRequestException('Invalid principal, cluster or role');
     if (!Array.isArray(input.namespaces) || !input.namespaces.length || input.namespaces.length > 100 || input.namespaces.some(value => !text(value))) throw new BadRequestException('Explicit namespace scope required');
-    if (!Array.isArray(input.capabilities) || input.capabilities.some(value => !['logs', 'exec', 'secrets', 'kubeconfig'].includes(String(value)))) throw new BadRequestException('Invalid capabilities');
+    if (!Array.isArray(input.capabilities) || input.capabilities.some(value => !['logs', 'exec', 'secrets', 'kubeconfig', 'ai-assistant:use'].includes(String(value)))) throw new BadRequestException('Invalid capabilities');
     const now = new Date();
     const validFrom = input.validFrom === undefined ? now : new Date(text(input.validFrom));
     const expiresAt = input.expiresAt === undefined || input.expiresAt === null ? null : new Date(text(input.expiresAt));

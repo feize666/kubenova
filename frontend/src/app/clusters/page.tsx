@@ -1,4 +1,9 @@
 "use client";
+import { scopedPlaceholder } from '@/lib/query/scoped-placeholder';
+import { useScopedDeferredValue } from '@/hooks/use-scoped-deferred-value';
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { isResourceAccessDenied } from '@/lib/query/visible-resource-data';
 
 import {
   CheckCircleOutlined,
@@ -13,7 +18,7 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Button,
@@ -41,11 +46,11 @@ import {
   OpsFormSection,
   OpsMetricTile,
   OpsModalShell,
+  OpsPageHeader,
   OpsSurface,
   openOpsConfirm,
   type OpsFilterChipTone,
 } from "@/components/ops";
-import { ResourcePageHeader } from "@/components/resource-page-header";
 import {
   ResourceFilterToolbar,
   ResourceFilterToolbarItem,
@@ -77,6 +82,7 @@ import type { Cluster } from "@/lib/api/types";
 import { QUERY_CACHE_TIMINGS, queryKeys } from "@/lib/query";
 import { useAntdTableSortPagination } from "@/lib/table";
 import { buildClusterWorkspaceHref } from "@/lib/cluster-workspace";
+import { sortClustersByRuntimeStatus } from "./cluster-list-order";
 
 export type ClusterTableRecord = Cluster & { key: string };
 type ClusterTableChangeHandler = NonNullable<TableProps<ClusterTableRecord>["onChange"]>;
@@ -272,7 +278,6 @@ export default function ClustersPage() {
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ClusterTableRecord>({
-      defaultPageSize: 10,
       allowedSortBy: ["name", "environment", "provider", "updatedAt"],
     });
   const [detailOpen, setDetailOpen] = useState(false);
@@ -299,9 +304,11 @@ export default function ClustersPage() {
     token: accessToken,
   });
 
-  const query = useQuery({
+  const clusterListScope=accessToken?JSON.stringify(['clusters',accessToken,keyword,environment]):'';
+  const query = useResourceListQuery({
     ...CLUSTER_LIST_QUERY_OPTIONS,
-    placeholderData: (previousData) => previousData,
+    meta:{resourceScope:clusterListScope},
+    placeholderData: (previousData,previousQuery) => scopedPlaceholder(previousData,previousQuery,clusterListScope),
     queryKey,
     queryFn: () =>
       getClusters(
@@ -310,23 +317,24 @@ export default function ClustersPage() {
           environment: environment || undefined,
           page: pagination.pageIndex + 1,
           pageSize: pagination.pageSize,
-          sortBy: sortBy || undefined,
+          sortBy: sortBy || "runtimeStatus",
           sortOrder: sortOrder || undefined,
         },
         accessToken,
       ),
     enabled: !isInitializing && Boolean(accessToken),
   });
-  const healthDetailQuery = useQuery({
+  const healthDetailQuery = useResourceListQuery({
     queryKey: ["cluster-health-detail", healthDetailCluster?.id, accessToken],
-    queryFn: () => getClusterHealthDetail(healthDetailCluster?.id ?? "", accessToken),
+    queryFn: ({ signal }) => getClusterHealthDetail(healthDetailCluster?.id ?? "", accessToken, { signal }),
     enabled: Boolean(accessToken && healthDetailCluster?.id),
   });
   const clusterItems = query.data?.items ?? EMPTY_CLUSTERS;
+  const clusterViewScope=JSON.stringify([clusterListScope,tableFilters,isResourceAccessDenied(query.error)]);
   const isTableBusy = query.isLoading && !query.data;
   const healthResultsView = healthResults ?? EMPTY_HEALTH_RESULTS;
   const deferredHealthResults = useDeferredValue(healthResultsView);
-  const deferredTableFilters = useDeferredValue(tableFilters);
+  const deferredTableFilters = useScopedDeferredValue(tableFilters,clusterViewScope);
   const preferencesClient = useMemo(
     () => createTablePreferencesClient(accessToken || undefined),
     [accessToken],
@@ -338,7 +346,7 @@ export default function ClustersPage() {
       .filter((item) => item.state !== "deleted")
       .map((item) => ({ ...item, key: item.id }));
   }, [clusterItems]);
-  const deferredTableData = useDeferredValue(tableData);
+  const deferredTableData = useScopedDeferredValue(tableData,clusterViewScope);
 
   const visibleTableData = useMemo<ClusterTableRecord[]>(() => {
     const nameFilter = typeof deferredTableFilters.name === "string" ? deferredTableFilters.name.toLowerCase() : "";
@@ -348,7 +356,7 @@ export default function ClustersPage() {
     const stateFilter = typeof deferredTableFilters.state === "string" ? deferredTableFilters.state : "";
     const kubeconfigFilter = typeof deferredTableFilters.hasKubeconfig === "string" ? deferredTableFilters.hasKubeconfig : "";
     const reasonFilter = typeof deferredTableFilters.healthReason === "string" ? deferredTableFilters.healthReason.toLowerCase() : "";
-    return deferredTableData.filter((row) => {
+    const filtered = deferredTableData.filter((row) => {
       const runtimeStatus = resolveRuntimeStatus(row, deferredHealthResults[row.id]).kind;
       const health = deferredHealthResults[row.id];
       const matchName = nameFilter ? row.name.toLowerCase().includes(nameFilter) : true;
@@ -360,7 +368,17 @@ export default function ClustersPage() {
       const matchReason = reasonFilter ? (health?.reason ?? "").toLowerCase().includes(reasonFilter) : true;
       return matchName && matchEnv && matchProvider && matchVersion && matchState && matchKubeconfig && matchReason;
     });
+
+    // Keep the console's primary inventory predictable: healthy/online
+    // clusters first, then transitional states, with unavailable clusters at
+    // the bottom. Names are the stable tie-breaker within each state.
+    return sortBy ? filtered : sortClustersByRuntimeStatus(
+      filtered,
+      (row) => resolveRuntimeStatus(row, deferredHealthResults[row.id]).kind,
+      (row) => row.name,
+    );
   }, [
+    sortBy,
     deferredHealthResults,
     deferredTableData,
     deferredTableFilters.environment,
@@ -456,9 +474,8 @@ export default function ClustersPage() {
   );
   const refetchList = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.clusters.all });
-    await query.refetch();
     await refreshHealthSummaries(tableData);
-  }, [query, queryClient, refreshHealthSummaries, tableData]);
+  }, [queryClient, refreshHealthSummaries, tableData]);
 
   useEffect(() => {
     if (tableData.length === 0) {
@@ -902,9 +919,8 @@ export default function ClustersPage() {
   return (
     <Space className="resource-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">
-        <ResourcePageHeader
-          path="/clusters"
-          embedded
+        <OpsPageHeader
+          surface={false}
           className="resource-workbench__header"
           style={{ marginBottom: 12 }}
           title={(
@@ -915,12 +931,8 @@ export default function ClustersPage() {
               </OpsFilterChip>
             </span>
           )}
-          description="查看集群版本、资源使用率和运行状态。系统自动健康探测与资源同步，支持禁用/启用。"
-          titleSuffix={(
-            <span className="resource-page-header__title-suffix">
-              <ResourceAddButton onClick={openAddModal} aria-label="创建集群" />
-            </span>
-          )}
+          subtitle="查看集群版本、资源使用率和运行状态。系统自动健康探测与资源同步，支持禁用/启用。"
+          primaryAction={<ResourceAddButton onClick={openAddModal} aria-label="创建集群" />}
         />
 
         <Space className="resource-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
@@ -961,18 +973,11 @@ export default function ClustersPage() {
             <Alert className="cluster-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看集群信息。" />
           ) : null}
 
-          {query.isError ? (
-            <Alert
-              className="cluster-resource-state-alert"
-              type="error"
-              showIcon
-              title="加载失败"
-              description={query.error instanceof Error ? query.error.message : "获取集群数据时发生错误"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="集群" className="cluster-resource-state-alert" query={query} />
 
           <div className="resource-workbench__table-zone">
             <ResourceTable<ClusterTableRecord>
+              queryState={query}
               rowKey="key"
               tableKey={CLUSTERS_TABLE_KEY}
               columns={columns as ColumnsType<ClusterTableRecord>}
@@ -1017,29 +1022,24 @@ export default function ClustersPage() {
         bodyClassName="cluster-health-drawer__body"
         footerActions={
           healthDetailCluster ? (
+            <Space>
+            <Button icon={<ReloadOutlined />} loading={healthDetailQuery.isFetching} onClick={() => void healthDetailQuery.refetch({ cancelRefetch: false })}>
+              刷新健康详情
+            </Button>
             <Button
               icon={<ReloadOutlined />}
               loading={manualProbeMutation.isPending && manualProbeMutation.variables === healthDetailCluster.id}
-              disabled={healthDetailCluster.state === "disabled" || healthDetailCluster.hasKubeconfig === false}
+              disabled={!healthDetailQuery.data || healthDetailQuery.isError || healthDetailQuery.isFetching || healthDetailCluster.state === "disabled" || healthDetailCluster.hasKubeconfig === false}
               onClick={() => manualProbeMutation.mutate(healthDetailCluster.id)}
             >
               立即探测
             </Button>
+            </Space>
           ) : null
         }
       >
         {healthDetailQuery.isLoading ? <Typography.Text>加载中...</Typography.Text> : null}
-        {healthDetailQuery.isError ? (
-          <Alert
-            className="cluster-resource-state-alert"
-            type="error"
-            showIcon
-            title="健康详情加载失败"
-            description={
-              healthDetailQuery.error instanceof Error ? healthDetailQuery.error.message : "请求失败，请稍后重试"
-            }
-          />
-        ) : null}
+        <ResourceQueryFeedback query={healthDetailQuery} label="健康详情" className="cluster-resource-state-alert" />
         {healthDetailQuery.data ? (
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <Descriptions bordered size="small" column={1}>

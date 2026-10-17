@@ -23,11 +23,13 @@ import {
   type ResourceIdentity,
   type ResourceYamlApplyRequest,
   type ResourceYamlUpdateRequest,
+  type ResourceEditorSubmitRequest,
 } from './resources.service';
 import { ClusterSyncService } from '../clusters/cluster-sync.service';
 import { ClustersService } from '../clusters/clusters.service';
 import { AuthorizationService } from '../common/authorization.service';
 import { NamespaceIdentityService } from '../common/namespace-identity.service';
+import { validateTlsPair } from './resource-editor-security';
 
 interface ResourcesRequest {
   user?: {
@@ -103,6 +105,141 @@ export class ResourcesController {
       return false;
     }
     return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+  }
+
+  @Get('access/context')
+  async getAccessContext(
+    @Req() req: ResourcesRequest,
+    @Query() query: { clusterId?: string; namespace?: string; kind?: string; name?: string },
+  ) {
+    const clusterId = query.clusterId?.trim() ?? '';
+    const namespace = query.namespace?.trim() ?? '';
+    if (!clusterId || !namespace) throw new BadRequestException('clusterId 与 namespace 不能为空');
+    const scope = { kind: 'Service', namespace, namespaced: true };
+    await this.authorizeEditorScope(req, clusterId, scope, false);
+    await this.clusterAccessService.assertCanDiscover(req.user?.user, clusterId);
+    let canMutate = false;
+    try {
+      await this.clusterAccessService.assertCanMutate(req.user?.user, clusterId);
+      await this.authorizeEditorScope(req, clusterId, scope, true);
+      canMutate = true;
+    } catch (error) {
+      const status = (error as { getStatus?: () => number })?.getStatus?.();
+      if (!(error instanceof ForbiddenException) && status !== 404) throw error;
+    }
+    return {
+      ...(await this.resourcesService.getAccessContext({
+        clusterId,
+        namespace,
+        kind: query.kind ?? '',
+        name: query.name ?? '',
+      })),
+      canMutate,
+    };
+  }
+
+  @Get('editor/config-keys')
+  async configKeys(@Req() req: ResourcesRequest, @Query() query: { clusterId?: string; namespace?: string; kind?: string; name?: string }) {
+    const clusterId = typeof query.clusterId === 'string' ? query.clusterId.trim() : '';
+    const namespace = typeof query.namespace === 'string' ? query.namespace.trim() : '';
+    const kind = typeof query.kind === 'string' ? query.kind : '';
+    const name = typeof query.name === 'string' ? query.name.trim() : '';
+    if (!clusterId || !namespace || !name || !['Secret', 'ConfigMap'].includes(kind)) throw new BadRequestException('配置资源身份无效');
+    await this.clusterAccessService.assertCanRead(req.user?.user, clusterId);
+    await this.authorizeEditorScope(req, clusterId, { kind, namespace, namespaced: true }, false);
+    return this.resourcesService.getConfigKeys(clusterId, namespace, kind, name);
+  }
+
+  @Get('editor/config-references')
+  async configReferences(@Req() req: ResourcesRequest, @Query() query: { clusterId?: string; namespace?: string; kind?: string }) {
+    const clusterId = typeof query.clusterId === 'string' ? query.clusterId.trim() : '';
+    const namespace = typeof query.namespace === 'string' ? query.namespace.trim() : '';
+    const kind = typeof query.kind === 'string' ? query.kind : '';
+    if (!clusterId || !namespace || !['Secret', 'ConfigMap'].includes(kind)) throw new BadRequestException('配置资源范围无效');
+    await this.clusterAccessService.assertCanRead(req.user?.user, clusterId);
+    await this.authorizeEditorScope(req, clusterId, { kind, namespace, namespaced: true }, false);
+    return this.resourcesService.getConfigReferences(clusterId, namespace, kind);
+  }
+
+  @Post('editor/validate-tls')
+  async validateTls(@Req() req: ResourcesRequest, @Body() body: { clusterId?: string; namespace?: string; certificate?: string; privateKey?: string }) {
+    const clusterId = typeof body?.clusterId === 'string' ? body.clusterId.trim() : '';
+    const namespace = typeof body?.namespace === 'string' ? body.namespace.trim() : '';
+    if (!clusterId || !namespace) throw new BadRequestException('请选择集群和命名空间');
+    await this.clusterAccessService.assertCanMutate(req.user?.user, clusterId);
+    await this.authorizeEditorScope(req, clusterId, { kind: 'Secret', namespace, namespaced: true }, true);
+    return validateTlsPair(body.certificate, body.privateKey);
+  }
+
+  @Get('ingressclasses')
+  async ingressClasses(@Req() req: ResourcesRequest, @Query('clusterId') clusterId = '') {
+    await this.clusterAccessService.assertCanRead(req.user?.user, clusterId);
+    return this.resourcesService.listIngressClasses(clusterId);
+  }
+
+  @Get('ingressclasses/impact')
+  async ingressClassImpact(@Req() req: ResourcesRequest, @Query('clusterId') clusterId = '', @Query('name') name = '') {
+    await this.clusterAccessService.assertCanRead(req.user?.user, clusterId);
+    return this.resourcesService.ingressClassImpact(clusterId, name);
+  }
+
+  @Post('ingressclasses/default')
+  async ingressClassDefault(@Req() req: ResourcesRequest, @Body() body: { clusterId: string; name: string; expected: Record<string, string>; dryRun: boolean }) {
+    await this.clusterAccessService.assertCanMutate(req.user?.user, body?.clusterId);
+    const result = await this.resourcesService.setDefaultIngressClass(body.clusterId, body.name, body.expected, body.dryRun);
+    if (!body.dryRun) this.triggerClusterSync(body.clusterId);
+    return result;
+  }
+
+  @Post('ingressclasses/delete')
+  async ingressClassDelete(@Req() req: ResourcesRequest, @Body() body: { clusterId: string; name: string; resourceVersion: string; force?: boolean }) {
+    if (body?.force !== undefined && typeof body.force !== 'boolean') throw new BadRequestException('force 必须为 boolean');
+    if (body?.force) await this.clusterAccessService.assertClusterAdmin(req.user?.user, body.clusterId);
+    else await this.clusterAccessService.assertCanMutate(req.user?.user, body?.clusterId);
+    const result = await this.resourcesService.deleteIngressClass(body.clusterId, body.name, body.resourceVersion, body.force === true);
+    this.triggerClusterSync(body.clusterId);
+    return result;
+  }
+
+  @Get('editor/schema')
+  async getEditorSchema(@Req() req: ResourcesRequest, @Query() query: { clusterId?: string; apiVersion?: string; kind?: string; namespace?: string; resource?: string }) {
+    const clusterId = typeof query.clusterId === 'string' ? query.clusterId.trim() : '';
+    if (!clusterId) throw new BadRequestException('clusterId 不能为空');
+    await this.clusterAccessService.assertCanRead(req.user?.user, clusterId);
+    const scope = await this.resourcesService.resolveEditorScope(query);
+    await this.authorizeEditorScope(req, clusterId, scope, false);
+    return this.resourcesService.getEditorSchema(query);
+  }
+
+  @Post('editor/submit')
+  async submitEditor(@Req() req: ResourcesRequest, @Body() body?: ResourceEditorSubmitRequest) {
+    const clusterId = typeof body?.clusterId === 'string' ? body.clusterId.trim() : '';
+    if (!clusterId) throw new BadRequestException('clusterId 不能为空');
+    await this.clusterAccessService.assertCanMutate(req.user?.user, clusterId);
+    if (body?.operation !== 'create' && body?.operation !== 'update') throw new BadRequestException('operation 必须为 create 或 update');
+    const result = await this.resourcesService.submitEditor({ ...body, clusterId } as ResourceEditorSubmitRequest, manifest =>
+      this.authorizeEditorManifest(req, clusterId, manifest),
+    );
+    if (!body?.dryRun && result.total > 0) this.triggerClusterSync(clusterId);
+    return result;
+  }
+
+  private async authorizeEditorManifest(req: ResourcesRequest, clusterId: string, manifest: any): Promise<void> {
+    const scope = await this.resourcesService.resolveEditorScope({ clusterId, apiVersion: manifest.apiVersion, kind: manifest.kind, namespace: manifest.metadata?.namespace });
+    await this.authorizeEditorScope(req, clusterId, scope, true);
+  }
+
+  private async authorizeEditorScope(req: ResourcesRequest, clusterId: string, scope: { kind: string; namespace: string; namespaced: boolean }, mutation: boolean): Promise<void> {
+    if (mutation) await this.assertSecretMutation(req, clusterId, scope.kind, scope.namespace);
+    else await this.assertSecretCapability(req, clusterId, scope.kind, scope.namespace);
+    const accessible = await this.clusterAccessService.listAccessibleClusterIds(req.user?.user);
+    if (accessible === null || accessible.includes(clusterId)) return;
+    if (!scope.namespaced || !scope.namespace) throw new ForbiddenException('资源不在授权范围内');
+    const namespaceUid = await this.namespaceIdentity.resolve(clusterId, scope.namespace);
+    const decision = await this.authorizationService.authorize({ userId: req.user?.user?.id ?? '', clusterId, namespaceUid, mutation,
+      ...(scope.kind === 'Secret' ? { capability: 'secrets' as const } : {}),
+    });
+    if (!decision.allowed) throw new ForbiddenException('资源不在授权范围内');
   }
 
   @Post('discovery/refresh')

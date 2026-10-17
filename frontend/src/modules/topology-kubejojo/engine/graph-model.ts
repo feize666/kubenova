@@ -34,7 +34,7 @@ export type KubejojoRelation = {
 };
 
 export type KubejojoGroupBy = "namespace" | "instance" | "node";
-export type KubejojoGroupKind = "scope" | "component" | "isolated";
+export type KubejojoGroupKind = "scope" | "component" | "isolated" | "stack";
 
 export type KubejojoGraphNode = Omit<TopologyRendererGraphNode, "resource" | "nodes" | "children"> & {
   resource?: KubejojoResource;
@@ -44,6 +44,8 @@ export type KubejojoGraphNode = Omit<TopologyRendererGraphNode, "resource" | "no
   weight?: number;
   groupKind?: KubejojoGroupKind;
   collapsedPreferred?: boolean;
+  expandedStackId?: string;
+  expandedStackLabel?: string;
   capacity?: TopologyCapacityMetadata;
 };
 
@@ -57,7 +59,6 @@ export type KubejojoSelectionPathItem = {
 
 export type KubejojoLayoutPolicy = {
   algorithm: "layered" | "rectpacking";
-  direction: "RIGHT";
   aspectRatio: number;
 };
 
@@ -68,8 +69,7 @@ export type KubejojoLayoutPolicy = {
 export const KUBEJOJO_LAYOUT_METRICS = Object.freeze({
   nodeWidth: 220,
   nodeHeight: 70,
-  layeredNodeSpacing: 60,
-  layeredLayerSpacing: 60,
+  nodeSpacing: 60,
   groupPadding: 16,
   packedNodeSpacing: 20,
   packedPaddingTop: 48,
@@ -77,10 +77,9 @@ export const KUBEJOJO_LAYOUT_METRICS = Object.freeze({
 });
 
 /**
- * Headlamp's `DEFAULT_NODE_WEIGHTS`, reproduced verbatim. The weight is the
- * layout partition: a higher weight is placed further left, which produces
- * Deployment -> ReplicaSet -> Pod -> Service -> Ingress without any per-kind
- * rank table.
+ * Headlamp's `DEFAULT_NODE_WEIGHTS`, retained as resource-kind priority
+ * metadata for deterministic graph ordering and aggregation. Negative weights
+ * define ELK partitions, matching Headlamp's resource-kind ordering.
  */
 export const KUBEJOJO_NODE_WEIGHTS: Readonly<Record<string, number>> = Object.freeze({
   HorizontalPodAutoscaler: 1000,
@@ -116,9 +115,8 @@ export const KUBEJOJO_NODE_WEIGHTS: Readonly<Record<string, number>> = Object.fr
 });
 
 /**
- * KubeNova extensions for kinds Headlamp does not model. They slot into the
- * Headlamp tiers instead of replacing them, so the canonical access path stays
- * intact while Gateway API and autoscaling resources keep their own columns.
+ * KubeNova extensions for kinds Headlamp does not model. They retain consistent
+ * semantic ordering and aggregation priority alongside the built-in kinds.
  */
 export const KUBEJOJO_NODE_WEIGHT_OVERRIDES: Readonly<Record<string, number>> = Object.freeze({
   VerticalPodAutoscaler: 995,
@@ -150,8 +148,7 @@ export function weightForKind(kind?: string | null): number | undefined {
 
 /**
  * Weight of a capacity aggregate. When several kinds fold into one card the
- * weighted average keeps the aggregate in the column its members dominate, so
- * a Service aggregate never drifts to the left of a Pod aggregate.
+ * weighted average preserves the dominant member priority for stable sorting.
  */
 export function aggregatedWeight(resource?: KubejojoGraphNode["resource"]): number | undefined {
   const members = Object.entries(resource?.aggregation?.membersByKind ?? {});
@@ -189,8 +186,13 @@ export function eachKubejojo(node: KubejojoGraphNode, visit: (item: KubejojoGrap
   node.nodes?.forEach((child) => eachKubejojo(child, visit));
 }
 
-/** Heaviest first, then stable by id so the canvas never reshuffles. */
+/** Heaviest first, then stable resource identity so refreshed graphs do not reshuffle. */
 export function compareKubejojoNodes(left: KubejojoGraphNode, right: KubejojoGraphNode): number {
+  const leftResource = left.resource;
+  const rightResource = right.resource;
   return getKubejojoWeight(right) - getKubejojoWeight(left)
+    || (leftResource?.kind ?? "").localeCompare(rightResource?.kind ?? "", "en")
+    || (leftResource?.namespace ?? "").localeCompare(rightResource?.namespace ?? "", "zh-CN")
+    || (leftResource?.name ?? "").localeCompare(rightResource?.name ?? "", "en", { numeric: true })
     || left.id.localeCompare(right.id, "en");
 }

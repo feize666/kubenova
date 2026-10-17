@@ -8,6 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as k8s from '@kubernetes/client-node';
+import { podDeleteOptions } from './pod-delete-security';
 import { ClusterAccessService, type ClusterAccessSubject } from '../common/cluster-access.service';
 import { AuthorizationService } from '../common/authorization.service';
 import { NamespaceIdentityService } from '../common/namespace-identity.service';
@@ -60,6 +61,7 @@ export interface WorkloadsListQuery {
 }
 
 export interface WorkloadActionPayload {
+  expectedUid?: string;
   replicas?: number;
   spec?: Prisma.InputJsonValue;
 }
@@ -895,7 +897,7 @@ export class WorkloadsService {
         break;
 
       case 'delete':
-        await this.deleteWorkloadInCluster(existing);
+        await this.deleteWorkloadInCluster(existing,payload?.expectedUid);
         updated = await this.repository.setState(id, 'deleted');
         break;
 
@@ -2894,6 +2896,7 @@ export class WorkloadsService {
 
   private async deleteWorkloadInCluster(
     existing: WorkloadRecord,
+    expectedUid?: string,
   ): Promise<void> {
     const kubeconfig = await this.repository.getClusterKubeconfig(
       existing.clusterId,
@@ -2950,16 +2953,11 @@ export class WorkloadsService {
         return;
       }
       if (existing.kind === 'Pod') {
-        await coreApi.deleteNamespacedPod({
-          name: existing.name,
-          namespace: existing.namespace,
-          body: {
-            gracePeriodSeconds: 0,
-            propagationPolicy: 'Background',
-          },
-        });
+        const status=existing.statusJson&&typeof existing.statusJson==='object'&&!Array.isArray(existing.statusJson)?existing.statusJson as Record<string,unknown>:{};
+        await coreApi.deleteNamespacedPod(podDeleteOptions(existing.namespace,existing.name,status.uid,expectedUid));
       }
     } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new BadRequestException(
         `${existing.kind} 删除失败: ${this.extractK8sErrorMessage(error)}`,
       );

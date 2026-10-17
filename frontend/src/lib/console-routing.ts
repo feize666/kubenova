@@ -3,18 +3,20 @@ export const PLATFORM_HOME_PATH = "/";
 export type ConsoleSurface = "public" | "portal" | "cluster-workspace" | "legacy-workspace";
 
 export type PlatformNavigationItem = {
-  key: "platform-overview" | "platform-clusters" | "platform-access" | "platform-applications" | "platform-settings";
+  key: "platform-overview" | "platform-clusters" | "platform-access" | "platform-applications" | "platform-settings" | "platform-ai-assistant";
   label: string;
   path: string;
-  icon: "home" | "clusters" | "authorization" | "applications" | "settings";
+  icon: "home" | "clusters" | "authorization" | "applications" | "settings" | "ai";
   requiredRole?: "admin";
+  requiredCapability?: "ai-assistant:use";
 };
 
 const PLATFORM_NAVIGATION: readonly PlatformNavigationItem[] = [
   { key: "platform-overview", label: "概览", path: "/", icon: "home" },
   { key: "platform-clusters", label: "集群", path: "/clusters", icon: "clusters" },
+  { key: "platform-ai-assistant", label: "AI 助手", path: "/ai-assistant", icon: "ai", requiredCapability: "ai-assistant:use" },
   { key: "platform-access", label: "访问控制", path: "/authorization", icon: "authorization", requiredRole: "admin" },
-  { key: "platform-applications", label: "应用中心", path: "/applications", icon: "applications" },
+  { key: "platform-applications", label: "应用中心", path: "/applications", icon: "applications", requiredRole: "admin" },
   { key: "platform-settings", label: "系统设置", path: "/settings", icon: "settings", requiredRole: "admin" },
 ];
 
@@ -25,10 +27,10 @@ export function isPlatformAdmin(userRole: string) {
   return normalizedRole === "admin" || normalizedRole === "platform-admin";
 }
 
-export function getPlatformNavigation(userRole: string, disabledPaths?: ReadonlySet<string> | null) {
+export function getPlatformNavigation(userRole: string, disabledPaths?: ReadonlySet<string> | null, aiAssistantAllowed = false) {
   const canManagePlatform = isPlatformAdmin(userRole);
   return PLATFORM_NAVIGATION.filter(
-    (item) => (!item.requiredRole || canManagePlatform) && !disabledPaths?.has(item.path),
+    (item) => (!item.requiredRole || canManagePlatform) && (!item.requiredCapability || canManagePlatform || aiAssistantAllowed) && !disabledPaths?.has(item.path),
   );
 }
 

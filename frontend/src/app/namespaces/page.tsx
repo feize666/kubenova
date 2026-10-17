@@ -1,7 +1,10 @@
 "use client";
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import {
   Alert,
   App,
@@ -117,8 +120,9 @@ export default function NamespacesPage() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
+  const assertCanWrite = () => { if (!canWrite) throw new Error('当前账号无权修改命名空间'); };
   const now = useNowTicker();
   const initialFilters = useMemo(
     () => readResourceFilterFromSearchParams(searchParams),
@@ -138,7 +142,6 @@ export default function NamespacesPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<NamespaceListItem>({
-    defaultPageSize: 10,
     allowedSortBy: ["namespace", "clusterId", "updatedAt"],
   });
   const [open, setOpen] = useState(false);
@@ -147,11 +150,10 @@ export default function NamespacesPage() {
   const [createYamlClusterId, setCreateYamlClusterId] = useState("");
   const [editing, setEditing] = useState<NamespaceListItem | null>(null);
   const [form] = Form.useForm<FormValues>();
-  const [detailTarget, setDetailTarget] =
-    useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
 
-  const clustersQuery = useQuery({
+  const clustersQuery = useResourceListQuery({
     queryKey: ["clusters", "namespace-admin", accessToken],
     queryFn: () =>
       getClusters(
@@ -160,7 +162,7 @@ export default function NamespacesPage() {
       ),
     enabled: !isInitializing && Boolean(accessToken),
   });
-  const namespacesQuery = useQuery({
+  const namespacesQuery = useResourceListQuery({
     queryKey: [
       "namespaces",
       {
@@ -173,7 +175,7 @@ export default function NamespacesPage() {
       },
       accessToken,
     ],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getNamespaces(
         {
           clusterId: clusterId || undefined,
@@ -184,6 +186,7 @@ export default function NamespacesPage() {
           sortOrder: sortOrder || undefined,
         },
         accessToken,
+        { signal },
       ),
     enabled: !isInitializing && Boolean(accessToken),
   });
@@ -208,15 +211,17 @@ export default function NamespacesPage() {
   );
 
   const mutateCreate = useMutation({
-    mutationFn: async (values: FormValues) =>
-      createNamespace(
+    mutationFn: async (values: FormValues) => {
+      assertCanWrite();
+      return createNamespace(
         {
           clusterId: values.clusterId,
           namespace: values.namespace,
           labels: parseLabels(values.labelsText),
         },
         accessToken,
-      ),
+      );
+    },
     onSuccess: async () => {
       message.success("名称空间创建成功");
       setOpen(false);
@@ -228,14 +233,16 @@ export default function NamespacesPage() {
   });
 
   const mutateApplyYaml = useMutation({
-    mutationFn: () =>
-      applyResourceYaml(
+    mutationFn: () => {
+      assertCanWrite();
+      return applyResourceYaml(
         {
           clusterId: createYamlClusterId.trim(),
           yaml: createYaml.trim(),
         },
         accessToken,
-      ),
+      );
+    },
     onSuccess: async (result) => {
       message.success(result.message || "YAML 已应用");
       setOpen(false);
@@ -248,6 +255,7 @@ export default function NamespacesPage() {
 
   const mutateUpdate = useMutation({
     mutationFn: async (values: FormValues) => {
+      assertCanWrite();
       if (!editing) throw new Error("未选择目标名称空间");
       return updateNamespace(
         editing.id,
@@ -267,7 +275,7 @@ export default function NamespacesPage() {
   });
 
   const mutateDelete = useMutation({
-    mutationFn: async (id: string) => deleteNamespace(id, accessToken),
+    mutationFn: async (id: string) => { assertCanWrite(); return deleteNamespace(id, accessToken); },
     onSuccess: async () => {
       message.success("名称空间已删除");
       await queryClient.invalidateQueries({ queryKey: ["namespaces"] });
@@ -328,7 +336,7 @@ export default function NamespacesPage() {
         <Button
           type="link"
           className="resource-name-link"
-          onClick={() => { const dt = buildNamespaceDetailTarget(row); setDetailTarget(dt); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/namespace/${encodeURIComponent(dt.id)}`); }}
+          onClick={() => { const dt = buildNamespaceDetailTarget(row); setDetailTarget(dt); }}
         >
           {value}
         </Button>
@@ -393,6 +401,7 @@ export default function NamespacesPage() {
       required: true,
       render: (_, row) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind:"Namespace",name:row.namespace}}
           deleteLabel="删除"
           deleteTitle="删除 Namespace"
           deleteContent={`确认删除 Namespace「${row.namespace}」吗？此操作不可恢复。`}
@@ -401,13 +410,13 @@ export default function NamespacesPage() {
             {
               key: "detail",
               label: "描述",
-              onClick: () => { const dt = buildNamespaceDetailTarget(row); setDetailTarget(dt); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/namespace/${encodeURIComponent(dt.id)}`); },
+              onClick: () => { const dt = buildNamespaceDetailTarget(row); setDetailTarget(dt); },
             },
           ]}
           onYaml={() =>
             setYamlTarget({
               clusterId: row.clusterId,
-              namespace: row.namespace,
+              namespace: "",
               kind: "Namespace",
               name: row.namespace,
             })
@@ -439,22 +448,6 @@ export default function NamespacesPage() {
             </span>
           }
           description="统一管理名称空间、标签与资源隔离范围。"
-          extra={
-            <ResourceAddButton
-              onClick={() => {
-                setEditing(null);
-                const nextClusterId =
-                  clusterId || clusterOptions[0]?.value || "";
-                form.resetFields();
-                form.setFieldsValue({ clusterId: nextClusterId });
-                setCreateMode("form");
-                setCreateYaml("");
-                setCreateYamlClusterId(nextClusterId);
-                setOpen(true);
-              }}
-              aria-label="创建名称空间"
-            />
-          }
         />
 
         <Space className="resource-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
@@ -486,22 +479,12 @@ export default function NamespacesPage() {
             />
           ) : null}
 
-          {namespacesQuery.isError ? (
-            <Alert
-              className="namespace-resource-state-alert"
-              type="error"
-              showIcon
-              title="Namespace 加载失败"
-              description={
-                namespacesQuery.error instanceof Error
-                  ? namespacesQuery.error.message
-                  : "请求失败"
-              }
-            />
-          ) : null}
+          <ResourceQueryFeedback label="Namespace" className="namespace-resource-state-alert" query={namespacesQuery} />
 
           <div className="resource-workbench__table-zone">
             <ResourceTable<NamespaceListItem>
+              queryState={namespacesQuery}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" title="创建名称空间" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" title="使用 YAML 创建名称空间" /></>}
               rowKey="id"
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -542,7 +525,7 @@ export default function NamespacesPage() {
         </Space>
       </OpsSurface>
 
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

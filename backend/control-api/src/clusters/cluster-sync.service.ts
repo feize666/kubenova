@@ -71,6 +71,7 @@ export class ClusterSyncService {
   private readonly logger = new Logger(ClusterSyncService.name);
   private readonly lastSyncStatus = new Map<string, SyncStatus>();
   private readonly listTimeoutMs = 3_000;
+  private readonly activeSyncs = new Map<string, Promise<SyncResult>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -87,6 +88,18 @@ export class ClusterSyncService {
     clusterId: string,
     kubeconfig: string,
   ): Promise<SyncResult> {
+    const active = this.activeSyncs.get(clusterId);
+    if (active) return active;
+    const pending = this.runClusterSync(clusterId, kubeconfig);
+    this.activeSyncs.set(clusterId, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.activeSyncs.get(clusterId) === pending) this.activeSyncs.delete(clusterId);
+    }
+  }
+
+  private async runClusterSync(clusterId: string, kubeconfig: string): Promise<SyncResult> {
     const errors: string[] = [];
     const counts: SyncResult['counts'] = {
       namespaces: 0,
@@ -658,6 +671,7 @@ export class ClusterSyncService {
             spec: toJson(pod.spec ?? {}),
             statusJson: toJson({
               phase,
+              uid: pod.metadata?.uid ?? null,
               podIP: pod.status?.podIP ?? null,
               nodeName: pod.spec?.nodeName ?? null,
               restartCount,
@@ -682,6 +696,7 @@ export class ClusterSyncService {
             spec: toJson(pod.spec ?? {}),
             statusJson: toJson({
               phase,
+              uid: pod.metadata?.uid ?? null,
               podIP: pod.status?.podIP ?? null,
               nodeName: pod.spec?.nodeName ?? null,
               restartCount,
@@ -790,6 +805,7 @@ export class ClusterSyncService {
             spec: toJson(dep.spec ?? {}),
             statusJson: toJson({
               replicas: dep.status?.replicas,
+              uid: dep.metadata?.uid ?? null,
               readyReplicas: dep.status?.readyReplicas,
               availableReplicas: dep.status?.availableReplicas,
               image,
@@ -810,6 +826,7 @@ export class ClusterSyncService {
             spec: toJson(dep.spec ?? {}),
             statusJson: toJson({
               replicas: dep.status?.replicas,
+              uid: dep.metadata?.uid ?? null,
               readyReplicas: dep.status?.readyReplicas,
               availableReplicas: dep.status?.availableReplicas,
               image,
@@ -901,6 +918,7 @@ export class ClusterSyncService {
             spec: toJson(rs.spec ?? {}),
             statusJson: toJson({
               replicas: rs.status?.replicas,
+              uid: rs.metadata?.uid ?? null,
               readyReplicas: rs.status?.readyReplicas,
               availableReplicas: rs.status?.availableReplicas,
               fullyLabeledReplicas: rs.status?.fullyLabeledReplicas,
@@ -923,6 +941,7 @@ export class ClusterSyncService {
             spec: toJson(rs.spec ?? {}),
             statusJson: toJson({
               replicas: rs.status?.replicas,
+              uid: rs.metadata?.uid ?? null,
               readyReplicas: rs.status?.readyReplicas,
               availableReplicas: rs.status?.availableReplicas,
               fullyLabeledReplicas: rs.status?.fullyLabeledReplicas,
@@ -1007,6 +1026,7 @@ export class ClusterSyncService {
             spec: toJson(sts.spec ?? {}),
             statusJson: toJson({
               replicas: sts.status?.replicas,
+              uid: sts.metadata?.uid ?? null,
               readyReplicas: sts.status?.readyReplicas,
               image,
               images,
@@ -1026,6 +1046,7 @@ export class ClusterSyncService {
             spec: toJson(sts.spec ?? {}),
             statusJson: toJson({
               replicas: sts.status?.replicas,
+              uid: sts.metadata?.uid ?? null,
               readyReplicas: sts.status?.readyReplicas,
               image,
               images,
@@ -1105,6 +1126,7 @@ export class ClusterSyncService {
             spec: toJson(ds.spec ?? {}),
             statusJson: toJson({
               desiredNumberScheduled: ds.status?.desiredNumberScheduled,
+              uid: ds.metadata?.uid ?? null,
               numberReady: ds.status?.numberReady,
               numberAvailable: ds.status?.numberAvailable,
               image,
@@ -1124,6 +1146,7 @@ export class ClusterSyncService {
             spec: toJson(ds.spec ?? {}),
             statusJson: toJson({
               desiredNumberScheduled: ds.status?.desiredNumberScheduled,
+              uid: ds.metadata?.uid ?? null,
               numberReady: ds.status?.numberReady,
               numberAvailable: ds.status?.numberAvailable,
               image,
@@ -1198,6 +1221,7 @@ export class ClusterSyncService {
             spec: toJson(job.spec ?? {}),
             statusJson: toJson({
               active: job.status?.active,
+              uid: job.metadata?.uid ?? null,
               succeeded: job.status?.succeeded,
               failed: job.status?.failed,
               ownerReferences,
@@ -1216,6 +1240,7 @@ export class ClusterSyncService {
             spec: toJson(job.spec ?? {}),
             statusJson: toJson({
               active: job.status?.active,
+              uid: job.metadata?.uid ?? null,
               succeeded: job.status?.succeeded,
               failed: job.status?.failed,
               ownerReferences,
@@ -1278,6 +1303,7 @@ export class ClusterSyncService {
             spec: toJson(cronjob.spec ?? {}),
             statusJson: toJson({
               lastScheduleTime: cronjob.status?.lastScheduleTime ?? null,
+              uid: cronjob.metadata?.uid ?? null,
               active: cronjob.status?.active ?? [],
               creationTimestamp: createdAt,
             }),
@@ -1294,6 +1320,7 @@ export class ClusterSyncService {
             spec: toJson(cronjob.spec ?? {}),
             statusJson: toJson({
               lastScheduleTime: cronjob.status?.lastScheduleTime ?? null,
+              uid: cronjob.metadata?.uid ?? null,
               active: cronjob.status?.active ?? [],
               creationTimestamp: createdAt,
             }),

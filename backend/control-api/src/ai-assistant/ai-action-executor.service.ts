@@ -10,8 +10,13 @@ import { ApiError } from '../common/errors/api-error';
 import { ErrorCode } from '../common/errors/error-codes';
 import { HelmService } from '../helm/helm.service';
 import { PrismaService } from '../platform/database/prisma.service';
+import { ResourcesService } from '../resources/resources.service';
+import { ClusterAccessService } from '../common/cluster-access.service';
+import { AuthorizationService } from '../common/authorization.service';
+import { NamespaceIdentityService } from '../common/namespace-identity.service';
 import { UnconfiguredVmActionProvider } from './vm-unconfigured.provider';
 import type { VmPowerOperation } from './vm-provider';
+import { AI_ACTION_REGISTRY, getAiActionDefinition } from './ai-action-registry';
 
 export type AiActionCanonicalOperation =
   | 'enable'
@@ -31,7 +36,8 @@ export type AiActionCanonicalOperation =
   | 'restart-workload'
   | 'vm-power-on'
   | 'vm-power-off'
-  | 'vm-restart';
+  | 'vm-restart'
+  | 'apply-resource-manifest';
 
 export type AiActionOperationAlias =
   | 'query-configmaps-overview'
@@ -54,6 +60,7 @@ export interface AiActionTarget {
   provider?: string;
   vmId?: string;
   reason?: string;
+  manifest?: string;
 }
 
 export interface AiActionQueryOptions {
@@ -132,6 +139,10 @@ export class AiActionExecutorService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly helmService: HelmService,
+    private readonly resourcesService: ResourcesService,
+    private readonly clusterAccessService: ClusterAccessService,
+    private readonly authorizationService: AuthorizationService,
+    private readonly namespaceIdentity: NamespaceIdentityService,
   ) {}
 
   async execute(
@@ -296,6 +307,18 @@ export class AiActionExecutorService {
             rollbackSuggestion: '建议回滚操作: 反向执行 VM 电源动作。',
           };
           break;
+        case 'apply-resource-manifest':
+          assertWritePermission(actor);
+          response = {
+            status: 'success',
+            requestId,
+            operation: normalizedAction.operation,
+            result: [
+              await this.applyResourceManifest(actor, normalizedAction, requestId),
+            ],
+            rollbackSuggestion: '建议回滚操作: 使用资源详情中的 YAML 版本记录恢复上一版本。',
+          };
+          break;
         case 'enable':
         case 'disable':
         case 'batch-enable':
@@ -360,17 +383,28 @@ export class AiActionExecutorService {
     }
   }
 
-  preview(action: AiActionExecuteInput): {
+  async preview(actor: AiActionActor | undefined, action: AiActionExecuteInput): Promise<{
     status: 'ok' | 'invalid';
     operation?: AiActionNormalizedOperation;
     targets?: AiActionTarget[];
+    result?: AiActionExecutionResultItem[];
     rollbackSuggestion?: string;
     error?: AiActionExecutionError;
-  } {
+  }> {
     try {
       this.validateAction(action);
       const normalizedAction = this.normalizeExecuteInput(action);
       const targets = this.normalizeTargets(normalizedAction);
+      if (normalizedAction.operation === 'apply-resource-manifest') {
+        const result = await this.previewResourceManifest(actor, normalizedAction);
+        return {
+          status: 'ok',
+          operation: normalizedAction.operation,
+          targets,
+          rollbackSuggestion: this.buildRollbackSuggestion(normalizedAction),
+          ...result,
+        };
+      }
       return {
         status: 'ok',
         operation: normalizedAction.operation,
@@ -1436,6 +1470,142 @@ export class AiActionExecutorService {
     };
   }
 
+  /**
+   * Applies a complete manifest only after the controller has consumed an
+   * actor-bound approval. Namespace identity is resolved live for every apply;
+   * a deleted and recreated namespace therefore cannot inherit an old grant.
+   */
+  private async applyResourceManifest(
+    actor: AiActionActor | undefined,
+    action: AiActionExecuteInput,
+    requestId: string,
+  ): Promise<AiActionExecutionResultItem> {
+    const target = this.requireTarget(action);
+    const clusterId = this.requireClusterId(target, 'target.clusterId');
+    const namespace = this.requireNamespace(target.namespace, 'target.namespace');
+    const manifest = this.requireManifest(target.manifest);
+    const subject = { id: actor?.userId, username: actor?.username, role: actor?.role };
+    await this.clusterAccessService.assertCanMutate(subject, clusterId);
+    const namespaceUid = await this.namespaceIdentity.resolve(clusterId, namespace);
+    await this.authorizeAiMutation(actor, clusterId, namespaceUid);
+
+    const result = await this.resourcesService.applyYaml(
+      { clusterId, namespace, yaml: manifest, dryRun: false },
+      async (resource) => {
+        const resourceNamespace = String(resource.metadata?.namespace ?? '').trim();
+        if (resourceNamespace !== namespace) {
+          throw new ApiError({
+            code: ErrorCode.FORBIDDEN,
+            message: 'AI 资源写入必须限制在当前命名空间内',
+          });
+        }
+        if (String(resource.kind ?? '').toLowerCase() === 'secret') {
+          const secretDecision = await this.authorizationService.authorize({
+            userId: this.requireActorId(actor),
+            clusterId,
+            namespaceUid,
+            capability: 'secrets',
+            mutation: true,
+          });
+          if (!secretDecision.allowed) {
+            throw new ApiError({ code: ErrorCode.FORBIDDEN, message: '当前授权不允许 AI 修改 Secret' });
+          }
+        }
+      },
+    );
+
+    appendAudit({
+      actor: actor?.username ?? 'unknown',
+      role: actor?.role ?? 'read-only',
+      action: 'update',
+      resourceType: 'k8s-manifest',
+      resourceId: `${clusterId}/${namespace}`,
+      result: 'success',
+      requestId,
+      reason: action.reason ?? target.reason,
+    });
+    return {
+      resourceType: 'k8s-manifest',
+      resourceId: `${clusterId}/${namespace}`,
+      action: action.operation,
+      status: 'success',
+      details: {
+        clusterId,
+        namespace,
+        total: result.total,
+        items: result.items,
+      },
+    };
+  }
+
+  private async previewResourceManifest(
+    actor: AiActionActor | undefined,
+    action: AiActionExecuteInput,
+  ): Promise<{ result?: AiActionExecutionResultItem[] }> {
+    const target = this.requireTarget(action);
+    const clusterId = this.requireClusterId(target, 'target.clusterId');
+    const namespace = this.requireNamespace(target.namespace, 'target.namespace');
+    const manifest = this.requireManifest(target.manifest);
+    const subject = { id: actor?.userId, username: actor?.username, role: actor?.role };
+    await this.clusterAccessService.assertCanMutate(subject, clusterId);
+    const namespaceUid = await this.namespaceIdentity.resolve(clusterId, namespace);
+    await this.authorizeAiMutation(actor, clusterId, namespaceUid);
+    const result = await this.resourcesService.applyYaml(
+      { clusterId, namespace, yaml: manifest, dryRun: true },
+      async (resource) => {
+        if (String(resource.metadata?.namespace ?? '').trim() !== namespace) {
+          throw new ApiError({ code: ErrorCode.FORBIDDEN, message: '预览资源必须属于当前命名空间' });
+        }
+        if (String(resource.kind ?? '').toLowerCase() === 'secret') {
+          const decision = await this.authorizationService.authorize({
+            userId: this.requireActorId(actor), clusterId, namespaceUid,
+            capability: 'secrets', mutation: true,
+          });
+          if (!decision.allowed) throw new ApiError({ code: ErrorCode.FORBIDDEN, message: '当前授权不允许 AI 修改 Secret' });
+        }
+      },
+    );
+    return {
+      result: [{
+        resourceType: 'k8s-manifest',
+        resourceId: `${clusterId}/${namespace}`,
+        action: action.operation,
+        status: 'success',
+        details: { clusterId, namespace, dryRun: true, total: result.total, items: result.items },
+      }],
+    };
+  }
+
+  private async authorizeAiMutation(
+    actor: AiActionActor | undefined,
+    clusterId: string,
+    namespaceUid: string,
+  ): Promise<void> {
+    if (this.clusterAccessService.isPlatformAdmin({ id: actor?.userId, role: actor?.role })) return;
+    const decision = await this.authorizationService.authorize({
+      userId: this.requireActorId(actor),
+      clusterId,
+      namespaceUid,
+      capability: 'ai-assistant:use',
+      mutation: true,
+    });
+    if (!decision.allowed) throw new ApiError({ code: ErrorCode.FORBIDDEN, message: '当前授权不允许 AI 执行写操作' });
+  }
+
+  private requireActorId(actor: AiActionActor | undefined): string {
+    const id = actor?.userId?.trim();
+    if (!id) throw new ApiError({ code: ErrorCode.FORBIDDEN, message: 'AI 写操作需要有效的用户身份' });
+    return id;
+  }
+
+  private requireManifest(value: string | undefined): string {
+    const manifest = value?.trim();
+    if (!manifest || manifest.length > 2_000_000) {
+      throw new ApiError({ code: ErrorCode.VALIDATION_ERROR, message: 'target.manifest 必须是有效的非空 YAML' });
+    }
+    return manifest;
+  }
+
   private async executeVmPowerAction(
     actor: AiActionActor | undefined,
     action: AiActionExecuteInput,
@@ -1544,28 +1714,7 @@ export class AiActionExecutorService {
     }
 
     const operation = this.normalizeActionOperationAlias(action.operation);
-    const supported: AiActionNormalizedOperation[] = [
-      'enable',
-      'disable',
-      'batch-enable',
-      'batch-disable',
-      'query-pods-overview',
-      'query-deployments-overview',
-      'query-nodes-overview',
-      'query-pv-pvc-bindings',
-      'query-pvcs',
-      'query-storageclasses',
-      'query-configmaps',
-      'query-helm-releases',
-      'query-helm-repositories',
-      'import-helm-repository-presets',
-      'restart-workload',
-      'vm-power-on',
-      'vm-power-off',
-      'vm-restart',
-    ];
-
-    if (!operation || !supported.includes(operation)) {
+    if (!operation || !getAiActionDefinition(operation) || !Object.prototype.hasOwnProperty.call(AI_ACTION_REGISTRY, operation)) {
       throw new ApiError({
         code: ErrorCode.VALIDATION_ERROR,
         message: 'operation is invalid',
@@ -1604,6 +1753,11 @@ export class AiActionExecutorService {
     }
 
     this.validateTarget(action.target, 'target', false);
+    if (operation === 'apply-resource-manifest') {
+      this.requireClusterId(action.target, 'target.clusterId');
+      this.requireNamespace(action.target.namespace, 'target.namespace');
+      this.requireManifest(action.target.manifest);
+    }
   }
 
   private validateTarget(

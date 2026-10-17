@@ -8,13 +8,16 @@ Type=simple
 User=root
 WorkingDirectory=/opt/kubenova
 EnvironmentFile=/etc/kubenova/update-executor.env
-ExecStart=/usr/bin/node /opt/kubenova/current/scripts/update-executor.mjs
+ExecStart=/usr/bin/node /opt/kubenova/scripts/update-executor.mjs
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=/var/lib/kubenova
+RuntimeDirectory=kubenova-update
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+ReadWritePaths=/var/lib/kubenova /run/kubenova-update
 
 [Install]
 WantedBy=multi-user.target

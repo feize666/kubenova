@@ -1,4 +1,5 @@
 "use client";
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Col, Form, Input, Row, Select, Space, Typography, message } from "antd";
@@ -15,6 +16,8 @@ import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceRowActions } from "@/components/resource-row-actions";
 import { ResourceScopeFilterButton } from "@/components/resource-scope-filter-button";
 import { ResourceTable } from "@/components/resource-table";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
 import { ResourceTimeCell, useNowTicker } from "@/components/resource-time";
 import { ResourceYamlDrawer } from "@/components/resource-yaml-drawer";
 import { matchLabelExpressions, parseResourceSearchInput } from "@/components/resource-action-bar";
@@ -357,7 +360,7 @@ export function DynamicConfigResourcePage({
   const [keyword, setKeyword] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const [yamlTarget, setYamlTarget] = useState<DynamicResourceIdentity | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
@@ -369,7 +372,6 @@ export function DynamicConfigResourcePage({
   const watchedLimitType = Form.useWatch("limitType", form) ?? "Container";
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<DynamicResourceItem>({
-      defaultPageSize: 10,
       storageKey: `${tableKey}/table-sort`,
       defaultSortBy: "updatedAt",
       defaultSortOrder: "desc",
@@ -392,7 +394,7 @@ export function DynamicConfigResourcePage({
     [clustersQuery.data?.items],
   );
 
-  const listQuery = useQuery({
+  const listQuery = useResourceListQuery({
     queryKey: [
       tableKey,
       "list",
@@ -764,6 +766,7 @@ export function DynamicConfigResourcePage({
       fixed: "right",
       render: (_: unknown, row) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind,name:row.name,namespace:row.namespace,apiVersion:group?group+'/'+version:version,resource}}
           deleteLabel="删除"
           deleteTitle={`删除 ${titleKind}`}
           deleteContent={`确认删除 ${titleKind}「${row.name}」吗？此操作不可恢复。`}
@@ -807,38 +810,23 @@ export function DynamicConfigResourcePage({
               </OpsFilterChip>
             </span>
           }
-          extra={
-            <ResourceAddButton
-              title={`创建${kind}`}
-              onClick={openCreate}
-              aria-label={`创建${kind}`}
-            />
-          }
         />
 
         <Space className="workload-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
           {!isInitializing && !accessToken ? (
             <Alert className="dynamic-config-state-alert" type="warning" showIcon title="未登录或登录初始化中，请稍后重试。" />
           ) : null}
-          {listQuery.isError ? (
-            <Alert
-              className="dynamic-config-state-alert"
-              type="error"
-              showIcon
-              title={`${titleKind} 列表加载失败`}
-              description={listQuery.error instanceof Error ? listQuery.error.message : "unknown"}
-              action={
-                clusterId ? (
-                  <Typography.Link onClick={() => refreshDiscoveryMutation.mutate()}>
-                    刷新资源发现
-                  </Typography.Link>
-                ) : undefined
-              }
-            />
+          <ResourceQueryFeedback className="dynamic-config-state-alert" label={titleKind} query={listQuery} />
+          {listQuery.isError && clusterId ? (
+            <Typography.Link onClick={() => refreshDiscoveryMutation.mutate()} disabled={refreshDiscoveryMutation.isPending}>
+              刷新资源发现
+            </Typography.Link>
           ) : null}
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<DynamicResourceItem>
+              queryState={listQuery}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" editorKind={kind} editorApiVersion={group ? `${group}/${version}` : version} editorResource={resource} title={`创建${kind}`} /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" editorKind={kind} editorApiVersion={group ? `${group}/${version}` : version} editorResource={resource} title={`使用 YAML 创建${kind}`} /></>}
               bordered
               rowKey="id"
               columns={columns}
@@ -870,7 +858,7 @@ export function DynamicConfigResourcePage({
         </Space>
       </OpsSurface>
 
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

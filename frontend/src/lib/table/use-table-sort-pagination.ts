@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { PaginationProps, TableProps } from "antd";
 import type { ColumnFiltersState, PaginationState, VisibilityState } from "@tanstack/react-table";
-import { buildTablePagination, type PageSizeOptions } from "./pagination";
+import { buildTablePagination, DEFAULT_RESOURCE_PAGE_SIZE, type PageSizeOptions } from "./pagination";
 import {
   type PersistentTableSortStateOptions,
   usePersistentTableSortState,
@@ -26,7 +26,7 @@ export function useTableSortPaginationState(options: TableSortPaginationOptions 
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(options.initialVisibility ?? {});
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: Number.isFinite(options.defaultPage) ? Math.max(0, Math.floor(options.defaultPage!) - 1) : 0,
-    pageSize: options.defaultPageSize ?? 20,
+    pageSize: options.defaultPageSize ?? DEFAULT_RESOURCE_PAGE_SIZE,
   });
 
   const tableState = useMemo(

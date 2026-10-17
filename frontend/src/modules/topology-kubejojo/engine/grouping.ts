@@ -148,6 +148,35 @@ function groupLabel(key: string, groupBy: KubejojoGroupBy): string {
   return "未归属实例";
 }
 
+function stackRepeatedResourceKinds(component: KubejojoGraphNode): KubejojoGraphNode {
+  if (component.groupKind !== "component" || component.collapsedPreferred) return component;
+  const members = component.nodes ?? [];
+  if (members.some((node) => !node.resource)) return component;
+  const byKind = new Map<string, KubejojoGraphNode[]>();
+  members.forEach((node) => {
+    const kind = node.resource?.kind ?? "Unknown";
+    byKind.set(kind, [...(byKind.get(kind) ?? []), node]);
+  });
+  const nodes = [...byKind.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, "en"))
+    .flatMap(([kind, grouped]) => {
+      const ordered = grouped.sort(compareKubejojoNodes);
+      if (ordered.length === 1) return ordered;
+      const memberIds = new Set(ordered.map((node) => node.id));
+      return [{
+        id: `stack:${component.id}:${encodeURIComponent(kind)}`,
+        label: kind,
+        subtitle: `${ordered.length} 个 ${kind}`,
+        nodes: ordered,
+        edges: relationsWithin(component.edges ?? [], memberIds),
+        groupKind: "stack" as const,
+        collapsedPreferred: true,
+        weight: getKubejojoWeight(ordered[0]),
+      }];
+    });
+  return { ...component, nodes };
+}
+
 /**
  * Builds the resource map: connected components first, then one container per
  * group value. This is Headlamp's `groupGraph` shape, minus the namespace object
@@ -280,8 +309,22 @@ export function groupKubejojoGraph(
   }).filter((component) => component.resource || (component.nodes ?? []).length > 0);
 
 
+  // Even an unconnected resource is entered through a component summary.
+  // Namespace scenes must never mix application summaries and raw resources.
+  const stackedComponents = dedupedComponents.map((component) => stackRepeatedResourceKinds(
+    component.resource ? {
+      id: `component:${component.id}`,
+      label: component.label,
+      subtitle: "1 个关联资源",
+      nodes: [component],
+      edges: component.edges ?? [],
+      groupKind: "component",
+      collapsedPreferred: true,
+      weight: getKubejojoWeight(component),
+    } : component,
+  ));
   const byGroup = new Map<string, KubejojoGraphNode[]>();
-  dedupedComponents.forEach((component) => {
+  stackedComponents.forEach((component) => {
     const key = componentGroupKey(component, groupBy);
     byGroup.set(key, [...(byGroup.get(key) ?? []), component]);
   });

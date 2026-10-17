@@ -10,6 +10,7 @@ import {
   Descriptions,
   message,
   Row,
+  Result,
   Select,
   Space,
   Typography,
@@ -19,6 +20,7 @@ import type { Dayjs } from "dayjs";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
+import { isPlatformAdmin } from "@/lib/console-routing";
 import { BusinessDetailDrawer, type BusinessDetailSection } from "@/components/business-detail-drawer";
 import { OpsCommandPreview, OpsFilterChip, OpsIconActionButton, OpsMetricTile, OpsModalShell, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -119,7 +121,7 @@ export default function InspectionPage() {
   const searchParams = useSearchParams();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
   const { clusterId, namespace, namespaceDisabled, namespacePlaceholder, onScopeChange } =
     useClusterNamespaceFilter(initialClusterId, initialNamespace);
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
@@ -639,6 +641,9 @@ export default function InspectionPage() {
     setIssuePage((prev) => Math.min(prev, issueMaxPage));
   }, [issueMaxPage]);
 
+  if (!isInitializing && !isPlatformAdmin(role)) {
+    return <Result status="403" title="仅超级管理员可访问" subTitle="资源巡检属于可观测性能力，当前仅对超级管理员开放。" />;
+  }
   return (
     <Space className="resource-workbench inspection-workbench" orientation="vertical" size={16} style={{ width: "100%" }}>
       <OpsSurface variant="panel" padding="sm">

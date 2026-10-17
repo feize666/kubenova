@@ -1,4 +1,7 @@
 "use client";
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,7 +12,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
@@ -82,7 +85,6 @@ function textMatches(value: unknown, filterValue: string) {
 export default function IngressPage() {
   const { accessToken, isInitializing } = useAuth();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const queryClient = useQueryClient();
@@ -93,7 +95,7 @@ export default function IngressPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const {
     sortBy,
     sortOrder,
@@ -103,7 +105,6 @@ export default function IngressPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<IngressResource>({
-    defaultPageSize: 10,
   });
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -122,7 +123,7 @@ export default function IngressPage() {
     path: "/network/ingress",
   });
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, isFetching:queryIsFetching, refetch } = useResourceListQuery({
     queryKey: [
       "network",
       "Ingress",
@@ -436,7 +437,7 @@ export default function IngressPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: IngressResource) =>
         row.id ? (
-          <Typography.Link onClick={() => { setDetailTarget({ kind: "Ingress", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/ingress/${encodeURIComponent(row.id)}`); }}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "Ingress", id: row.id }); }}>
             {name}
           </Typography.Link>
         ) : (
@@ -483,6 +484,7 @@ export default function IngressPage() {
       fixed: "right",
       render: (_: unknown, row: IngressResource) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind:"Ingress",name:row.name,namespace:row.namespace}}
           deleteLabel="删除"
           deleteTitle="删除 Ingress"
           deleteContent={`确认删除 Ingress「${row.name}」吗？此操作不可恢复。`}
@@ -553,7 +555,6 @@ export default function IngressPage() {
             </span>
           }
           description="管理集群 Ingress 入口规则与域名路由。"
-          extra={<ResourceAddButton title="创建Ingress" onClick={handleOpenCreate} />}
         />
 
         <Space
@@ -566,18 +567,12 @@ export default function IngressPage() {
             <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="network-resource-state-alert"
-              type="error"
-              showIcon
-              title="网络入口加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="网络入口" className="network-resource-state-alert" query={{data,isError,error,isFetching:queryIsFetching,refetch}} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<IngressResource>
+              queryState={{data,isLoading,isError,error,isFetching:queryIsFetching}}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" title="创建Ingress" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" title="使用 YAML 创建Ingress" /></>}
               rowKey="id"
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -721,7 +716,7 @@ export default function IngressPage() {
           />
         )}
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

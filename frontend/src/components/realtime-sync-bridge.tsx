@@ -14,6 +14,12 @@ const STREAM_PATH = "/api/v1/clusters/events/stream";
 const RECONNECT_DELAY_MS = 1500;
 const INVALIDATE_BATCH_DELAY_MS = 250;
 const INITIAL_CONNECT_DELAY_MS = 1200;
+const TOPOLOGY_SYNC_SETTLE_MS = 2600;
+
+function publishStreamState(state: "connected" | "disconnected") {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("kubenova:realtime-state", { detail: { state } }));
+}
 
 function buildStreamUrl() {
   return STREAM_PATH;
@@ -98,6 +104,7 @@ export function RealtimeSyncBridge() {
     const controller = new AbortController();
     let buffer = "";
     let invalidateTimer: ReturnType<typeof setTimeout> | null = null;
+    const topologyTimers = new Set<ReturnType<typeof setTimeout>>();
     const pendingInvalidations = new Map<string, readonly unknown[]>();
     const refreshQueryPrefixes = (queryPrefixes: readonly (readonly unknown[])[]) => {
       for (const queryKey of queryPrefixes) {
@@ -139,12 +146,17 @@ export function RealtimeSyncBridge() {
             const patched = applyRealtimePatch(queryClient, event);
             const topologyPrefixes = getTopologyQueryPrefixes(event);
             const shouldRefreshTopology =
-              !patched &&
               typeof document !== "undefined" &&
               !document.hidden &&
               pathnameRef.current.startsWith("/network/topology");
             if (shouldRefreshTopology && topologyPrefixes.length > 0) {
-              refreshQueryPrefixes(topologyPrefixes);
+              // ClusterEventSyncService debounces inventory sync after the
+              // watch event. Fetch after it has had time to persist the update.
+              const timer = setTimeout(() => {
+                topologyTimers.delete(timer);
+                refreshQueryPrefixes(topologyPrefixes);
+              }, TOPOLOGY_SYNC_SETTLE_MS);
+              topologyTimers.add(timer);
             }
             if (!patched && topologyPrefixes.length === 0) {
               // No-op fallback: list/query handlers already handled the current event shape.
@@ -177,6 +189,7 @@ export function RealtimeSyncBridge() {
           if (!response.ok || !response.body) {
             throw new Error(`stream failed: ${response.status}`);
           }
+          publishStreamState("connected");
 
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
@@ -193,6 +206,7 @@ export function RealtimeSyncBridge() {
           if (controller.signal.aborted) {
             return;
           }
+          publishStreamState("disconnected");
           await new Promise((resolve) =>
             setTimeout(resolve, RECONNECT_DELAY_MS),
           );
@@ -206,6 +220,7 @@ export function RealtimeSyncBridge() {
       if (invalidateTimer) {
         clearTimeout(invalidateTimer);
       }
+      topologyTimers.forEach(clearTimeout);
       controller.abort();
     };
   }, [accessToken, isAuthenticated, queryClient]);

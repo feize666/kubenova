@@ -567,7 +567,18 @@ function renderPipelineObject(
     <>
       <DetailTag color={color}>{safeKind}</DetailTag>
       {navigation.target && onNavigateRequest ? (
-        <Typography.Link strong onClick={() => onNavigateRequest(navigation.target)}>
+        <Typography.Link
+          strong
+          role="link"
+          tabIndex={0}
+          onClick={() => onNavigateRequest(navigation.target)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onNavigateRequest(navigation.target);
+            }
+          }}
+        >
           {safeName}
         </Typography.Link>
       ) : (

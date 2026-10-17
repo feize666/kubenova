@@ -5,10 +5,19 @@ import { Tooltip } from "antd";
 import type { ButtonProps } from "antd";
 import type { ReactNode } from "react";
 import { OpsIconActionButton } from "@/components/ops";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
+import { resourceTypeForPath } from "@/lib/resource-editor";
+import { useAuth } from "@/components/auth-context";
 
 type ResourceAddButtonProps = Omit<ButtonProps, "children" | "type" | "icon"> & {
   label?: ReactNode;
   compact?: boolean;
+  editorKind?: string;
+  editorApiVersion?: string;
+  editorResource?: string;
+  legacyCreate?: boolean;
+  editorMode?: 'form' | 'yaml';
 };
 
 function normalizeAddTooltip(text: string): string {
@@ -24,8 +33,20 @@ export function ResourceAddButton({
   label = "+",
   compact = true,
   style,
+  editorKind,
+  editorApiVersion,
+  editorResource,
+  legacyCreate = false,
+  editorMode = 'form',
   ...props
 }: ResourceAddButtonProps) {
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const openEditor = useResourceEditorNavigation();
+  const { role } = useAuth();
+  const resourceType = resourceTypeForPath(pathname);
+  const canUseEditor = !legacyCreate && !pathname.startsWith('/users/') && (editorKind || resourceType);
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const rawTooltipTitle =
     typeof props.title === "string" && props.title.trim().length > 0
       ? props.title
@@ -37,7 +58,10 @@ export function ResourceAddButton({
   const button = (
     <OpsIconActionButton
       {...props}
-      opsVariant="primary"
+      disabled={props.disabled || Boolean(canUseEditor && !canWrite)}
+      type={editorMode === 'yaml' ? 'default' : 'primary'}
+      onClick={canUseEditor ? () => openEditor({ kind: editorKind || params.get('kind') || resourceType!.kind, apiVersion:editorApiVersion, resource:editorResource }, editorMode) : props.onClick}
+      opsVariant={editorMode === 'yaml' ? 'secondary' : 'primary'}
       opsTone="primary"
       icon={<PlusOutlined />}
       style={style}

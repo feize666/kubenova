@@ -5,6 +5,7 @@ import {
   BellOutlined,
   HomeOutlined,
   MenuOutlined,
+  RobotOutlined,
   MoonFilled,
   NodeIndexOutlined,
   ReloadOutlined,
@@ -20,10 +21,12 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useAuth } from "@/components/auth-context";
+import { usePageRefresh } from '@/hooks/use-page-refresh';
 import { useThemeMode } from "@/components/theme-context";
 import { SidebarCollapseButton, useSidebarCollapse } from "@/components/sidebar-collapse";
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from "@/lib/sidebar-preference";
 import { listCapabilities } from "@/lib/api/capabilities";
+import { getAiAssistantAccess } from "@/lib/api/ai-assistant";
 import { getSystemUpdateStatus, type SystemUpdateStatusPayload } from "@/lib/api/system-update";
 import { buildLoginRoute, buildInternalReturnTo } from "@/lib/login-return";
 import { BootstrapScreen } from "@/components/bootstrap-screen";
@@ -42,6 +45,7 @@ const platformIconMap: Record<PlatformNavigationItem["icon"], React.ReactNode> =
   authorization: <SafetyOutlined />,
   applications: <AppstoreOutlined />,
   settings: <SettingOutlined />,
+  ai: <RobotOutlined />,
 };
 
 const PREFETCHABLE_NAV_PATHS = new Set(getPlatformNavigation("platform-admin").map((item) => item.path));
@@ -161,18 +165,20 @@ const AppSider = memo(function AppSider({
   mode,
   userRole,
   disabledPaths,
+  aiAssistantAllowed,
   updateAvailable,
 }: {
   pathname: string;
   mode: string;
   userRole: string;
   disabledPaths?: Set<string> | null;
+  aiAssistantAllowed: boolean;
   updateAvailable: boolean;
 }) {
   const { collapsed, toggle } = useSidebarCollapse();
   const visibleNavigation = useMemo(
-    () => getPlatformNavigation(userRole, disabledPaths),
-    [disabledPaths, userRole],
+    () => getPlatformNavigation(userRole, disabledPaths, aiAssistantAllowed),
+    [aiAssistantAllowed, disabledPaths, userRole],
   );
   const prefetchedPathsRef = useRef(new Set<string>());
   const pendingPrefetchPathsRef = useRef(new Set<string>());
@@ -315,6 +321,7 @@ function LoadingSkeleton() {
 }
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
+  const {refreshing,refresh}=usePageRefresh();
   const pathname = usePathname();
   const router = useRouter();
   const { mode, toggleTheme } = useThemeMode();
@@ -334,6 +341,14 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     refetchOnReconnect: true,
     refetchOnWindowFocus: false,
   });
+  const aiAssistantAccessQuery = useQuery({
+    queryKey: ["ai-assistant", "access", accessToken],
+    queryFn: () => getAiAssistantAccess(accessToken ?? undefined),
+    enabled: !isLoginPage && !isInitializing && isAuthenticated && Boolean(accessToken) && !isPlatformAdmin(role),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const aiAssistantAllowed = isPlatformAdmin(role) || Boolean(aiAssistantAccessQuery.data?.allowed);
   const updateStatusQuery = useQuery<SystemUpdateStatusPayload>({
     queryKey: ["system-update", "status", accessToken],
     queryFn: () => getSystemUpdateStatus(accessToken ?? undefined),
@@ -366,12 +381,12 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     );
   }, [accessToken, capabilitiesQuery.data, isAuthenticated]);
   const mobileNavItems = useMemo<MenuProps["items"]>(() => {
-    return getPlatformNavigation(role, disabledPaths).map((item) => ({
+    return getPlatformNavigation(role, disabledPaths, aiAssistantAllowed).map((item) => ({
       key: item.path,
       icon: platformIconMap[item.icon],
       label: item.label,
     }));
-  }, [disabledPaths, role]);
+  }, [aiAssistantAllowed, disabledPaths, role]);
   const capabilityStats = useMemo(() => {
     const items = capabilitiesQuery.data ?? [];
     const enabled = items.filter((item) => item.enabled).length;
@@ -469,7 +484,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
       </a>
       <Layout className="kubenova-shell" style={{ minHeight: "100dvh" }}>
         {/* AppSider 用 memo 隔离，pathname 变化时只有 selectedKeys/openKeys 更新，父级其余 state 不会触发它重渲染 */}
-        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} updateAvailable={updateAvailable} />
+        <AppSider pathname={pathname} mode={mode} userRole={role} disabledPaths={disabledPaths} aiAssistantAllowed={aiAssistantAllowed} updateAvailable={updateAvailable} />
         <Layout>
         <Header
           className="app-header"
@@ -604,7 +619,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
                 </OpsIconActionButton>
               </Badge>
             </Popover>
-            <OpsIconActionButton className="shell-topbar-action" icon={<ReloadOutlined />} onClick={() => window.location.reload()}>
+            <OpsIconActionButton className="shell-topbar-action shell-refresh-action" icon={<ReloadOutlined />} aria-label="刷新页面" loading={refreshing} onClick={() => void refresh()}>
               刷新
             </OpsIconActionButton>
             <OpsIconActionButton

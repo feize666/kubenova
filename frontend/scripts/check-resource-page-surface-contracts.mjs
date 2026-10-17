@@ -30,13 +30,10 @@ for (const path of singlePanelRoutes) {
 }
 
 const clusterPage = read("src/app/clusters/page.tsx");
-for (const token of ["resource-page-header__title-suffix", "aria-label=\"创建集群\""]) {
+for (const token of ["primaryAction={<ResourceAddButton", "aria-label=\"创建集群\""]) {
   if (!clusterPage.includes(token)) {
-    failures.push(`src/app/clusters/page.tsx: missing cluster title-aligned add button token ${token}`);
+    failures.push(`src/app/clusters/page.tsx: missing shared cluster primary action ${token}`);
   }
-}
-if (clusterPage.includes("primaryAction={<ResourceAddButton")) {
-  failures.push("src/app/clusters/page.tsx: cluster add button must align after title, not in right primaryAction");
 }
 
 const nodesPage = read("src/app/clusters/nodes/page.tsx");

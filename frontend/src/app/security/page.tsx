@@ -9,7 +9,7 @@ import {
   SafetyCertificateOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Col,
@@ -41,6 +41,8 @@ import { ResourceDetailDrawer } from "@/components/resource-detail";
 import { ResourceTable } from "@/components/resource-table";
 import type { HeadlampResourceTableColumn, HeadlampTableFilters } from "@/components/resource-table";
 import { useClusterNamespaceFilter } from "@/hooks/use-cluster-namespace-filter";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
 import { readResourceFilterFromSearchParams, useSyncResourceFilterUrlState } from "@/hooks/use-resource-filter-url-state";
 import { getClusters } from "@/lib/api/clusters";
 import type { ResourceDetailRequest } from "@/lib/api/resources";
@@ -168,7 +170,8 @@ function SecurityEventsTab() {
   const searchParams = useSearchParams();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
   const [refreshingEvents, setRefreshingEvents] = useState(false);
@@ -196,10 +199,11 @@ function SecurityEventsTab() {
     defaultSortBy: "occurredAt",
     defaultSortOrder: "desc",
   });
-  const clustersQuery = useQuery({
+  const clustersQuery = useResourceListQuery({
     queryKey: ["clusters", "security-events", accessToken],
     queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken),
     enabled,
+    retry: false,
   });
   const clusterMap = useMemo(
     () => Object.fromEntries((clustersQuery.data?.items ?? []).map((item) => [item.id, item.name])),
@@ -209,7 +213,7 @@ function SecurityEventsTab() {
     () => [{ label: "全部集群", value: "" }, ...(clustersQuery.data?.items ?? []).map((item) => ({ label: item.name, value: item.id }))],
     [clustersQuery.data?.items],
   );
-  const { data, isLoading } = useQuery({
+  const eventsQuery = useResourceListQuery({
     queryKey: ["security", "events", clusterId, namespace, severityFilter, statusFilter, accessToken],
     queryFn: () =>
       getSecurityEvents(
@@ -224,8 +228,17 @@ function SecurityEventsTab() {
         accessToken || undefined,
       ),
     enabled,
+    retry: false,
     refetchInterval: 30_000,
   });
+  const { data, isLoading } = eventsQuery;
+  const visibleDetailRecord = data?.items.find((item) => item.id === detailRecord?.id) ?? null;
+  useEffect(() => {
+    if (!data) {
+      setDetailRecord(null);
+      setResourceDetailTarget(null);
+    }
+  }, [data]);
 
   const knownNamespaces = useMemo(
     () =>
@@ -241,7 +254,10 @@ function SecurityEventsTab() {
   );
 
   const resolveMutation = useMutation({
-    mutationFn: (id: string) => resolveSecurityEvent(id, accessToken || undefined),
+    mutationFn: (id: string) => {
+      if (!canWrite) throw new Error('当前账号无权处理安全事件');
+      return resolveSecurityEvent(id, accessToken || undefined);
+    },
     onSuccess: () => {
       void messageApi.success("已标记为已解决");
       void queryClient.invalidateQueries({ queryKey: ["security", "events"] });
@@ -490,9 +506,10 @@ function SecurityEventsTab() {
             key: "resolve",
             label: record.status === "resolved" ? "已处理" : "标记已解决",
             disabled:
+              !canWrite ||
               record.status === "resolved" ||
               (resolveMutation.isPending && resolveMutation.variables === record.id),
-            onClick: () => resolveMutation.mutate(record.id),
+            onClick: () => { if (canWrite) resolveMutation.mutate(record.id); },
           },
         ];
         return (
@@ -506,6 +523,8 @@ function SecurityEventsTab() {
     <>
       {contextHolder}
       <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+        <ResourceQueryFeedback query={eventsQuery} label="安全事件" />
+        <ResourceQueryFeedback query={clustersQuery} label="集群候选" />
         <ResourceFilterToolbar>
           <ResourceFilterToolbarItem width="auto">
             <ResourceScopeFilterButton
@@ -513,6 +532,7 @@ function SecurityEventsTab() {
               namespace={namespace}
               clusterOptions={clusterOptions}
               clusterLoading={clustersQuery.isLoading}
+              clusterUnavailable={clustersQuery.isError && !clustersQuery.data}
               knownNamespaces={knownNamespaces}
               namespaceDisabled={namespaceDisabled}
               namespacePlaceholder={namespacePlaceholder}
@@ -588,16 +608,16 @@ function SecurityEventsTab() {
         </div>
       </Space>
       <BusinessDetailDrawer
-        open={Boolean(detailRecord)}
-        title={detailRecord ? `安全事件 · ${detailRecord.title}` : "安全事件"}
-        subtitle={detailRecord ? `${getEventTypeLabel(detailRecord.type)} / ${detailRecord.resourceName}` : undefined}
+        open={Boolean(visibleDetailRecord)}
+        title={visibleDetailRecord ? `安全事件 · ${visibleDetailRecord.title}` : "安全事件"}
+        subtitle={visibleDetailRecord ? `${getEventTypeLabel(visibleDetailRecord.type)} / ${visibleDetailRecord.resourceName}` : undefined}
         onClose={() => setDetailRecord(null)}
-        sections={buildSecurityEventDetailSections(detailRecord, clusterMap)}
+        sections={buildSecurityEventDetailSections(visibleDetailRecord, clusterMap)}
       />
       <ResourceDetailDrawer
-        open={Boolean(resourceDetailTarget)}
+        open={Boolean(data && resourceDetailTarget)}
         onClose={() => setResourceDetailTarget(null)}
-        request={resourceDetailTarget}
+        request={data ? resourceDetailTarget : null}
         onNavigateRequest={(request) => setResourceDetailTarget(request)}
         token={accessToken ?? undefined}
       />
@@ -631,7 +651,7 @@ function AuditLogsTab() {
     defaultSortOrder: "desc",
   });
 
-  const { data, isLoading } = useQuery({
+  const auditQuery = useResourceListQuery({
     queryKey: ["security", "audit-logs", actionFilter, resultFilter, accessToken],
     queryFn: () =>
       getAuditLogs(
@@ -639,7 +659,13 @@ function AuditLogsTab() {
         accessToken || undefined,
       ),
     enabled,
+    retry: false,
   });
+  const { data, isLoading } = auditQuery;
+  const visibleDetailRecord = data?.items.find((item) => item.id === detailRecord?.id) ?? null;
+  useEffect(() => {
+    if (!data) setDetailRecord(null);
+  }, [data]);
 
   const filteredItems = useMemo(() => {
     const raw = data?.items ?? [];
@@ -831,6 +857,7 @@ function AuditLogsTab() {
 
   return (
     <>
+      <ResourceQueryFeedback query={auditQuery} label="审计日志" />
       <div className="resource-workbench__table-zone">
         <ResourceTable<AuditLogRecord>
           rowKey="id"
@@ -887,11 +914,11 @@ function AuditLogsTab() {
         />
       </div>
       <BusinessDetailDrawer
-        open={Boolean(detailRecord)}
-        title={detailRecord ? `审计日志 · ${detailRecord.actor}` : "审计日志"}
-        subtitle={detailRecord ? `${getActionLabel(detailRecord.action)} / ${detailRecord.resourceType}` : undefined}
+        open={Boolean(visibleDetailRecord)}
+        title={visibleDetailRecord ? `审计日志 · ${visibleDetailRecord.actor}` : "审计日志"}
+        subtitle={visibleDetailRecord ? `${getActionLabel(visibleDetailRecord.action)} / ${visibleDetailRecord.resourceType}` : undefined}
         onClose={() => setDetailRecord(null)}
-        sections={buildAuditLogDetailSections(detailRecord)}
+        sections={buildAuditLogDetailSections(visibleDetailRecord)}
       />
     </>
   );
@@ -969,12 +996,14 @@ export default function SecurityPage() {
   const { accessToken, isInitializing } = useAuth();
   const enabled = !isInitializing && Boolean(accessToken);
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ["security", "stats"],
+  const statsQuery = useResourceListQuery({
+    queryKey: ["security", "stats", accessToken],
     queryFn: () => getSecurityStats(accessToken || undefined),
     enabled,
+    retry: false,
     refetchInterval: 60_000,
   });
+  const { data: stats, isLoading: statsLoading } = statsQuery;
 
   const complianceTone =
     (stats?.complianceScore ?? 0) >= 90
@@ -994,7 +1023,7 @@ export default function SecurityPage() {
       ),
       children: (
         <OpsSurface variant="panel" padding="sm">
-          <SecurityEventsTab />
+          <SecurityEventsTab key={accessToken} />
         </OpsSurface>
       ),
     },
@@ -1008,7 +1037,7 @@ export default function SecurityPage() {
       ),
       children: (
         <OpsSurface variant="panel" padding="sm">
-          <AuditLogsTab />
+          <AuditLogsTab key={accessToken} />
         </OpsSurface>
       ),
     },
@@ -1034,6 +1063,7 @@ export default function SecurityPage() {
       </OpsSurface>
 
       {/* 统计卡片 */}
+      <ResourceQueryFeedback query={statsQuery} label="安全统计" />
       <Skeleton loading={statsLoading} active paragraph={{ rows: 1 }}>
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           <Col xs={24} sm={12} lg={6}>
@@ -1041,8 +1071,8 @@ export default function SecurityPage() {
               icon={<LockOutlined />}
               label="高危漏洞数"
               meta={(stats?.criticalVulnerabilities ?? 0) > 0 ? "需立即处理" : undefined}
-              tone={(stats?.criticalVulnerabilities ?? 0) > 0 ? "danger" : "success"}
-              value={stats?.criticalVulnerabilities ?? 0}
+              tone={!stats ? "neutral" : stats.criticalVulnerabilities > 0 ? "danger" : "success"}
+              value={stats?.criticalVulnerabilities ?? "—"}
             />
           </Col>
           <Col xs={24} sm={12} lg={6}>
@@ -1050,18 +1080,18 @@ export default function SecurityPage() {
               icon={<ExclamationCircleOutlined />}
               label="待处理事件"
               meta={stats ? `今日审计 ${stats.todayAuditLogs ?? 0} 条` : undefined}
-              tone={(stats?.openEvents ?? 0) > 0 ? "warning" : "success"}
-              value={stats?.openEvents ?? 0}
+              tone={!stats ? "neutral" : stats.openEvents > 0 ? "warning" : "success"}
+              value={stats?.openEvents ?? "—"}
             />
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <OpsMetricTile
               icon={<SafetyCertificateOutlined />}
               label="合规评分"
-              meta={`评分区间 ${complianceTone === "success" ? "健康" : complianceTone === "warning" ? "关注" : "风险"}`}
-              suffix="%"
-              tone={complianceTone}
-              value={stats?.complianceScore ?? 0}
+              meta={stats ? `评分区间 ${complianceTone === "success" ? "健康" : complianceTone === "warning" ? "关注" : "风险"}` : "尚未读取"}
+              suffix={stats ? "%" : undefined}
+              tone={stats ? complianceTone : "neutral"}
+              value={stats?.complianceScore ?? "—"}
             />
           </Col>
           <Col xs={24} sm={12} lg={6}>
@@ -1070,7 +1100,7 @@ export default function SecurityPage() {
               label="今日审计日志"
               meta={stats ? `高危漏洞 ${stats.criticalVulnerabilities ?? 0} 条` : undefined}
               tone="info"
-              value={stats?.todayAuditLogs ?? 0}
+              value={stats?.todayAuditLogs ?? "—"}
             />
           </Col>
         </Row>

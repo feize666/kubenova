@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 // This file lives in frontend/scripts; its parent is the frontend root.
 const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const nextDir = path.join(root, process.env.KUBENOVA_NEXT_DIST_DIR || ".next");
+const distDir = process.env.KUBENOVA_NEXT_DIST_DIR || ".next";
+const nextDir = path.join(root, distDir);
 const staticDir = path.join(nextDir, "static");
 const standaloneDir = path.join(nextDir, "standalone");
 
@@ -17,8 +18,8 @@ try {
   process.exit(0);
 }
 
-await mkdir(path.join(standaloneDir, ".next"), { recursive: true });
-await cp(staticDir, path.join(standaloneDir, ".next", "static"), { recursive: true, force: true });
+await mkdir(path.join(standaloneDir, distDir), { recursive: true });
+await cp(staticDir, path.join(standaloneDir, distDir, "static"), { recursive: true, force: true });
 const publicDir = path.join(root, "public");
 try {
   await access(publicDir, constants.R_OK);

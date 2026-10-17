@@ -1,22 +1,17 @@
 "use client";
 
-import { CodeOutlined, CopyOutlined, DownloadOutlined, EyeInvisibleOutlined, EyeOutlined, UndoOutlined } from "@ant-design/icons";
-import { useEffect, useMemo, useState, type ComponentProps } from "react";
-import { Input, Space, Typography } from "antd";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import {
-  getDynamicResourceDetail,
-  getResourceYaml,
-  updateDynamicResourceYaml,
-  updateResourceYaml,
-  type DynamicResourceIdentity,
-  type ResourceIdentity,
-} from "@/lib/api/resources";
-
-import { getClusters } from "@/lib/api/clusters";
-
-import { getClusterDisplayName } from "@/lib/cluster-display-name";
-import { OpsDrawerShell, OpsErrorState, OpsFilterChip, OpsIconActionButton, OpsLoadingState } from "@/components/ops";
+import { CopyOutlined, DownloadOutlined, EditOutlined, EyeInvisibleOutlined, EyeOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useRef, useState, type RefObject } from 'react';
+import { Alert, Space, Typography } from 'antd';
+import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getDynamicResourceDetail, getResourceYaml, type DynamicResourceIdentity, type ResourceIdentity } from '@/lib/api/resources';
+import { OpsDrawerShell, OpsIconActionButton, OpsLoadingState } from '@/components/ops';
+import { EditorDocument } from '@/components/resource-editor/resource-editor-page';
+import { embeddedYamlContext } from '@/lib/embedded-yaml-editor';
+import { useAuth } from '@/components/auth-context';
+import { YamlCodeEditor } from './resource-editor/yaml-code-editor';
+import { useOptionalResourceEditBoundary } from './resource-editor/resource-edit-boundary';
+import { useReadAccess } from '@/lib/query/read-access-state';
 
 interface ResourceYamlDrawerProps {
   open: boolean;
@@ -30,355 +25,66 @@ interface ResourceYamlDrawerProps {
   embedded?: boolean;
 }
 
-function InlineYamlShell({ children, extra, footerActions }: ComponentProps<typeof OpsDrawerShell>) {
-  return <Space orientation="vertical" size={16} style={{ width: "100%" }}>{extra}{children}{footerActions}</Space>;
+// Embedded details edit in place, reusing the same dry-run/preview write path.
+export function ResourceYamlDrawer(props: ResourceYamlDrawerProps) {
+  const localLeaveRef=useRef<((action:()=>void)=>void)|null>(null);
+  const boundary=useOptionalResourceEditBoundary();
+  const leaveRequestRef=props.embedded&&boundary?boundary.ref:localLeaveRef;
+  const content=<YamlPreview key={JSON.stringify([props.identity,props.dynamicIdentity])} {...props} leaveRequestRef={leaveRequestRef}/>;
+  if(props.embedded)return content;
+  return <OpsDrawerShell title={`YAML · ${props.identity?.name??props.dynamicIdentity?.name??'资源'}`} open={props.open} destroyOnHidden size="large" variant="resource" onClose={()=>{if(leaveRequestRef.current)leaveRequestRef.current(props.onClose);else props.onClose();}}>{content}</OpsDrawerShell>;
 }
 
-function sanitizeFilenameSegment(value: string, fallback: string): string {
-  const normalized = value.trim().replace(/[\\/:*?"<>|\s]+/g, "-");
-  return normalized || fallback;
-}
-
-function buildYamlFilename(identity: ResourceIdentity): string {
-  const namespace = identity.namespace ? sanitizeFilenameSegment(identity.namespace, "default") : "cluster";
-  const kind = sanitizeFilenameSegment(identity.kind, "resource");
-  const name = sanitizeFilenameSegment(identity.name, "item");
-  return `${namespace}-${kind}-${name}.yaml`;
-}
-
-function downloadTextFile(content: string, filename: string) {
-  const blob = new Blob([content], { type: "application/x-yaml;charset=utf-8" });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
-}
-
-function formatYamlText(value: string): string {
-  return value
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .map((line) => line.replace(/[ \t]+$/g, ""))
-    .join("\n")
-    .trimEnd();
-}
-
-function maskSensitiveYaml(value: string): string {
-  const lines = value.split("\n");
-  let inSensitiveBlock = false;
-  let blockIndent = 0;
-
-  return lines.map((line) => {
-    const blockMatch = line.match(/^(\s*)(data|stringData):\s*$/);
-    if (blockMatch) {
-      inSensitiveBlock = true;
-      blockIndent = blockMatch[1].length;
-      return line;
-    }
-
-    const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
-    if (inSensitiveBlock && line.trim() && indent <= blockIndent) {
-      inSensitiveBlock = false;
-    }
-    if (inSensitiveBlock && /^\s*[^#\s][^:]*:\s*.+$/.test(line)) {
-      return line.replace(/(:\s*).+$/, "$1******");
-    }
-    return line;
-  }).join("\n");
-}
-
-function isSensitiveYamlResource(input: {
-  identity: ResourceIdentity | null;
-  dynamicIdentity?: DynamicResourceIdentity | null;
-  yamlText: string;
-}) {
-  const kind = input.identity?.kind ?? input.dynamicIdentity?.resource ?? "";
-  return kind.toLowerCase().includes("secret") || /^kind:\s*Secret\b/im.test(input.yamlText);
-}
-
-export function ResourceYamlDrawer({
-  open,
-  onClose,
-  token,
-  identity,
-  dynamicIdentity,
-  onUpdated,
-  readOnly = false,
-  maskSensitive = true,
-  embedded = false,
-}: ResourceYamlDrawerProps) {
-  const Shell = embedded ? InlineYamlShell : OpsDrawerShell;
-  const [yamlText, setYamlText] = useState("");
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [sensitiveVisible, setSensitiveVisible] = useState(false);
-  const isDynamic = Boolean(dynamicIdentity);
-
+function YamlPreview({open,token,identity,dynamicIdentity,readOnly,onUpdated,leaveRequestRef}:ResourceYamlDrawerProps & {leaveRequestRef:RefObject<((action:()=>void)=>void)|null>}) {
+  const {role}=useAuth();
+  const client=useQueryClient();
+  const [editing,setEditing]=useState(false);
+  const [editingYaml,setEditingYaml]=useState('');
+  const [saved,setSaved]=useState(false);
+  const [visible,setVisible] = useState(false);
+  const [error,setError] = useState('');
+  const queryKey=['resource-yaml-preview',identity,dynamicIdentity,token];
   const query = useQuery({
-    queryKey: [
-      "resource-yaml",
-      isDynamic ? "dynamic" : "core",
-      dynamicIdentity?.clusterId ?? identity?.clusterId,
-      dynamicIdentity?.group,
-      dynamicIdentity?.version,
-      dynamicIdentity?.resource ?? identity?.kind,
-      dynamicIdentity?.namespace ?? identity?.namespace,
-      dynamicIdentity?.name ?? identity?.name,
-      token,
-    ],
-    queryFn: async ({ signal }) => {
-      if (dynamicIdentity) {
-        const detail = await getDynamicResourceDetail(dynamicIdentity, token, { signal });
-        return {
-          clusterId: detail.clusterId,
-          namespace: detail.namespace,
-          kind: detail.kind || dynamicIdentity.resource,
-          name: detail.name,
-          yaml: detail.yaml,
-          updatedAt: detail.timestamp,
-        };
-      }
-      return getResourceYaml(identity!, token, { signal });
+    queryKey,
+    queryFn:async ({signal})=>{
+      const result=dynamicIdentity?await getDynamicResourceDetail(dynamicIdentity,token,{signal}):await getResourceYaml(identity!,token,{signal});
+      return {yaml:result.yaml};
     },
-    enabled:
-      open &&
-      (dynamicIdentity
-        ? Boolean(dynamicIdentity.clusterId && dynamicIdentity.version && dynamicIdentity.resource && dynamicIdentity.name)
-        : Boolean(identity?.clusterId && identity?.namespace && identity?.kind && identity?.name)),
+    enabled:open&&!!token&&!!(identity||dynamicIdentity),
+    gcTime:0,refetchOnWindowFocus:false,retry:false,
   });
-  const clusterQuery = useQuery({
-    queryKey: ["resource-yaml", "clusters", token],
-    queryFn: ({ signal }) => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, token!, { signal }),
-    enabled: open && Boolean(token),
-  });
-  const clusterMap = useMemo(
-    () => Object.fromEntries((clusterQuery.data?.items ?? []).map((item) => [item.id, item.name])),
-    [clusterQuery.data?.items],
-  );
-
-  useEffect(() => {
-    const nextYaml = query.data?.yaml;
-    if (nextYaml === undefined) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      setYamlText(nextYaml);
-      setLocalError(null);
-      setSensitiveVisible(false);
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [query.data]);
-
-  useEffect(() => {
-    if (open) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      setLocalError(null);
-      setSensitiveVisible(false);
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [open]);
-
-  const mutation = useMutation({
-    mutationFn: async () => {
-      if (!identity && !dynamicIdentity) {
-        throw new Error("资源标识缺失，无法提交 YAML");
-      }
-      const normalized = yamlText.trim();
-      if (!normalized) {
-        throw new Error("YAML 内容不能为空");
-      }
-      if (readOnly) {
-        throw new Error("当前 YAML 为只读状态，无法保存");
-      }
-      if (shouldMaskSensitive) {
-        throw new Error("敏感内容已隐藏，请先显示敏感内容后再保存");
-      }
-      if (dynamicIdentity) {
-        return updateDynamicResourceYaml({ ...dynamicIdentity, yaml: normalized }, token);
-      }
-      if (!identity) {
-        throw new Error("资源标识缺失，无法提交 YAML");
-      }
-      return updateResourceYaml({ ...identity, yaml: normalized }, token);
-    },
-    onSuccess: () => {
-      onUpdated?.();
-      onClose();
-    },
-  });
-
-  const title = useMemo(() => {
-    if (!identity) {
-      return "YAML";
-    }
-    return `YAML · ${identity.kind}/${identity.name}`;
-  }, [identity]);
-
-  const errorMessage =
-    localError ??
-    (query.error instanceof Error
-      ? query.error.message
-      : mutation.error instanceof Error
-      ? mutation.error.message
-      : null);
-  const effectiveIdentity = identity ?? (query.data
-    ? {
-        clusterId: query.data.clusterId,
-        namespace: query.data.namespace ?? "",
-        kind: query.data.kind,
-        name: query.data.name,
-      }
-    : null);
-  const isDirty = Boolean(query.data?.yaml !== undefined && yamlText !== query.data.yaml);
-  const isSensitiveResource = isSensitiveYamlResource({ identity, dynamicIdentity, yamlText });
-  const shouldMaskSensitive = Boolean(maskSensitive && isSensitiveResource && !sensitiveVisible);
-  const displayedYaml = shouldMaskSensitive ? maskSensitiveYaml(yamlText) : yamlText;
-  const lineCount = yamlText ? yamlText.split("\n").length : 0;
-  const downloadDisabled = query.isLoading || !effectiveIdentity || !yamlText.trim();
-  const saveDisabled = query.isLoading || readOnly || shouldMaskSensitive || !yamlText.trim();
-  const drawerState = mutation.isPending || (query.isFetching && Boolean(yamlText)) ? "loading" : "idle";
-
-  return (
-    <Shell
-      title={title}
-      size="large"
-      open={open}
-      destroyOnHidden
-      variant="resource"
-      state={drawerState}
-      stateTitle={mutation.isPending ? "正在保存 YAML" : drawerState === "loading" ? "正在刷新 YAML" : undefined}
-      stateDescription={
-        mutation.isPending
-          ? "保存完成后抽屉会关闭并刷新资源。"
-          : drawerState === "loading"
-            ? "当前内容保持可读，刷新完成后自动更新。"
-            : undefined
-      }
-      styles={{
-        body: { padding: 24, overflow: "auto" },
-      }}
-      extra={
-        <Space wrap size={8}>
-          {readOnly ? <OpsFilterChip tone="neutral">只读</OpsFilterChip> : <OpsFilterChip tone="info">可编辑</OpsFilterChip>}
-          {isDirty ? <OpsFilterChip tone="warning">已修改</OpsFilterChip> : <OpsFilterChip tone="neutral">未修改</OpsFilterChip>}
-          {isSensitiveResource ? <OpsFilterChip tone={shouldMaskSensitive ? "warning" : "danger"}>{shouldMaskSensitive ? "敏感已隐藏" : "敏感已显示"}</OpsFilterChip> : null}
-          <OpsFilterChip tone="neutral">{lineCount} 行</OpsFilterChip>
-        </Space>
-      }
-      onClose={() => {
-        mutation.reset();
-        setLocalError(null);
-        setSensitiveVisible(false);
-        onClose();
-      }}
-      footerActions={
-        <Space wrap={false} className="resource-yaml-drawer__actions" size={8}>
-          <OpsIconActionButton
-            icon={<DownloadOutlined />}
-            disabled={downloadDisabled}
-            disabledReason={downloadDisabled ? "没有可下载的 YAML" : undefined}
-            onClick={() => {
-              if (!effectiveIdentity || !yamlText.trim()) {
-                return;
-              }
-              downloadTextFile(yamlText, buildYamlFilename(effectiveIdentity));
-            }}
-          >
-            下载 YAML
-          </OpsIconActionButton>
-          <OpsIconActionButton
-            icon={<CopyOutlined />}
-            disabled={!yamlText.trim()}
-            disabledReason={!yamlText.trim() ? "没有可复制的 YAML" : undefined}
-            onClick={() => {
-              void navigator.clipboard.writeText(yamlText).catch(() => setLocalError("复制 YAML 失败"));
-            }}
-          >
-            复制
-          </OpsIconActionButton>
-          <OpsIconActionButton
-            icon={<CodeOutlined />}
-            disabled={readOnly || shouldMaskSensitive || !yamlText.trim()}
-            disabledReason={readOnly ? "只读状态不可格式化" : shouldMaskSensitive ? "敏感内容隐藏时不可格式化" : undefined}
-            onClick={() => setYamlText((value) => formatYamlText(value))}
-          >
-            格式化
-          </OpsIconActionButton>
-          <OpsIconActionButton
-            icon={<UndoOutlined />}
-            disabled={!isDirty}
-            disabledReason={!isDirty ? "当前没有未保存修改" : undefined}
-            onClick={() => {
-              setYamlText(query.data?.yaml ?? "");
-              setLocalError(null);
-            }}
-          >
-            重置
-          </OpsIconActionButton>
-          {isSensitiveResource ? (
-            <OpsIconActionButton
-              icon={shouldMaskSensitive ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-              opsTone={shouldMaskSensitive ? "primary" : "danger"}
-              onClick={() => setSensitiveVisible((value) => !value)}
-            >
-              {shouldMaskSensitive ? "显示敏感" : "隐藏敏感"}
-            </OpsIconActionButton>
-          ) : null}
-          <OpsIconActionButton onClick={() => void query.refetch()} loading={query.isFetching}>
-            重新加载
-          </OpsIconActionButton>
-          <OpsIconActionButton
-            opsTone="primary"
-            loading={mutation.isPending}
-            disabled={saveDisabled}
-            disabledReason={
-              readOnly
-                ? "当前 YAML 为只读状态"
-                : shouldMaskSensitive
-                  ? "敏感内容隐藏时不可保存"
-                  : !yamlText.trim()
-                    ? "YAML 内容不能为空"
-                    : undefined
-            }
-            onClick={() => void mutation.mutateAsync()}
-          >
-            保存 YAML
-          </OpsIconActionButton>
-        </Space>
-      }
-    >
-      <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-        {identity ? (
-          <Typography.Text type="secondary">
-            集群 {getClusterDisplayName(clusterMap, identity.clusterId)} · 名称空间 {identity.namespace} · 资源 {identity.kind}/{identity.name}
-          </Typography.Text>
-        ) : null}
-        {query.isLoading ? (
-          <OpsLoadingState compact title="正在加载 YAML" description="保持当前抽屉打开，加载完成后可继续查看或编辑。" />
-        ) : null}
-        {errorMessage ? <OpsErrorState compact title="YAML 操作失败" description={errorMessage} /> : null}
-        <Input.TextArea
-          value={displayedYaml}
-          aria-label="YAML 内容"
-          onChange={(e) => {
-            if (shouldMaskSensitive || readOnly) {
-              return;
-            }
-            setYamlText(e.target.value);
-          }}
-          autoSize={{ minRows: 20, maxRows: 30 }}
-          placeholder="YAML 内容"
-          style={{ fontFamily: "var(--kn-font-mono)", overflowX: "auto", whiteSpace: "pre" }}
-          spellCheck={false}
-          readOnly={readOnly || shouldMaskSensitive}
-          disabled={query.isLoading}
-        />
-      </Space>
-    </Shell>
-  );
+  const permissionDenied = useReadAccess(hashKey(queryKey),query);
+  const yaml = permissionDenied ? '' : query.data?.yaml ?? '';
+  const editorYaml = editing ? editingYaml : yaml;
+  const sensitive = /secret/i.test(identity?.kind ?? dynamicIdentity?.resource ?? '') || /^kind:\s*Secret\b/im.test(yaml);
+  const hidden = sensitive&&!visible;
+  const unavailable = !yaml || hidden;
+  const editorIdentity=identity??(dynamicIdentity?{clusterId:dynamicIdentity.clusterId,kind:dynamicIdentity.resource,name:dynamicIdentity.name,namespace:dynamicIdentity.namespace??''}:null);
+  const context=editorIdentity?embeddedYamlContext(editorYaml,editorIdentity,dynamicIdentity):null;
+  const canEdit=!readOnly&&['admin','platform-admin','operator','cluster-operator'].includes(role.trim().toLowerCase());
+  if(editing&&context&&token)return <Space orientation="vertical" size={12} style={{width:'100%'}}>
+    {!permissionDenied&&<Space wrap>
+      <OpsIconActionButton icon={<ReloadOutlined/>} aria-label="刷新 YAML" loading={query.isFetching} onClick={()=>void query.refetch({cancelRefetch:false})}>刷新 YAML</OpsIconActionButton>
+    </Space>}
+    {query.error&&!permissionDenied&&<Alert showIcon type="warning" title="资源刷新失败，已保留当前草稿" description={query.error.message}/>}
+    <EditorDocument embedded lockContext leaveRequestRef={leaveRequestRef} clusterId={context.clusterId} token={token} initialKind={context.kind} initialVersion={context.apiVersion} initialNamespace={context.namespace} initialNamespaced={context.namespaced} resource={context.resource} initialYaml={editorYaml} initialMode="yaml" readOnly={!canEdit} readUnavailable={permissionDenied} onRetryRead={()=>void query.refetch({cancelRefetch:false})} returnTo="" resourceOptions={[]} onClose={()=>setEditing(false)} onSaved={()=>{setEditing(false);setSaved(true);void query.refetch({cancelRefetch:false});void client.invalidateQueries({queryKey:['resource-detail']});onUpdated?.();}}/>
+  </Space>;
+  return <Space orientation="vertical" size={16} style={{width:'100%'}}>
+    <Space wrap>
+      <Typography.Text type="secondary">在当前详情面板编辑，校验并预览后保存。</Typography.Text>
+      {canEdit&&<OpsIconActionButton icon={<EditOutlined/>} disabled={!query.data||permissionDenied||!context||hidden} onClick={()=>{setSaved(false);setEditingYaml(yaml);setEditing(true);}}>编辑 YAML</OpsIconActionButton>}
+      <OpsIconActionButton icon={<ReloadOutlined/>} aria-label="刷新 YAML" loading={query.isFetching} onClick={()=>void query.refetch({cancelRefetch:false})}>刷新 YAML</OpsIconActionButton>
+      {sensitive&&<OpsIconActionButton icon={visible?<EyeInvisibleOutlined/>:<EyeOutlined/>} onClick={()=>setVisible(!visible)}>{visible?'隐藏敏感内容':'显示敏感内容'}</OpsIconActionButton>}
+      <OpsIconActionButton icon={<CopyOutlined/>} disabled={unavailable} onClick={()=>void navigator.clipboard.writeText(yaml).catch(()=>setError('复制失败，请重试'))}>复制</OpsIconActionButton>
+      <OpsIconActionButton icon={<DownloadOutlined/>} disabled={unavailable} onClick={()=>{
+        const url=URL.createObjectURL(new Blob([yaml],{type:'application/yaml;charset=utf-8'}));
+        const link=document.createElement('a');link.href=url;link.download=((identity?.name??dynamicIdentity?.name??'resource').replace(/[^a-zA-Z0-9._-]/g,'-'))+'.yaml';
+        link.click();URL.revokeObjectURL(url);
+      }}>下载 YAML</OpsIconActionButton>
+    </Space>
+    {saved&&<Alert showIcon type="success" title="YAML 已保存"/>}
+    {query.isLoading&&<OpsLoadingState compact title="正在读取 YAML"/>}
+    {(error||query.error)&&<Alert showIcon type={permissionDenied?'warning':'error'} title={permissionDenied?'无权读取 YAML':error||query.error?.message} description={permissionDenied?'当前资源内容已隐藏，恢复访问后可重试。':undefined}/>}
+    {hidden?<Alert type="info" title="Secret 内容已隐藏，显示敏感内容后才可查看、复制或下载。"/>:<YamlCodeEditor ariaLabel="YAML 只读预览" value={yaml} readOnly embedded/>}
+  </Space>;
 }

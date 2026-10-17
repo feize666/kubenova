@@ -1,6 +1,7 @@
 import type { PaginationProps, TablePaginationConfig, TableProps } from "antd";
 
-export const DEFAULT_PAGE_SIZE_OPTIONS = ["10", "20", "50", "100"] as const;
+export const DEFAULT_RESOURCE_PAGE_SIZE = 25;
+export const DEFAULT_PAGE_SIZE_OPTIONS = ["10", "25", "50", "100"] as const;
 export const DEFAULT_RESOURCE_TABLE_LOADING_TEXT = "资源数据加载中...";
 
 export type PageSizeOption = number | string;
@@ -41,7 +42,7 @@ function buildPageSizeChanger(
     allowClear: false,
     showSearch: false,
     options: pageSizeOptions.map((value) => ({
-      value,
+      value: Number(value),
       label: `${value} 条/页`,
     })),
   };

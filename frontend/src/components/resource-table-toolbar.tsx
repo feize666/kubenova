@@ -1,6 +1,6 @@
 "use client";
 
-import { Checkbox, Input, Popover, Space, Tooltip } from "antd";
+import { Checkbox, Input, Popover, Segmented, Space, Tooltip } from "antd";
 import {
   ClearOutlined,
   ColumnWidthOutlined,
@@ -11,6 +11,7 @@ import type { CheckboxChangeEvent } from "antd/es/checkbox";
 import type { ReactNode } from "react";
 import type { HeadlampTableState } from "@/lib/table/headlamp-table";
 import { OpsIconActionButton, OpsPopoverPanel } from "@/components/ops";
+import type { TableDensity } from "@/lib/table/density";
 
 export type ResourceTableToolbarProps<T extends object> = {
   table: Pick<
@@ -27,22 +28,23 @@ export type ResourceTableToolbarProps<T extends object> = {
   >;
   resetColumnWidths?: () => void;
   extra?: ReactNode;
+  primary?: ReactNode;
+  density?: TableDensity;
+  onDensityChange?: (density: TableDensity) => void;
 };
 
-export function ResourceTableToolbar<T extends object>({ table, resetColumnWidths, extra }: ResourceTableToolbarProps<T>) {
+export function ResourceTableToolbar<T extends object>({ table, resetColumnWidths, extra, primary, density, onDensityChange }: ResourceTableToolbarProps<T>) {
   const activeFilterCount = table.activeFilterCount + (table.globalSearch?.value ? 1 : 0);
   const searchPanel = table.globalSearch ? (
-    <OpsPopoverPanel title="搜索" subtitle="按关键字过滤当前表格" className="resource-table-search-panel">
       <Input
         allowClear
-        autoFocus
+        aria-label="搜索资源"
         className="resource-table-global-search"
         prefix={<SearchOutlined />}
         placeholder={table.globalSearch.placeholder ?? "搜索"}
         value={table.globalSearch.value}
         onChange={(event) => table.globalSearch?.onChange(event.target.value)}
       />
-    </OpsPopoverPanel>
   ) : null;
 
   const columnPanel = (
@@ -81,27 +83,15 @@ export function ResourceTableToolbar<T extends object>({ table, resetColumnWidth
       data-active-filter-count={activeFilterCount}
       data-resource-table-toolbar=""
     >
-      <div className="resource-table-toolbar-left">{extra}</div>
+      <div className="resource-table-toolbar-left">{primary}{extra}{searchPanel}</div>
       <Space className="resource-table-toolbar-actions" size={8} wrap>
-        {table.globalSearch ? (
-          <Popover
-            content={searchPanel}
-            placement="bottomRight"
-            trigger="click"
-            overlayClassName="resource-table-search-popover"
-          >
-            <Tooltip title="搜索">
-              <OpsIconActionButton
-                className={["resource-table-icon-action", table.globalSearch.value ? "is-active" : ""]
-                  .filter(Boolean)
-                  .join(" ")}
-                icon={<SearchOutlined />}
-                aria-label="搜索"
-              >
-                搜索
-              </OpsIconActionButton>
-            </Tooltip>
-          </Popover>
+        {onDensityChange ? (
+          <Segmented<TableDensity>
+            aria-label="表格密度"
+            options={[{ label: "标准", value: "standard" }, { label: "紧凑", value: "compact" }]}
+            value={density ?? "standard"}
+            onChange={onDensityChange}
+          />
         ) : null}
         <Tooltip title="过滤">
           <OpsIconActionButton

@@ -1,4 +1,5 @@
 "use client";
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
 import { MinusCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,12 +17,14 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
 import { ConfigCountCell, ConfigVersionCell } from "@/components/configs/config-table-cells";
 import { ResourceTable } from "@/components/resource-table";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
 import type { HeadlampTableFilters, HeadlampResourceTableColumn } from "@/components/resource-table";
 import {
   matchLabelExpressions,
@@ -140,7 +143,6 @@ function readSecretDetail(raw: unknown): {
 
 export default function SecretsPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -152,10 +154,9 @@ export default function SecretsPage() {
   const [globalSearchInput, setGlobalSearchInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<ConfigResourceItem>({
-      defaultPageSize: 10,
       storageKey: "configs/secrets/table-sort",
       defaultSortBy: "updatedAt",
       defaultSortOrder: "desc",
@@ -173,7 +174,7 @@ export default function SecretsPage() {
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
   const [form] = Form.useForm<SecretFormValues>();
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const listQuery = useResourceListQuery({
     queryKey: [
       "configs",
       "secrets",
@@ -205,6 +206,7 @@ export default function SecretsPage() {
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
+  const { data, isLoading, refetch } = listQuery;
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "all", accessToken],
@@ -472,7 +474,7 @@ export default function SecretsPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: ConfigResourceItem) =>
         row.id ? (
-          <Typography.Link onClick={() => { setDetailTarget({ kind: "Secret", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/secret/${encodeURIComponent(row.id)}`); }}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "Secret", id: row.id }); }}>
             {name}
           </Typography.Link>
         ) : (
@@ -529,6 +531,7 @@ export default function SecretsPage() {
       fixed: "right",
       render: (_: unknown, row: ConfigResourceItem) => (
         <ResourceRowActions
+          editorIdentity={{clusterId:row.clusterId,kind:"Secret",name:row.name,namespace:row.namespace}}
           deleteLabel="删除"
           deleteTitle="删除 Secret"
           deleteContent={`确认删除 Secret「${row.name}」吗？此操作不可恢复。`}
@@ -579,7 +582,6 @@ export default function SecretsPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={<ResourceAddButton title="创建Secret" onClick={handleOpenCreate} />}
         />
 
         <Space className="workload-workbench__content" orientation="vertical" size={12} style={{ width: "100%" }}>
@@ -592,18 +594,12 @@ export default function SecretsPage() {
             />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="config-resource-state-alert"
-              type="error"
-              showIcon
-              title="Secret 加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback className="config-resource-state-alert" label="Secret" query={listQuery} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<ConfigResourceItem>
+              queryState={listQuery}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" title="创建Secret" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" title="使用 YAML 创建Secret" /></>}
               bordered
               tableKey="configs.secrets"
               rowKey="id"
@@ -931,7 +927,7 @@ export default function SecretsPage() {
           />
         )}
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

@@ -1,4 +1,8 @@
 "use client";
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
 
 import {
   DeleteOutlined,
@@ -16,7 +20,7 @@ import {
   Typography,
   message,
 } from "antd";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-context";
 import { ClusterSelect } from "@/components/cluster-select";
@@ -107,11 +111,12 @@ function readAllowVolumeExpansion(resource: StorageResource) {
 }
 
 export default function StorageClassPage() {
+  const openEditor = useResourceEditorNavigation();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const { clusterId, onClusterChange } = useClusterNamespaceFilter(initialClusterId);
@@ -128,7 +133,6 @@ export default function StorageClassPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<StorageResource>({
-    defaultPageSize: 10,
   });
   const [modalOpen, setModalOpen] = useState(false);
   const [createMode, setCreateMode] = useState<ResourceCreateMode>("form");
@@ -136,11 +140,11 @@ export default function StorageClassPage() {
   const [createYamlClusterId, setCreateYamlClusterId] = useState("");
   const [editTarget, setEditTarget] = useState<StorageResource | null>(null);
   const [yamlTarget, setYamlTarget] = useState<ResourceIdentity | null>(null);
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const [form] = Form.useForm<ScFormValues>();
   const [editForm] = Form.useForm<ScEditFormValues>();
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const listQuery = useResourceListQuery({
     queryKey: [
       "storage",
       "SC",
@@ -170,6 +174,7 @@ export default function StorageClassPage() {
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
   });
+  const { data, isLoading, refetch } = listQuery;
 
   const clustersQuery = useQuery({
     queryKey: ["clusters", "all", accessToken],
@@ -331,7 +336,7 @@ export default function StorageClassPage() {
       ...getSortableColumnProps("name", isLoading && !data),
       render: (name: string, row: StorageResource) =>
         row.id ? (
-          <Typography.Link onClick={() => { setDetailTarget({ kind: "StorageClass", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/storageclass/${encodeURIComponent(row.id)}`); }}>
+          <Typography.Link onClick={() => { setDetailTarget({ kind: "StorageClass", id: row.id }); }}>
             {name}
           </Typography.Link>
         ) : (
@@ -415,7 +420,7 @@ export default function StorageClassPage() {
             icon: <SettingOutlined />,
             label: "编辑",
             onClick: () => {
-              handleOpenEdit(row);
+              openEditor({clusterId:row.clusterId,kind:'StorageClass',name:row.name});
             },
           },
           {
@@ -425,7 +430,7 @@ export default function StorageClassPage() {
             onClick: () => {
               setYamlTarget({
                 clusterId: row.clusterId,
-                namespace: "default",
+                namespace: "",
                 kind: "StorageClass",
                 name: row.name,
               });
@@ -434,6 +439,7 @@ export default function StorageClassPage() {
           { type: "divider" },
           {
             key: "delete",
+            disabled: !canWrite,
             icon: <DeleteOutlined />,
             label: "删除",
             danger: true,
@@ -579,20 +585,6 @@ export default function StorageClassPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={<ResourceAddButton title="创建StorageClass" onClick={() => {
-            const nextClusterId = clusterId || clusterOptions[0]?.value || "";
-            form.resetFields();
-            form.setFieldsValue({
-              clusterId: nextClusterId,
-              bindingMode: "WaitForFirstConsumer",
-              reclaimPolicy: "Delete",
-              allowVolumeExpansion: "false",
-            });
-            setCreateMode("form");
-            setCreateYaml("");
-            setCreateYamlClusterId(nextClusterId);
-            setModalOpen(true);
-          }} />}
         />
 
         <Space
@@ -604,18 +596,12 @@ export default function StorageClassPage() {
           {!isInitializing && !accessToken ? (
             <Alert className="storage-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再查看 StorageClass 信息。" />
           ) : null}
-          {isError ? (
-            <Alert
-              className="storage-resource-state-alert"
-              type="error"
-              showIcon
-              title="加载失败"
-              description={error instanceof Error ? error.message : "获取 StorageClass 数据时发生错误"}
-            />
-          ) : null}
+          <ResourceQueryFeedback className="storage-resource-state-alert" label="StorageClass" query={listQuery} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<StorageResource>
+              queryState={listQuery}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建StorageClass" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建StorageClass" /></>}
               rowKey="id"
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -763,7 +749,7 @@ export default function StorageClassPage() {
           </OpsFormSection>
         </Form>
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

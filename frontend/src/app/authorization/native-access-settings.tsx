@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Alert, Button, Descriptions, Form, Input, Popconfirm, Select, Space, Spin, Switch, Tag, Typography } from "antd";
 import { CloudServerOutlined, ReloadOutlined, SafetyCertificateOutlined, SyncOutlined } from "@ant-design/icons";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
 import { useAuth } from "@/components/auth-context";
 import { getClusters } from "@/lib/api/clusters";
 import {
@@ -31,23 +33,36 @@ function syncTag(state: NativeAccessSettings["syncState"]) {
 
 export function NativeAccessSettingsPanel() {
   const { accessToken, role } = useAuth();
+  return <NativeAccessSettingsDocument key={`${accessToken}:${role}`} />;
+}
+
+function NativeAccessSettingsDocument() {
+  const { accessToken, role } = useAuth();
   const [clusterId, setClusterId] = useState<string>();
   const [form] = Form.useForm<NativeAccessSettingsInput>();
+  const draftDirty=useRef(false);
   const client = useQueryClient();
   const isAdministrator = ["admin", "platform-admin"].includes(role);
-  const clusters = useQuery({
+  const clusters = useResourceListQuery({
     queryKey: ["native-access-clusters", accessToken],
     enabled: Boolean(accessToken && isAdministrator),
     queryFn: () => getClusters({ pageSize: 100 }, accessToken!),
+    retry:false,
   });
-  const settings = useQuery({
+  const settings = useResourceListQuery({
     queryKey: ["native-access-settings", accessToken, clusterId],
     enabled: Boolean(accessToken && isAdministrator && clusterId),
     queryFn: () => getNativeAccessSettings(clusterId!, accessToken!),
+    retry:false,
   });
+  const writeContext=useRef<{clusterId?:string;available:boolean}>({available:false});
+  useLayoutEffect(()=>{
+    writeContext.current={clusterId,available:!!clusters.data&&!!settings.data&&isAdministrator};
+    return()=>{writeContext.current={available:false};};
+  },[clusterId,clusters.data,settings.data,isAdministrator]);
 
   useEffect(() => {
-    if (!settings.data) return;
+    if (!settings.data || draftDirty.current) return;
     form.setFieldsValue({
       enabled: settings.data.enabled,
       issuer: settings.data.issuer ?? "",
@@ -61,6 +76,7 @@ export function NativeAccessSettingsPanel() {
   const save = useMutation({
     mutationFn: (input: NativeAccessSettingsInput) => saveNativeAccessSettings(clusterId!, input, accessToken!),
     onSuccess: async () => {
+      draftDirty.current=false;
       await client.invalidateQueries({ queryKey: ["native-access-settings", accessToken, clusterId] });
     },
   });
@@ -74,7 +90,11 @@ export function NativeAccessSettingsPanel() {
 
   const submit = async () => {
     try {
-      save.mutate(await form.validateFields());
+      if (!clusters.data || !settings.data) return;
+      const target=clusterId;
+      const input=await form.validateFields();
+      if(!writeContext.current.available||writeContext.current.clusterId!==target)return;
+      save.mutate(input);
     } catch {
       // Field errors remain next to their input.
     }
@@ -100,8 +120,10 @@ export function NativeAccessSettingsPanel() {
         style={{ width: 320 }}
         value={clusterId}
         loading={clusters.isFetching}
+        disabled={!clusters.data}
         onChange={(value) => {
           setClusterId(value);
+          draftDirty.current=false;
           save.reset();
           reconcile.reset();
           form.setFieldsValue(initialValues);
@@ -111,10 +133,10 @@ export function NativeAccessSettingsPanel() {
       <Button icon={<ReloadOutlined />} onClick={() => void clusters.refetch()} loading={clusters.isFetching}>刷新集群</Button>
       {clusterId && <Button icon={<ReloadOutlined />} onClick={() => void settings.refetch()} loading={settings.isFetching}>重新读取</Button>}
     </Space>
-    {clusters.isError && <Alert type="error" showIcon message="集群列表加载失败" action={<Button onClick={() => void clusters.refetch()}>重试</Button>} />}
-    {settings.isError && <Alert type="error" showIcon message="访问配置读取失败" description="请确认当前账号仍是平台管理员，并重试。" action={<Button onClick={() => void settings.refetch()}>重试</Button>} />}
-    {clusterId && !settings.isError && <Spin spinning={settings.isLoading}>
-      <Form form={form} layout="vertical" initialValues={initialValues} disabled={save.isPending || reconcile.isPending}>
+    <ResourceQueryFeedback query={clusters} label="集群列表" />
+    <ResourceQueryFeedback query={settings} label="访问配置" />
+    {clusterId && clusters.data && current && <Spin spinning={settings.isLoading}>
+      <Form form={form} layout="vertical" initialValues={initialValues} onValuesChange={()=>{draftDirty.current=true;}} disabled={save.isPending || reconcile.isPending}>
         <Form.Item name="enabled" label="启用个人 kubectl 访问" valuePropName="checked">
           <Switch checkedChildren="已启用" unCheckedChildren="未启用" />
         </Form.Item>

@@ -8,7 +8,7 @@ import {
   type KubejojoRelation,
 } from "./index";
 
-test("both endpoint types join the Service component and render to its right", async () => {
+test("both endpoint types join the Service Node-Link component", async () => {
   const resources: KubejojoResource[] = [
     { id: "svc", name: "api", kind: "Service", namespace: "apps" },
     { id: "ep", name: "api", kind: "Endpoints", namespace: "apps" },
@@ -37,8 +37,21 @@ test("both endpoint types join the Service component and render to its right", a
   ]);
   const layout = await layoutKubejojoGraph(scene, 1.6);
   const nodes = new Map(layout.nodes.map((node) => [node.id, node]));
-  assert.ok(nodes.get("svc")!.position.x < nodes.get("ep")!.position.x);
-  assert.equal(nodes.get("ep")!.position.x, nodes.get("slice")!.position.x);
+  for (const node of nodes.values()) {
+    assert.ok(Number.isFinite(node.position.x) && Number.isFinite(node.position.y));
+  }
+  const cards = [...nodes.values()];
+  for (let left = 0; left < cards.length; left += 1) {
+    for (let right = left + 1; right < cards.length; right += 1) {
+      const a = cards[left];
+      const b = cards[right];
+      const overlaps = a.position.x < b.position.x + Number(b.style?.width)
+        && a.position.x + Number(a.style?.width) > b.position.x
+        && a.position.y < b.position.y + Number(b.style?.height)
+        && a.position.y + Number(a.style?.height) > b.position.y;
+      assert.equal(overlaps, false, `${a.id} and ${b.id} do not overlap`);
+    }
+  }
   assert.deepEqual(
     layout.edges.map((edge) => [edge.source, edge.target]).sort(),
     [

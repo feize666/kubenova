@@ -26,14 +26,25 @@ export type ElkGraph = {
   x?: number;
   y?: number;
   layoutOptions?: Record<string, string>;
+  ports?: ElkGraphPort[];
   children?: ElkGraph[];
   edges?: ElkGraphEdge[];
+};
+
+export type ElkGraphPort = {
+  id: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  layoutOptions?: Record<string, string>;
 };
 
 export type ElkGraphEdge = {
   id: string;
   sources: string[];
   targets: string[];
+  layoutOptions?: Record<string, string>;
   labels?: Array<{ text: string }>;
   sections?: TopologyElkSection[];
 };
@@ -49,16 +60,6 @@ export type KubejojoLayout = {
 
 const NODE_WIDTH = KUBEJOJO_LAYOUT_METRICS.nodeWidth;
 const NODE_HEIGHT = KUBEJOJO_LAYOUT_METRICS.nodeHeight;
-
-/**
- * Headlamp derives the layout partition from the node weight and negates it,
- * because ELK places lower partition numbers further left. Matching that sign
- * is what makes a Deployment sit before its ReplicaSet, Pods, Services and
- * Ingresses without any hand-maintained rank table.
- */
-export function getPartitionLayer(node: KubejojoGraphNode): number {
-  return -getKubejojoWeight(node);
-}
 
 function isContainer(node: KubejojoGraphNode): boolean {
   return Boolean(node.nodes?.length) && !node.collapsed;
@@ -91,6 +92,7 @@ export type ContainerRelation = {
   relation: KubejojoRelation;
   source: string;
   target: string;
+  members: KubejojoRelation[];
 };
 
 /**
@@ -102,13 +104,31 @@ export type ContainerRelation = {
  */
 export function containerRelations(node: KubejojoGraphNode): ContainerRelation[] {
   const contained = containedIds(node);
-  return (node.edges ?? [])
+  const projected = (node.edges ?? [])
     .filter((edge) => contained.has(edge.source) && contained.has(edge.target))
-    .flatMap<ContainerRelation>((relation) => {
+    .flatMap((relation) => {
       const source = directChildId(node, relation.source);
       const target = directChildId(node, relation.target);
       if (!source || !target || source === target) return [];
-      return [{ relation, source, target }];
+      const semantics = relation.type ?? relation.role ?? relation.label ?? "unknown";
+      return [{ relation, source, target, key: `${source}\u0000${target}\u0000${semantics}` }];
+    });
+  const groups = new Map<string, typeof projected>();
+  projected.forEach((item) => groups.set(item.key, [...(groups.get(item.key) ?? []), item]));
+  return [...groups.entries()]
+    .map(([key, members]) => {
+      const relations = members.map((member) => member.relation);
+      const first = relations[0];
+      const isAggregate = relations.length > 1;
+      const relation = isAggregate
+        ? { ...first, id: `stacked:${encodeURIComponent(key)}` }
+        : first;
+      return {
+        relation,
+        source: members[0].source,
+        target: members[0].target,
+        members: relations,
+      };
     })
     .sort((left, right) => left.relation.id.localeCompare(right.relation.id, "en"));
 }
@@ -118,17 +138,57 @@ export function containerRelations(node: KubejojoGraphNode): ContainerRelation[]
  * out, and that sort is also what makes the canvas order-independent.
  */
 function orderedChildren(node: KubejojoGraphNode): KubejojoGraphNode[] {
-  return [...(node.nodes ?? [])].sort(compareKubejojoNodes);
+  const children = node.nodes ?? [];
+  const byId = new Map(children.map((child) => [child.id, child]));
+  const neighborhoods = new Map<string, string[]>();
+  const describe = (id: string) => {
+    const child = byId.get(id);
+    const resource = child?.resource;
+    return [resource?.kind ?? "", resource?.namespace ?? "", resource?.name ?? "", id].join("\u0000");
+  };
+
+  containerRelations(node).forEach(({ relation, source, target }) => {
+    const type = relation.type ?? relation.role ?? relation.label ?? "unknown";
+    const sourceKey = neighborhoods.get(source) ?? [];
+    sourceKey.push(`out:${type}:${describe(target)}`);
+    neighborhoods.set(source, sourceKey);
+    const targetKey = neighborhoods.get(target) ?? [];
+    targetKey.push(`in:${type}:${describe(source)}`);
+    neighborhoods.set(target, targetKey);
+  });
+
+  const signature = (id: string) => (neighborhoods.get(id) ?? []).sort().join("\u0001");
+  return [...children].sort((left, right) =>
+    getKubejojoWeight(right) - getKubejojoWeight(left)
+    || (left.resource?.kind ?? "").localeCompare(right.resource?.kind ?? "", "en")
+    || signature(left.id).localeCompare(signature(right.id), "en")
+    || compareKubejojoNodes(left, right),
+  );
 }
 
-/**
- * Layered layout for containers with internal relationships, plain rect
- * packing for relationship-free groups. This mirrors Headlamp's per-group
- * option choice, so an all-standalone group still packs tidily.
- */
-export function containerLayoutOptions(hasEdges: boolean): Record<string, string> {
+function directionLayoutOptions(direction: "RIGHT" | "DOWN") {
+  // Keep the default graph explicitly horizontal; stack containers opt into
+  // the vertical variant below without changing the main Node-Link flow.
+  if (direction === "RIGHT") return { "elk.direction": "RIGHT" };
+  return { "elk.direction": "DOWN" };
+}
+
+/** Headlamp's layered spline layout, explicitly horizontal for this console. */
+export function containerLayoutOptions(hasEdges: boolean, direction: "RIGHT" | "DOWN" = "RIGHT"): Record<string, string> {
   if (!hasEdges) {
+    if (direction === "DOWN") {
+      return {
+        "elk.algorithm": "layered",
+        "elk.direction": "DOWN",
+        "elk.edgeRouting": "SPLINES",
+        "elk.spacing.nodeNode": String(KUBEJOJO_LAYOUT_METRICS.packedNodeSpacing),
+        "elk.padding": `[left=${KUBEJOJO_LAYOUT_METRICS.packedPaddingSide}, top=12, right=${KUBEJOJO_LAYOUT_METRICS.packedPaddingSide}, bottom=12]`,
+      };
+    }
     return {
+      // A stack is expanded as a vertical rail. Rectpacking is useful for
+      // disconnected top-level groups, but it places stack members side by
+      // side and makes the relationship scan jump between rows.
       "elk.algorithm": "rectpacking",
       "elk.rectpacking.widthApproximation.optimizationGoal": "ASPECT_RATIO_DRIVEN",
       "elk.rectpacking.packing.compaction.rowHeightReevaluation": "true",
@@ -138,15 +198,15 @@ export function containerLayoutOptions(hasEdges: boolean): Record<string, string
     };
   }
   return {
-    "partitioning.activate": "true",
-    // Keep the operator-facing access path horizontal. Partitions still decide
-    // the columns; RIGHT makes that contract deterministic across ELK versions.
-    "elk.direction": "RIGHT",
-    "elk.edgeRouting": "SPLINES",
     "elk.algorithm": "layered",
+    "elk.partitioning.activate": "true",
+    ...directionLayoutOptions(direction),
+    "elk.randomSeed": "1",
+    "elk.separateConnectedComponents": "true",
+    "elk.edgeRouting": "SPLINES",
     "elk.nodeSize.minimum": "(220.0,70.0)",
     "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
-    "elk.spacing.nodeNode": "60",
+    "elk.spacing.nodeNode": String(KUBEJOJO_LAYOUT_METRICS.nodeSpacing),
     "elk.layered.spacing.nodeNodeBetweenLayers": "60",
     "elk.padding": "[left=16, top=16, right=16, bottom=16]",
   };
@@ -163,14 +223,12 @@ export function toElkGraph(node: KubejojoGraphNode): ElkGraph {
       id: node.id,
       width: NODE_WIDTH,
       height: NODE_HEIGHT,
-      layoutOptions: { "partitioning.partition": String(getPartitionLayer(node)) },
+      layoutOptions: { "elk.partitioning.partition": String(-getKubejojoWeight(node)) },
     };
   }
 
-  // ELK routes an edge from its source column to its target column, so an edge
-  // handed over in API direction (a Service selecting a Pod) is a backward edge
-  // that ELK has to loop around the whole column. Feeding the endpoints in the
-  // order the canvas draws them keeps every rail a simple left-to-right run.
+  // Route higher-priority resource kinds toward lower-priority kinds, retaining
+  // the original business relation separately from its visual orientation.
   const childWeightById = new Map<string, number>();
   (node.nodes ?? []).forEach((child) => childWeightById.set(child.id, getKubejojoWeight(child)));
   const oriented = (source: string, target: string): [string, string] => {
@@ -180,7 +238,9 @@ export function toElkGraph(node: KubejojoGraphNode): ElkGraph {
     return sourceWeight >= targetWeight ? [source, target] : [target, source];
   };
 
-  const edges: ElkGraphEdge[] = containerRelations(node)
+  const relations = containerRelations(node);
+  const children = orderedChildren(node).map(toElkGraph);
+  const edges: ElkGraphEdge[] = relations
     .map(({ relation, source, target }) => {
       const [from, to] = oriented(source, target);
       return {
@@ -195,89 +255,11 @@ export function toElkGraph(node: KubejojoGraphNode): ElkGraph {
     id: node.id,
     width: NODE_WIDTH,
     height: NODE_HEIGHT,
-    layoutOptions: containerLayoutOptions(edges.length > 0),
+    layoutOptions: { ...containerLayoutOptions(edges.length > 0, node.groupKind === "stack" ? "DOWN" : "RIGHT"),
+      "elk.partitioning.partition": String(-getKubejojoWeight(node)) },
     ...(edges.length ? { edges } : {}),
-    children: orderedChildren(node).map(toElkGraph),
+    children,
   };
-}
-
-/** Center each resource rank on the same rail after ELK has separated fan-out. */
-function alignFlatAccessPath(root: KubejojoGraphNode, layout: ElkGraph): void {
-  if ((root.nodes ?? []).some(isContainer) || !layout.edges?.length || !layout.children?.length) return;
-  const columns = new Map<number, ElkGraph[]>();
-  layout.children.forEach((child) => {
-    const column = columns.get(child.x ?? 0) ?? [];
-    column.push(child);
-    columns.set(child.x ?? 0, column);
-  });
-  if (columns.size < 2) return;
-
-  const center = (column: ElkGraph[]) => {
-    const top = Math.min(...column.map((child) => child.y ?? 0));
-    const bottom = Math.max(...column.map((child) => (child.y ?? 0) + (child.height ?? NODE_HEIGHT)));
-    return (top + bottom) / 2;
-  };
-  const rail = Math.max(...[...columns.values()].map(center));
-  const shifts = new Map<string, number>();
-  columns.forEach((column) => {
-    const shift = rail - center(column);
-    column.forEach((child) => {
-      child.y = (child.y ?? 0) + shift;
-      shifts.set(child.id, shift);
-    });
-  });
-
-  layout.edges?.forEach((edge) => {
-    const sourceShift = shifts.get(edge.sources[0]) ?? 0;
-    const targetShift = shifts.get(edge.targets[0]) ?? 0;
-    edge.sections?.forEach((section) => {
-      const startX = section.startPoint.x;
-      const distance = section.endPoint.x - startX;
-      const shiftAt = (x: number) => distance === 0
-        ? (sourceShift + targetShift) / 2
-        : sourceShift + (targetShift - sourceShift) * Math.max(0, Math.min(1, (x - startX) / distance));
-      section.startPoint.y += sourceShift;
-      section.endPoint.y += targetShift;
-      section.bendPoints?.forEach((point) => { point.y += shiftAt(point.x); });
-    });
-
-    const source = layout.children?.find((child) => child.id === edge.sources[0]);
-    const target = layout.children?.find((child) => child.id === edge.targets[0]);
-    if (!source || !target || (source.x ?? 0) >= (target.x ?? 0)) return;
-    const startX = (source.x ?? 0) + (source.width ?? NODE_WIDTH);
-    const endX = target.x ?? 0;
-    const intervening = layout.children!.filter((child) =>
-      child.id !== source.id && child.id !== target.id
-      && (child.x ?? 0) > (source.x ?? 0)
-      && (child.x ?? 0) < endX,
-    );
-    if (!intervening.length) return;
-    const startY = (source.y ?? 0) + (source.height ?? NODE_HEIGHT) / 2;
-    const endY = (target.y ?? 0) + (target.height ?? NODE_HEIGHT) / 2;
-    const collision = intervening.filter((child) => {
-      const left = child.x ?? 0;
-      const right = left + (child.width ?? NODE_WIDTH);
-      const projected = (x: number) => startY + (endY - startY) * (x - startX) / (endX - startX);
-      const low = Math.min(projected(left), projected(right));
-      const high = Math.max(projected(left), projected(right));
-      const top = child.y ?? 0;
-      return high >= top - 8 && low <= top + (child.height ?? NODE_HEIGHT) + 8;
-    });
-    if (!collision.length) return;
-    const top = Math.min(...collision.map((child) => child.y ?? 0));
-    const bottom = Math.max(...collision.map((child) => (child.y ?? 0) + (child.height ?? NODE_HEIGHT)));
-    const upper = top - 24;
-    const lower = bottom + 24;
-    const detourY = Math.abs((startY + endY) / 2 - upper) <= Math.abs((startY + endY) / 2 - lower) ? upper : lower;
-    const enterX = (startX + Math.min(...collision.map((child) => child.x ?? 0))) / 2;
-    const exitX = (endX + Math.max(...collision.map((child) => (child.x ?? 0) + (child.width ?? NODE_WIDTH)))) / 2;
-    edge.sections = [
-      { startPoint: { x: startX, y: startY }, endPoint: { x: enterX, y: detourY } },
-      { startPoint: { x: enterX, y: detourY }, endPoint: { x: exitX, y: detourY } },
-      { startPoint: { x: exitX, y: detourY }, endPoint: { x: endX, y: endY } },
-    ];
-  });
-  layout.height = Math.max(layout.height ?? 0, ...layout.children.map((child) => (child.y ?? 0) + (child.height ?? NODE_HEIGHT) + 16));
 }
 
 function offsetPoint(point: TopologyElkPoint, offset: TopologyElkPoint): TopologyElkPoint {
@@ -293,10 +275,9 @@ function offsetSection(section: TopologyElkSection, offset: TopologyElkPoint): T
 }
 
 /**
- * API relationships keep their Kubernetes direction (a Service selects a Pod),
- * but the canvas reads left to right. An edge is therefore drawn from the
- * earlier column to the later one so every arrow follows the access path
- * instead of pointing backwards into a Pod.
+ * Resource relationships are visually undirected, but stable endpoint ordering
+ * keeps edge geometry independent of API response order and preserves the
+ * familiar workload-to-network reading direction in the layered layout.
  */
 export function visibleEdgeEndpoints(
   endpoints: { source: string; target: string },
@@ -333,7 +314,8 @@ function relationEdge(
       // Sections are already in canvas coordinates; the renderer must not add
       // a second parent offset on top of them.
       parentOffset: { x: 0, y: 0 },
-      relationIds: [relation.id],
+      relationIds: drawn.members.map((member) => member.id),
+      ...(drawn.members.length > 1 ? { count: drawn.members.length } : {}),
       role: relation.role,
       relationType: semantics.type,
       relationDomain: semantics.domain,
@@ -421,7 +403,6 @@ function emit(
 
 /** Converts an ELK layout result into renderer-ready nodes and edges. */
 export function toKubejojoLayout(root: KubejojoGraphNode, laidOut: ElkGraph): KubejojoLayout {
-  alignFlatAccessPath(root, laidOut);
   const nodes: Node<TopologyRendererNodeData>[] = [];
   const edges: Edge<TopologyRendererEdgeData>[] = [];
   const weightById = new Map<string, number>();

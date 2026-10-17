@@ -85,9 +85,12 @@ function EdgeRenderer({
   const status = edgeData?.status ?? "unknown";
   const style = edgeStyle(viewState, edgeData?.confidence, layer);
   const labelPosition = edgeData?.labelPosition ?? relationshipPathMidpoint(sections, offset);
+  const label = edgeData?.count
+    ? `${edgeData.label ?? "关联"} ×${edgeData.count}`
+    : edgeData?.label;
   // Labels are a detail affordance, not a second graph layer: keep the canvas
   // quiet until the rail is focused or hovered.
-  const showLabel = Boolean(edgeData?.label && (hovered || edgeData.viewState === "focused"));
+  const showLabel = Boolean(label && (hovered || edgeData?.viewState === "focused"));
   return (
     <>
       <BaseEdge
@@ -98,6 +101,13 @@ function EdgeRenderer({
         // by the relation label and status, not an arrowhead.
         className={`topology-kubejojo__edge-path is-${layer} is-${viewState} is-status-${status} is-domain-${edgeData?.relationDomain ?? "scope"}`}
         style={style}
+      />
+      <path
+        d={path}
+        className={`topology-kubejojo__edge-flow${edgeData?.flowActive ? " is-active" : ""}`}
+        fill="none"
+        strokeWidth={style.strokeWidth}
+        aria-hidden="true"
       />
       <path
         d={path}
@@ -116,7 +126,7 @@ function EdgeRenderer({
               transform: `translate(-50%, -50%) translate(${labelPosition.x}px, ${labelPosition.y}px)`,
             }}
           >
-            {edgeData?.label}
+            {label}
           </span>
         </EdgeLabelRenderer>
       ) : null}

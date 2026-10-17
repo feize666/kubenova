@@ -170,6 +170,7 @@ export interface ClusterDetailResponse {
     cniPlugin: string | null;
     criRuntime: string | null;
     kubernetesVersion: string | null;
+    probe?: Record<string, unknown>;
   };
   metadata: {
     environment: string;
@@ -316,6 +317,7 @@ export class ClustersService implements OnModuleInit {
         degradationReason: nodeInventory.degradationReason,
       },
       platform: {
+        probe: detailJson?.platformProbe as Record<string, unknown> | undefined,
         cniPlugin: this.pickClusterPlatformValue(detailJson, 'cniPlugin'),
         criRuntime: this.pickClusterPlatformValue(detailJson, 'criRuntime'),
         kubernetesVersion:

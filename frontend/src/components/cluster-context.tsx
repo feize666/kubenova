@@ -41,6 +41,7 @@ export function ClusterContextProvider({
     enabled: Boolean(accessToken),
     staleTime: QUERY_CACHE_TIMINGS.listStaleTimeMs,
     gcTime: QUERY_CACHE_TIMINGS.listGcTimeMs,
+    refetchInterval: 10 * 60_000,
     retry: 1,
   });
 

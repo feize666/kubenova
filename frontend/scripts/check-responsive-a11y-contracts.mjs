@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const read = (path) => readFileSync(join(root, path), "utf8");
@@ -200,13 +201,6 @@ requireTokens("src/components/ops/ops-confirm-modal.tsx", [
   "aria-label={`输入 ${requiredText} 以确认操作`}",
 ]);
 
-requireTokens("src/components/resource-yaml-drawer.tsx", [
-  'body: { padding: 24, overflow: "auto" }',
-  "<Space wrap>",
-  'aria-label="YAML 内容"',
-  'whiteSpace: "pre"',
-]);
-
 requireTokens("src/components/resource-table/index.tsx", [
   "getStandardResourceTableScrollX",
   "x: getStandardResourceTableScrollX",
@@ -219,7 +213,7 @@ requireTokens("src/components/resource-table/index.tsx", [
 ]);
 
 requireTokens("src/components/resource-table-toolbar.tsx", [
-  'aria-label="搜索"',
+  'aria-label="搜索资源"',
   'aria-label="过滤"',
   'aria-label="清空搜索和过滤"',
   'aria-label="列设置"',
@@ -253,39 +247,14 @@ requireTokens("src/app/globals.css", [
   "@media (max-width: 720px)",
 ]);
 
-requireTokens("src/app/logs/page.tsx", [
-  'aria-label="查找日志"',
-  'aria-label="清除日志"',
-  'aria-label="下载日志"',
-  'aria-label="重新接入日志"',
-  'aria-label="显示上一个实例日志"',
-  'aria-label="显示时间戳"',
-  'aria-label="实时跟随日志"',
-  "aria-pressed={searchCaseSensitive}",
-  "aria-pressed={searchRegex}",
-  "ResizeObserver",
-  ".headlamp-search-flag:focus-visible",
-  "reconnectNow",
-  "@media (max-width: 900px)",
-  ".logs-terminal-host",
-]);
-
-requireTokens("src/app/terminal/page.tsx", [
-  "TerminalConnectionStatus",
-  "VISUAL_STATUS_LABEL",
-  "VISUAL_STATUS_TONE",
-  "VISUAL_FRAME_STATE",
-  "@media (max-width: 900px)",
-  ".terminal-workbench-container-select",
-]);
-
 requireTokens("src/app/ai-assistant/page.tsx", [
   "aria-label",
   "onKeyDown={handleInputEnter}",
   'role="button"',
   "tabIndex={0}",
   "aria-current",
-  "HIGH_RISK_ACTIONS",
+  "confirmHighRiskAction",
+  "requiresApproval",
   "Modal.confirm",
   "OpsCommandPreview",
   "getMarkdownCodePreviewKind",
@@ -324,6 +293,15 @@ if (failures.length > 0) {
   }
   process.exit(1);
 }
+
+// These surfaces now delegate to real editors and workbenches. Validate their
+// rendered keyboard/viewport behavior instead of obsolete route source tokens.
+execFileSync(process.execPath, ["--test",
+  "src/components/resource-yaml-drawer.test.mjs",
+  "src/components/resource-table/table-keyboard-browser.test.mjs",
+  "src/components/runtime-workbench/logs-workbench.test.mjs",
+  "src/components/runtime-workbench/terminal-workbench.test.mjs",
+], { cwd: root, stdio: "inherit", env: process.env });
 
 console.log(
   "[check-responsive-a11y-contracts] PASS: responsive, focus, labels, reduced-motion, drawer, modal, logs, terminal, and AI contracts verified.",

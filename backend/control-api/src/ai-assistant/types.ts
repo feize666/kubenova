@@ -32,7 +32,8 @@ export type AiAssistantActionOperation =
   | 'query-configmaps-overview'
   | 'query-pvc-overview'
   | 'query-storageclass-overview'
-  | 'vm-power-restart';
+  | 'vm-power-restart'
+  | 'apply-resource-manifest';
 
 export interface AiAssistantActionTarget {
   clusterId?: string;
@@ -44,6 +45,8 @@ export interface AiAssistantActionTarget {
   provider?: string;
   vmId?: string;
   reason?: string;
+  /** Complete YAML manifest for an explicitly confirmed resource apply. */
+  manifest?: string;
 }
 
 export interface AiAssistantActionOptions {

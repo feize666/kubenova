@@ -1,4 +1,8 @@
 "use client";
+import { useResourceDetailState } from '@/hooks/use-resource-detail-state';
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
 
 import { DeleteOutlined, EyeOutlined, FileTextOutlined, MinusCircleOutlined, UploadOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -322,11 +326,13 @@ function buildHpaBehavior(value: HpaBehaviorFormItem | undefined): HpaPolicyConf
 }
 
 export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
+  const openEditor = useResourceEditorNavigation();
   const { message } = App.useApp();
   const searchParams = useSearchParams();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.toLowerCase());
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const queryEnabled = !isInitializing && Boolean(accessToken);
@@ -338,13 +344,12 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
   const [typeFilter, setTypeFilter] = useState<AutoscalingType | "">(defaultType ?? "");
   const { sortBy, sortOrder, pagination, resetPage, getSortableColumnProps, getPaginationConfig, handleTableChange } =
     useAntdTableSortPagination<AutoscalingPolicyItem>({
-      defaultPageSize: 10,
       allowedSortBy: ["workloadName", "namespace", "clusterId", "updatedAt"],
     });
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<AutoscalingPolicyItem | null>(null);
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
-  const [detailRequest, setDetailRequest] = useState<{ kind: string; id: string } | null>(null);
+  const [detailRequest, setDetailRequest, detailUrlSession] = useResourceDetailState();
   const [yamlTarget, setYamlTarget] = useState<AutoscalingPolicyItem | null>(null);
   const [createMode, setCreateMode] = useState<"form" | "yaml">("form");
   const [createYaml, setCreateYaml] = useState("");
@@ -381,13 +386,13 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
     defaultType ??
     "HPA";
 
-  const clustersQuery = useQuery({
+  const clustersQuery = useResourceListQuery({
     queryKey: ["clusters", "autoscaling", accessToken],
     queryFn: () => getClusters({ state: "active", selectableOnly: true }, accessToken),
     enabled: queryEnabled,
   });
 
-  const policiesQuery = useQuery({
+  const policiesQuery = useResourceListQuery({
     queryKey: policiesQueryKey,
     queryFn: () =>
       listAutoscalingPolicies({
@@ -813,10 +818,10 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
       render: (_, row) => {
         const actions: ResourceMenuItem[] = [
           { key: "detail", icon: <EyeOutlined />, label: "详情" },
-          { key: "edit", label: "编辑" },
+          { key: "edit", label: "编辑", disabled: !canWrite },
           { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
           { type: "divider" },
-          { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true },
+          { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true, disabled: !canWrite },
         ];
         const items = buildResourceActionMenuItems(actions);
         return (
@@ -831,7 +836,8 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                   return;
                 }
                 if (key === "edit") {
-                  openEditPolicyModal(row);
+                  if (!canWrite) return;
+                  openEditor({clusterId:row.clusterId,kind:row.type==='HPA'?'HorizontalPodAutoscaler':'VerticalPodAutoscaler',name:getAutoscalingResourceName(row),namespace:row.namespace});
                   return;
                 }
                 if (key === "yaml") {
@@ -839,6 +845,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
                   return;
                 }
                 if (key === "delete") {
+                  if (!canWrite) return;
                   openOpsConfirm({
                     title: `删除 ${row.type} 策略`,
                     description: `确认删除 ${getAutoscalingResourceName(row)} 的 ${row.type} 策略？`,
@@ -954,7 +961,6 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
               </OpsFilterChip>
             </span>
           }
-          extra={<ResourceAddButton onClick={openCreatePolicyModal} aria-label="创建伸缩策略" />}
           description={pageDescription}
           style={{ marginBottom: 12 }}
         />
@@ -991,7 +997,10 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           </Row>
 
           <div className="resource-workbench__table-zone">
+            <ResourceQueryFeedback label="伸缩策略" query={policiesQuery} />
             <ResourceTable<AutoscalingPolicyItem>
+              queryState={policiesQuery}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" disabled={!canWrite} editorKind={defaultType === 'VPA' ? 'VerticalPodAutoscaler' : 'HorizontalPodAutoscaler'} aria-label="创建伸缩策略" /><ResourceAddButton compact={false} label="YAML 创建" disabled={!canWrite} editorMode="yaml" editorKind={defaultType === 'VPA' ? 'VerticalPodAutoscaler' : 'HorizontalPodAutoscaler'} aria-label="使用 YAML 创建伸缩策略" /></>}
               tableKey="workloads.autoscaling.policies"
               preferencesClient={createTablePreferencesClient(accessToken || undefined)}
               globalSearch={{
@@ -1598,7 +1607,7 @@ export function AutoscalingConsole({ defaultType }: AutoscalingConsoleProps) {
           await queryClient.invalidateQueries({ queryKey: ["autoscaling"] });
         }}
       />
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailRequest)}
         onClose={() => setDetailRequest(null)}
         token={accessToken ?? undefined}

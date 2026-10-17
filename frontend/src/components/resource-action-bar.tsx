@@ -149,7 +149,8 @@ export function getResourceActionIcon(actionKey: string): ReactNode | null {
 }
 
 export function buildResourceActionMenuItems(actions: ResourceMenuItem[]): NonNullable<MenuProps["items"]> {
-  return actions.map((action) => {
+  const visible = actions.filter(action => action.key !== 'describe' && action.key !== 'detail' && action.key !== 'view-details');
+  return visible.filter((action,index) => action.type !== 'divider' || (index > 0 && index < visible.length-1 && visible[index-1].type !== 'divider')).map((action) => {
     if ("type" in action && action.type === "divider") {
       return { type: "divider" };
     }
@@ -157,9 +158,7 @@ export function buildResourceActionMenuItems(actions: ResourceMenuItem[]): NonNu
     return {
       key: action.key,
       icon: action.icon ?? getResourceActionIcon(action.key) ?? undefined,
-      // Match the platform-console vocabulary used by VKE while preserving
-      // the existing `describe` action key and callback contract.
-      label: action.key === "describe" ? "查看详情" : action.label,
+      label: action.label,
       danger: action.danger,
       disabled: action.disabled,
     };

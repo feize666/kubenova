@@ -19,6 +19,19 @@
   color: var(--login-v2-text);
 }
 
+.login-v2__theme-toggle {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 2;
+  color: var(--login-v2-muted);
+}
+
+.login-v2__theme-toggle:hover {
+  color: var(--login-v2-primary) !important;
+  background: var(--login-v2-primary-soft) !important;
+}
+
 [data-theme="dark"] .login-v2 {
   --login-v2-bg: #0b111b;
   --login-v2-surface: #111b29;

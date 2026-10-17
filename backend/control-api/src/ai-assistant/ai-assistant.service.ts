@@ -30,6 +30,7 @@ import {
   PresetQuestion,
 } from './types';
 import { AiProviderService } from './ai-provider.service';
+import { AiContextAggregatorService } from './ai-context-aggregator.service';
 
 @Injectable()
 export class AiAssistantService {
@@ -39,6 +40,7 @@ export class AiAssistantService {
     private readonly prisma: PrismaService,
     private readonly helmService: HelmService,
     @Optional() private readonly aiProviderService?: AiProviderService,
+    @Optional() private readonly contextAggregator?: AiContextAggregatorService,
   ) {}
 
   private static readonly CLUSTER_CONTEXT_KEYS = [
@@ -211,27 +213,10 @@ export class AiAssistantService {
     sessionId: string,
   ): Promise<AiConversationMessage> {
     const turn = await this.prepareAssistantTurn(ownerUserId, sessionId);
-    let { content, structured, actionDescriptors } = turn.ai;
-
-    try {
-      content = await this.callLLM(turn.messageHistory, {
-        systemAppend: turn.systemAppend,
-      });
-    } catch (error) {
-      const fallback = this.buildProviderFailureFallback({
-        error,
-        systemAppend: turn.systemAppend,
-        latestUserPrompt: turn.latestUserPrompt,
-      });
-      content = fallback.content;
-      if (!structured || actionDescriptors.length === 0) {
-        structured = fallback.structured;
-        actionDescriptors = fallback.actionDescriptors;
-      }
-      if (structured) {
-        content = `${content}\n\n${this.buildAssistantText(structured)}`;
-      }
-    }
+    const { structured, actionDescriptors } = turn.ai;
+    const content = await this.callLLM(turn.messageHistory, {
+      systemAppend: turn.systemAppend,
+    });
 
     return this.persistAssistantMessage(
       sessionId,
@@ -276,11 +261,26 @@ export class AiAssistantService {
       sessionRecord,
       latestUserPrompt,
     );
-    const systemAppend = await this.buildClusterAwareSystemAppend(
+    let systemAppend = await this.buildClusterAwareSystemAppend(
       clusterContext,
       latestUserPrompt,
     );
-    const structured: AssistantStructuredResponse | undefined = latestUserPrompt
+    if (sessionRecord.surface === 'mini') {
+      systemAppend = `${systemAppend ?? ''}\n仅提供只读分析与建议，不执行任何资源变更，不臆测缺失数据。健康分析不超过800字。`;
+      if (clusterContext?.clusterId && this.contextAggregator) {
+        const snapshot = await this.contextAggregator.collect(clusterContext.clusterId);
+        const compactSnapshot = {
+          cluster: snapshot.cluster,
+          health: snapshot.health,
+          resources: snapshot.resources,
+          alerts: snapshot.alerts,
+          events: snapshot.events,
+          topology: snapshot.topology,
+        };
+        systemAppend += `\n服务端观测上下文：${JSON.stringify(compactSnapshot).slice(0, 8000)}`;
+      }
+    }
+    const structured: AssistantStructuredResponse | undefined = latestUserPrompt && sessionRecord.surface !== 'mini'
       ? this.buildStructuredResponse(latestUserPrompt)
       : undefined;
     const actionDescriptors: AiActionDescriptor[] =
@@ -296,40 +296,6 @@ export class AiAssistantService {
       systemAppend,
       ai: { content: '', structured, actionDescriptors },
     };
-  }
-
-  /**
-   * Provider 调用失败时的兜底文案与结构化结果，供阻塞/流式两条链路复用。
-   */
-  private buildProviderFailureFallback(input: {
-    error: unknown;
-    systemAppend?: string;
-    latestUserPrompt?: string;
-  }): {
-    content: string;
-    structured: AssistantStructuredResponse | undefined;
-    actionDescriptors: AiActionDescriptor[];
-  } {
-    const reason =
-      input.error instanceof Error ? input.error.message : 'AI 模型调用失败';
-    let content = [
-      '⚠️ KubeNova 中台模型调用失败',
-      '',
-      reason,
-      '',
-      '请检查「AI 模型」页的 Base URL / API Key / Model 配置和网络连通性。',
-    ].join('\n');
-    if (input.systemAppend?.includes('## 集群实时查询结果')) {
-      content = `${content}\n\n${input.systemAppend}`;
-    }
-    const structured = input.latestUserPrompt
-      ? this.buildStructuredResponse(input.latestUserPrompt)
-      : undefined;
-    const actionDescriptors =
-      input.latestUserPrompt && structured
-        ? this.buildActionDescriptors(input.latestUserPrompt, structured)
-        : [];
-    return { content, structured, actionDescriptors };
   }
 
   /**
@@ -445,41 +411,12 @@ export class AiAssistantService {
     );
 
     const turn = await this.prepareAssistantTurn(ownerUserId, sessionId);
-    let { structured, actionDescriptors } = turn.ai;
-    let reply = '';
-    // Track whether the provider already streamed partial text. When it did, the
-    // fallback message must not be appended on top; the client replaces its
-    // optimistic bubble with the authoritative content delivered by chat.done.
-    let streamedChars = 0;
-
-    try {
-      reply = await this.callLLMStream(turn.messageHistory, {
-        systemAppend: turn.systemAppend,
-        signal: handlers.signal,
-        onDelta: (delta) => {
-          streamedChars += delta.length;
-          handlers.onDelta(delta);
-        },
-      });
-    } catch (error) {
-      if (handlers.signal?.aborted) {
-        throw error;
-      }
-      const fallback = this.buildProviderFailureFallback({
-        error,
-        systemAppend: turn.systemAppend,
-        latestUserPrompt: turn.latestUserPrompt,
-      });
-      reply = fallback.content;
-      structured = fallback.structured ?? structured;
-      actionDescriptors = fallback.actionDescriptors;
-      if (structured) {
-        reply = `${reply}\n\n${this.buildAssistantText(structured)}`;
-      }
-      if (streamedChars === 0) {
-        handlers.onDelta(reply);
-      }
-    }
+    const { structured, actionDescriptors } = turn.ai;
+    const reply = await this.callLLMStream(turn.messageHistory, {
+      systemAppend: turn.systemAppend,
+      signal: handlers.signal,
+      onDelta: handlers.onDelta,
+    });
 
     const assistant = await this.persistAssistantMessage(
       sessionId,
@@ -1561,7 +1498,7 @@ export class AiAssistantService {
     sessionRecord: AiConversationSessionRecord,
     latestUserPrompt: string | undefined,
   ): Promise<Record<string, string> | undefined> {
-    const ownerId = this.requireOwnerUserId(ownerUserId);
+    this.requireOwnerUserId(ownerUserId);
     const existing = this.parseClusterContext(sessionRecord.clusterContextJson);
 
     const merged: Record<string, string> = { ...(existing ?? {}) };
@@ -1571,48 +1508,6 @@ export class AiAssistantService {
       const ns = this.extractNamespaceFromPrompt(latestUserPrompt);
       if (ns) {
         merged.namespace = ns;
-      }
-    }
-
-    // 2) If clusterId missing, reuse last cluster context from user's latest session.
-    if (!merged.clusterId) {
-      const last = await this.prisma.aiConversationSession.findFirst({
-        where: {
-          ownerUserId: ownerId,
-          deletedAt: null,
-          NOT: [{ id: sessionRecord.id }],
-        },
-        orderBy: { updatedAt: 'desc' },
-        select: { clusterContextJson: true },
-      });
-      const lastCtx = this.parseClusterContext(last?.clusterContextJson);
-      if (lastCtx?.clusterId) {
-        merged.clusterId = lastCtx.clusterId;
-        if (!merged.namespace && lastCtx.namespace) {
-          merged.namespace = lastCtx.namespace;
-        }
-      }
-    }
-
-    // 3) If still missing, auto-select when platform has exactly one usable cluster.
-    if (!merged.clusterId) {
-      const clusters = await this.prisma.clusterRegistry.findMany({
-        where: { deletedAt: null, status: { not: 'deleted' } },
-        select: { id: true, metadata: true },
-      });
-      const usable = clusters.filter((c) => {
-        if (
-          !c.metadata ||
-          typeof c.metadata !== 'object' ||
-          Array.isArray(c.metadata)
-        ) {
-          return false;
-        }
-        const kubeconfig = (c.metadata as Record<string, unknown>).kubeconfig;
-        return typeof kubeconfig === 'string' && kubeconfig.trim().length > 0;
-      });
-      if (usable.length === 1) {
-        merged.clusterId = usable[0].id;
       }
     }
 

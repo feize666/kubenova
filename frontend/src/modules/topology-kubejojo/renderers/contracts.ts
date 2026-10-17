@@ -38,7 +38,9 @@ export interface TopologyRendererGraphNode {
   collapsed?: boolean;
   // Kept for persisted/legacy layouts. The current grouping implementation
   // no longer emits an isolated aggregate.
-  groupKind?: "scope" | "component" | "isolated";
+  groupKind?: "scope" | "component" | "isolated" | "stack";
+  expandedStackId?: string;
+  expandedStackLabel?: string;
   data?: Record<string, unknown>;
 }
 
@@ -47,6 +49,7 @@ export interface TopologyRendererNodeData extends Record<string, unknown> {
   viewState?: TopologyViewState;
   /** Opens the represented resource's management page. */
   onOpenResource?: (id: string) => void;
+  onToggleStack?: (id: string) => void;
 }
 
 export interface TopologyElkPoint {
@@ -65,6 +68,7 @@ export interface TopologyRendererEdgeData extends Record<string, unknown> {
   parentOffset?: TopologyElkPoint;
   viewState?: TopologyViewState;
   label?: string;
+  flowActive?: boolean;
   count?: number;
   relationIds?: string[];
   role?: "owner" | "network" | "storage" | "config" | "policy" | "gateway" | "scope";

@@ -111,7 +111,8 @@ export class ClustersRepository {
       where.name = { contains: keyword, mode: 'insensitive' };
     }
 
-    const needsMemoryFilter = !!(provider || environment || status);
+    const sortByRuntime = sortBy === 'runtimeStatus';
+    const needsMemoryFilter = !!(provider || environment || status || sortByRuntime);
 
     const orderBy = this.resolveOrderBy(sortBy, sortOrder);
     if (!needsMemoryFilter) {
@@ -136,7 +137,14 @@ export class ClustersRepository {
     const rows = await this.prisma.clusterRegistry.findMany({
       where,
       orderBy,
+      ...(sortByRuntime ? { include: { healthSnapshot: { select: { status: true } } } } : {}),
     });
+
+    // Runtime ordering must precede pagination; sorting a page in the browser
+    // cannot move an online cluster out of a later page.
+    const runtimeStates = new Map(rows.map(row => [row.id,
+      (row as ClusterRow & { healthSnapshot?: { status: string } | null }).healthSnapshot?.status,
+    ]));
 
     const normalizedKeyword = keyword?.trim().toLowerCase();
     const filtered = rows
@@ -154,6 +162,21 @@ export class ClustersRepository {
         return true;
       });
 
+    if (sortByRuntime) {
+      const rank = (record: ClusterRecord): number => {
+        if (record.state === 'disabled') return 3;
+        const state = runtimeStates.get(record.id);
+        if (state === 'running') return 0;
+        if (state === 'checking') return 1;
+        if (state === 'offline-mode') return 2;
+        if (state === 'disabled') return 3;
+        if (state === 'offline') return 4;
+        return record.kubeconfig ? 1 : 2;
+      };
+      filtered.sort((left, right) => rank(left) - rank(right)
+        || left.name.localeCompare(right.name, 'zh-CN', { sensitivity: 'base', numeric: true })
+        || left.id.localeCompare(right.id));
+    }
     const total = filtered.length;
     const start = (page - 1) * pageSize;
     const items = filtered.slice(start, start + pageSize);

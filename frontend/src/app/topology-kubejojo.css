@@ -158,6 +158,20 @@
 .topology-kubejojo__edge-path.is-focused.is-main { filter: drop-shadow(0 0 3px color-mix(in srgb, currentColor 42%, transparent)); animation: topology-edge-flow 1.4s linear infinite; }
 .topology-kubejojo__edge-path.is-focused.is-overlay { filter: drop-shadow(0 0 2px color-mix(in srgb, var(--tk-edge) 30%, transparent)); }
 @keyframes topology-edge-flow { to { stroke-dashoffset: -30; } }
+.topology-kubejojo__edge-flow {
+  display: none;
+  stroke: var(--tk-primary);
+  stroke-linecap: round;
+  stroke-dasharray: 10 34;
+  opacity: .42;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+.topology-kubejojo__edge-flow.is-active { display: block; animation: topology-edge-highlight 2.4s linear infinite; }
+@keyframes topology-edge-highlight { to { stroke-dashoffset: -44; } }
+@media (prefers-reduced-motion: reduce) {
+  .topology-kubejojo__edge-flow.is-active { display: none; animation: none !important; }
+}
 .topology-kubejojo__edge-path.is-overlay { stroke-linecap: round; }
 .topology-kubejojo__node-title-button {
   display: block;
@@ -344,7 +358,7 @@
 }
 
 .topology-kubejojo__zoom {
-  /* A vertical capsule in the bottom-right corner keeps the top edge free for
+  /* A vertical capsule in the bottom-left corner keeps the top edge free for
      the resource path and mirrors the console-style zoom rail operators expect. */
   bottom: 14px;
   top: auto;
@@ -352,6 +366,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 2px;
   overflow: hidden;
   padding: 3px;
 }
@@ -362,9 +377,69 @@
   justify-content: center;
   width: 100%;
   min-width: 30px;
+  min-height: 30px;
   padding: 0 8px;
 }
 .topology-kubejojo__zoom button + button { border-top-color: var(--tk-border); }
+.topology-kubejojo__collapse-all {
+  display: inline-flex;
+  min-height: 30px;
+  width: 100%;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-top-color: var(--tk-border) !important;
+  border-radius: 0;
+  background: var(--tk-surface);
+  color: var(--tk-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 3px 5px;
+}
+.topology-kubejojo__collapse-all {
+  margin-top: 2px;
+  border-radius: 0 0 6px 6px;
+}
+.topology-kubejojo__collapse-all:hover,
+.topology-kubejojo__stack-collapse:hover { border-color: var(--tk-primary); color: var(--tk-primary); }
+.topology-kubejojo__collapse-all.is-active { color: var(--tk-primary); }
+.topology-kubejojo__collapse-all:focus-visible,
+.topology-kubejojo__stack-collapse:focus-visible { outline: 2px solid var(--tk-focus); outline-offset: 2px; }
+.topology-kubejojo__stack-collapse {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  background: var(--tk-surface);
+  color: var(--tk-muted);
+  cursor: pointer;
+}
+.topology-kubejojo__resource-stack-collapse {
+  position: absolute;
+  z-index: 4;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--tk-border);
+  border-radius: 4px;
+  background: var(--tk-surface);
+  color: var(--tk-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.topology-kubejojo__resource-stack-collapse:hover,
+.topology-kubejojo__resource-stack-collapse:focus-visible { border-color: var(--tk-primary); color: var(--tk-primary); }
+.topology-kubejojo__resource-stack-collapse:focus-visible { outline: 2px solid var(--tk-focus); outline-offset: 1px; }
+.topology-kubejojo__node-card.has-expanded-stack-control .topology-kubejojo__node-copy { padding-right: 20px; }
 
 .topology-kubejojo__node {
   position: relative;
@@ -630,8 +705,7 @@
 }
 .topology-kubejojo__node:hover > .topology-kubejojo__node-glance,
 .topology-kubejojo__node:focus-visible > .topology-kubejojo__node-glance,
-.topology-kubejojo__group:focus-visible > .topology-kubejojo__node-glance,
-.topology-kubejojo__group-label:hover ~ .topology-kubejojo__node-glance {
+.topology-kubejojo__group:focus-visible > .topology-kubejojo__node-glance {
   visibility: visible;
   opacity: 1;
   transform: translateY(0);
@@ -933,6 +1007,8 @@
   .topology-kubejojo__zoom button,
   .topology-kubejojo__zoom button:last-child { width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
   .topology-kubejojo__zoom button > span:not(.anticon) { display: none; }
+  .topology-kubejojo__collapse-all { width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
+  .topology-kubejojo__collapse-all > span:not(.anticon) { display: none; }
   .topology-kubejojo__focus { min-height: 44px; }
   .topology-kubejojo__focus button { min-width: 44px; min-height: 44px; }
   .topology-kubejojo__node-glance { width: min(272px, calc(100vw - 32px)); }
@@ -950,8 +1026,7 @@
 }
 
 @media (hover: none) and (pointer: coarse) {
-  .topology-kubejojo__node:hover > .topology-kubejojo__node-glance,
-  .topology-kubejojo__group-label:hover ~ .topology-kubejojo__node-glance {
+  .topology-kubejojo__node:hover > .topology-kubejojo__node-glance {
     visibility: hidden;
     opacity: 0;
   }
@@ -1572,6 +1647,30 @@
   filter: drop-shadow(0 0 4px color-mix(in srgb, var(--tk-primary) 28%, transparent));
 }
 
+/* Keep the selected relationship leg visibly alive without animating the
+ * entire graph. The moving dash is the same path as the selected edge, so
+ * it stays aligned through ELK re-layouts and never crosses a node card. */
+.topology-kubejojo__edge-flow.is-active {
+  display: block;
+  stroke: color-mix(in srgb, var(--tk-primary) 82%, var(--tk-edge));
+  stroke-width: 2.6px;
+  stroke-dasharray: 16 22;
+  opacity: .9;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--tk-primary) 42%, transparent));
+  animation: topology-edge-highlight 1.15s linear infinite;
+}
+
+@keyframes topology-edge-highlight {
+  to { stroke-dashoffset: -76; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topology-kubejojo__edge-flow.is-active {
+    animation: none !important;
+    opacity: .72;
+  }
+}
+
 /* Groups provide context for their children; the children remain the visual
  * surfaces. Keep only a compact heading so scope/component bounds do not
  * compete with resource cards or relationship paths. */
@@ -1604,6 +1703,24 @@
   padding: 4px 8px;
 }
 .topology-kubejojo__group > .topology-kubejojo__node-glance { top: 42px; left: 8px; }
+
+/* Expanded resource cards are the primary visual surface. Keep the group
+ * metadata as an on-demand affordance so it cannot look like an extra node or
+ * cover the relationship rails behind Pod/Service cards. The stack action is
+ * revealed with the same hover/focus state and remains keyboard reachable. */
+.topology-kubejojo__group > .topology-kubejojo__group-label {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, visibility 0s linear 120ms;
+}
+.topology-kubejojo__group:has(.topology-kubejojo__node:hover) > .topology-kubejojo__group-label,
+.topology-kubejojo__group:has(.topology-kubejojo__node:focus-visible) > .topology-kubejojo__group-label {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
 
 /* Stacked card effect for collapsed groups (Headlamp style) */
 .topology-kubejojo__node-card--summary[data-count] {

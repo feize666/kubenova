@@ -23,14 +23,19 @@ describe('AiClusterController cluster access', () => {
         accessRole: 'viewer',
         source: 'role-binding',
       }),
+      assertPlatformAdmin: jest.fn(),
     };
+    const aiAssistantAccess = { authorize: jest.fn().mockResolvedValue({ allowed: true }) };
     return {
       controller: new AiClusterController(
         providers as never,
         clusterAccessService as never,
+        undefined,
+        aiAssistantAccess as never,
       ),
       providers,
       clusterAccessService,
+      aiAssistantAccess,
     };
   }
 
@@ -67,7 +72,7 @@ describe('AiClusterController cluster access', () => {
   });
 
   it('authorizes chat and uses the canonical cluster id in the prompt', async () => {
-    const { controller, providers, clusterAccessService } = build();
+    const { controller, providers, clusterAccessService, aiAssistantAccess } = build();
 
     await controller.chat(
       ' cluster-alias ',
@@ -80,32 +85,38 @@ describe('AiClusterController cluster access', () => {
       ' cluster-alias ',
     );
     expect(providers.chat).toHaveBeenCalledWith(undefined, expect.anything());
+    expect(aiAssistantAccess.authorize).toHaveBeenCalledWith(
+      { userId: 'operator-a', username: undefined, role: 'user' },
+      { clusterId: 'canonical-cluster', namespace: 'default', requireScope: true },
+    );
   });
 
-  it('authorizes analysis and returns the canonical cluster id', async () => {
+  it('rejects cluster chat without an explicit namespace for scoped grants', async () => {
+    const { controller, providers, aiAssistantAccess } = build();
+    aiAssistantAccess.authorize.mockRejectedValue(new ForbiddenException());
+
+    await expect(controller.chat(
+      'cluster-a',
+      { message: '检查状态' },
+      { user: { user: { id: 'operator-a', role: 'user' } } },
+    )).rejects.toBeInstanceOf(ForbiddenException);
+    expect(providers.chat).not.toHaveBeenCalled();
+  });
+
+  it('rejects scoped roles from cluster-wide analysis context', async () => {
     const { controller, providers, clusterAccessService } = build();
 
-    const result = await controller.analyze(
+    await expect(controller.analyze(
       'cluster-a',
       { agentId: 'agent-1', evidence: { status: 'healthy' } },
       { user: { user: { id: 'operator-a', role: 'operator' } } },
-    );
+    )).rejects.toBeInstanceOf(ForbiddenException);
 
     expect(clusterAccessService.assertCanRead).toHaveBeenCalledWith(
       { id: 'operator-a', role: 'operator' },
       'cluster-a',
     );
-    expect(providers.chat).toHaveBeenCalledWith('agent-1', [
-      expect.objectContaining({
-        content: expect.stringContaining('canonical-cluster'),
-      }),
-    ]);
-    expect(result).toEqual(
-      expect.objectContaining({
-        clusterId: 'canonical-cluster',
-        evidence: { status: 'healthy' },
-      }),
-    );
+    expect(providers.chat).not.toHaveBeenCalled();
   });
 
   it('validates the chat message after cluster authorization', async () => {
@@ -141,7 +152,7 @@ describe('AiClusterController cluster access', () => {
     const result = await controller.analyze(
       'cluster-a',
       { evidence: { symptom: 'slow', apiKey: 'do-not-return' } },
-      { user: { user: { id: 'operator-a', role: 'operator' } } },
+      { user: { user: { id: 'admin-a', role: 'platform-admin' } } },
     );
 
     expect(contextAggregator.collect).toHaveBeenCalledWith(

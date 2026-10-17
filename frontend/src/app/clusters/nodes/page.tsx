@@ -1,10 +1,11 @@
 "use client";
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceListQuery } from "@/hooks/use-resource-list-query";
+import { ResourceQueryFeedback } from "@/components/resource-query-feedback";
 
-import { useQuery } from "@tanstack/react-query";
 import { Alert, Space, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-context";
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { OpsEmptyState, OpsFilterChip, OpsSurface } from "@/components/ops";
@@ -169,21 +170,19 @@ export default function ClusterNodesPage() {
   const workspace = useOptionalClusterWorkspace();
   const now = useNowTicker();
   const [clusterId, setClusterId] = useState("");
-  const router = useRouter();
   const [keyword, setKeyword] = useState("");
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [detailTarget, setDetailTarget] = useState<DetailTarget | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const {
     resetPage,
     getSortableColumnProps,
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<ClusterNodeListItemModel>({
-    defaultPageSize: 10,
     allowedSortBy: ["name", "ready", "kubeletVersion", "createdAt"],
   });
 
-  const clustersQuery = useQuery({
+  const clustersQuery = useResourceListQuery({
     queryKey: ["clusters", "nodes-page", accessToken],
     queryFn: () =>
       getClusters(
@@ -206,10 +205,10 @@ export default function ClusterNodesPage() {
     clusterOptions.find((item) => item.value === effectiveClusterId)?.label ??
     "";
 
-  const nodesQuery = useQuery({
+  const nodesQuery = useResourceListQuery({
     queryKey: ["clusters", "nodes", effectiveClusterId, accessToken],
-    queryFn: () =>
-      getClusterNodes(effectiveClusterId, accessToken || undefined),
+    queryFn: ({ signal }) =>
+      getClusterNodes(effectiveClusterId, accessToken || undefined, { signal }),
     enabled:
       !isInitializing && Boolean(accessToken) && Boolean(effectiveClusterId),
   });
@@ -271,7 +270,7 @@ export default function ClusterNodesPage() {
                 kind: "Node",
                 id: `live-node:${effectiveClusterId}:${row.name}`,
                 label: row.name,
-              }); router.push(`/clusters/${encodeURIComponent(effectiveClusterId)}/resource/node/${encodeURIComponent("live-node:" + effectiveClusterId + ":" + row.name)}`); }
+              }); }
             }
           >
             {value}
@@ -453,19 +452,7 @@ export default function ClusterNodesPage() {
             />
           ) : null}
 
-          {nodesQuery.isError ? (
-            <Alert
-              className="cluster-resource-state-alert"
-              type="error"
-              showIcon
-              title="工作节点加载失败"
-              description={
-                nodesQuery.error instanceof Error
-                  ? nodesQuery.error.message
-                  : "获取节点数据时发生错误"
-              }
-            />
-          ) : null}
+          <ResourceQueryFeedback label="工作节点" className="cluster-resource-state-alert" query={nodesQuery} />
 
           {!effectiveClusterId && !clustersQuery.isLoading ? (
             <OpsEmptyState
@@ -475,6 +462,7 @@ export default function ClusterNodesPage() {
           ) : (
             <div className="resource-workbench__table-zone">
               <ResourceTable<ClusterNodeListItemModel>
+                queryState={nodesQuery}
                 rowKey="id"
                 tableKey="business.cluster-nodes"
                 columns={columns as ColumnsType<ClusterNodeListItemModel>}
@@ -522,7 +510,7 @@ export default function ClusterNodesPage() {
           )}
         </Space>
       </OpsSurface>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

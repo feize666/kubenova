@@ -1,4 +1,8 @@
 "use client";
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
+import { useResourceEditorNavigation } from "@/hooks/use-resource-editor-navigation";
 
 import {
   DeleteOutlined,
@@ -128,6 +132,7 @@ interface FormValues {
 }
 
 export default function JobsPage() {
+  const openEditor = useResourceEditorNavigation();
   const { message } = App.useApp();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -136,7 +141,8 @@ export default function JobsPage() {
     namespace: initialNamespace,
     keyword: initialKeyword,
   } = readResourceFilterFromSearchParams(searchParams);
-  const { accessToken, isInitializing } = useAuth();
+  const { accessToken, isInitializing, role } = useAuth();
+  const canWrite = ['admin', 'platform-admin', 'operator', 'cluster-operator'].includes(role.trim().toLowerCase());
   const queryClient = useQueryClient();
   const now = useNowTicker();
   const [keyword, setKeyword] = useState(initialKeyword);
@@ -159,10 +165,8 @@ export default function JobsPage() {
     getSortableColumnProps,
     handleTableChange,
   } = useAntdTableSortPagination<WorkloadListItem>({
-    defaultPageSize: 10,
   });
-  const [detailTarget, setDetailTarget] =
-    useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<WorkloadListItem | null>(null);
@@ -189,9 +193,9 @@ export default function JobsPage() {
     accessToken,
   ];
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, isFetching:queryIsFetching, refetch } = useResourceListQuery({
     queryKey,
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       getWorkloadsByKind(
         "Job",
         {
@@ -204,6 +208,7 @@ export default function JobsPage() {
           sortOrder: sortOrder || undefined,
         },
         accessToken || undefined,
+        { signal },
       ),
     enabled: !isInitializing && Boolean(accessToken),
     ...RESOURCE_LIST_REFRESH_OPTIONS,
@@ -448,10 +453,11 @@ export default function JobsPage() {
       { key: "edit", icon: <EditOutlined />, label: "编辑" },
       { key: "yaml", icon: <FileTextOutlined />, label: "YAML" },
       { type: "divider" },
-      { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true },
+      { key: "delete", icon: <DeleteOutlined />, label: "删除", danger: true, disabled: !canWrite },
     ]);
 
   const handleRowAction = (row: WorkloadListItem, key: string) => {
+    if (key === "delete" && !canWrite) return;
     if (key === "describe") {
       if (row.id) {
         setDetailTarget({ kind: "Job", id: row.id });
@@ -468,7 +474,7 @@ export default function JobsPage() {
       return;
     }
     if (key === "edit") {
-      openEditModal(row);
+      openEditor({clusterId:row.clusterId,namespace:row.namespace,kind:"Job",name:row.name});
       return;
     }
     if (key === "delete") {
@@ -651,7 +657,6 @@ export default function JobsPage() {
               </OpsFilterChip>
             </span>
           }
-          extra={<ResourceAddButton onClick={openAddModal} aria-label="创建Job" />}
         />
 
         <Space
@@ -669,18 +674,11 @@ export default function JobsPage() {
             />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="workload-resource-state-alert"
-              type="error"
-              showIcon
-              title="任务加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="Job" className="workload-resource-state-alert" query={{data,isError,error,isFetching:queryIsFetching,refetch}} />
 
           <div className="workload-workbench__table-zone">
             <ResourceTable<WorkloadListItem>
+              queryState={{data,isLoading,isError,error,isFetching:queryIsFetching}}
               bordered
               rowKey="id"
               tableKey="workloads.jobs"
@@ -698,6 +696,7 @@ export default function JobsPage() {
                 resetPage();
               }}
               toolbarExtra={scopeFilterControl}
+              toolbarPrimary={<><ResourceAddButton compact={false} label="创建" aria-label="创建Job" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" aria-label="使用 YAML 创建Job" /></>}
               sort={{ sortBy, sortOrder }}
               columns={columns}
               onResourceNavigate={(request) => setDetailTarget(request)}
@@ -872,7 +871,7 @@ export default function JobsPage() {
           </OpsFormSection>
         ) : null}
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

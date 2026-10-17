@@ -11,23 +11,13 @@ const failures = [];
 const contracts = [
   {
     path: "src/app/users/page.tsx",
-    required: ["OpsPageHeader", "OpsSurface", "OpsModalShell", "BusinessDetailDrawer", "ResourceTable"],
+    required: ["ResourcePageHeader", "OpsSurface", "OpsModalShell", "BusinessDetailDrawer", "ResourceTable"],
     forbidden: ["<Card", "cyber-panel"],
   },
   {
     path: "src/app/users/rbac/page.tsx",
-    required: ["OpsPageHeader", "OpsSurface", "OpsModalShell", "BusinessDetailDrawer", "ResourceTable"],
+    required: ["ResourcePageHeader", "OpsSurface", "OpsModalShell", "BusinessDetailDrawer", "ResourceTable"],
     forbidden: ["cyber-panel"],
-  },
-  {
-    path: "src/app/workloads/helm/page.tsx",
-    required: ["OpsSurface", "OpsModalShell", "ResourcePageHeader", "ResourceTable", "ResourceDetailDrawer", "openResourceActionConfirm"],
-    forbidden: ['<Card>', "<Modal", "cyber-panel"],
-  },
-  {
-    path: "src/app/workloads/helm/repositories/page.tsx",
-    required: ["OpsSurface", "OpsModalShell", "ResourcePageHeader", "ResourceTable", "ResourceDetailDrawer", "openResourceActionConfirm"],
-    forbidden: ['<Card>', "<Modal", "cyber-panel"],
   },
   {
     path: "src/components/workloads/autoscaling-console.tsx",
@@ -36,7 +26,7 @@ const contracts = [
   },
   {
     path: "src/app/security/page.tsx",
-    required: ["OpsPageHeader", "OpsSurface", "BusinessDetailDrawer", "ResourceTable", "ResourceActionDropdown"],
+    required: ["ResourcePageHeader", "OpsSurface", "BusinessDetailDrawer", "ResourceTable", "ResourceActionDropdown"],
     forbidden: ["cyber-panel"],
   },
 ];

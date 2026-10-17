@@ -9,6 +9,16 @@ export interface AiSuggestion {
   affectedResources: string[];
 }
 
+export interface AiAssistantAccess {
+  allowed: boolean;
+  fullAccess: boolean;
+  scopes: Array<{ clusterId: string; namespaces: string[] }>;
+}
+
+export function getAiAssistantAccess(token?: string) {
+  return apiRequest<AiAssistantAccess>("/api/ai-assistant/access", { token });
+}
+
 export interface AiSuggestionsResponse {
   items: AiSuggestion[];
   total?: number;
@@ -42,7 +52,8 @@ export type AiAssistantCanonicalOperation =
   | "restart-workload"
   | "vm-power-on"
   | "vm-power-off"
-  | "vm-restart";
+  | "vm-restart"
+  | "apply-resource-manifest";
 export type AiAssistantActionOperationAlias =
   | "query-configmaps-overview"
   | "query-pvc-overview"
@@ -60,6 +71,7 @@ export interface AiAssistantActionTarget {
   provider?: string;
   vmId?: string;
   reason?: string;
+  manifest?: string;
 }
 
 export interface AiAssistantActionOptions {
@@ -232,6 +244,7 @@ const CANONICAL_OPERATIONS = new Set<AiAssistantCanonicalOperation>([
   "vm-power-on",
   "vm-power-off",
   "vm-restart",
+  "apply-resource-manifest",
 ]);
 
 export function normalizeAiAssistantActionOperation(
@@ -385,6 +398,9 @@ export async function previewAction(
 ): Promise<{
   status: "ok" | "invalid";
   operation?: AiAssistantCanonicalOperation;
+  approvalId?: string;
+  expiresAt?: string;
+  result?: AiActionExecutionResult["result"];
   rollbackSuggestion?: string;
   error?: { code: string; message: string };
 }> {
@@ -395,6 +411,9 @@ export async function previewAction(
   const response = await apiRequest<{
     status: "ok" | "invalid";
     operation?: string;
+    approvalId?: string;
+    expiresAt?: string;
+    result?: AiActionExecutionResult["result"];
     rollbackSuggestion?: string;
     error?: { code: string; message: string };
   }>("/api/ai-assistant/actions/preview", {
@@ -411,6 +430,7 @@ export async function previewAction(
 export async function executeAction(
   action: AiActionExecuteRequest,
   token?: string,
+  approvalId?: string,
 ): Promise<AiActionExecutionResult> {
   const normalizedOperation = normalizeAiAssistantActionOperation(action.operation);
   const payload: AiActionExecuteRequest = normalizedOperation
@@ -419,7 +439,7 @@ export async function executeAction(
   const response = await apiRequest<AiActionExecutionResult>("/api/ai-assistant/actions/execute", {
     method: "POST",
     token,
-    body: { action: payload },
+    body: { action: payload, approvalId },
   });
   return {
     ...response,

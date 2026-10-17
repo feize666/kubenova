@@ -1,4 +1,10 @@
 "use client";
+import { scopedPlaceholder } from '@/lib/query/scoped-placeholder';
+import { useScopedDeferredValue } from '@/hooks/use-scoped-deferred-value';
+import { ResourceQueryFeedback } from '@/components/resource-query-feedback';
+import { useResourceListQuery } from '@/hooks/use-resource-list-query';
+import { isResourceAccessDenied } from '@/lib/query/visible-resource-data';
+import { useResourceDetailState } from "@/hooks/use-resource-detail-state";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -12,8 +18,8 @@ import {
 } from "antd";
 import type { TableProps } from "antd";
 import type { SortOrder as AntdSortOrder } from "antd/es/table/interface";
-import { useRouter, useSearchParams } from "next/navigation";
-import { createContext, useCallback, useContext, useDeferredValue, useMemo, useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth-context";
 import {
   matchLabelExpressions,
@@ -241,7 +247,6 @@ function ServiceTimeProvider({ children }: { children: ReactNode }) {
 
 export default function ServicesPage() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const { clusterId: initialClusterId, namespace: initialNamespace, keyword: initialKeyword } =
     readResourceFilterFromSearchParams(searchParams);
   const { accessToken, isInitializing } = useAuth();
@@ -253,7 +258,7 @@ export default function ServicesPage() {
   const [keywordInput, setKeywordInput] = useState(initialKeyword);
   const [mergedFilters, setMergedFilters] = useState<string[]>([]);
   const [tableFilters, setTableFilters] = useState<HeadlampTableFilters>({});
-  const [detailTarget, setDetailTarget] = useState<ResourceDetailRequest | null>(null);
+  const [detailTarget, setDetailTarget, detailUrlSession] = useResourceDetailState();
   const {
     sortBy,
     sortOrder,
@@ -262,7 +267,6 @@ export default function ServicesPage() {
     getPaginationConfig,
     handleTableChange,
   } = useAntdTableSortPagination<NetworkResource>({
-    defaultPageSize: 10,
   });
 
   // Modal state
@@ -290,9 +294,12 @@ export default function ServicesPage() {
     [clusterId, keyword, namespace, page, pagination.pageSize, sortBy, sortOrder],
   );
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const serviceListScope=accessToken?JSON.stringify(['services',accessToken,clusterId,namespace,keyword]):'';
+  const clusterListScope=accessToken?JSON.stringify(['clusters',accessToken]):'';
+  const { data, isLoading, isError, error, isFetching:queryIsFetching, refetch } = useResourceListQuery({
     ...SERVICE_LIST_QUERY_CACHE_OPTIONS,
-    placeholderData: (previousData) => previousData,
+    meta:{resourceScope:serviceListScope},
+    placeholderData: (previousData,previousQuery) => scopedPlaceholder(previousData,previousQuery,serviceListScope),
     queryKey: [
       "network",
       SERVICE_KIND,
@@ -306,11 +313,14 @@ export default function ServicesPage() {
     ),
     enabled: !isInitializing && Boolean(accessToken),
   });
+  const serviceDataScope=JSON.stringify([serviceListScope,isResourceAccessDenied(error)]);
+  const serviceViewScope=JSON.stringify([serviceDataScope,mergedFilters,tableFilters]);
   const isTableBusy = isLoading && !data;
 
   const clustersQuery = useQuery({
     ...SERVICE_LIST_QUERY_CACHE_OPTIONS,
-    placeholderData: (previousData) => previousData,
+    meta:{resourceScope:clusterListScope},
+    placeholderData: (previousData,previousQuery) => scopedPlaceholder(previousData,previousQuery,clusterListScope),
     queryKey: ["clusters", "all", accessToken],
     queryFn: () => getClusters({ pageSize: 200, state: "active", selectableOnly: true }, accessToken!),
     enabled: !isInitializing && Boolean(accessToken),
@@ -496,10 +506,10 @@ export default function ServicesPage() {
   }, [applyYamlMutation, createMode, createMutation, createYaml, createYamlClusterId, editingItem, form, updateMutation]);
 
   const serviceItems = data?.items ?? EMPTY_NETWORK_RESOURCES;
-  const deferredServiceItems = useDeferredValue(serviceItems);
-  const deferredMergedFilters = useDeferredValue(mergedFilters);
-  const deferredTableFilters = useDeferredValue(tableFilters);
-  const deferredClusterMap = useDeferredValue(clusterMap);
+  const deferredServiceItems = useScopedDeferredValue(serviceItems,serviceDataScope);
+  const deferredMergedFilters = useScopedDeferredValue(mergedFilters,serviceViewScope);
+  const deferredTableFilters = useScopedDeferredValue(tableFilters,serviceViewScope);
+  const deferredClusterMap = useScopedDeferredValue(clusterMap,clusterListScope);
   const knownNamespaces = useMemo(
     () =>
       Array.from(new Set(serviceItems.map((i) => i.namespace).filter(Boolean))),
@@ -517,7 +527,7 @@ export default function ServicesPage() {
       ),
     [deferredClusterMap, deferredMergedFilters, deferredServiceItems, deferredTableFilters],
   );
-  const deferredTableData = useDeferredValue(tableData);
+  const deferredTableData = useScopedDeferredValue(tableData,serviceViewScope);
   const nameWidth = useMemo(
     () => getAdaptiveNameWidth(deferredTableData.map((item) => item.name), { max: 320 }),
     [deferredTableData],
@@ -584,7 +594,7 @@ export default function ServicesPage() {
         ...getServiceSortableColumnProps("name", sortBy, sortOrder, isTableBusy),
         render: (name: string, row: NetworkResource) =>
           row.id ? (
-            <Typography.Link onClick={() => { setDetailTarget({ kind: "Service", id: row.id }); router.push(`/clusters/${encodeURIComponent(clusterId)}/resource/service/${encodeURIComponent(row.id)}`); }}>
+            <Typography.Link onClick={() => { setDetailTarget({ kind: "Service", id: row.id }); }}>
               {name}
             </Typography.Link>
           ) : (
@@ -631,6 +641,7 @@ export default function ServicesPage() {
         fixed: "right",
         render: (_: unknown, row: NetworkResource) => (
           <ResourceRowActions
+            editorIdentity={{clusterId:row.clusterId,kind:"Service",name:row.name,namespace:row.namespace}}
             deleteLabel="删除"
             deleteTitle="删除 Service"
             deleteContent={`确认删除 Service「${row.name}」吗？此操作不可恢复。`}
@@ -648,7 +659,7 @@ export default function ServicesPage() {
         ),
       },
     ]),
-    [clusterMap, deleteService, handleOpenEdit, isTableBusy, nameWidth, sortBy, sortOrder, workspace?.clusterId],
+    [clusterMap, deleteService, handleOpenEdit, isTableBusy, nameWidth, setDetailTarget, sortBy, sortOrder, workspace?.clusterId],
   );
 
   const scopeFilterControl = (
@@ -698,7 +709,6 @@ export default function ServicesPage() {
             </span>
           }
           description="管理集群 Service 访问策略、端口映射与服务暴露方式。"
-          extra={<ResourceAddButton title="创建Service" onClick={handleOpenCreate} />}
         />
 
         <Space
@@ -711,19 +721,12 @@ export default function ServicesPage() {
             <Alert className="network-resource-state-alert" type="warning" showIcon title="未检测到登录状态，请先登录后再操作。" />
           ) : null}
 
-          {isError ? (
-            <Alert
-              className="network-resource-state-alert"
-              type="error"
-              showIcon
-              title="网络服务加载失败"
-              description={error instanceof Error ? error.message : "请求失败"}
-            />
-          ) : null}
+          <ResourceQueryFeedback label="网络服务" className="network-resource-state-alert" query={{data,isError,error,isFetching:queryIsFetching,refetch}} />
 
           <div className="workload-workbench__table-zone">
             <ServiceTimeProvider>
               <ResourceTable<NetworkResource>
+                queryState={{data,isLoading,isError,error,isFetching:queryIsFetching}}
                 rowKey="id"
                 columns={columns}
                 onResourceNavigate={(request) => setDetailTarget(request)}
@@ -733,6 +736,7 @@ export default function ServicesPage() {
                 filters={tableFilters}
                 onFiltersChange={handleFiltersChange}
                 toolbarExtra={scopeFilterControl}
+                toolbarPrimary={<><ResourceAddButton compact={false} label="创建" title="创建Service" /><ResourceAddButton compact={false} label="YAML 创建" editorMode="yaml" title="使用 YAML 创建Service" /></>}
                 sort={sortState}
                 dataSource={tableData}
                 bordered
@@ -928,7 +932,7 @@ export default function ServicesPage() {
           />
         )}
       </OpsModalShell>
-      <ResourceDetailDrawer
+      <ResourceDetailDrawer key={detailUrlSession}
         open={Boolean(detailTarget)}
         onClose={() => setDetailTarget(null)}
         request={detailTarget}

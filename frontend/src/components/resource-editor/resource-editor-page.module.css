@@ -1,0 +1,72 @@
+.page { display: flex; flex-direction: column; gap: 20px; max-width: 1100px; width: 100%; min-width: 0; margin: 0 auto; padding-bottom: 24px; }
+.workspace { min-height: 100%; padding-bottom: 0; }
+.document { flex: 1; padding-bottom: 0; }
+.embedded { padding-bottom: 0; }
+.embeddedWorkspace { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 16px; padding: 16px; overflow: auto; }
+.header { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; }
+.context { display: flex; flex-direction: column; gap: 4px; max-width: 760px; }
+.field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.footer { position: sticky; bottom: calc(-1 * var(--kn-shell-page-gutter, 24px)); z-index: 5; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; align-items: center; flex-shrink: 0; min-height: 64px; margin-top: auto; margin-bottom: calc(-1 * var(--kn-shell-page-gutter, 24px)); padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--ops-border, #d9dfe7); border-radius: 0; background: var(--ops-surface, var(--kn-surface, Canvas)); }
+.footer > :global(.ant-btn) { min-width: 72px; flex-shrink: 0; white-space: nowrap; }
+:global(body):has(.footer) :global(.kn-ai-fab) { bottom: calc(80px + env(safe-area-inset-bottom)); }
+.embedded .footer { bottom: -16px; margin-inline: -16px; margin-bottom: -16px; }
+.wizard { display: flex; min-height: 100%; }
+.wizard:has(.wizardFooter) { min-height: calc(100% + var(--kn-shell-page-gutter, 24px)); margin-bottom: calc(-1 * var(--kn-shell-page-gutter, 24px)); }
+.wizard > :global(.ant-space-item:last-child) { flex: 1; display: flex; flex-direction: column; }
+.wizard > :global(.ant-space-item:last-child) > :global(.ops-surface) { overflow: visible; }
+.wizard > :global(.ant-space-item:last-child) > :global(.ops-surface),
+.wizard > :global(.ant-space-item:last-child) > :global(.ops-surface) > :global(.ops-surface__body),
+.wizard > :global(.ant-space-item:last-child) > :global(.ops-surface) > :global(.ops-surface__body) > :global(form) { flex: 1; display: flex; flex-direction: column; }
+.wizardFooter { margin-inline: -16px; margin-bottom: -16px; }
+.yaml { min-width: 0; }
+.diff { max-height: 58vh; overflow: auto; overscroll-behavior: contain; }
+.diff :global(.ant-table-cell) { vertical-align: top; overflow-wrap: anywhere; }
+.diff pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
+.maprow { display: flex; gap: 8px; margin-bottom: 8px; }
+.maprow input { min-width: 0; }
+.section { margin-top: 24px; scroll-margin-top: 88px; }
+.section[hidden] { display: none; }
+.editLayout { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 32px; align-items: start; }
+.sectionNav { position: sticky; top: 88px; display: flex; flex-direction: column; gap: 10px; padding-top: 24px; }
+.sectionNav :global(.ant-btn) { width: 100%; }
+.formContent { min-width: 0; }
+.workloadForm :global(.ant-form-item-row), .document :global(.ant-form-vertical > .ant-form-item > .ant-form-item-row) { display: flex; flex-flow: row nowrap; align-items: flex-start; gap: 16px; }
+.workloadForm :global(.ant-form-item-label), .document :global(.ant-form-vertical > .ant-form-item > .ant-form-item-row > .ant-form-item-label) { flex: 0 0 156px; text-align: left; white-space: normal; padding: 5px 0 0; }
+.workloadForm :global(.ant-form-item-label > label) { height: auto; min-height: 24px; white-space: normal; }
+.workloadForm :global(.ant-form-item-control) { flex: 1; min-width: 0; }
+.workloadForm :global(.ant-form-item) { margin-bottom: 18px; }
+.workloadForm :global(.ant-card) { border-radius: 0; box-shadow: none; background: transparent; }
+.workloadForm > :global(.ant-card) { border: 0; border-top: 1px solid var(--ops-border, #d9dfe7); }
+.workloadForm :global(.ant-card-head) { padding: 12px 0; min-height: 44px; border-bottom: 0; }
+.workloadForm :global(.ant-card-body) { padding: 12px 0; }
+.workloadForm :global(.ant-card .ant-card) { padding: 0 16px; border: 1px solid var(--ops-border, #d9dfe7); border-radius: 6px; }
+.workloadForm :global(.ant-select), .document :global(.ant-form-item .ant-input-number) { width: 100%; }
+.advanced { border-top: 1px solid var(--ops-border, #d9dfe7); padding: 14px 0; margin-top: 12px; }
+.advanced > summary { cursor: pointer; font-weight: 600; padding: 4px; border-radius: 4px; }
+.advanced > summary:focus-visible { outline: 2px solid var(--kn-primary, #1677ff); outline-offset: 3px; }
+.advancedBody { padding-top: 16px; }
+.containerActions { display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 18px; }
+.containers { min-width: 0; }
+.containers :global(.ant-tabs-tabpane-hidden) { display: none; }
+.errorSummary { scroll-margin-top: 88px; }
+.errorSummary:focus { outline: 2px solid var(--kn-primary, #1677ff); outline-offset: 3px; border-radius: 8px; }
+.errorLinks { display: flex; flex-direction: column; align-items: flex-start; }
+.errorLinks :global(.ant-btn-link) { white-space: normal; height: auto; text-align: left; padding-left: 0; }
+.document :global(.ant-btn) { min-height: 34px; border-radius: 6px; font-weight: 500; }
+.document :global(.ant-tabs-tabpane), .document :global(.ant-space-item) { min-width: 0; }
+@media (max-width: 760px) {
+  .context { max-width: none; }
+  .editLayout { grid-template-columns: 1fr; gap: 12px; }
+  .sectionNav { position: sticky; top: 0; z-index: 4; flex-direction: row; background: var(--ops-surface, var(--kn-surface, Canvas)); padding: 10px 0; }
+  .sectionNav :global(.ant-btn) { width: auto; flex: 1; padding-inline: 8px; }
+  .workloadForm :global(.ant-form-item-row), .document :global(.ant-form-vertical > .ant-form-item > .ant-form-item-row) { flex-direction: column; gap: 4px; }
+  .workloadForm :global(.ant-form-item-label), .document :global(.ant-form-vertical > .ant-form-item > .ant-form-item-row > .ant-form-item-label) { flex: auto; padding-top: 0; }
+  .workloadForm :global(.ant-form-item-control) { width: 100%; }
+  .footer { padding-inline: 12px; }
+  .embeddedWorkspace { padding: 12px; }
+  .embedded .footer { bottom: -12px; margin-inline: -12px; margin-bottom: -12px; }
+  .wizardFooter { margin-inline: -12px; margin-bottom: -12px; }
+  .header { align-items: flex-start; }
+  .containerActions { justify-content: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) { .document *, .document *::before, .document *::after { transition-duration: 0s !important; animation-duration: 0s !important; } }

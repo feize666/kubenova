@@ -62,11 +62,22 @@ card.props.onKeyDown({ key: "Enter", target: cardTarget, currentTarget: cardTarg
 assert.equal(opens, 1, "the card itself remains keyboard accessible");
 
 const request = { kind: "Service", id: "cluster/namespace/service", name: "service" };
+const { isResourceAccessDenied } = loadComponent("lib/query/visible-resource-data.ts", {});
+const queryState = loadComponent("components/resource-detail/query-state.ts", {
+  "@/lib/query/visible-resource-data": { isResourceAccessDenied },
+});
+const navigationStateIndex = state.length + 1; // fullscreen state precedes drawer navigation.
 const { ResourceDetailDrawer } = loadComponent("components/resource-detail/resource-detail-drawer.tsx", {
   "@ant-design/icons": {},
   antd: { Space: "space", Typography: {} },
-  "@tanstack/react-query": { useQuery: ({ queryKey }) => ({ data: queryKey[1] === "clusters"
+  "@tanstack/react-query": { hashKey: require("@tanstack/react-query").hashKey, useQuery: ({ queryKey }) => ({ data: queryKey[1] === "clusters"
     ? { items: [] } : { overview: { kind: "Service", name: "service" } } }) },
+  "@/components/resource-editor/resource-edit-boundary": {
+    ResourceEditBoundaryContext: { Provider: "edit-boundary" },
+    useResourceEditBoundary: () => ({ ref: { current: null }, request: (action) => action() }),
+  },
+  "@/lib/query/read-access-state": { useReadAccess: () => false },
+  "./query-state": queryState,
   "@/lib/api/clusters": {},
   "@/lib/api/resources": {},
   "@/components/ops": { OpsDrawerShell: "drawer", OpsIconActionButton: "action" },
@@ -80,11 +91,11 @@ const drawer = ResourceDetailDrawer({ open: true, request, onClose() {}, onNavig
 const content = find(drawer, (element) => element.type === "content");
 content.props.onNavigateRequest(request);
 assert.deepEqual(targets, [request], "clicking the current resource title must reach the owning page");
-assert.equal(state[0], null, "the current title must not create a duplicate drawer history entry");
+assert.equal(state[navigationStateIndex], null, "the current title must not create a duplicate drawer history entry");
 const related = { kind: "Pod", id: "cluster/namespace/pod", name: "pod" };
 content.props.onNavigateRequest(related);
 assert.deepEqual(targets, [request, related]);
-assert.deepEqual(state[0].stack, [request], "related-resource navigation must retain drawer history");
+assert.deepEqual(state[navigationStateIndex].stack, [request], "related-resource navigation must retain drawer history");
 // Execute the page/canvas handlers with their state bindings. Loading the full
 // page would require a router, authentication and live cluster queries.
 function readHandler(path, matches, bindings) {

@@ -16,6 +16,8 @@ import {
   ReloadOutlined,
   SettingOutlined,
   ShareAltOutlined,
+  SunFilled,
+  MoonFilled,
   ToolOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
@@ -37,6 +39,7 @@ import { BootstrapScreen } from "@/components/bootstrap-screen";
 import { ClusterWorkspaceProvider } from "@/components/cluster-workspace-context";
 import { OpsIconActionButton } from "@/components/ops";
 import { useThemeMode } from "@/components/theme-context";
+import { usePageRefresh } from '@/hooks/use-page-refresh';
 import { SidebarCollapseButton, useSidebarCollapse } from "@/components/sidebar-collapse";
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from "@/lib/sidebar-preference";
 import { getClusterDetail } from "@/lib/api/clusters";
@@ -72,9 +75,10 @@ export function ClusterWorkspaceShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { accessToken, isAuthenticated, isInitializing, username, logout } =
+  const {refreshing,refresh:refreshWorkspace}=usePageRefresh();
+  const { accessToken, isAuthenticated, isInitializing, username, role, logout } =
     useAuth();
-  const { mode } = useThemeMode();
+  const { mode, toggleTheme } = useThemeMode();
   const { collapsed, toggle } = useSidebarCollapse();
   const clusterId = getClusterIdFromPathname(pathname);
   const clusterQuery = useQuery({
@@ -83,11 +87,12 @@ export function ClusterWorkspaceShell({
     enabled: Boolean(accessToken && clusterId),
     staleTime: QUERY_CACHE_TIMINGS.listStaleTimeMs,
     gcTime: QUERY_CACHE_TIMINGS.listGcTimeMs,
+    refetchInterval: 10 * 60_000,
     retry: 1,
   });
   const navigation = useMemo(
-    () => (clusterId ? getClusterWorkspaceNavigation(clusterId) : []),
-    [clusterId],
+    () => (clusterId ? getClusterWorkspaceNavigation(clusterId, role) : []),
+    [clusterId, role],
   );
   const menuItems = useMemo<MenuProps["items"]>(
     () =>
@@ -213,7 +218,7 @@ export function ClusterWorkspaceShell({
   }
 
   return (
-    <ClusterWorkspaceProvider clusterId={clusterId}>
+    <ClusterWorkspaceProvider clusterId={clusterId} clusterName={clusterName}>
       <Layout
         className="kubenova-shell cluster-workspace-shell"
         style={{ minHeight: "100dvh" }}
@@ -227,15 +232,17 @@ export function ClusterWorkspaceShell({
           theme={mode}
         >
           <div className="cluster-workspace-brand">
-            <Link
-              href="/clusters"
+            <OpsIconActionButton
               className="cluster-workspace-brand__back"
+              opsVariant="secondary"
+              size="small"
+              icon={<ArrowLeftOutlined />}
               aria-label="返回集群列表"
               title="返回集群列表"
+              onClick={() => router.push("/clusters")}
             >
-              <ArrowLeftOutlined />
-              <span>返回集群列表</span>
-            </Link>
+              {!collapsed && "返回"}
+            </OpsIconActionButton>
             <div className="cluster-workspace-brand__identity">
               <NodeIndexOutlined />
               <div className="shell-brand-copy">
@@ -300,15 +307,26 @@ export function ClusterWorkspaceShell({
             </div>
             <Space size={10} className="shell-topbar-actions">
               <OpsIconActionButton
+                className={`shell-theme-toggle shell-theme-toggle--${mode}`}
+                onClick={toggleTheme}
+                aria-pressed={mode === "dark"}
+                aria-label={`切换到${mode === "dark" ? "浅色" : "深色"}主题`}
+                data-mode={mode}
+              >
+                <span className={`shell-theme-segment ${mode === "light" ? "is-active" : ""}`}><SunFilled />浅色</span>
+                <span className={`shell-theme-segment ${mode === "dark" ? "is-active" : ""}`}><MoonFilled />深色</span>
+              </OpsIconActionButton>
+              <OpsIconActionButton
                 className="shell-topbar-action"
                 icon={<BellOutlined />}
                 aria-label="打开通知中心"
               />
               <OpsIconActionButton
-                className="shell-topbar-action"
+                className="shell-topbar-action shell-refresh-action"
                 icon={<ReloadOutlined />}
                 aria-label="刷新页面"
-                onClick={() => window.location.reload()}
+                loading={refreshing}
+                onClick={() => void refreshWorkspace()}
               />
               <Dropdown
                 menu={{

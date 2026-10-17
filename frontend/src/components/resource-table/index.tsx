@@ -1,17 +1,20 @@
 "use client";
 
-import { Table, Typography } from "antd";
+import { Checkbox, Radio, Table, Typography, theme } from "antd";
+import { useResourceSelection } from '@/hooks/use-resource-selection';
 import type { TableProps } from "antd";
 import type { ColumnsType, ColumnType } from "antd/es/table";
 import {
   Children,
   isValidElement,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type Key,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type CSSProperties,
 } from "react";
 import {
   getStandardResourceTableScrollX,
@@ -20,6 +23,7 @@ import {
 } from "@/lib/table-column-widths";
 import { buildResourceTableLoading, type ResourceTableLoadingOptions } from "@/lib/table/pagination";
 import { getStableResourceRowKey } from "@/lib/table/row-key";
+import { useTableDensity } from '@/hooks/use-table-density';
 import {
   useHeadlampTableState,
   type HeadlampGlobalSearchState,
@@ -30,7 +34,10 @@ import {
 } from "@/lib/table/headlamp-table";
 import type { TablePreferencesClient } from "@/lib/api/table-preferences";
 import { ResourceDetailDrawer, type ResourceDetailDrawerProps } from "@/components/resource-detail";
+import { getDetailUrlController } from "@/components/resource-detail/detail-url";
 import { ResourceTableToolbar } from "@/components/resource-table-toolbar";
+import { useResourceTableViewportHeight } from "./use-viewport-height";
+import { deriveResourceTableState, type ResourceTableQueryState, type ResourceTableState } from "./query-state";
 import {
   OpsEmptyState,
   OpsErrorState,
@@ -42,6 +49,7 @@ import {
   type OpsMobileResourceCardMeta,
 } from "@/components/ops";
 import { useAuth } from "@/components/auth-context";
+import { isMobileContextColumn } from '@/lib/table/mobile-context';
 import { useOptionalClusterWorkspace } from "@/components/cluster-workspace-context";
 import { filterClusterScopedColumns } from "@/lib/cluster-workspace";
 import {
@@ -50,7 +58,7 @@ import {
 } from "@/components/resource-table/resizable-header-cell";
 
 export const RESOURCE_TABLE_CLASS_NAME = "resource-table";
-const RESOURCE_TABLE_VIEWPORT_SCROLL_Y = "clamp(240px, calc(100dvh - 420px), 560px)";
+const RESOURCE_TABLE_VIEWPORT_SCROLL_Y = "var(--resource-table-body-height, clamp(240px, calc(100dvh - 420px), 560px))";
 
 type ResourceTableNavigateRequest = NonNullable<ResourceDetailDrawerProps["request"]>;
 type ResourceTableNavigateHandler = (request: ResourceTableNavigateRequest) => void;
@@ -393,12 +401,14 @@ export type ResourceTableProps<T extends object> = Omit<
   initialFilterRowVisible?: boolean;
   preferencesClient?: TablePreferencesClient;
   toolbarExtra?: ReactNode;
+  toolbarPrimary?: ReactNode;
   showToolbar?: boolean;
   loading?: TableProps<T>["loading"];
   loadingOptions?: ResourceTableLoadingOptions;
   onResourceNavigate?: ResourceTableNavigateHandler;
   emptyDescription?: string;
-  state?: "idle" | "loading" | "empty" | "filtered-empty" | "error" | "degraded" | "permission";
+  state?: ResourceTableState;
+  queryState?: ResourceTableQueryState;
   stateTitle?: ReactNode;
   stateDescription?: ReactNode;
   stateAction?: ReactNode;
@@ -430,6 +440,7 @@ export function ResourceTable<T extends object>({
   onResourceNavigate,
   pagination,
   preferencesClient,
+  queryState,
   scroll,
   showToolbar = true,
   size,
@@ -440,24 +451,46 @@ export function ResourceTable<T extends object>({
   stateTitle,
   tableKey,
   toolbarExtra,
+  toolbarPrimary,
   viewportScroll = true,
   ...restProps
 }: ResourceTableProps<T>) {
-  const { accessToken } = useAuth();
+  const { accessToken, username } = useAuth();
   const workspace = useOptionalClusterWorkspace();
   const scopedColumns = useMemo(
     () => filterClusterScopedColumns(workspace?.clusterId, columns),
     [columns, workspace?.clusterId],
   );
   const [fallbackDetailTarget, setFallbackDetailTarget] = useState<ResourceTableNavigateRequest | null>(null);
+  const [detailUrlSession, setDetailUrlSession] = useState(0);
+  const [detailUrlOwner] = useState(() => ({}));
+  const ownsAutoDetail = !onResourceNavigate;
+  useEffect(() => {
+    if (!ownsAutoDetail) return;
+    return getDetailUrlController(window).register(detailUrlOwner, (request, source) => {
+      setFallbackDetailTarget(request);
+      // Browser restoration is a new session, not the drawer's own drill-down/back.
+      if (source === "restore") setDetailUrlSession((session) => session + 1);
+    });
+  }, [detailUrlOwner, ownsAutoDetail]);
   const handleFallbackNavigate = useCallback((request: ResourceTableNavigateRequest) => {
-    setFallbackDetailTarget(request);
-  }, []);
+    getDetailUrlController(window).navigate(detailUrlOwner, request);
+  }, [detailUrlOwner]);
+  const handleFallbackClose = useCallback(() => {
+    getDetailUrlController(window).navigate(detailUrlOwner, null);
+  }, [detailUrlOwner]);
   const effectiveResourceNavigate = onResourceNavigate ?? handleFallbackNavigate;
+  const effectiveState = deriveResourceTableState(queryState, state);
+  const queryOverridesEmpty = Boolean(queryState && ["loading", "error", "permission", "degraded"].includes(effectiveState));
+  const effectiveLocale = queryOverridesEmpty ? { ...locale, emptyText: undefined } : locale;
+  const effectiveDataProps = effectiveState === "permission" && queryState
+    ? { ...restProps, dataSource: [] as T[] }
+    : restProps;
 
   const tableNode = tableKey ? (
     <HeadlampResourceTable<T>
-        {...restProps}
+        key={JSON.stringify([username,tableKey])}
+        {...effectiveDataProps}
         bordered={bordered}
         className={className}
         columnSettings={columnSettings}
@@ -469,7 +502,7 @@ export function ResourceTable<T extends object>({
         layoutOptions={layoutOptions}
         loading={loading}
         loadingOptions={loadingOptions}
-        locale={locale}
+        locale={effectiveLocale}
         onChange={onChange}
         onFiltersChange={onFiltersChange}
         onResourceNavigate={effectiveResourceNavigate}
@@ -479,17 +512,18 @@ export function ResourceTable<T extends object>({
         showToolbar={showToolbar}
         size={size}
         sort={sort}
-        state={state}
+        state={effectiveState}
         stateAction={stateAction}
         stateDescription={stateDescription}
         stateTitle={stateTitle}
         tableKey={tableKey}
         toolbarExtra={toolbarExtra}
+        toolbarPrimary={toolbarPrimary}
         viewportScroll={viewportScroll}
       />
   ) : (
     <StandardResourceTable<T>
-      {...restProps}
+      {...effectiveDataProps}
       bordered={bordered}
       className={className}
       columns={scopedColumns}
@@ -497,12 +531,13 @@ export function ResourceTable<T extends object>({
       layoutOptions={layoutOptions}
       loading={loading}
       loadingOptions={loadingOptions}
-      locale={locale}
+      locale={effectiveLocale}
+      onChange={onChange}
       onResourceNavigate={effectiveResourceNavigate}
       pagination={pagination}
       scroll={scroll}
       size={size}
-      state={state}
+      state={effectiveState}
       stateAction={stateAction}
       stateDescription={stateDescription}
       stateTitle={stateTitle}
@@ -516,10 +551,11 @@ export function ResourceTable<T extends object>({
       {tableNode}
       {!onResourceNavigate ? (
         <ResourceDetailDrawer
+          key={detailUrlSession}
           open={Boolean(fallbackDetailTarget)}
-          onClose={() => setFallbackDetailTarget(null)}
+          onClose={handleFallbackClose}
           request={fallbackDetailTarget}
-          onNavigateRequest={setFallbackDetailTarget}
+          onNavigateRequest={handleFallbackNavigate}
           token={accessToken || undefined}
         />
       ) : null}
@@ -614,6 +650,8 @@ function renderMobileResourceCards<T extends object>(input: {
   onResourceNavigate?: ResourceTableNavigateHandler;
   rowKey?: TableProps<T>["rowKey"];
   rowSelection?: TableProps<T>["rowSelection"];
+  selectRow?: ReturnType<typeof useResourceSelection<T>>['selectRow'];
+  clusterName?: string;
 }) {
   const { columns, dataSource, onResourceNavigate, rowKey, rowSelection } = input;
   if (!dataSource?.length) return null;
@@ -624,6 +662,7 @@ function renderMobileResourceCards<T extends object>(input: {
   const actionsColumn = leafColumns.find((column) => getMobileColumnRole(column) === "actions");
   const metaColumns = leafColumns
     .filter((column) => column !== titleColumn && column !== statusColumn && column !== actionsColumn)
+    .filter((column) => !isMobileContextColumn(getColumnIdentity(column)))
     .slice(0, 4);
   const selectedKeys = new Set(rowSelection?.selectedRowKeys ?? []);
 
@@ -637,11 +676,13 @@ function renderMobileResourceCards<T extends object>(input: {
           : getRecordString(record, ["name"]) || String(key);
         const subtitle = getRecordString(record, ["kind", "resourceKind", "type"]);
         const namespace = getRecordString(record, ["namespace", "namespaceName"]);
-        const cluster = getRecordString(record, ["clusterId", "cluster", "clusterName"]);
+        const cluster = input.clusterName || getRecordString(record, ["clusterName", "cluster", "clusterId"]);
         const meta: OpsMobileResourceCardMeta[] = metaColumns.map((column) => ({
           label: getMobileColumnLabel(column),
           value: renderMobileColumnValue(column, record, index),
         }));
+        const selectionProps=rowSelection?.getCheckboxProps?.(record);
+        const Selection=rowSelection?.type==='radio'?Radio:Checkbox;
 
         return (
           <OpsMobileResourceCard
@@ -652,6 +693,7 @@ function renderMobileResourceCards<T extends object>(input: {
             namespace={namespace || undefined}
             onSelect={request ? () => onResourceNavigate?.(request) : undefined}
             selected={selectedKeys.has(key)}
+            selectionControl={rowSelection ? <Selection {...selectionProps} checked={selectedKeys.has(key)} aria-label={`选择资源 ${getRecordString(record,['name'])||String(key)}`} onChange={event=>input.selectRow?.(record,event.target.checked,event)}/> : undefined}
             status={statusColumn ? renderMobileColumnValue(statusColumn, record, index) : undefined}
             statusState={!statusColumn ? getRecordString(record, ["status", "state", "phase"]) : undefined}
             subtitle={subtitle || undefined}
@@ -685,6 +727,9 @@ function StandardResourceTable<T extends object>({
   viewportScroll,
   ...restProps
 }: ResourceTableProps<T>) {
+  const viewportRef = useResourceTableViewportHeight(viewportScroll && !scroll?.y);
+  const workspace=useOptionalClusterWorkspace();
+  const {username}=useAuth();
   const normalizedLayoutOptions = useMemo(
     () => ({
       ...layoutOptions,
@@ -737,16 +782,19 @@ function StandardResourceTable<T extends object>({
     [className, isLoading, state],
   );
   const nextRowKey = restProps.rowKey ?? getStableResourceRowKey<T>;
+  const selection=useResourceSelection({dataSource:restProps.dataSource,keyOf:row=>resolveResourceTableRowKey(nextRowKey,row),rowSelection:restProps.rowSelection,scopeKey:JSON.stringify([username,workspace?.clusterId,tableKey])});
   const mobileCards = renderMobileResourceCards({
+    clusterName:workspace?.clusterName,
     columns: normalizedColumns,
     dataSource: restProps.dataSource,
     onResourceNavigate,
     rowKey: nextRowKey,
-    rowSelection: restProps.rowSelection,
+    rowSelection: selection.rowSelection,
+    selectRow: selection.selectRow,
   });
 
   return (
-    <div className={viewportScroll ? "resource-table-viewport resource-table-viewport--viewport-scroll" : "resource-table-viewport"}>
+    <div ref={viewportRef} className={viewportScroll ? "resource-table-viewport resource-table-viewport--viewport-scroll" : "resource-table-viewport"}>
       {mobileCards}
       <Table<T>
         {...restProps}
@@ -758,6 +806,7 @@ function StandardResourceTable<T extends object>({
         locale={nextLocale}
         pagination={pagination}
         rowKey={nextRowKey}
+        rowSelection={selection.rowSelection}
         scroll={nextScroll}
         size={size}
         tableLayout={restProps.tableLayout ?? "fixed"}
@@ -795,9 +844,21 @@ function HeadlampResourceTable<T extends object>({
   stateTitle,
   tableKey,
   toolbarExtra,
+  toolbarPrimary,
   viewportScroll,
   ...restProps
 }: ResourceTableProps<T> & { tableKey: string }) {
+  const viewportRef = useResourceTableViewportHeight(viewportScroll && !scroll?.y);
+  const workspace=useOptionalClusterWorkspace();
+  const { username } = useAuth();
+  const { token } = theme.useToken();
+  const [density, setDensity] = useTableDensity(username, tableKey);
+  // Scope the existing row rhythm variable to the desktop table only. Mobile
+  // cards, pagination, column widths and Headlamp filters remain untouched.
+  const densityStyle = {
+    ...restProps.style,
+    "--resource-table-row-height": `${density === "compact" ? token.controlHeightLG : token.controlHeightLG + token.paddingSM}px`,
+  } as CSSProperties;
   const headlampColumns = useMemo(
     () =>
       columns.filter(
@@ -808,6 +869,7 @@ function HeadlampResourceTable<T extends object>({
   );
   const table = useHeadlampTableState<T>({
     tableKey,
+    preferenceUser: username,
     columns: headlampColumns,
     columnSettings,
     filters,
@@ -887,16 +949,19 @@ function HeadlampResourceTable<T extends object>({
     [className, state, table.filterRowVisible],
   );
   const nextRowKey = restProps.rowKey ?? getStableResourceRowKey<T>;
+  const selection=useResourceSelection({dataSource:restProps.dataSource,keyOf:row=>resolveResourceTableRowKey(nextRowKey,row),rowSelection:restProps.rowSelection,scopeKey:JSON.stringify([username,workspace?.clusterId,tableKey])});
   const mobileCards = renderMobileResourceCards({
+    clusterName:workspace?.clusterName,
     columns: normalizedColumns,
     dataSource: restProps.dataSource,
     onResourceNavigate,
     rowKey: nextRowKey,
-    rowSelection: restProps.rowSelection,
+    rowSelection: selection.rowSelection,
+    selectRow: selection.selectRow,
   });
 
   return (
-    <div className={getResourceTableClassName(
+    <div ref={viewportRef} className={getResourceTableClassName(
       "resource-table-shell",
       viewportScroll ? "resource-table-shell--viewport-scroll" : undefined,
     )}>
@@ -905,6 +970,9 @@ function HeadlampResourceTable<T extends object>({
           table={table}
           resetColumnWidths={resizableTable.resetColumnWidths}
           extra={toolbarExtra}
+          primary={toolbarPrimary}
+          density={density}
+          onDensityChange={setDensity}
         />
       ) : null}
       {mobileCards}
@@ -919,8 +987,10 @@ function HeadlampResourceTable<T extends object>({
         onChange={handleChange}
         pagination={pagination}
         rowKey={nextRowKey}
+        rowSelection={selection.rowSelection}
         scroll={nextScroll}
         size={size}
+        style={densityStyle}
         tableLayout={restProps.tableLayout ?? "fixed"}
       />
     </div>

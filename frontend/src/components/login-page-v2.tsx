@@ -3,7 +3,9 @@
 import {
   LockOutlined,
   LoginOutlined,
+  MoonOutlined,
   SafetyCertificateOutlined,
+  SunOutlined,
   UserOutlined,
 } from "@ant-design/icons";
 import { Alert, App, Button, Checkbox, Form, Input, Typography } from "antd";
@@ -45,7 +47,7 @@ function LoginPageV2Content() {
   const { isAuthenticated, isInitializing, lastRequestId, login, mfaPending, verifyMfa, cancelMfa } = useAuth();
   const [loginForm] = Form.useForm<LoginForm>();
   const [recovery, setRecovery] = useState(false);
-  const { mode } = useThemeMode();
+  const { mode, toggleTheme } = useThemeMode();
   const { message } = App.useApp();
   const [submitting, setSubmitting] = useState(false);
   const [oidcEnabled, setOidcEnabled] = useState(false);
@@ -144,6 +146,9 @@ function LoginPageV2Content() {
 
   return (
     <main className="login-v2">
+      <Button className="login-v2__theme-toggle" type="text" onClick={toggleTheme} aria-label="切换主题" icon={isDark ? <SunOutlined /> : <MoonOutlined />}>
+        {isDark ? "浅色" : "深色"}
+      </Button>
       <section className="login-v2__panel" aria-label="KubeNova 登录">
         <aside className="login-v2__context" aria-label="平台概览">
           <div className="login-v2__brand">

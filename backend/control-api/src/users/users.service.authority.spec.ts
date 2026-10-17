@@ -107,7 +107,7 @@ describe('user administration authority', () => {
   it.each(['admin', 'platform-admin', 'user'])('rejects role %s through ordinary profile editing without any writes', async role => {
     const { service, prisma, writes } = setup();
     prisma.user.findUnique.mockResolvedValue(row as never);
-    await expect(service.updateUser({ role: 'admin' }, 'target', { role, name: 'Changed' })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.updateUser({ role: 'admin' } as never, 'target', { role, name: 'Changed' })).rejects.toBeInstanceOf(BadRequestException);
     expect(writes).toEqual([]);
   });
   it('protects the last active platform administrator', async () => {
@@ -122,7 +122,7 @@ describe('user administration authority', () => {
     const { service, prisma } = setup();
     prisma.user.findUnique.mockResolvedValue({ ...row, role: 'admin', isActive: true } as never);
     (prisma.user as any).count = jest.fn().mockResolvedValue(1);
-    await expect(service.updateUser({ role: 'admin' }, 'target', { password: 'new-test-password' })).resolves.toMatchObject({ id: 'target' });
+    await expect(service.updateUser({ role: 'admin' } as never, 'target', { password: 'new-test-password' })).resolves.toMatchObject({ id: 'target' });
     expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ passwordHash: expect.any(String), authzVersion: { increment: 1 } }) }));
   });
   it.each(['delete', 'disable', 'legacy-disable'])('prevents designated administrator self-lockout through %s even with another administrator', async operation => {

@@ -13,8 +13,8 @@ import {
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Col, Modal, Progress, Row, Space, Spin, Typography } from "antd";
-import { useParams, useRouter } from "next/navigation";
+import { Alert, Button, Col, Progress, Row, Space, Typography } from "antd";
+import { useParams } from "next/navigation";
 import { ClusterContextProvider, useClusterContext } from "@/components/cluster-context";
 import { OpsFilterChip, OpsIconActionButton, OpsLoadingState, OpsMetricTile, OpsStatusTag, OpsSurface } from "@/components/ops";
 import { ResourcePageHeader } from "@/components/resource-page-header";
@@ -24,19 +24,16 @@ import {
   getDashboardStats,
   type DashboardResourceMetric,
 } from "@/lib/api/dashboard";
-import { analyzeCluster } from "@/lib/api/ai-cluster";
 import { QUERY_CACHE_TIMINGS } from "@/lib/query";
-import { useState } from "react";
 
 const panelStyle = {
-  background: "#ffffff",
-  borderColor: "#b9d7f5",
-  boxShadow: "0 8px 24px rgba(24, 91, 167, 0.08)",
+  background: "var(--kn-surface)",
+  borderColor: "var(--kn-border)",
 };
 
 const softBlueStyle = {
-  background: "#f3f8ff",
-  border: "1px solid #d5e7fb",
+  background: "var(--kn-surface-raised)",
+  border: "1px solid var(--kn-border)",
 };
 
 function displayValue(value: string | number | null | undefined) {
@@ -48,19 +45,6 @@ function usageTone(value: number | undefined) {
   if (value >= 90) return "exception";
   if (value >= 75) return "active";
   return "success";
-}
-
-function formatCapturedAt(value: string | null) {
-  if (!value) return "--";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "--" : date.toLocaleString("zh-CN", { hour12: false });
-}
-
-function getAiText(payload: Record<string, unknown>) {
-  for (const key of ["response", "content", "text", "message"]) {
-    if (typeof payload[key] === "string" && payload[key]) return payload[key] as string;
-  }
-  return JSON.stringify(payload, null, 2);
 }
 
 function ResourceMetricPanel({
@@ -76,7 +60,7 @@ function ResourceMetricPanel({
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
         <div>
           <Typography.Text strong>{label}</Typography.Text>
-          <div style={{ marginTop: 4, color: "#0b4f9c", fontSize: 26, fontWeight: 700 }}>
+          <div style={{ marginTop: 4, color: "var(--kn-primary)", fontSize: 26, fontWeight: 700 }}>
             {presentation.valueLabel}
           </div>
           <Typography.Text type="secondary">{presentation.capacityLabel}</Typography.Text>
@@ -90,8 +74,8 @@ function ResourceMetricPanel({
           style={{
             minHeight: 30,
             borderRadius: 6,
-            background: "#edf5ff",
-            color: "#5e7691",
+            background: "var(--kn-surface-raised)",
+            color: "var(--kn-text-muted)",
             display: "grid",
             placeItems: "center",
             fontSize: 12,
@@ -103,15 +87,11 @@ function ResourceMetricPanel({
         <Progress
           percent={Math.round(presentation.percent)}
           status={usageTone(presentation.percent)}
-          strokeColor="#1677ff"
-          trailColor="#dcecff"
+          strokeColor="var(--kn-primary)"
+          trailColor="var(--kn-border)"
         />
       )}
-      <div style={{ display: "grid", gap: 2 }}>
-        <Typography.Text type="secondary">来源：{presentation.sourceLabel}</Typography.Text>
-        <Typography.Text type="secondary">采集时间：{formatCapturedAt(metric.capturedAt)}</Typography.Text>
-        {metric.note ? <Typography.Text type="warning">{metric.note}</Typography.Text> : null}
-      </div>
+      {metric.note ? <Typography.Text type="warning">{metric.note}</Typography.Text> : null}
     </div>
   );
 }
@@ -119,11 +99,6 @@ function ResourceMetricPanel({
 function ClusterInfoContent() {
   const { accessToken } = useAuth();
   const { clusterId, cluster, error, isFetching, isLoading, refresh } = useClusterContext();
-  const router = useRouter();
-  const [analysisOpen, setAnalysisOpen] = useState(false);
-  const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [analysisText, setAnalysisText] = useState("");
-  const [analysisError, setAnalysisError] = useState("");
   const statsQuery = useQuery({
     queryKey: ["dashboard", "stats", "cluster-workspace", clusterId, accessToken],
     queryFn: () => getDashboardStats({ clusterId }, accessToken || undefined),
@@ -158,30 +133,10 @@ function ClusterInfoContent() {
   const topology = statsQuery.data?.topology;
   const statusTone = cluster.runtimeStatus === "running" ? "success" : cluster.runtimeStatus === "checking" ? "warning" : "danger";
 
-  const openAnalysis = async () => {
-    setAnalysisOpen(true);
-    setAnalysisLoading(true);
-    setAnalysisError("");
-    try {
-      const result = await analyzeCluster(
-        clusterId,
-        {
-          runtimeStatus: cluster.runtimeStatus,
-          nodeSummary: cluster.nodeSummary,
-          platform: cluster.platform,
-          workloads: statsQuery.data?.workloads,
-          resourceUsage: statsQuery.data?.resourceUsage,
-          topology: statsQuery.data?.topology,
-        },
-        accessToken || undefined,
-      );
-      setAnalysisText(getAiText(result));
-    } catch (analysisFailure) {
-      setAnalysisError(analysisFailure instanceof Error ? analysisFailure.message : "AI 分析请求失败，请稍后重试。");
-    } finally {
-      setAnalysisLoading(false);
-    }
-  };
+  const openAnalysis = () => window.dispatchEvent(new CustomEvent("kubenova:ai-open", {
+    detail: { clusterId, prompt: "请用中文分析当前集群健康状态，只读输出根因候选、影响范围、置信度、优先级和排障步骤。" },
+  }));
+  const openConversation = () => window.dispatchEvent(new CustomEvent("kubenova:ai-open", { detail: { clusterId } }));
 
   return (
     <div className="resource-workbench" style={{ display: "grid", gap: 16 }}>
@@ -198,14 +153,13 @@ function ClusterInfoContent() {
                 <OpsIconActionButton
                   type="primary"
                   icon={<RobotOutlined />}
-                  loading={analysisLoading}
-                  onClick={() => void openAnalysis()}
+                  onClick={openAnalysis}
                 >
                   AI 分析
                 </OpsIconActionButton>
                 <OpsIconActionButton
                   icon={<MessageOutlined />}
-                  onClick={() => router.push(`/ai-assistant?clusterId=${encodeURIComponent(clusterId)}`)}
+                  onClick={openConversation}
                 >
                   AI 对话
                 </OpsIconActionButton>
@@ -240,7 +194,7 @@ function ClusterInfoContent() {
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={14}>
             <Typography.Text type="secondary">当前集群</Typography.Text>
-            <Typography.Title level={3} style={{ margin: "4px 0 8px", color: "#0b4f9c" }}>{cluster.displayName || cluster.name}</Typography.Title>
+              <Typography.Title level={3} style={{ margin: "4px 0 8px", color: "var(--kn-primary)" }}>{cluster.displayName || cluster.name}</Typography.Title>
             <Typography.Text type="secondary" copyable={{ text: cluster.id }}>ID：{cluster.id}</Typography.Text>
             <Space size={[8, 8]} wrap>
               <OpsFilterChip tone="info">{cluster.metadata.provider || "未识别供应商"}</OpsFilterChip>
@@ -250,11 +204,16 @@ function ClusterInfoContent() {
           </Col>
           <Col xs={24} lg={10}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
-              <div><Typography.Text type="secondary">Kubernetes 版本</Typography.Text><div style={{ color: "#0b4f9c", fontWeight: 700 }}>{displayValue(cluster.platform.kubernetesVersion)}</div></div>
-              <div><Typography.Text type="secondary">最后同步</Typography.Text><div style={{ color: "#12375d", fontWeight: 600 }}>{displayValue(cluster.lastSyncTime)}</div></div>
+              <div><Typography.Text type="secondary">Kubernetes 版本</Typography.Text><div style={{ color: "var(--kn-primary)", fontWeight: 700 }}>{displayValue(cluster.platform.kubernetesVersion)}</div></div>
+              <div><Typography.Text type="secondary">最后同步</Typography.Text><div style={{ color: "var(--kn-text)", fontWeight: 600 }}>{displayValue(cluster.lastSyncTime)}</div></div>
               <div><Typography.Text type="secondary">CNI</Typography.Text><div>{displayValue(cluster.platform.cniPlugin)}</div></div>
               <div><Typography.Text type="secondary">容器运行时</Typography.Text><div>{displayValue(cluster.platform.criRuntime)}</div></div>
             </div>
+            {cluster.platform.probe?.stale ? (
+              <Typography.Text type="warning" title={cluster.platform.probe.error ?? undefined}>
+                平台探测信息可能已过期：{cluster.platform.probe.error || "等待后台自动更新"}
+              </Typography.Text>
+            ) : null}
           </Col>
         </Row>
       </section>
@@ -293,26 +252,6 @@ function ClusterInfoContent() {
         )}
       </OpsSurface>
 
-      <Modal
-        title={<Space><RobotOutlined style={{ color: "#1677ff" }} />当前集群 AI 健康分析</Space>}
-        open={analysisOpen}
-        onCancel={() => setAnalysisOpen(false)}
-        footer={<Button type="primary" onClick={() => void openAnalysis()} loading={analysisLoading}>重新分析</Button>}
-        width={720}
-      >
-        {analysisLoading ? (
-          <div style={{ minHeight: 180, display: "grid", placeItems: "center", gap: 12 }}>
-            <Spin />
-            <Typography.Text type="secondary">正在基于当前集群快照生成只读分析...</Typography.Text>
-          </div>
-        ) : analysisError ? (
-          <Alert type="error" showIcon title="分析暂不可用" description={analysisError} />
-        ) : (
-          <Typography.Paragraph style={{ whiteSpace: "pre-wrap", lineHeight: 1.8, marginBottom: 0 }}>
-            {analysisText || "暂无分析结果。"}
-          </Typography.Paragraph>
-        )}
-      </Modal>
     </div>
   );
 }

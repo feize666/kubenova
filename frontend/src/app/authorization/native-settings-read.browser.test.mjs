@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { build } from 'esbuild';
+import { chromium } from 'playwright';
+
+test('native settings preserve authorized drafts on transient refresh but hide denied reads and writes',async t=>{
+  const bundle=await build({stdin:{contents:`import React from 'react';import {createRoot} from 'react-dom/client';import {flushSync} from 'react-dom';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';import {NativeAccessSettingsPanel} from './native-access-settings';
+    const client=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:Infinity,gcTime:Infinity}}});
+    window.refreshNative=kind=>client.refetchQueries({queryKey:[kind==='clusters'?'native-access-clusters':'native-access-settings']});
+    window.testToken='fixture-token';
+    function Fixture(){const [mount,setMount]=React.useState(0);const [,render]=React.useReducer(value=>value+1,0);window.changeNativeToken=value=>flushSync(()=>{window.testToken=value;render()});window.remountNative=()=>setMount(value=>value+1);return <NativeAccessSettingsPanel key={mount}/>}
+    createRoot(document.getElementById('root')).render(<QueryClientProvider client={client}><Fixture/></QueryClientProvider>);`,resolveDir:new URL('.',import.meta.url).pathname,loader:'tsx'},plugins:[{name:'auth-boundary',setup(builder){builder.onResolve({filter:/^@\/components\/auth-context$/},args=>({path:args.path,namespace:'fixture'}));builder.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:'export const useAuth=()=>({accessToken:window.testToken,role:"admin"});',loader:'js'}));}}],define:{'process.env.NODE_ENV':'"production"','process.env.NEXT_PUBLIC_CONTROL_API_BASE':'""'},bundle:true,write:false,format:'iife',jsx:'automatic',outfile:'tmp/native-settings-read.js',logLevel:'silent'});
+  const browser=await chromium.launch({headless:true,channel:process.env.RESOURCE_BROWSER_CHANNEL||'chrome'});
+  t.after(()=>browser.close());
+  const page=await browser.newPage();page.setDefaultTimeout(5000);
+  let clustersStatus=200,settingsStatus=200;
+  const writes=[],errors=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  await page.route('**/*',route=>{
+    const request=route.request(),url=new URL(request.url());
+    if(request.resourceType()==='document')return route.fulfill({contentType:'text/html',body:'<div id="root"></div>'});
+    if(request.method()!=='GET'){writes.push({url:request.url(),token:request.headers().authorization,body:request.postDataJSON()});return route.abort();}
+    if(url.pathname==='/api/clusters')return route.fulfill({status:clustersStatus,json:clustersStatus===200?{data:{items:[{id:'c1',name:'Private cluster',state:'active'}],total:1}}:{message:'Denied candidates'}});
+    if(url.pathname==='/api/cluster-health')return route.fulfill({json:{data:{items:[]}}});
+    if(url.pathname==='/api/users/native-access/c1')return route.fulfill({status:settingsStatus,json:settingsStatus===200?{data:{clusterId:'c1',enabled:true,issuer:'https://private.example.com',audience:'test',jwksUri:'https://private.example.com/jwks',gatewayUrl:'https://gateway.example.com',revision:4,syncState:'pending'}}:{message:'Settings unavailable'}});
+    return route.abort();
+  });
+  await page.goto('http://native-settings.test/');
+  const css=bundle.outputFiles.find(file=>file.path.endsWith('.css'))?.text;
+  if(css)await page.addStyleTag({content:css});
+  await page.addScriptTag({content:bundle.outputFiles.find(file=>file.path.endsWith('.js')).text});
+  const choose=async()=>{await page.getByRole('combobox',{name:'选择待配置的集群'}).click();await page.getByText('Private cluster',{exact:true}).click();};
+  await choose();
+  const issuer=page.getByPlaceholder('https://sso.example.com/realms/kubenova',{exact:true});
+  await issuer.fill('https://unsaved.example.com');
+  settingsStatus=503;await page.evaluate(()=>window.refreshNative('settings'));
+  assert.equal(await issuer.count(),1,'transient refresh must retain the editable authorized snapshot');
+  assert.equal(await issuer.inputValue(),'https://unsaved.example.com');
+  settingsStatus=403;await page.evaluate(()=>window.refreshNative('settings'));
+  assert.equal(await issuer.count(),0);
+  assert.equal(await page.getByRole('button',{name:'保存配置',exact:true}).count(),0);
+  settingsStatus=503;await page.evaluate(()=>window.refreshNative('settings'));
+  assert.equal(await issuer.count(),0);
+  settingsStatus=200;await page.evaluate(()=>window.refreshNative('settings'));
+  await issuer.waitFor();
+  assert.equal(await issuer.inputValue(),'https://unsaved.example.com','successful reread must not discard an unsaved draft');
+  clustersStatus=403;await page.evaluate(()=>window.refreshNative('clusters'));
+  assert.equal(await issuer.count(),0,'unavailable cluster context must protect settings');
+  assert.equal(await page.getByRole('combobox',{name:'选择待配置的集群'}).isDisabled(),true);
+  clustersStatus=503;await page.evaluate(()=>window.refreshNative('clusters'));
+  await page.evaluate(()=>window.remountNative());
+  assert.equal(await page.getByRole('combobox',{name:'选择待配置的集群'}).isDisabled(),true);
+  clustersStatus=200;await page.evaluate(()=>window.refreshNative('clusters'));
+  await choose();await issuer.waitFor();
+  await issuer.fill('https://another-unsaved.example.com');
+  await page.evaluate(()=>window.changeNativeToken('new-token'));
+  await issuer.waitFor({state:'hidden'});
+  await choose();await issuer.waitFor();
+  assert.equal(await issuer.inputValue(),'https://private.example.com','new identity must not inherit another identity draft');
+  await page.evaluate(async()=>{
+    const button=Array.from(document.querySelectorAll('button')).find(item=>item.textContent.replace(/\s/g,'')==='保存配置');
+    button.click();
+    window.changeNativeToken('third-token');
+    await new Promise(resolve=>setTimeout(resolve,100));
+  });
+  assert.deepEqual(writes,[],'identity change during asynchronous field validation must cancel the old submission');
+  await choose();await issuer.waitFor();
+  await issuer.fill('https://authorized-draft.example.com');
+  const requestPromise=page.waitForRequest(request=>request.method()==='PUT');
+  await page.getByRole('button',{name:'保存配置',exact:true}).click();
+  await requestPromise;
+  assert.equal(writes.length,1,'current authorized scope can still submit a valid configuration');
+  assert.equal(writes[0].token,'Bearer third-token');
+  assert.equal(writes[0].body.issuer,'https://authorized-draft.example.com');
+  assert.equal(writes[0].body.revision,4);
+  assert.deepEqual(errors,[]);
+});
