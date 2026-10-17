@@ -16,7 +16,7 @@ test('security rendered consumers isolate revoked snapshots and identity changes
       builder.onResolve({filter:/^next\/navigation$/},()=>({path:'navigation',namespace:'fixture'}));
       builder.onResolve({filter:/^next\/link$/},()=>({path:'link',namespace:'fixture'}));
       builder.onResolve({filter:/\/resource-detail$/},()=>({path:'resourceDetail',namespace:'fixture'}));
-      builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'tsx',contents:args.path==='auth'?'export const useAuth=()=>({accessToken:window.token,isInitializing:false,user:{role:"super-admin"}});':args.path==='navigation'?'export const useSearchParams=()=>new URLSearchParams();export const useRouter=()=>({replace(){},push(){}});export const usePathname=()=>"/security";':args.path==='link'?'export default function Link(p){return <a {...p}/>;}':'export const ResourceDetailDrawer=()=>null;'}));
+      builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'tsx',contents:args.path==='auth'?'export const useAuth=()=>({accessToken:window.token,isInitializing:false,role:"super-admin",user:{role:"super-admin"}});':args.path==='navigation'?'export const useSearchParams=()=>new URLSearchParams();export const useRouter=()=>({replace(){},push(){}});export const usePathname=()=>"/security";':args.path==='link'?'export default function Link(p){return <a {...p}/>;}':'export const ResourceDetailDrawer=()=>null;'}));
     }}], define:{'process.env.NODE_ENV':'"production"','process.env.NEXT_PUBLIC_CONTROL_API_BASE':'""'}, bundle:true,write:false,format:'iife',jsx:'automatic',outfile:'tmp/security-read-test.js',
   });
   const browser=await chromium.launch({headless:true,channel:process.env.RESOURCE_BROWSER_CHANNEL||'chrome'});
