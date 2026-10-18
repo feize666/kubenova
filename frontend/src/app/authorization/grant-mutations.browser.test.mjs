@@ -90,8 +90,9 @@ test('rendered authorization forms block stale selections after denied reads and
     await select(page.getByRole('combobox',{name:/用户/}),'reader-a');
     await select(page.getByRole('combobox',{name:/集群/}),'Cluster A');
     await select(page.getByRole('combobox',{name:/命名空间/}),'prod');
-    await page.getByRole('combobox',{name:/命名空间/}).press('Escape');
-    const submit=page.getByRole('button',{name:'创建授权',exact:true});
+    const submit=page.locator('.ant-modal-footer .ant-btn-primary').filter({hasText:'创建授权'});
+    await submit.waitFor({state:'visible'});
+    assert.equal((await submit.innerText()).trim(),'创建授权');
     for(const path of ['/api/users','/api/clusters','/api/namespaces']){
       await refresh(path,503); assert.equal(await submit.isEnabled(),true);
       await refresh(path,403); assert.equal(await submit.isDisabled(),true,'Denied '+path+' must block authorization writes');

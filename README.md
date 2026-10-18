@@ -263,6 +263,8 @@ cd backend/runtime-gateway && go test ./...
 
 bash scripts/service.sh test topology
 bash scripts/service.sh test release
+
+cd frontend && RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/authorization/grant-mutations.browser.test.mjs
 ```
 
 ## 文档索引
