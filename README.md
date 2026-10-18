@@ -265,6 +265,7 @@ bash scripts/service.sh test topology
 bash scripts/service.sh test release
 
 cd frontend && RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/authorization/grant-mutations.browser.test.mjs
+# Covers asynchronous layout settlement during realtime disconnect/recovery.
 cd frontend && RESOURCE_BROWSER_CHANNEL=chromium node scripts/run-node-tests.mjs src/modules/topology-kubejojo/topology-surface.test.ts
 cd frontend && YAML_EDITOR_BROWSER_CHANNEL=chromium node --test src/components/resource-editor/resource-editor-yaml.test.mjs
 ```

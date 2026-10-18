@@ -631,12 +631,14 @@ test("realtime disconnection retains the graph but blocks resource actions until
     await expandResources(page);
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("kubenova:realtime-state", { detail: { state: "disconnected" } })));
     await page.getByText("实时连接中断", { exact: true }).waitFor();
-    assert.equal(await page.getByRole("button", { name: /^Service web，/ }).count(), 1, "the last graph stays visible");
-    await page.getByRole("button", { name: /^Service web，/ }).locator(".topology-kubejojo__node-kind").click();
+    const serviceCard = page.getByRole("button", { name: /^Service web，/ });
+    await serviceCard.waitFor({ state: "visible" });
+    assert.equal(await serviceCard.count(), 1, "the last graph stays visible");
+    await serviceCard.locator(".topology-kubejojo__node-kind").click();
     assert.equal(await page.getByRole("dialog").count(), 0, "stale topology must not open an actionable detail drawer");
     await page.evaluate(() => window.dispatchEvent(new CustomEvent("kubenova:realtime-state", { detail: { state: "connected" } })));
     await page.getByText("实时连接中断", { exact: true }).waitFor({ state: "hidden" });
-    await page.getByRole("button", { name: /^Service web，/ }).locator(".topology-kubejojo__node-kind").click();
+    await serviceCard.locator(".topology-kubejojo__node-kind").click();
     await page.getByRole("dialog").waitFor();
   });
 });
