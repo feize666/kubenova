@@ -677,6 +677,7 @@ test("background topology reconciliation keeps the current graph mounted", async
       `refetch must not replace the graph with a loading screen; canvas=${await page.locator(".resource-map-canvas").innerText()}`,
     );
   }, fixtureResources, fixtureRelations, 1000);
+});
 
 test("transient topology refresh failure keeps the last graph and disables actions", async () => {
   await withTopology(async page => {
@@ -689,7 +690,6 @@ test("transient topology refresh failure keeps the last graph and disables actio
     await card.click();
     assert.equal(await page.getByRole("dialog").count(), 0, "stale graph data must not open a mutating detail surface");
   }, fixtureResources, fixtureRelations, 0, true);
-});
 });
 
 test("cluster scoped resource pages do not render an empty namespace scope slot", () => {
