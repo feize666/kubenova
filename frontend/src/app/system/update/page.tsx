@@ -2,7 +2,7 @@
 
 import { CheckCircleOutlined, CloudDownloadOutlined, ClockCircleOutlined, LinkOutlined, ReloadOutlined, RollbackOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Empty, Modal, Progress, Result, Skeleton } from "antd";
+import { Alert, App, Button, Empty, Progress, Result, Skeleton } from "antd";
 import { Select } from "antd";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -40,9 +40,10 @@ export default function SystemUpdatePage() {
 }
 
 function ReleaseCenter({ accessToken }: { accessToken: string }) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const [selectedVersion, setSelectedVersion] = useState<string>();
+  const [rollbackVersion, setRollbackVersion] = useState<string>();
   const statusQuery = useQuery({
     queryKey: ["system-update", "status", accessToken],
     queryFn: () => getSystemUpdateStatus(accessToken),
@@ -75,20 +76,27 @@ function ReleaseCenter({ accessToken }: { accessToken: string }) {
   });
   const status = statusQuery.data;
   const issue = statusQuery.error?.message || status?.updateCheckError;
+  const releaseValidation = status?.releaseValidationMessage;
   const state = issue ? "error" : status?.checkState ?? "checking";
   const checking = checkMutation.isPending || state === "checking";
   const stateLabels = { checking: "正在检查", current: "已是最新版本", available: "发现新版本", "migration-required": "需要迁移版本编号", ahead: "运行版本高于发布版本", error: "检查失败" };
   const tone = state === "error" ? "danger" : state === "migration-required" ? "warning" : state === "current" ? "success" : "info";
-  const ready = Boolean(status?.releaseReady && !issue && status?.latestVersion);
   const releasesError = releasesQuery.error?.message || releasesQuery.data?.error;
   const taskActive = Boolean(status && !["idle", "installed", "failed"].includes(status.installStatus));
   const taskBusy = taskActive || installMutation.isPending || rollbackMutation.isPending;
   const targetVersion = selectedVersion || status?.latestVersion;
   const selectedRelease = releasesQuery.data?.items.find((release) => release.tag === targetVersion);
-  const installLabels: Record<string, string> = { queued: "等待执行", installing: "正在升级", "backing-up": "备份数据库", downloading: "下载发布包", verifying: "校验文件", switching: "切换服务", "health-check": "检查服务健康", rollbacking: "恢复旧版本", "installed-not-active": "等待新版本服务就绪" };
+  const targetIsLatest = targetVersion === status?.latestVersion;
+  const targetDownload = selectedRelease?.downloadUrl ?? (targetIsLatest ? status?.downloadUrl : null);
+  const targetChecksum = selectedRelease?.checksumUrl ?? (targetIsLatest ? status?.checksumUrl : null);
+  const targetUrl = selectedRelease?.url ?? (targetIsLatest ? status?.latestReleaseUrl : null);
+  const targetNotes = selectedRelease ? selectedRelease.notes : targetIsLatest ? status?.releaseNotes : null;
+  const rollbackTarget = rollbackVersion || status?.backupVersion || status?.rollbackCandidates?.[0]?.version;
+  const targetReady = !issue && Boolean(targetDownload && targetChecksum && (selectedRelease?.manifestUrl ?? status?.manifestUrl)) && (!selectedVersion || Boolean(selectedRelease));
+  const installLabels: Record<string, string> = { queued: "等待执行", installing: "准备升级", "backing-up": "备份数据库", downloading: "获取发布清单", verifying: "校验版本与镜像", switching: "切换服务", "health-check": "检查服务健康", rollbacking: "恢复旧版本", "installed-not-active": "等待新版本服务就绪" };
   const installNow = () => {
     if (!targetVersion) return;
-    Modal.confirm({
+    modal.confirm({
       title: "升级到 " + targetVersion + "？",
       content: "系统将先备份 PostgreSQL，再切换 Docker Compose 镜像并执行健康检查。失败时自动回滚应用镜像，数据库不会自动回滚。",
       okText: "立即升级",
@@ -101,7 +109,7 @@ function ReleaseCenter({ accessToken }: { accessToken: string }) {
   return <div className={styles.page}>
     <header className={styles.header}>
       <div><h1>系统更新</h1><p>正式发布、版本检测与在线升级。升级任务由受保护的宿主机执行器处理。</p></div>
-      <OpsIconActionButton icon={<ReloadOutlined />} loading={checking} onClick={() => checkMutation.mutate()}>检查更新</OpsIconActionButton>
+      <OpsIconActionButton aria-label="检查更新" icon={<ReloadOutlined />} loading={checking} onClick={() => checkMutation.mutate()}>检查更新</OpsIconActionButton>
     </header>
     <OpsSurface as="section" padding="md" aria-label="版本状态">
       {statusQuery.isPending ? <Skeleton active paragraph={{ rows: 2 }} /> : <>
@@ -113,18 +121,19 @@ function ReleaseCenter({ accessToken }: { accessToken: string }) {
       </>}
     </OpsSurface>
     {issue && <Alert type="error" showIcon title="未能确认最新版本" description={issue} />}
+    {!issue && releaseValidation && <Alert type="warning" showIcon title="已发现正式版本，但暂不可在线升级" description={releaseValidation + "可打开发布记录查看详情，待管理员补齐发布资产后再执行升级。"} />}
     {state === "migration-required" && <Alert type="warning" showIcon title="版本编号已调整" description="旧编号系列已统一重整为 v1.1。请备份后按下方指引手动迁移；这不是自动降级，也不会修改当前服务。" />}
     {state === "ahead" && <Alert type="info" showIcon title="当前构建高于正式发布" description="可能正在使用开发构建或其他发布渠道。不会自动降级，请核对部署来源。" />}
     <OpsSurface as="section" title="在线升级" subtitle="仅超级管理员可执行；升级由宿主机执行器完成，页面持续显示进度。" padding="md">
       <div className={styles.upgradeActions}>
-        <Select aria-label="选择升级版本" value={targetVersion} onChange={setSelectedVersion} options={(releasesQuery.data?.items ?? []).filter((release) => release.releaseReady).map((release) => ({ value: release.tag, label: release.tag + " · " + (release.name || "正式版本") }))} style={{ minWidth: 220 }} />
-        <Button type="primary" icon={<CloudDownloadOutlined />} loading={installMutation.isPending} disabled={!ready || (selectedRelease && !selectedRelease.releaseReady) || !targetVersion || !status?.installable || taskBusy || !status || !isLaterVersion(targetVersion, status.runningVersion)} onClick={installNow}>立即升级到 {targetVersion ?? "最新版本"}</Button>
-        {status?.backupAvailable && status.backupVersion && <Button loading={rollbackMutation.isPending} disabled={taskBusy} onClick={() => Modal.confirm({ title: `回滚到 ${status.backupVersion}？`, content: "仅回滚应用镜像，不会自动恢复数据库。", okText: "确认回滚", cancelText: "取消", onOk: () => rollbackMutation.mutateAsync(status.backupVersion!) })}>回滚到 {status.backupVersion}</Button>}
+        <Select aria-label="选择升级版本" value={targetVersion} onChange={setSelectedVersion} disabled={taskBusy} loading={releasesQuery.isPending} options={(releasesQuery.data?.items ?? []).map((release) => ({ value: release.tag, label: release.tag + (release.releaseReady ? " · 正式版本" : " · 资产不完整"), disabled: !release.releaseReady }))} style={{ minWidth: 220, maxWidth: "100%" }} />
+        <Button type="primary" icon={<CloudDownloadOutlined />} loading={installMutation.isPending} disabled={!targetReady || !targetVersion || !status?.installable || taskBusy || !status || !isLaterVersion(targetVersion, status.runningVersion)} onClick={installNow}>立即升级到 {targetVersion ?? "最新版本"}</Button>
+        {!!status?.rollbackCandidates?.length && rollbackTarget && <><Select aria-label="选择回滚版本" value={rollbackTarget} onChange={setRollbackVersion} disabled={taskBusy} options={status.rollbackCandidates.map((candidate) => ({ value: candidate.version, label: candidate.version }))} /><Button loading={rollbackMutation.isPending} disabled={taskBusy || !!statusQuery.error} onClick={() => modal.confirm({ title: `回滚到 ${rollbackTarget}？`, content: "系统将切换到已验证的应用镜像并执行健康检查，数据库不会自动恢复。", okText: "确认回滚", cancelText: "取消", onOk: () => rollbackMutation.mutateAsync(rollbackTarget) })}>回滚到 {rollbackTarget}</Button></>}
       </div>
       <div className={styles.updateFacts} aria-label="升级环境状态">
-        <span><CheckCircleOutlined /> 发布资产：{status?.releaseReady ? "已校验" : "待校验"}</span>
+        <span><CheckCircleOutlined /> 发布资产：{status?.releaseReady ? "清单完整" : releaseValidation ? "待补齐" : "待确认"}</span>
         <span><ClockCircleOutlined /> 执行器：{status?.installable ? "已就绪" : "未接入"}</span>
-        <span><RollbackOutlined /> 回滚：{status?.backupAvailable ? `可回滚至 ${status.backupVersion}` : "暂无备份"}</span>
+        <span><RollbackOutlined /> 回滚：{status?.rollbackCandidates?.length ? `可恢复 ${status.rollbackCandidates.length} 个版本` : "暂无可恢复版本"}</span>
       </div>
       {!status?.installable && <p className={styles.meta}>在线升级暂不可用：{status?.manualUpdateReason ?? "未配置宿主机升级执行器"}</p>}
       {statusQuery.error && taskActive && <Alert type="warning" showIcon title="正在重新连接升级任务" description="服务切换期间可能短暂断开，恢复连接后将继续显示任务进度。请勿重复提交。" />}
@@ -133,15 +142,16 @@ function ReleaseCenter({ accessToken }: { accessToken: string }) {
       {status?.installStatus === "failed" && <Alert type="error" showIcon title="升级失败" description={status.installProgress?.message ?? "执行器已终止任务，可查看审计记录后重试或回滚。"} />}
     </OpsSurface>
     <OpsSurface as="section" title="操作记录" subtitle="升级、回滚与发布后审计均会写入审计记录。" padding="md">
-      {historyQuery.isPending ? <Skeleton active paragraph={{ rows: 2 }} /> : historyQuery.data?.items.length ? <ul className={styles.history}>{historyQuery.data.items.slice(0, 8).map((item, index) => <li key={`${item.timestamp}-${index}`}><div><strong>{item.operationType === "install" ? "在线升级" : item.operationType === "rollback" ? "版本回滚" : "发布后审计"}</strong><span className={styles.meta}>{item.targetVersion ? `目标 ${item.targetVersion} · ` : ""}{dateLabel(item.timestamp)} · {item.operator}</span><span>{item.message}</span></div><OpsStatusTag tone={item.result === "success" ? "success" : "danger"}>{item.result === "success" ? "成功" : "失败"}</OpsStatusTag></li>)}</ul> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无操作记录" />}
+      {historyQuery.isError && <Alert type="warning" showIcon title="操作记录读取失败" description="无法确认当前记录，请重试。" action={<Button onClick={() => void historyQuery.refetch()}>重试</Button>} />}
+      {historyQuery.isPending ? <Skeleton active paragraph={{ rows: 2 }} /> : historyQuery.data?.items.length ? <ul className={styles.history}>{historyQuery.data.items.slice(0, 8).map((item, index) => { const resultLabel = item.result === "success" ? "成功" : item.result === "failed" ? "失败" : item.result === "running" ? "执行中" : "已提交"; const resultTone = item.result === "success" ? "success" : item.result === "failed" ? "danger" : "info"; return <li key={`${item.timestamp}-${index}`}><div><strong>{item.operationType === "install" ? "在线升级" : item.operationType === "rollback" ? "版本回滚" : "发布后审计"}</strong><span className={styles.meta}>{item.targetVersion ? `目标 ${item.targetVersion} · ` : ""}{dateLabel(item.timestamp)} · {item.operator}</span><span>{item.message}</span></div><OpsStatusTag tone={resultTone}>{resultLabel}</OpsStatusTag></li>; })}</ul> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无操作记录" />}
     </OpsSurface>
     <OpsSurface as="section" title="发布说明" subtitle="修复内容与升级注意事项来自正式 Release" padding="md">
       <OpsStatusTag tone="info">{targetVersion ?? "尚无可用版本"}</OpsStatusTag>
-      {(selectedRelease?.notes ?? status?.releaseNotes) ? <ReleaseNotes>{(selectedRelease?.notes ?? status?.releaseNotes)!}</ReleaseNotes> : <p className={styles.meta}>{checking ? "正在读取发布信息…" : "暂无发布说明，请在 GitHub 查看该版本记录。"}</p>}
+      {targetNotes ? <ReleaseNotes>{targetNotes}</ReleaseNotes> : <p className={styles.meta}>{checking ? "正在读取发布信息…" : "暂无发布说明，请在 GitHub 查看该版本记录。"}</p>}
       <div className={styles.downloads}>
-        <Button type="primary" icon={<CloudDownloadOutlined />} href={ready ? selectedRelease?.downloadUrl ?? status?.downloadUrl ?? undefined : undefined} disabled={!ready || !(selectedRelease?.downloadUrl ?? status?.downloadUrl)}>下载 Linux x64 发布包</Button>
-        <Button href={ready ? selectedRelease?.checksumUrl ?? status?.checksumUrl ?? undefined : undefined} disabled={!ready || !(selectedRelease?.checksumUrl ?? status?.checksumUrl)}>SHA256 校验文件</Button>
-        {(selectedRelease?.url ?? status?.latestReleaseUrl) && <Button type="link" icon={<LinkOutlined />} href={selectedRelease?.url ?? status?.latestReleaseUrl ?? undefined} target="_blank" rel="noopener noreferrer">GitHub Release</Button>}
+        <Button type="primary" icon={<CloudDownloadOutlined />} href={targetReady ? targetDownload ?? undefined : undefined} disabled={!targetReady}>下载 Linux x64 发布包</Button>
+        <Button href={targetReady ? targetChecksum ?? undefined : undefined} disabled={!targetReady}>SHA256 校验文件</Button>
+        {targetUrl && <Button type="link" icon={<LinkOutlined />} href={targetUrl} target="_blank" rel="noopener noreferrer">GitHub Release</Button>}
       </div>
       <p className={styles.meta}>原生包：Ubuntu 24.04 x64 · Node.js 22+。容器镜像：Linux amd64。未配置执行器时仍可下载并手动部署。</p>
     </OpsSurface>

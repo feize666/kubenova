@@ -155,6 +155,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     installStatus: 'idle' as SystemUpdateStatusPayload['installStatus'],
     installProgress: null as ExecutorTaskState | null,
     backupVersion: null as string | null,
+    rollbackCandidates: [] as Array<{ version: string; backupAvailable: boolean; imageDigests?: Record<string, string> }>,
   };
   private timer?: ReturnType<typeof setInterval>;
   private auditPromise: Promise<void> | null = null;
@@ -164,8 +165,11 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   private releaseNotes: string | null = null;
   private lastUpdateCheckAt: string | null = null;
   private updateCheckError: string | null = null;
+  private releaseValidationMessage: string | null = null;
   private downloadUrl: string | null = null;
   private checksumUrl: string | null = null;
+  private manifestUrl: string | null = null;
+  private imageDigests: SystemUpdateRelease['imageDigests'] = null;
   private releaseReady = false;
   private updateCheckPromise: Promise<void> | null = null;
   private releasesPromise: Promise<SystemUpdateReleasesPayload> | null = null;
@@ -239,13 +243,17 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       latestReleasePublishedAt: this.latestReleasePublishedAt,
       lastUpdateCheckAt: this.lastUpdateCheckAt,
       updateCheckError: this.updateCheckError,
+      releaseValidationMessage: this.releaseValidationMessage,
       releaseReady: this.releaseReady,
       downloadUrl: this.downloadUrl,
       checksumUrl: this.checksumUrl,
+      manifestUrl: this.manifestUrl,
+      imageDigests: this.imageDigests,
       installStatus: this.state.installStatus,
       installable: this.executorReady,
       manualUpdateReason: this.executorReason,
       backupVersion: this.state.backupVersion,
+      rollbackCandidates: this.state.rollbackCandidates,
       backupAvailable: Boolean(this.state.backupVersion),
       releaseMode: executorConfigured() ? 'pointer-swap' : 'manual',
       postReleaseAudit: { ...this.state.postReleaseAudit },
@@ -283,7 +291,11 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     const targetVersion = body.targetVersion?.trim() || this.state.latestVersion;
     if (!/^v\d+\.\d+(?:\.\d+)?$/.test(targetVersion))
       throw new BadRequestException('目标版本不是稳定版本');
+    // A cached catalog is suitable for browsing, never for authorizing a
+    // destructive switch: assets may have been removed since it was read.
+    this.invalidateReleasesCache();
     const releases = await this.getReleases();
+    if (releases.error) throw new BadRequestException('无法确认目标版本资产：' + releases.error);
     const release = releases.items.find((item) => item.tag === targetVersion);
     if (!release?.releaseReady || !release.downloadUrl || !release.checksumUrl)
       throw new BadRequestException('目标版本不是已校验的正式版本');
@@ -291,10 +303,12 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('目标版本必须高于当前运行版本');
     this.downloadUrl = release.downloadUrl;
     this.checksumUrl = release.checksumUrl;
-    const task = await this.createExecutorTask('install', targetVersion, operator);
+    this.manifestUrl = release.manifestUrl;
+    this.imageDigests = release.imageDigests ?? null;
+    const task = await this.createExecutorTask('install', targetVersion, operator, release);
     this.state.installStatus = 'queued';
     this.state.installProgress = task;
-    this.recordOperation({ operationType: 'install', targetVersion, result: 'success', message: '升级任务已提交，等待宿主机执行器处理', operator });
+    this.recordOperation({ operationType: 'install', targetVersion, result: 'queued', message: '升级任务已提交，等待宿主机执行器处理', operator });
     return this.getStatus();
   }
   restart(
@@ -313,15 +327,15 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   private async startRollback(body: SystemUpdateRollbackRequest, operator: string): Promise<SystemUpdateStatusPayload> {
     await this.refreshExecutor();
     if (!this.executorReady) throw new BadRequestException(this.executorReason);
-    if (!this.state.backupVersion) throw new BadRequestException('没有可用的上一版本备份');
+    if (!this.state.backupVersion && !this.state.rollbackCandidates.length) throw new BadRequestException('没有可用的回滚版本');
     if (this.state.installStatus !== 'idle' && this.state.installStatus !== 'installed' && this.state.installStatus !== 'failed')
       throw new BadRequestException('已有升级任务正在运行，请等待完成');
-    const targetVersion = body.targetVersion?.trim() || this.state.backupVersion;
-    if (targetVersion !== this.state.backupVersion) throw new BadRequestException('只能回滚到最近一次升级前的版本');
+    const targetVersion = body.targetVersion?.trim() || this.state.backupVersion || this.state.rollbackCandidates[0]?.version;
+    if (!targetVersion || !this.state.rollbackCandidates.some((candidate) => candidate.version === targetVersion)) throw new BadRequestException('只能回滚到已验证的回滚版本');
     const task = await this.createExecutorTask('rollback', targetVersion, operator);
     this.state.installStatus = 'rollbacking';
     this.state.installProgress = task;
-    this.recordOperation({ operationType: 'rollback', targetVersion, result: 'success', message: '回滚任务已提交', operator });
+    this.recordOperation({ operationType: 'rollback', targetVersion, result: 'queued', message: '回滚任务已提交，等待宿主机执行器处理', operator });
     return this.getStatus();
   }
   private unsupportedDeployment(): never {
@@ -331,13 +345,13 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async createExecutorTask(action: 'install' | 'rollback', targetVersion: string, operator: string): Promise<ExecutorTaskState> {
+  private async createExecutorTask(action: 'install' | 'rollback', targetVersion: string, operator: string, release?: SystemUpdateRelease): Promise<ExecutorTaskState> {
     let response: Response;
     try {
       response = await executorRequest('/v1/system-update/tasks', {
           action,
           targetVersion,
-          release: action === 'install' ? { downloadUrl: this.downloadUrl, checksumUrl: this.checksumUrl } : undefined,
+          release: action === 'install' ? { downloadUrl: release?.downloadUrl ?? this.downloadUrl, checksumUrl: release?.checksumUrl ?? this.checksumUrl, manifestUrl: release?.manifestUrl ?? this.manifestUrl, imageDigests: release?.imageDigests ?? this.imageDigests } : undefined,
           operator,
       });
     } catch {
@@ -365,13 +379,18 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
         const response = await executorRequest('/v1/system-update/status');
         if (!response.ok) throw new Error('执行器状态查询失败（HTTP ' + response.status + '）');
         const payload = await response.json() as {
-          ready?: boolean; reason?: string; backupVersion?: string | null; latestTask?: ExecutorTaskResponse | null;
+          ready?: boolean;
+          reason?: string;
+          backupVersion?: string | null;
+          rollbackCandidates?: Array<{ version: string; backupAvailable: boolean; imageDigests?: Record<string, string> }>;
+          latestTask?: ExecutorTaskResponse | null;
         };
         this.executorReady = payload.ready === true;
         this.executorReason = this.executorReady
           ? '宿主机执行器已就绪，升级期间网页可能短暂断连，恢复后会继续显示进度。'
           : payload.reason || '宿主机执行器未就绪';
         this.state.backupVersion = payload.backupVersion && parseVersion(payload.backupVersion) ? payload.backupVersion : null;
+        this.state.rollbackCandidates = Array.isArray(payload.rollbackCandidates) ? payload.rollbackCandidates : [];
         const task = payload.latestTask;
         if (!task?.taskId || !task.targetVersion || !parseVersion(task.targetVersion) || !['install', 'rollback'].includes(task.action ?? '')) return;
         const action = task.action!;
@@ -510,8 +529,9 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
         if (!isFormalStableRelease(release))
           throw new Error('Release 不是有效的稳定版本');
         const mapped = this.mapRelease(release);
-        if (!mapped.releaseReady)
-          throw new Error('Release 缺少 Linux x64 发布包或 SHA256 校验文件，暂不可更新');
+        // A formal Release is still useful information when one of its
+        // install assets is missing. Keep it visible and distinguish that
+        // validation warning from a GitHub/network failure.
         this.applyRelease(mapped);
       } catch (error) {
         // Keep the last verified release available for inspection during a
@@ -525,6 +545,9 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
           this.releaseNotes = null;
           this.downloadUrl = null;
           this.checksumUrl = null;
+          this.manifestUrl = null;
+          this.imageDigests = null;
+          this.releaseValidationMessage = null;
         }
         this.updateCheckError = error instanceof Error ? error.message : '更新检测失败，请稍后重试';
       } finally {
@@ -579,7 +602,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   private isMigrationRequired(): boolean {
     const current = parseVersion(this.state.runningVersion);
     const latest = parseVersion(this.state.latestVersion);
-    return !!current && !!latest && latest[0] === 1 && latest[1] === 1 && current[0] === 1 && (current[1] === 11 || (current[1] >= 2 && current[1] <= 10));
+    return !!current && !!latest && latest[0] === 1 && latest[1] === 1 && current[0] === 1 && current[1] === 11;
   }
 
   private async fetchReleases(): Promise<SystemUpdateReleasesPayload> {
@@ -615,6 +638,12 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     };
     const downloadUrl = assetUrl('kubenova-ubuntu.tar.gz');
     const checksumUrl = assetUrl('kubenova-ubuntu.tar.gz.sha256');
+    const manifestUrl = assetUrl('release-manifest.json');
+    const validationMessage = downloadUrl && checksumUrl && manifestUrl
+      ? null
+      : !manifestUrl
+        ? '已发现正式版本，但缺少发布清单 release-manifest.json，暂不可在线升级。'
+        : '已发现正式版本，但缺少 Linux x64 发布包或 SHA256 校验文件，暂不可在线升级。';
     return {
       tag,
       name: raw.name ?? tag,
@@ -623,7 +652,10 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       notes: raw.body ?? null,
       downloadUrl,
       checksumUrl,
-      releaseReady: !!downloadUrl && !!checksumUrl,
+      manifestUrl,
+      imageDigests: null,
+      validationMessage,
+      releaseReady: !!downloadUrl && !!checksumUrl && !!manifestUrl,
     };
   }
 
@@ -634,7 +666,10 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     this.releaseNotes = release.notes;
     this.downloadUrl = release.downloadUrl;
     this.checksumUrl = release.checksumUrl;
+    this.manifestUrl = release.manifestUrl;
+    this.imageDigests = release.imageDigests ?? null;
     this.releaseReady = release.releaseReady;
+    this.releaseValidationMessage = release.validationMessage ?? null;
     this.updateCheckError = null;
   }
 

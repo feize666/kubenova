@@ -1,0 +1,9 @@
+.shell { display: grid; grid-template-columns: minmax(190px, 240px) minmax(0, 1fr); gap: 20px; align-items: start; min-width: 0; }
+.navigation { border-right: 1px solid var(--kn-border); padding-right: 16px; min-width: 0; }
+.content { min-width: 0; }
+@media (max-width: 900px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .navigation { border-right: 0; padding-right: 0; border-bottom: 1px solid var(--kn-border); padding-bottom: 12px; }
+  .navigation :global(.ant-menu) { display: flex; overflow-x: auto; }
+  .navigation :global(.ant-menu-item) { flex: 0 0 auto; width: auto; margin-block: 0; }
+}

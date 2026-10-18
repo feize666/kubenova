@@ -4,6 +4,8 @@ KubeNova 是一套面向 Kubernetes 的集群运维控制台。它把集群接�
 
 当前版本：**v1.2**
 
+更新管理支持在 `/settings/update` 原位检查版本和提交升级；页面或操作记录加载失败时提供重试入口。选择版本后，说明与下载资产始终对应同一版本；新版本系列 `v1.2` 不会被误判为旧版本编号迁移。升级前会重新确认目标版本的正式发布资产。
+
 ## 核心能力
 
 - **集群接入**：支持阿里云 ACK、腾讯云 TKE、华为云 CCE、AWS EKS、Google GKE、火山引擎 VKE 等主流托管 Kubernetes，上传 kubeconfig 后自动识别供应商与集群状态。
@@ -194,7 +196,7 @@ control-api 每 5 分钟读取 `feize666/kubenova` 的最新正式 Release，排
 
 运行版本从构建环境 `KUBENOVA_VERSION`、发布包元数据或 control-api 的 package 版本读取，不再从可变更新状态文件读取虚拟版本。可通过 `KUBENOVA_UPDATE_REPOSITORY=owner/repo` 指定仓库；默认匿名读取公开 GitHub Release。需要提高限额或访问私有仓库时，可在 control-api 服务端配置只读 `KUBENOVA_UPDATE_GITHUB_TOKEN`：仅发送至 api.github.com，禁止重定向，不下发浏览器。私有发布资产下载仍需操作者具备 GitHub 权限。
 
-网页提供版本检测、发布说明和在线升级入口。在线升级必须配置独立宿主机执行器（不向 control-api 暴露 Docker socket）：执行器先备份 PostgreSQL，再下载并校验发布资产，切换三项 Compose 服务并等待健康检查；失败时自动回滚应用镜像，数据库不自动回滚。升级任务仅超级管理员可发起，同一时间只能运行一个任务，状态和结果写入审计记录。未配置执行器时页面保持只读，不会伪造升级成功。
+网页提供版本检测、发布说明和在线升级入口。在线升级必须配置独立宿主机执行器（不向 control-api 暴露 Docker socket）：Release 必须同时提供压缩包、SHA256 校验文件和 `release-manifest.json`，清单绑定 frontend、control-api、runtime-gateway 三个 GHCR 镜像摘要；执行器先备份 PostgreSQL，再校验清单与发布资产，按摘要切换 Compose 服务，并检查 API、网关和登录页面健康状态。失败时自动回滚应用镜像，数据库不自动回滚。升级任务仅超级管理员可发起，同一时间只能运行一个任务，状态和结果写入审计记录；保留最近三个有备份且镜像摘要完整的回滚候选。未配置执行器时页面保持只读，不会伪造升级成功。
 
 Linux Docker Compose 部署使用初始化和安装脚本接入执行器，无需手工拼接 token 或填写执行器 IP。首次执行初始化时自动生成数据库密码、JWT、Runtime token、网关内部鉴权、AI 凭据加密密钥及初始管理员密码；各密钥独立随机生成并以 `0600` 保存。已有环境文件不会重新生成、覆盖或轮换密钥；旧模板中的占位值需人工补齐。公网域名、AI 厂商 key、外部数据库及 SMTP 凭据仍需按实际环境填写。
 
@@ -209,7 +211,7 @@ sudo bash scripts/compose-release.sh up --tag <当前部署版本>
 
 安装脚本自动生成或复用同一个执行器密钥，分别存入 `/etc/kubenova/update-executor.env` 与 `/etc/kubenova/update-client.env`；共享环境文件不存放该特权密钥，Compose 只把客户端密钥文件注入 control-api。发布流水线会解析合并后的 Compose 配置，验证客户端密钥文件只进入 control-api，且执行器 socket 以只读方式挂载。执行器默认监听 `/run/kubenova-update/executor.sock`，不暴露公网端口，也不挂载 Docker socket。部署文件路径自动解析，并保留现有 Compose 项目名，避免误建数据库卷。不要把服务密钥粘贴到前端或提交 Git。
 
-页面只有在执行器实际通过 Docker/Compose 就绪检查后才启用在线升级。API 重启后从执行器恢复任务状态，暂时断连不会伪报任务失败，完成任务也不会修改旧进程的运行版本。任务及数据库备份保存于 `/var/lib/kubenova/update-executor`；大备份流式写入，备份失败不切换服务。发布资产允许 GitHub 官方下载重定向且校验 SHA256，失败切换才触发应用镜像回滚，不自动回滚数据库。已成功回滚的任务不会重复提供同一回滚入口。
+页面只有在执行器实际通过 Docker/Compose 就绪检查后才启用在线升级。API 重启后从执行器恢复任务状态，暂时断连不会伪报任务失败，完成任务也不会修改旧进程的运行版本。任务及数据库备份保存于 `/var/lib/kubenova/update-executor`；大备份流式写入，备份失败不切换服务。发布清单、压缩包和 SHA256 均允许 GitHub 官方下载重定向并逐项校验，失败切换才触发应用镜像回滚，不自动回滚数据库。已完成的任务以排队、执行中、成功或失败分别记录，回滚候选必须重新核验备份和摘要。
 
 此自动接入流程只覆盖 **Linux + Docker Compose + systemd**；macOS 本地源码/launchd 开发、原生二进制及 Kubernetes 部署不会被强制迁移或伪装为已接入。私有仓库的资产下载暂不支持执行器自动鉴权。完整操作与故障检查见 [Docker Compose 部署](deploy/docs/docker-compose.md)。
 

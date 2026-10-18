@@ -9,7 +9,7 @@ const release = {
   prerelease: false,
   html_url: `https://github.com/${repo}/releases/tag/v1.9`,
   published_at: '2026-09-27T00:00:00Z',
-  assets: ['kubenova-ubuntu.tar.gz', 'kubenova-ubuntu.tar.gz.sha256'].map(
+  assets: ['kubenova-ubuntu.tar.gz', 'kubenova-ubuntu.tar.gz.sha256', 'release-manifest.json'].map(
     (name) => ({
       name,
       size: 100,
@@ -59,27 +59,25 @@ describe('release-backed system updates', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
-  it('does not treat an incomplete release as installable', async () => {
+  it('keeps an incomplete formal release visible without reporting a check failure', async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ ...release, assets: [] })),
+      new Response(JSON.stringify({
+        ...release,
+        assets: release.assets.filter((asset) => asset.name !== 'release-manifest.json'),
+      })),
     );
     expect(await checkedStatus()).toMatchObject({
       releaseReady: false,
       updateAvailable: false,
-      updateCheckError: expect.any(String),
+      checkState: 'available',
+      updateCheckError: null,
+      releaseValidationMessage: expect.stringContaining('release-manifest.json'),
     });
   });
-  it('ignores prereleases and unsafe download URLs', async () => {
+  it('ignores prereleases and invalid tags, and warns on unsafe release assets', async () => {
     for (const body of [
       { ...release, prerelease: true },
       { ...release, tag_name: '../other' },
-      {
-        ...release,
-        assets: release.assets.map((a) => ({
-          ...a,
-          browser_download_url: 'https://evil.example/archive',
-        })),
-      },
     ]) {
       fetchMock.mockResolvedValue(new Response(JSON.stringify(body)));
       expect(await checkedStatus()).toMatchObject({
@@ -88,6 +86,16 @@ describe('release-backed system updates', () => {
         updateCheckError: expect.any(String),
       });
     }
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      ...release,
+      assets: release.assets.map((asset) => ({ ...asset, browser_download_url: 'https://evil.example/archive' })),
+    })));
+    expect(await checkedStatus()).toMatchObject({
+      checkState: 'available',
+      releaseReady: false,
+      updateCheckError: null,
+      releaseValidationMessage: expect.any(String),
+    });
   });
   it('treats v1.9 and v1.9.0 as the same stable version', async () => {
     process.env.KUBENOVA_VERSION = 'v1.9.0';
@@ -188,6 +196,15 @@ describe('release-backed system updates', () => {
       migrationRequired: true,
       updateAvailable: false,
     });
+  });
+  it('never treats the new v1.2 series as legacy numbering', async () => {
+    process.env.KUBENOVA_VERSION = 'v1.2.0';
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      ...release, tag_name: 'v1.1', assets: release.assets.map(asset => ({
+        ...asset, browser_download_url: asset.browser_download_url.replace('/v1.9/', '/v1.1/'),
+      })),
+    })));
+    expect(await checkedStatus()).toMatchObject({ checkState: 'ahead', migrationRequired: false, updateAvailable: false });
   });
 
   it('lists only formal releases with verified assets', async () => {

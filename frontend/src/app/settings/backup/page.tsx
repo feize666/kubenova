@@ -52,6 +52,23 @@ export default function SettingsBackupPage() {
       {statusQuery.isError ? (
         <Alert type="error" showIcon title="备份状态读取失败" description="请确认当前账号是平台管理员，并检查控制面服务。" />
       ) : null}
+      {status && !status.configuration.ready && !statusQuery.isError ? (
+        <Alert
+          type="info"
+          showIcon
+          title="备份策略尚未配置"
+          description={[
+            '当前页面只展示备份状态，不会触发备份任务。请由平台管理员在部署环境补齐',
+            ...([
+              !status.configuration.repositoryConfigured && '备份仓库',
+              !status.configuration.passwordFileConfigured && '仓库密码文件',
+              !status.configuration.databaseConfigured && '数据库连接',
+              !status.configuration.configurationFilesConfigured && '配置文件清单',
+            ].filter(Boolean) as string[]),
+            '配置后重新读取状态。',
+          ].join('、')}
+        />
+      ) : null}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>

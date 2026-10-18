@@ -26,6 +26,8 @@ let activeTask = null;
 let persistQueue = Promise.resolve();
 const stableTag = value => typeof value === 'string' && /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?$/.test(value);
 const safeReleaseUrl = (value, tag, asset) => value === 'https://github.com/' + repository + '/releases/download/' + tag + '/' + asset;
+const digestValue = value => typeof value === 'string' && /^ghcr\.io\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@sha256:[a-f0-9]{64}$/i.test(value);
+const safeManifestUrl = (value, tag) => safeReleaseUrl(value, tag, 'release-manifest.json');
 
 function persist() {
   const data = JSON.stringify([...tasks.values()].slice(-100));
@@ -50,10 +52,10 @@ async function composeArgs() {
   if (env.COMPOSE_PROJECT_NAME) args.push('--project-name', env.COMPOSE_PROJECT_NAME);
   return [...args, '--env-file', envFile];
 }
-async function run(command, args, timeout = 20*60*1000) {
+async function run(command, args, timeout = 20*60*1000, extraEnv = {}) {
   try {
     return await exec(command, args, { timeout, maxBuffer: 2*1024*1024,
-      env: {...process.env, COMPOSE_FILE:composeFile, KUBENOVA_COMPOSE_ENV_FILE:envFile} });
+      env: {...process.env, ...extraEnv, COMPOSE_FILE:composeFile, KUBENOVA_COMPOSE_ENV_FILE:envFile} });
   } catch { throw new Error(command + ' 执行失败，请检查受保护的主机日志和部署配置'); }
 }
 async function ready() {
@@ -64,9 +66,23 @@ async function ready() {
 async function currentVersion() {
   const {stdout} = await run('docker', ['inspect', 'kubenova-control-api']);
   const rows = JSON.parse(stdout);
-  const version = rows[0]?.Config?.Image?.split(':').pop();
+  const image = rows[0]?.Config?.Image || '';
+  const labelled = rows[0]?.Config?.Labels?.['org.opencontainers.image.version'];
+  const version = stableTag(labelled) ? labelled : image.split('@')[0].split(':').pop();
   if (!stableTag(version)) throw new Error('当前容器必须使用固定版本 tag，不能以 latest 或未知版本升级');
   return version;
+}
+async function currentImageDigests() {
+  const names = { frontend: 'kubenova-frontend', controlApi: 'kubenova-control-api', runtimeGateway: 'kubenova-runtime-gateway' };
+  const result = {};
+  for (const [key, name] of Object.entries(names)) {
+    const {stdout} = await run('docker', ['inspect', name]);
+    const rows = JSON.parse(stdout);
+    const image = rows[0]?.RepoDigests?.find(value => digestValue(value)) || '';
+    if (!digestValue(image)) throw new Error('当前服务镜像缺少固定摘要，不能安全回滚');
+    result[key] = image;
+  }
+  return result;
 }
 async function backup(task) {
   await setTask(task,{phase:'backing-up',percent:10,message:'正在备份 PostgreSQL'});
@@ -108,6 +124,12 @@ async function downloadFile(url, file, limit = 4*1024*1024*1024) {
 async function download(task) {
   await setTask(task,{phase:'downloading',percent:35,message:'正在下载并校验发布包'});
   const dir=join(stateDir,'downloads',task.taskId); await mkdir(dir,{recursive:true,mode:0o700});
+  if(!safeManifestUrl(task.release.manifestUrl,task.targetVersion)) throw new Error('发布清单地址不受信任');
+  await downloadFile(task.release.manifestUrl,join(dir,'manifest.json'),65536);
+  let manifest;
+  try { manifest=JSON.parse(await readFile(join(dir,'manifest.json'),'utf8')); } catch { throw new Error('发布清单格式无效'); }
+  if(manifest.version!==task.targetVersion || manifest.repository!==repository || !digestValue(manifest.images?.frontend) || !digestValue(manifest.images?.controlApi) || !digestValue(manifest.images?.runtimeGateway)) throw new Error('发布清单与目标版本或镜像摘要不匹配');
+  await setTask(task,{imageDigests:{frontend:manifest.images.frontend,controlApi:manifest.images.controlApi,runtimeGateway:manifest.images.runtimeGateway}});
   await downloadFile(task.release.checksumUrl,join(dir,'checksum'),4096);
   const match=(await readFile(join(dir,'checksum'),'utf8')).trim().match(/^([a-f0-9]{64})\s+\*?kubenova-ubuntu\.tar\.gz$/i);
   if(!match) throw new Error('SHA256 校验文件格式无效');
@@ -117,9 +139,16 @@ async function download(task) {
   if(hash.digest('hex')!==match[1].toLowerCase()) throw new Error('SHA256 校验失败，未切换服务');
   await setTask(task,{phase:'verifying',percent:50,message:'SHA256 校验通过'});
 }
+function rollbackCandidates() {
+  const rows=[...tasks.values()];
+  return rows.map((task,index)=>({task,index})).reverse()
+    .filter(({task})=>task.action==='install' && task.status==='succeeded' && task.previousVersion && task.backupFile && task.previousImageDigests)
+    .filter(({task,index})=>!rows.some((later,laterIndex)=>laterIndex>index && later.action==='rollback' && later.status==='succeeded' && later.targetVersion===task.previousVersion))
+    .map(({task})=>({version:task.previousVersion,backupAvailable:true,imageDigests:task.previousImageDigests}))
+    .filter((candidate,index,all)=>all.findIndex(item=>item.version===candidate.version)===index).slice(0,3);
+}
 function backupVersion() {
-  const latest=[...tasks.values()].reverse().find(task=>task.status==='succeeded');
-  return latest?.action==='install' ? latest.previousVersion || null : null;
+  return rollbackCandidates()[0]?.version || null;
 }
 async function pruneBackups() {
   const dir=join(stateDir,'backups'); const files=[];
@@ -136,12 +165,15 @@ async function runTask(task) {
     await setTask(task,{status:'running',phase:'preparing',percent:0,startedAt:new Date().toISOString()});
     await ready();
     if(task.action==='install') {
-      await setTask(task,{previousVersion:await currentVersion()});
+      await setTask(task,{previousVersion:await currentVersion(),previousImageDigests:await currentImageDigests()});
       await backup(task); await download(task);
     }
-    await setTask(task,{phase:'switching',percent:65,message:task.action==='install'?'正在切换服务并等待健康检查':'正在回滚应用镜像'});
+    await setTask(task,{phase:'switching',percent:65,message:task.action==='install'?'正在切换服务':'正在回滚应用镜像'});
     switching=true;
-    await run('bash',[scriptFile,task.action==='install'?'up':'rollback',...(task.action==='install'?['--tag',task.targetVersion]:[task.targetVersion]),'--env-file',envFile]);
+    const targetImages = task.action==='install' ? task.imageDigests : rollbackCandidates().find(item=>item.version===task.targetVersion)?.imageDigests;
+    if (!targetImages) throw new Error('目标版本没有可验证的镜像摘要');
+    await run('bash',[scriptFile,task.action==='install'?'up':'rollback',...(task.action==='install'?['--tag',task.targetVersion]:[task.targetVersion]),'--env-file',envFile],20*60*1000,{FRONTEND_IMAGE:targetImages.frontend,CONTROL_API_IMAGE:targetImages.controlApi,RUNTIME_GATEWAY_IMAGE:targetImages.runtimeGateway});
+    await setTask(task,{phase:'health-check',percent:90,message:'服务健康检查通过，正在确认版本'});
     await setTask(task,{status:'succeeded',phase:'completed',percent:100,message:'服务已通过健康检查'});
     if(task.action==='install') await pruneBackups().catch(()=>console.error('旧备份清理失败；升级结果不受影响'));
   } catch(error) {
@@ -149,7 +181,9 @@ async function runTask(task) {
     if(switching && task.action==='install' && task.previousVersion) {
       await setTask(task,{phase:'rollbacking',message:'升级失败，正在回滚应用镜像'});
       try {
-        await run('bash',[scriptFile,'rollback',task.previousVersion,'--env-file',envFile]);
+        const rollbackImages = task.previousImageDigests;
+        if (!rollbackImages) throw new Error('升级前镜像摘要缺失');
+        await run('bash',[scriptFile,'rollback',task.previousVersion,'--env-file',envFile],20*60*1000,{FRONTEND_IMAGE:rollbackImages.frontend,CONTROL_API_IMAGE:rollbackImages.controlApi,RUNTIME_GATEWAY_IMAGE:rollbackImages.runtimeGateway});
         task.rolledBack=true; message='升级失败，应用镜像已自动回滚；数据库未回滚';
       } catch { message='升级与自动回滚均失败，请立即检查主机服务'; }
     }
@@ -180,13 +214,13 @@ const server=createServer(async(request,response)=>{
     const path=request.url?.split('?')[0] || '/';
     if(request.method==='GET' && path==='/v1/system-update/status') {
       let issue=null; try {await ready();} catch {issue='执行器未就绪：请检查 Docker、Compose 文件及环境配置';}
-      return json(response,200,{ready:!issue,reason:issue,backupVersion:backupVersion(),latestTask:publicTask([...tasks.values()].at(-1))});
+      return json(response,200,{ready:!issue,reason:issue,backupVersion:backupVersion(),rollbackCandidates:rollbackCandidates(),latestTask:publicTask([...tasks.values()].at(-1))});
     }
     if(request.method==='POST' && path==='/v1/system-update/tasks') {
       const input=await body(request);
       if(!['install','rollback'].includes(input.action) || !stableTag(input.targetVersion)) return json(response,400,{message:'invalid update task'});
-      if(input.action==='install' && (!safeReleaseUrl(input.release?.downloadUrl,input.targetVersion,'kubenova-ubuntu.tar.gz') || !safeReleaseUrl(input.release?.checksumUrl,input.targetVersion,'kubenova-ubuntu.tar.gz.sha256'))) return json(response,400,{message:'untrusted release assets'});
-      if(input.action==='rollback' && input.targetVersion!==backupVersion()) return json(response,400,{message:'no verified rollback version'});
+      if(input.action==='install' && (!safeReleaseUrl(input.release?.downloadUrl,input.targetVersion,'kubenova-ubuntu.tar.gz') || !safeReleaseUrl(input.release?.checksumUrl,input.targetVersion,'kubenova-ubuntu.tar.gz.sha256') || !safeManifestUrl(input.release?.manifestUrl,input.targetVersion))) return json(response,400,{message:'untrusted release assets'});
+      if(input.action==='rollback' && !rollbackCandidates().some(item=>item.version===input.targetVersion)) return json(response,400,{message:'no verified rollback version'});
       // Claim before the first await: concurrent submissions cannot both pass.
       if(activeTask) return json(response,409,{message:'another update task is running'});
       const task={taskId:randomUUID(),action:input.action,targetVersion:input.targetVersion,release:input.release,operator:String(input.operator || 'unknown').slice(0,200),status:'queued',phase:'queued',percent:0,message:null,createdAt:new Date().toISOString()};

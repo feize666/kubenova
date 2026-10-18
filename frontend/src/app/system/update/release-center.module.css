@@ -37,3 +37,9 @@
 .history li:last-child { border-bottom: 0; padding-bottom: 0; }
 .history li > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 @media (max-width: 640px) { .versions { grid-template-columns: 1fr; gap: 18px; } .page { gap: 16px; } .releases li { align-items: flex-start; } }
+@media (max-width: 640px) {
+  .page :global(.ant-alert) { flex-wrap: wrap; row-gap: 10px; }
+  .page :global(.ant-alert-section) { min-width: 0; flex: 1 1 160px; overflow-wrap: anywhere; }
+  .page :global(.ant-alert-actions) { margin-inline-start: 0; }
+  .upgradeActions > :global(.ant-select), .upgradeActions > :global(.ant-btn) { width: 100%; min-width: 0 !important; }
+}

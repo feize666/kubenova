@@ -6,7 +6,7 @@ export type SystemUpdateOperationType =
   | "rollback"
   | "post_release_audit";
 
-export type SystemUpdateOperationResult = "success" | "failed";
+export type SystemUpdateOperationResult = "queued" | "running" | "success" | "failed";
 
 export interface SystemUpdateHistoryItem {
   operationType: SystemUpdateOperationType;
@@ -31,11 +31,15 @@ export interface SystemUpdateStatusPayload {
   lastUpdateCheckAt?: string | null;
   buildType: "release" | "source";
   updateCheckError: string | null;
+  releaseValidationMessage: string | null;
   releaseReady: boolean;
   downloadUrl: string | null;
   checksumUrl: string | null;
+  manifestUrl: string | null;
+  imageDigests?: { frontend: string; controlApi: string; runtimeGateway: string } | null;
   manualUpdateReason: string;
   backupVersion?: string | null;
+  rollbackCandidates?: Array<{ version: string; backupAvailable: boolean; imageDigests?: Record<string, string> }>;
   installStatus: "idle" | "queued" | "installing" | "backing-up" | "downloading" | "verifying" | "switching" | "health-check" | "installed-not-active" | "installed" | "restarting" | "rollbacking" | "failed";
   installable?: boolean;
   installProgress?: { taskId: string; targetVersion: string; phase: string; percent: number | null; message: string | null; startedAt: string } | null;
@@ -70,6 +74,9 @@ export interface SystemRelease {
   notes: string | null;
   downloadUrl: string | null;
   checksumUrl: string | null;
+  manifestUrl: string | null;
+  imageDigests?: { frontend: string; controlApi: string; runtimeGateway: string } | null;
+  validationMessage?: string | null;
   releaseReady: boolean;
 }
 

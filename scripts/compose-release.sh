@@ -129,10 +129,13 @@ compose_tagged() {
     return
   fi
   local frontend control_api runtime
-  frontend="$(image_repository FRONTEND_IMAGE ghcr.io/feize666/kubenova-frontend)"
-  control_api="$(image_repository CONTROL_API_IMAGE ghcr.io/feize666/kubenova-control-api)"
-  runtime="$(image_repository RUNTIME_GATEWAY_IMAGE ghcr.io/feize666/kubenova-runtime-gateway)"
-  env "KUBENOVA_IMAGE_TAG=$TAG" "FRONTEND_IMAGE=$frontend:$TAG" "CONTROL_API_IMAGE=$control_api:$TAG" "RUNTIME_GATEWAY_IMAGE=$runtime:$TAG" docker compose "${COMPOSE_ARGS[@]}" "$@"
+  frontend="$(env_value FRONTEND_IMAGE)"
+  control_api="$(env_value CONTROL_API_IMAGE)"
+  runtime="$(env_value RUNTIME_GATEWAY_IMAGE)"
+  [[ "$frontend" == *@sha256:* ]] || frontend="$(image_repository FRONTEND_IMAGE ghcr.io/feize666/kubenova-frontend):$TAG"
+  [[ "$control_api" == *@sha256:* ]] || control_api="$(image_repository CONTROL_API_IMAGE ghcr.io/feize666/kubenova-control-api):$TAG"
+  [[ "$runtime" == *@sha256:* ]] || runtime="$(image_repository RUNTIME_GATEWAY_IMAGE ghcr.io/feize666/kubenova-runtime-gateway):$TAG"
+  env "KUBENOVA_IMAGE_TAG=$TAG" "FRONTEND_IMAGE=$frontend" "CONTROL_API_IMAGE=$control_api" "RUNTIME_GATEWAY_IMAGE=$runtime" docker compose "${COMPOSE_ARGS[@]}" "$@"
 }
 
 preflight() {
@@ -141,6 +144,7 @@ preflight() {
   require_cmd awk
   require_cmd sed
   require_cmd tr
+  require_cmd curl
   validate_env
   # --quiet validates interpolation and YAML without echoing resolved secrets.
   compose_tagged config --quiet
@@ -158,6 +162,9 @@ wait_for_health() {
       if [[ "$state" != running || "$health" != healthy ]]; then all_ready=false; fi
     done
     if [[ "$all_ready" == true ]]; then
+      curl --fail --silent --show-error --retry 3 "http://127.0.0.1:$(env_value CONTROL_API_PORT || printf 4000)/api/health/ready" >/dev/null
+      curl --fail --silent --show-error --retry 3 "http://127.0.0.1:$(env_value RUNTIME_GATEWAY_PORT || printf 4100)/healthz" >/dev/null
+      curl --fail --silent --show-error --retry 3 "http://127.0.0.1:$(env_value FRONTEND_PORT || printf 3000)/login" >/dev/null
       printf '[compose-release] all services healthy\n'
       return 0
     fi

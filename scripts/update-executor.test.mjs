@@ -11,6 +11,7 @@ const key = 'a'.repeat(64);
 const release = {
   downloadUrl: 'https://github.com/feize666/kubenova/releases/download/v1.2/kubenova-ubuntu.tar.gz',
   checksumUrl: 'https://github.com/feize666/kubenova/releases/download/v1.2/kubenova-ubuntu.tar.gz.sha256',
+  manifestUrl: 'https://github.com/feize666/kubenova/releases/download/v1.2/release-manifest.json',
 };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function fixture(t, extra = {}) {
@@ -24,16 +25,17 @@ async function fixture(t, extra = {}) {
   await writeFile(path.join(dir, 'compose.sh'), '#!/bin/bash\nprintf "%s\\n" "$*" >> "$FAKE_DIR/calls"\nif [[ "$*" == *"--tag v1.2"* && -f "$FAKE_DIR/fail-switch" ]]; then exit 1; fi\n');
   await writeFile(path.join(dir, 'bin/docker'), '#!' + process.execPath + '\n' + [
     'const fs=require("node:fs"); const args=process.argv.slice(2);',
-    'if(args.includes("inspect")) process.stdout.write(JSON.stringify([{Config:{Image:"ghcr.io/feize666/kubenova-control-api:v1.1",Labels:{"com.docker.compose.project":"docker"}},State:{Running:true,Health:{Status:"healthy"}}}]));',
+    'if(args.includes("inspect")) process.stdout.write(JSON.stringify([{Config:{Image:"ghcr.io/feize666/kubenova-control-api:v1.1",Labels:{"com.docker.compose.project":"docker"}},RepoDigests:["ghcr.io/feize666/kubenova-control-api@sha256:"+"e".repeat(64)],State:{Running:true,Health:{Status:"healthy"}}}]));',
     'if(args.includes("pg_dump")) { if(fs.existsSync(process.env.FAKE_DIR+"/fail-backup")) process.exit(1); process.stdout.write("x".repeat(3*1024*1024)); }',
   ].join('\n'), {mode:0o755});
   await writeFile(path.join(dir, 'network.mjs'), [
     'import {createHash} from "node:crypto";',
     'const artifact=Buffer.from("release archive fixture");',
+    'const manifest=JSON.stringify({version:"v1.2",repository:"feize666/kubenova",images:{frontend:"ghcr.io/feize666/kubenova-frontend@sha256:"+"b".repeat(64),controlApi:"ghcr.io/feize666/kubenova-control-api@sha256:"+"c".repeat(64),runtimeGateway:"ghcr.io/feize666/kubenova-runtime-gateway@sha256:"+"d".repeat(64)}});',
     'globalThis.fetch=async(input)=>{ const url=new URL(input);',
     'if(url.hostname==="github.com") return new Response(null,{status:302,headers:{location:process.env.REDIRECT_TARGET || "https://release-assets.githubusercontent.com/fixture/"+url.pathname.split("/").pop()}});',
     'if(url.hostname!=="release-assets.githubusercontent.com") throw Error("unexpected outbound request");',
-    'return new Response(url.pathname.endsWith("sha256") ? (process.env.BAD_CHECKSUM ? "0".repeat(64) : createHash("sha256").update(artifact).digest("hex"))+"  kubenova-ubuntu.tar.gz\\n" : artifact); };',
+    'return new Response(url.pathname.endsWith("release-manifest.json") ? manifest : url.pathname.endsWith("sha256") ? (process.env.BAD_CHECKSUM ? "0".repeat(64) : createHash("sha256").update(artifact).digest("hex"))+"  kubenova-ubuntu.tar.gz\\n" : artifact); };',
   ].join('\n'));
   let child;
   let output = '';
