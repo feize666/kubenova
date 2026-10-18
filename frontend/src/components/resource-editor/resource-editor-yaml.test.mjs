@@ -49,8 +49,10 @@ test('YAML editor preserves controlled drafts, colors, undo, readonly and keyboa
     const beforeUrl = page.url();
     const changed = 'metadata:\n  name: "updated # name"\n  replicas: 2\n';
     await input.fill(changed);
+    await page.waitForFunction(expected => window.editorState.value === expected, changed);
     assert.equal(await page.evaluate(()=>window.editorState.value), changed);
     await input.press('Meta+z');
+    await page.waitForFunction(expected => window.editorState.value === expected, 'apiVersion: v1\nmetadata:\n  name: web\nspec:\n  replicas: 3\n  enabled: true\n');
     assert.equal(await page.evaluate(()=>window.editorState.value), 'apiVersion: v1\nmetadata:\n  name: web\nspec:\n  replicas: 3\n  enabled: true\n');
     await input.press('Tab');
     assert.equal(await page.getByRole('button', { name: 'After editor' }).evaluate(element=>element===document.activeElement), true);
