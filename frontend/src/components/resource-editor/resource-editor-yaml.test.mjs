@@ -34,6 +34,7 @@ test('YAML editor preserves controlled drafts, colors, undo, readonly and keyboa
     await page.setContent(`<style>body{margin:16px}#root{width:100%}${bundle.outputFiles.find(file=>file.path.endsWith('.css')).text}</style><div id="root"></div>`);
     await page.addScriptTag({ content: bundle.outputFiles.find(file=>file.path.endsWith('.js')).text });
     const input = page.getByRole('textbox', { name: '资源 YAML' });
+    const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
     await input.waitFor();
     assert.equal(await page.locator('.cm-editor').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(16, 16, 16)');
     const colorOf = text => page.locator('.cm-content span').filter({ hasText: new RegExp('^'+text+'$') }).first().evaluate(element=>getComputedStyle(element).color);
@@ -51,13 +52,13 @@ test('YAML editor preserves controlled drafts, colors, undo, readonly and keyboa
     await input.fill(changed);
     await page.waitForFunction(expected => window.editorState.value === expected, changed);
     assert.equal(await page.evaluate(()=>window.editorState.value), changed);
-    await input.press('Meta+z');
+    await input.press(`${modKey}+z`);
     await page.waitForFunction(expected => window.editorState.value === expected, 'apiVersion: v1\nmetadata:\n  name: web\nspec:\n  replicas: 3\n  enabled: true\n');
     assert.equal(await page.evaluate(()=>window.editorState.value), 'apiVersion: v1\nmetadata:\n  name: web\nspec:\n  replicas: 3\n  enabled: true\n');
     await input.press('Tab');
     assert.equal(await page.getByRole('button', { name: 'After editor' }).evaluate(element=>element===document.activeElement), true);
     await input.click();
-    await input.press('Meta+f');
+    await input.press(`${modKey}+f`);
     assert.equal(await page.locator('.cm-search').count(), 1);
     await page.locator('.cm-search input').first().press('Escape');
     const count = await page.evaluate(()=>window.editorState.changes);
@@ -80,7 +81,7 @@ test('YAML editor preserves controlled drafts, colors, undo, readonly and keyboa
     await page.evaluate(value=>window.setEditorValue(value), crlf);
     await page.waitForFunction(()=>document.querySelector('.cm-content')?.textContent?.includes('windows'));
     assert.equal(await page.evaluate(()=>window.getEditorText()), crlf);
-    await input.press('Meta+ArrowDown');
+    await input.press(`${modKey}+ArrowDown`);
     await input.press('a');
     assert.equal(await page.evaluate(()=>window.editorState.value), crlf+'a');
     const manyLines = Array.from({length:100},(_,i)=>'line'+i+': '+ 'x'.repeat(170)).join('\n');
@@ -92,7 +93,7 @@ test('YAML editor preserves controlled drafts, colors, undo, readonly and keyboa
     await page.locator('.cm-scroller').evaluate(element=>{element.scrollTop=220;element.scrollLeft=180});
     assert.deepEqual(await page.locator('.cm-scroller').evaluate(element=>[element.scrollTop,element.scrollLeft]), [220,180]);
     await input.click();
-    await input.press('Meta+f');
+    await input.press(`${modKey}+f`);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth), false);
     await page.locator('.cm-search input').first().press('Escape');
     assert.equal(page.url(), beforeUrl);
