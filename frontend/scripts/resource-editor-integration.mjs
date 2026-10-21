@@ -268,7 +268,7 @@ try {
         await page.getByRole('button',{name:'配置目标资源',exact:true}).click();
         await page.getByRole('textbox',{name:'API 版本',exact:true}).fill('apps/v1');
         await page.getByRole('textbox',{name:'资源类型',exact:true}).fill('Deployment');
-        await page.getByRole('textbox',{name:'资源名称',exact:true}).last().fill('web');
+        await page.getByRole('textbox',{name:'目标资源名称',exact:true}).fill('web');
         await page.getByRole('spinbutton',{name:'最大副本数',exact:true}).fill('5');
         await page.getByRole('button',{name:'新增扩缩容指标',exact:true}).click();
       } else if(kind==='VerticalPodAutoscaler') {
