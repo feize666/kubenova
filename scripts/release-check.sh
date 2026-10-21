@@ -61,6 +61,7 @@ require_file deploy/docker/docker-compose.update.yml
 require_file deploy/systemd/kubenova-update-executor.service
 require_file deploy/systemd/env/update-executor.env.example
 require_file backend/control-api/src/system-update/kubernetes-update.worker.ts
+require_file backend/control-api/src/system-update/kubernetes-update.worker.spec.ts
 require_file backend/control-api/src/system-update/kubernetes-database-backup.service.ts
 require_file deploy/k8s/update-controller.yaml
 require_file deploy/k8s/update-backups-pvc.yaml
@@ -104,7 +105,6 @@ done
 
 if node --check "$ROOT_DIR/scripts/update-executor.mjs"; then pass 'scripts/update-executor.mjs syntax'; else fail 'scripts/update-executor.mjs syntax'; fi
 if node --check "$ROOT_DIR/scripts/systemd-update-executor.mjs" && node --check "$ROOT_DIR/scripts/install-systemd-update-executor.mjs"; then pass 'systemd updater syntax'; else fail 'systemd updater syntax'; fi
-if node --check "$ROOT_DIR/backend/control-api/dist/src/system-update/kubernetes-update.worker.js"; then pass 'Kubernetes update worker build'; else fail 'Kubernetes update worker build'; fi
 if node --test "$ROOT_DIR/scripts/install-systemd-update-executor.test.mjs" "$ROOT_DIR/scripts/systemd-update-executor.test.mjs" "$ROOT_DIR/scripts/systemd-update-utils.test.mjs"; then pass 'systemd updater isolated tests'; else fail 'systemd updater isolated tests'; fi
 if node --test "$ROOT_DIR/scripts/update-preflight.test.mjs"; then pass 'update preflight and backup retention tests'; else fail 'update preflight and backup retention tests'; fi
 if node --test "$ROOT_DIR/scripts/s3-backup-storage.test.mjs"; then pass 'S3 backup storage isolated tests'; else fail 'S3 backup storage isolated tests'; fi
