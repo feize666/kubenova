@@ -34,6 +34,8 @@ const tokens=[host,client,env].map(text=>value(text,'KUBENOVA_UPDATE_EXECUTOR_TO
 if (tokens.some(v=>v.length<32 || /[^a-zA-Z0-9._~-]/.test(v))) throw new Error('执行器密钥无效：至少32位且仅允许字母数字及 . _ ~ -');
 if(new Set(tokens).size>1) throw new Error('执行器密钥冲突，保留现有文件，请先核对配置');
 const token=tokens[0] || randomBytes(32).toString('hex');
+const encryptionKey=value(env,'KUBENOVA_UPDATE_ENCRYPTION_KEY') || randomBytes(32).toString('hex');
+if(!/^[a-f0-9]{64}$/i.test(encryptionKey)) throw new Error('更新设置加密密钥无效，必须是 64 位十六进制密钥');
 let project=value(env,'COMPOSE_PROJECT_NAME');
 if (!prepare) {
   await exec('docker',['info'],{timeout:10000});
@@ -63,9 +65,12 @@ project ||= path.basename(path.dirname(composeFile)).toLowerCase();
 if(!/^[a-z0-9][a-z0-9_-]*$/.test(project)) throw new Error('Compose 项目名无效');
 const repository=value(host,'KUBENOVA_UPDATE_REPOSITORY') || value(env,'KUBENOVA_UPDATE_REPOSITORY') || 'feize666/kubenova';
 if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('更新仓库无效');
-for(const [key,val] of Object.entries({COMPOSE_PROJECT_NAME:project,KUBENOVA_UPDATE_ENABLED:'true',KUBENOVA_UPDATE_RUNTIME_DIR:runtimeDir,KUBENOVA_UPDATE_CLIENT_ENV_FILE:clientFile,KUBENOVA_UPDATE_EXECUTOR_TOKEN:'',KUBENOVA_UPDATE_EXECUTOR_URL:''})) env=set(env,key,val);
+const migrationTestCommand=value(host,'KUBENOVA_UPDATE_MIGRATION_TEST_COMMAND') || value(env,'KUBENOVA_UPDATE_MIGRATION_TEST_COMMAND');
+const compatibilityCommand=value(host,'KUBENOVA_UPDATE_OLD_VERSION_COMPATIBILITY_COMMAND') || value(env,'KUBENOVA_UPDATE_OLD_VERSION_COMPATIBILITY_COMMAND');
+if([migrationTestCommand,compatibilityCommand].some(command=>/[\r\n]/.test(command))) throw new Error('数据库迁移检查命令不能包含换行');
+for(const [key,val] of Object.entries({COMPOSE_PROJECT_NAME:project,KUBENOVA_UPDATE_ENABLED:'true',KUBENOVA_UPDATE_RUNTIME_DIR:runtimeDir,KUBENOVA_UPDATE_CLIENT_ENV_FILE:clientFile,KUBENOVA_UPDATE_EXECUTOR_TOKEN:'',KUBENOVA_UPDATE_EXECUTOR_URL:'',KUBENOVA_UPDATE_ENCRYPTION_KEY:encryptionKey})) env=set(env,key,val);
 const serialize=obj=>Object.entries(obj).map(([key,val])=>key+'='+val).join('\n')+'\n';
-const hostEnv=serialize({KUBENOVA_UPDATE_EXECUTOR_SOCKET:path.join(runtimeDir,'executor.sock'),KUBENOVA_UPDATE_EXECUTOR_TOKEN:token,KUBENOVA_UPDATE_COMPOSE_FILE:composeFile,KUBENOVA_UPDATE_ENV_FILE:envFile,KUBENOVA_UPDATE_COMPOSE_SCRIPT:path.join(root,'scripts/compose-release.sh'),KUBENOVA_UPDATE_STATE_DIR:stateDir,KUBENOVA_UPDATE_REPOSITORY:repository});
+const hostEnv=serialize({KUBENOVA_UPDATE_EXECUTOR_SOCKET:path.join(runtimeDir,'executor.sock'),KUBENOVA_UPDATE_EXECUTOR_TOKEN:token,KUBENOVA_UPDATE_COMPOSE_FILE:composeFile,KUBENOVA_UPDATE_ENV_FILE:envFile,KUBENOVA_UPDATE_COMPOSE_SCRIPT:path.join(root,'scripts/compose-release.sh'),KUBENOVA_UPDATE_STATE_DIR:stateDir,KUBENOVA_UPDATE_REPOSITORY:repository,KUBENOVA_UPDATE_MIGRATION_TEST_COMMAND:migrationTestCommand,KUBENOVA_UPDATE_OLD_VERSION_COMPATIBILITY_COMMAND:compatibilityCommand});
 const clientEnv=serialize({KUBENOVA_UPDATE_EXECUTOR_SOCKET:'/run/kubenova-update/executor.sock',KUBENOVA_UPDATE_EXECUTOR_URL:'',KUBENOVA_UPDATE_EXECUTOR_TOKEN:token,KUBENOVA_UPDATE_REPOSITORY:repository});
 let unit=await readFile(path.join(root,'deploy/systemd/kubenova-update-executor.service'),'utf8');
 unit=unit.replace(/^WorkingDirectory=.*$/m,'WorkingDirectory='+root).replace(/^EnvironmentFile=.*$/m,'EnvironmentFile='+hostFile).replace(/^ExecStart=.*$/m,'ExecStart='+process.execPath+' '+path.join(root,'scripts/update-executor.mjs')).replace(/^ReadWritePaths=.*$/m,'ReadWritePaths='+stateDir+' '+runtimeDir);

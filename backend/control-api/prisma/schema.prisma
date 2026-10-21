@@ -138,6 +138,40 @@ model NativeAccessConfig {
   cluster      ClusterRegistry @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 }
 
+model SystemUpdateSettings {
+  id            String   @id
+  encryptedData String
+  updatedBy     String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model KubernetesUpdateTask {
+  id          String    @id @default(uuid()) @db.Uuid
+  action      String    @default("install")
+  payload     Json
+  signature   String
+  status      String    @default("queued")
+  phase       String    @default("queued")
+  percent     Int?      @default(0)
+  message     String?
+  claimedBy   String?
+  leaseUntil  DateTime?
+  attempt     Int       @default(0)
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  backupLocation String?
+  backupBytes    String?
+  result         Json?
+  resultSignature String?
+  activeSlot      String?   @unique
+
+  @@index([action, createdAt])
+  @@index([status, createdAt])
+  @@index([leaseUntil])
+}
+
 model IdentityGroup {
   id           String            @id @default(cuid())
   externalId   String?

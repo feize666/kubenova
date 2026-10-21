@@ -1,6 +1,32 @@
 export interface SystemUpdateInstallRequest {
   confirm?: boolean;
   targetVersion?: string;
+  preflightId?: string;
+  backupTargetId?: string;
+}
+
+export interface SystemUpdatePreflightRequest {
+  targetVersion?: string;
+  backupTargetId?: string;
+  migrationTargetId?: string;
+}
+
+export interface SystemUpdatePreflightPayload {
+  id: string;
+  taskId?: string | null;
+  status: 'running' | 'passed' | 'failed' | 'expired';
+  targetVersion: string;
+  deploymentMode: 'compose' | 'systemd' | 'kubernetes' | 'source' | 'unknown';
+  expiresAt: string | null;
+  backupTargetId: string | null;
+  migrationTargetId: string | null;
+  message: string;
+  imageDigests?: {
+    frontend: string;
+    controlApi: string;
+    runtimeGateway: string;
+  } | null;
+  checks: Array<{ name: string; status: 'passed' | 'failed' | 'skipped'; message: string }>;
 }
 
 export interface SystemUpdateRestartRequest {
@@ -38,6 +64,7 @@ export interface SystemUpdateHistoryItem {
 }
 
 export interface SystemUpdateStatusPayload {
+  deploymentMode: 'compose' | 'systemd' | 'kubernetes' | 'source' | 'unknown';
   runningVersion: string;
   installedVersion?: string | null;
   latestVersion: string;
@@ -82,6 +109,8 @@ export interface SystemUpdateStatusPayload {
     | 'rollbacking'
     | 'failed';
   installable?: boolean;
+  updateExecutorReady?: boolean;
+  installReady?: boolean;
   installProgress?: {
     taskId: string;
     targetVersion: string;
@@ -105,6 +134,7 @@ export interface SystemUpdateStatusPayload {
   lastOperation: SystemUpdateHistoryItem | null;
   lastOperationResult: SystemUpdateOperationResult | null;
   timestamp: string;
+  preflight: SystemUpdatePreflightPayload | null;
 }
 
 export interface SystemUpdateRelease {

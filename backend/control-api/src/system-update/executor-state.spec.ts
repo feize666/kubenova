@@ -1,12 +1,15 @@
 import { SystemUpdateService } from './system-update.service';
 import * as transport from './executor-request';
+import * as deploymentMode from './deployment-mode';
 
 describe('executor readiness and task recovery', () => {
   const saved = { ...process.env };
   let service: SystemUpdateService;
   let request: jest.SpyInstance;
   beforeEach(() => {
+    process.env.KUBERNETES_SERVICE_HOST = '';
     process.env.KUBENOVA_VERSION = 'v1.1';
+    jest.spyOn(deploymentMode, 'detectDeploymentMode').mockReturnValue('systemd');
     jest.spyOn(transport, 'executorConfigured').mockReturnValue(true);
     request = jest.spyOn(transport, 'executorRequest');
     jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));

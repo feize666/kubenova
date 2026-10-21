@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Optional, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../common/auth.guard';
 import {
   assertAdministrationPermission,
@@ -9,26 +9,54 @@ import type {
   SystemUpdatePostReleaseAuditRequest,
   SystemUpdateRestartRequest,
   SystemUpdateRollbackRequest,
+  SystemUpdatePreflightRequest,
 } from './dto/system-update.dto';
 import { SystemUpdateService } from './system-update.service';
+import { UpdateSettingsService, type UpdateSettingsInput } from './update-settings.service';
 
 @Controller('api/system/update')
 @UseGuards(AuthGuard)
 export class SystemUpdateController {
-  constructor(private readonly systemUpdateService: SystemUpdateService) {}
+  constructor(private readonly systemUpdateService: SystemUpdateService, @Optional() private readonly updateSettings?: UpdateSettingsService) {}
 
   @Get('status')
   getStatus(
     @Req() req: { user: { user?: { role?: PlatformRole } } },
   ) {
     assertAdministrationPermission(req.user?.user);
-    return this.systemUpdateService.getStatus();
+    return this.systemUpdateService.getStatusForApi();
   }
 
   @Post('check')
   check(@Req() req: { user: { user?: { role?: PlatformRole } } }) {
     assertAdministrationPermission(req.user?.user);
     return this.systemUpdateService.checkForUpdates();
+  }
+
+  @Post('preflight')
+  preflight(
+    @Req() req: { user: { user?: { role?: PlatformRole } } },
+    @Body() body: SystemUpdatePreflightRequest,
+  ) {
+    assertSuperAdmin(req.user?.user);
+    return this.systemUpdateService.preflight(body ?? {});
+  }
+
+  @Get('settings')
+  getSettings(@Req() req: { user: { user?: { role?: PlatformRole } } }) {
+    assertSuperAdmin(req.user?.user);
+    if (!this.updateSettings) throw new ForbiddenException('更新设置服务未配置');
+    return this.updateSettings.get();
+  }
+
+  @Put('settings')
+  saveSettings(
+    @Req() req: { user: { user?: { username?: string; role?: PlatformRole } } },
+    @Body() body: UpdateSettingsInput,
+  ) {
+    assertSuperAdmin(req.user?.user);
+    if (!this.updateSettings) throw new ForbiddenException('更新设置服务未配置');
+    return this.updateSettings.save(body, req.user?.user?.username ?? 'unknown');
   }
 
   @Post('install')
@@ -42,6 +70,21 @@ export class SystemUpdateController {
       body ?? {},
       req.user?.user?.username ?? 'unknown',
     );
+  }
+
+  @Get('tasks/latest')
+  getLatestKubernetesTask(@Req() req: { user: { user?: { role?: PlatformRole } } }) {
+    assertAdministrationPermission(req.user?.user);
+    return this.systemUpdateService.getLatestKubernetesTask();
+  }
+
+  @Get('tasks/:taskId')
+  getKubernetesTask(
+    @Req() req: { user: { user?: { role?: PlatformRole } } },
+    @Param('taskId') taskId: string,
+  ) {
+    assertAdministrationPermission(req.user?.user);
+    return this.systemUpdateService.getKubernetesTask(taskId);
   }
 
   @Post('restart')
@@ -89,7 +132,7 @@ export class SystemUpdateController {
     @Req() req: { user: { user?: { role?: PlatformRole } } },
   ) {
     assertAdministrationPermission(req.user?.user);
-    return this.systemUpdateService.getHistory();
+    return this.systemUpdateService.getHistoryForApi();
   }
 
   @Get('releases')

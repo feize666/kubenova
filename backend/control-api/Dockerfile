@@ -10,7 +10,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV KUBENOVA_BUILD_TYPE=release
-RUN apk add --no-cache ca-certificates tzdata helm
+RUN apk add --no-cache ca-certificates tzdata helm postgresql-client aws-cli
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules

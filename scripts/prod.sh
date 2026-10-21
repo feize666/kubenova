@@ -111,6 +111,10 @@ install_systemd() {
   systemctl enable kubenova-runtime-gateway.service >/dev/null 2>&1 || true
   systemctl enable kubenova-frontend.service >/dev/null 2>&1
 
+  node "$CURRENT_DIR/scripts/install-systemd-update-executor.mjs" \
+    --root "$CURRENT_DIR" --release-base "$RELEASE_BASE" \
+    --config-dir "$ENV_DIR" --unit-dir "$SYSTEMD_DIR"
+
   echo "✔ systemd 与环境模板安装完成"
   echo "  单元目录: $SYSTEMD_DIR"
   echo "  环境目录: $ENV_DIR"

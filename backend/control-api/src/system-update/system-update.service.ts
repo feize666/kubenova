@@ -20,9 +20,18 @@ import type {
   SystemUpdateRelease,
   SystemUpdateReleasesPayload,
   SystemUpdateStatusPayload,
+  SystemUpdatePreflightRequest,
+  SystemUpdatePreflightPayload,
 } from './dto/system-update.dto';
+import { detectDeploymentMode } from './deployment-mode';
+import { UpdateSettingsService } from './update-settings.service';
+import { randomUUID } from 'node:crypto';
+import { assertValidPreflight } from './preflight-policy';
+import { Optional } from '@nestjs/common';
 import { appendAudit } from '../common/governance';
 import { executorConfigured, executorRequest } from './executor-request';
+import { fetchKubernetesReleaseManifest } from './release-manifest';
+import { KubernetesUpdateTasksService, type KubernetesUpdateTaskRecord } from './kubernetes-update-tasks.service';
 
 const execFileAsync = promisify(execFile);
 const AUDIT_SCRIPT = join(process.cwd(), 'tools/resource-reality-audit.mjs');
@@ -32,11 +41,18 @@ const AUDIT_REPORT_PATH = join(
 );
 const UPDATE_STATE_PATH = join(process.cwd(), '.run/system-update-state.json');
 const UPDATE_CHECK_INTERVAL_MS = 5 * 60_000;
-const MANUAL_UPDATE_REASON = '未配置宿主机升级执行器。请在 Linux Compose 宿主机安装执行器，并将私有 socket 和密钥接入 control-api。';
+const MANUAL_UPDATE_REASON = '未配置宿主机升级执行器。请重新运行系统安装脚本接入受保护的本机执行器与私有 socket。';
+const KUBERNETES_UPDATE_REASON = '当前为 Kubernetes 部署，但专用持久化更新执行器尚未接入；在线更新保持禁用，避免绕过 GitOps 或跳过数据库演练。';
+const rollbackImageDigests: Record<string, RegExp> = {
+  frontend: /^ghcr\.io\/feize666\/kubenova-frontend@sha256:[a-f0-9]{64}$/i,
+  controlApi: /^ghcr\.io\/feize666\/kubenova-control-api@sha256:[a-f0-9]{64}$/i,
+  runtimeGateway: /^ghcr\.io\/feize666\/kubenova-runtime-gateway@sha256:[a-f0-9]{64}$/i,
+};
 
 type RecordOperationInput = Omit<SystemUpdateHistoryItem, 'timestamp'>;
 
 interface GithubAsset {
+  id?: number;
   name?: string;
   size?: number;
   state?: string;
@@ -136,8 +152,13 @@ function runningBuild(): { version: string; buildType: 'release' | 'source' } {
 
 @Injectable()
 export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
+  constructor(
+    @Optional() private readonly updateSettings?: UpdateSettingsService,
+    @Optional() private readonly kubernetesTasks?: KubernetesUpdateTasksService,
+  ) {}
   private readonly logger = new Logger(SystemUpdateService.name);
   private readonly build = runningBuild();
+  private readonly deploymentMode = detectDeploymentMode();
   private readonly repository =
     process.env.KUBENOVA_UPDATE_REPOSITORY ?? 'feize666/kubenova';
   private readonly history: SystemUpdateHistoryItem[] = [];
@@ -156,6 +177,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     installProgress: null as ExecutorTaskState | null,
     backupVersion: null as string | null,
     rollbackCandidates: [] as Array<{ version: string; backupAvailable: boolean; imageDigests?: Record<string, string> }>,
+    preflight: null as SystemUpdateStatusPayload['preflight'],
   };
   private timer?: ReturnType<typeof setInterval>;
   private auditPromise: Promise<void> | null = null;
@@ -182,6 +204,8 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   private executorCheckAt = 0;
   private executorPromise: Promise<void> | null = null;
   private completedExecutorTask: string | null = null;
+  private observedKubernetesTask: string | null = null;
+  private preflightSettingsFingerprint: string | null = null;
 
   async onModuleInit(): Promise<void> {
     // Older updater state only changed version strings, not installed files.
@@ -190,8 +214,10 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       const parsed = JSON.parse(await readFile(UPDATE_STATE_PATH, 'utf8')) as {
         history?: SystemUpdateHistoryItem[];
         completedExecutorTask?: string;
+        completedKubernetesTask?: string;
       };
       if (typeof parsed.completedExecutorTask === 'string') this.completedExecutorTask = parsed.completedExecutorTask;
+      if (typeof parsed.completedKubernetesTask === 'string') this.observedKubernetesTask = parsed.completedKubernetesTask;
       if (Array.isArray(parsed.history))
         this.history.push(
           ...parsed.history
@@ -207,7 +233,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       UPDATE_CHECK_INTERVAL_MS,
     );
     this.timer.unref();
-    if (executorConfigured()) {
+    if (this.canUseHostExecutor() && executorConfigured()) {
       await this.refreshExecutor();
       this.executorTimer = setInterval(() => void this.refreshExecutor(), 5_000);
       this.executorTimer.unref();
@@ -220,7 +246,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   }
 
   getStatus(): SystemUpdateStatusPayload {
-    if (executorConfigured() && Date.now() - this.executorCheckAt >= 5_000) void this.refreshExecutor();
+    if (this.canUseHostExecutor() && executorConfigured() && Date.now() - this.executorCheckAt >= 5_000) void this.refreshExecutor();
     if (
       !this.updateCheckPromise &&
       (!this.lastUpdateCheckAt ||
@@ -229,6 +255,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
     )
       void this.refreshLatestVersion();
     return {
+      deploymentMode: this.deploymentMode,
       runningVersion: this.state.runningVersion,
       installedVersion: this.state.runningVersion,
       buildType: this.build.buildType,
@@ -250,12 +277,20 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       manifestUrl: this.manifestUrl,
       imageDigests: this.imageDigests,
       installStatus: this.state.installStatus,
-      installable: this.executorReady,
-      manualUpdateReason: this.executorReason,
+      installable: this.canUseHostExecutor() && this.executorReady,
+      updateExecutorReady: this.canUseHostExecutor()
+        ? this.executorReady
+        : this.deploymentMode === 'kubernetes' && Boolean(this.kubernetesTasks),
+      installReady: this.canUseHostExecutor()
+        ? this.executorReady
+        : this.deploymentMode === 'kubernetes' && Boolean(this.kubernetesTasks) && this.state.preflight?.status === 'passed',
+      manualUpdateReason: this.deploymentMode === 'kubernetes'
+        ? KUBERNETES_UPDATE_REASON
+        : !executorConfigured() ? MANUAL_UPDATE_REASON : this.executorReason,
       backupVersion: this.state.backupVersion,
       rollbackCandidates: this.state.rollbackCandidates,
       backupAvailable: Boolean(this.state.backupVersion),
-      releaseMode: executorConfigured() ? 'pointer-swap' : 'manual',
+      releaseMode: this.canUseHostExecutor() && executorConfigured() ? 'pointer-swap' : 'manual',
       postReleaseAudit: { ...this.state.postReleaseAudit },
       lastOperation: this.state.lastOperation
         ? { ...this.state.lastOperation }
@@ -265,20 +300,277 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
         ? { ...this.state.installProgress }
         : null,
       timestamp: new Date().toISOString(),
+      preflight: this.state.preflight ? { ...this.state.preflight, checks: this.state.preflight.checks.map((check) => ({ ...check })) } : null,
     };
+  }
+
+  async getStatusForApi(): Promise<SystemUpdateStatusPayload> {
+    if (this.deploymentMode === 'kubernetes' && this.kubernetesTasks) {
+      this.state.rollbackCandidates = [];
+      this.state.backupVersion = null;
+      const task = await this.kubernetesTasks.getLatest();
+      if (task) {
+        const phaseStatus: Record<string, SystemUpdateStatusPayload['installStatus']> = {
+          initializing: 'installing', 'backing-up': 'backing-up', 'migration-test': 'verifying',
+          updating: 'switching', 'health-check': 'health-check', 'rolling-back': 'rollbacking',
+        };
+        this.state.installStatus = task.status === 'queued' ? 'queued'
+          : task.status === 'running' ? phaseStatus[task.phase] ?? 'installing'
+            : task.status === 'succeeded' ? 'installed' : 'failed';
+        this.state.installProgress = task.status === 'succeeded' ? null : {
+          taskId: task.id, targetVersion: task.payload.targetVersion,
+          phase: task.phase, percent: task.percent, message: task.message,
+          startedAt: (task.startedAt ?? task.createdAt).toISOString(),
+        };
+        const previousImages = task.result?.previousImages;
+        const previousVersion = task.result?.previousVersion;
+        if (task.status === 'succeeded' && task.action !== 'preflight'
+          && previousVersion && parseVersion(previousVersion)
+          && previousImages && Object.entries(rollbackImageDigests).every(([component, pattern]) =>
+            typeof previousImages[component] === 'string' && pattern.test(previousImages[component]),
+          )) {
+          this.state.backupVersion = previousVersion;
+          this.state.rollbackCandidates = [{ version: previousVersion, backupAvailable: Boolean(task.backupLocation), imageDigests: previousImages }];
+        }
+        if (task.action !== 'preflight' && (task.status === 'succeeded' || task.status === 'failed') && this.observedKubernetesTask !== task.id) {
+          this.observedKubernetesTask = task.id;
+          const success = task.status === 'succeeded';
+          this.recordOperation({ operationType: task.action as 'install' | 'rollback', targetVersion: task.payload.targetVersion,
+            result: success ? 'success' : 'failed',
+            message: task.message ?? (success ? 'Kubernetes 更新任务已完成' : 'Kubernetes 更新任务失败'),
+            operator: task.payload.operator,
+          });
+          appendAudit({ actor: task.payload.operator, role: 'platform-admin', action: 'update', resourceType: 'system-update',
+            resourceId: task.payload.targetVersion, result: success ? 'success' : 'failure', reason: task.message ?? task.payload.action });
+        }
+      }
+      const preflightTask = await this.kubernetesTasks.getLatestPreflight();
+      if (preflightTask) {
+        const checks = preflightTask.result?.checks ?? preflightTask.payload.preflightChecks ?? [];
+        const resultPassed = preflightTask.status === 'succeeded' && checks.length > 0 && checks.every((check) => check.status === 'passed');
+        this.state.preflight = {
+          id: preflightTask.payload.preflightId,
+          taskId: preflightTask.id,
+          status: preflightTask.status === 'queued' || preflightTask.status === 'running' ? 'running' : resultPassed ? 'passed' : 'failed',
+          targetVersion: preflightTask.payload.targetVersion,
+          deploymentMode: 'kubernetes',
+          expiresAt: preflightTask.payload.preflightExpiresAt,
+          backupTargetId: preflightTask.payload.backupTargetId,
+          migrationTargetId: preflightTask.payload.migrationTargetId ?? null,
+          imageDigests: preflightTask.payload.images,
+          message: preflightTask.message ?? (resultPassed ? 'Kubernetes 临时数据库演练全部通过' : 'Kubernetes 临时数据库演练失败，已阻止更新'),
+          checks,
+        };
+      }
+    }
+    return this.getStatus();
   }
 
   async checkForUpdates(): Promise<SystemUpdateStatusPayload> {
     this.invalidateReleasesCache();
     await this.refreshLatestVersion();
-    await this.refreshExecutor();
+    if (this.canUseHostExecutor()) await this.refreshExecutor();
+    else this.executorReason = KUBERNETES_UPDATE_REASON;
     return this.getStatus();
+  }
+
+  async preflight(body: SystemUpdatePreflightRequest): Promise<SystemUpdateStatusPayload> {
+    const targetVersion = body.targetVersion?.trim() || this.state.latestVersion;
+    const checks: SystemUpdatePreflightPayload['checks'] = [];
+    const add = (name: string, status: 'passed' | 'failed' | 'skipped', message: string) => checks.push({ name, status, message });
+    if (this.canUseHostExecutor()) await this.refreshExecutor();
+    const executorUnavailableReason = this.deploymentMode === 'kubernetes'
+      ? KUBERNETES_UPDATE_REASON
+      : executorConfigured() ? this.executorReason : '当前部署未接入受保护的更新执行器';
+    add(
+      '更新执行器',
+      this.canUseHostExecutor() && this.executorReady || this.deploymentMode === 'kubernetes' && Boolean(this.kubernetesTasks) ? 'passed' : 'failed',
+      this.canUseHostExecutor() && this.executorReady
+        ? this.executorReason
+        : this.deploymentMode === 'kubernetes' && this.kubernetesTasks
+          ? 'Kubernetes 持久化更新任务队列已接入，可执行受保护的数据库演练'
+          : executorUnavailableReason,
+    );
+    await this.refreshLatestVersion();
+    const releases = await this.getReleases();
+    const release = releases.items.find((item) => item.tag === targetVersion);
+    if (release?.releaseReady) add('正式发布资产', 'passed', `${targetVersion} 的下载包、校验文件和清单完整`);
+    else add('正式发布资产', 'failed', release?.validationMessage ?? releases.error ?? '目标版本不是已校验的正式版本');
+    let imageDigests: SystemUpdatePreflightPayload['imageDigests'] = null;
+    if (this.deploymentMode === 'kubernetes') {
+      try {
+        if (!release?.releaseReady) throw new Error('目标版本没有完整的正式发布资产');
+        imageDigests = await this.fetchKubernetesImageDigests(targetVersion);
+        add('Kubernetes 镜像清单', 'passed', '发布清单版本、仓库和三个不可变镜像摘要均已核验');
+      } catch (error) {
+        add('Kubernetes 镜像清单', 'failed', error instanceof Error ? error.message : 'Kubernetes 镜像清单校验失败');
+      }
+    }
+    const settings = this.updateSettings ? await this.updateSettings.get() : null;
+    const executorSettings = this.updateSettings ? await this.updateSettings.getForExecutor() : null;
+    const backupTargets: Array<{ id: string; name: string; configured: boolean }> = settings?.backupTargets ?? [];
+    const migrationTargets: Array<{ id: string; name: string; configured: boolean }> = settings?.migrationTargets ?? [];
+    this.preflightSettingsFingerprint = this.updateSettings ? await this.updateSettings.fingerprint() : null;
+    const backupTarget = body.backupTargetId ? backupTargets.find((item) => item.id === body.backupTargetId) : backupTargets[0];
+    const migrationTarget = body.migrationTargetId ? migrationTargets.find((item) => item.id === body.migrationTargetId) : migrationTargets[0];
+    if (backupTarget?.configured) add('数据库备份目标', 'passed', `已选择 ${backupTarget.name}`);
+    else add('数据库备份目标', 'failed', '请先配置并验证一个备份目标');
+    if (migrationTarget?.configured) add('迁移测试目标', 'passed', `已选择 ${migrationTarget.name}`);
+    else add('迁移测试目标', 'failed', '请先配置并验证一个迁移测试目标');
+    if (this.deploymentMode === 'kubernetes') {
+      const preflightId = randomUUID();
+      const expiresAt = new Date(Date.now() + 30 * 60_000).toISOString();
+      const preliminaryPassed = checks.every((check) => check.status === 'passed') && Boolean(release?.releaseReady && imageDigests && backupTarget && migrationTarget && executorSettings && this.kubernetesTasks);
+      if (!preliminaryPassed) {
+        add('Kubernetes 数据库演练', 'failed', '发布资产、镜像摘要、备份或迁移配置未就绪，未创建预检任务');
+        if (this.kubernetesTasks?.invalidateLatestPreflight)
+          await this.kubernetesTasks.invalidateLatestPreflight(checks, '新的 Kubernetes 预检未满足执行条件，之前的预检已失效');
+        this.state.preflight = { id: preflightId, taskId: null, status: 'failed', targetVersion, deploymentMode: this.deploymentMode,
+          expiresAt: null, backupTargetId: backupTarget?.id ?? null, migrationTargetId: migrationTarget?.id ?? null,
+          imageDigests, message: '预检未通过，请修复失败项后重新预检', checks };
+        return this.getStatus();
+      }
+      const task = await this.kubernetesTasks!.submit({
+        action: 'preflight', targetVersion, preflightId, preflightExpiresAt: expiresAt,
+        backupTargetId: backupTarget!.id, migrationTargetId: migrationTarget!.id,
+        settingsFingerprint: this.preflightSettingsFingerprint!, preflightChecks: checks,
+        images: imageDigests!, operator: 'system-preflight',
+      });
+      this.state.preflight = { id: preflightId, taskId: task.id, status: 'running', targetVersion, deploymentMode: this.deploymentMode,
+        expiresAt, backupTargetId: backupTarget!.id, migrationTargetId: migrationTarget!.id,
+        imageDigests, message: 'Kubernetes 数据库备份、恢复、迁移兼容和临时库清理正在执行', checks };
+      return this.getStatus();
+    }
+    if (this.executorReady && executorSettings && backupTarget && migrationTarget) {
+      const privateBackupTarget = executorSettings.backupTargets.find((item) => item.id === backupTarget.id);
+      const privateMigrationTarget = executorSettings.migrationTargets.find((item) => item.id === migrationTarget.id);
+      try {
+        const response = await executorRequest('/v1/system-update/preflight', {
+          targetVersion,
+          backupTarget: privateBackupTarget,
+          migrationTarget: privateMigrationTarget,
+          targetRelease: release?.manifestUrl ? { manifestUrl: release.manifestUrl } : null,
+        });
+        if (!response.ok) throw new Error(`宿主机预检执行器拒绝请求（HTTP ${response.status}）`);
+        const result = await response.json() as { status?: string; checks?: Array<{ name: string; status: 'passed' | 'failed' | 'skipped'; message: string }> };
+        if (!Array.isArray(result.checks) || !['passed', 'failed'].includes(result.status ?? '')) throw new Error('宿主机预检执行器返回无效结果');
+        for (const check of result.checks) add(check.name, check.status, check.message);
+        if (result.status !== 'passed' && result.checks.every((check) => check.status === 'passed'))
+          add('预检执行器结果', 'failed', '宿主机执行器未确认整体验证通过');
+      } catch (error) {
+        add('备份与磁盘预检', 'failed', error instanceof Error ? error.message : '宿主机备份预检失败');
+        add('迁移副本演练', 'failed', '没有获得完整的迁移兼容与测试库清理验证结果');
+      }
+    } else {
+      add('备份与磁盘预检', 'failed', '执行器未就绪或备份目标未配置');
+      add('迁移副本演练', 'failed', '执行器未就绪或迁移测试目标未配置');
+    }
+    const passed = checks.every((check) => check.status === 'passed');
+    this.state.preflight = {
+      id: randomUUID(), status: passed ? 'passed' : 'failed', targetVersion, deploymentMode: this.deploymentMode,
+      expiresAt: passed ? new Date(Date.now() + 30 * 60_000).toISOString() : null,
+      backupTargetId: backupTarget?.id ?? null, migrationTargetId: migrationTarget?.id ?? null,
+      imageDigests,
+      message: passed ? '预检通过；正式执行时仍会再次备份并验证数据库' : '预检未通过，请修复失败项后重新预检', checks,
+    };
+    return this.getStatus();
+  }
+
+  private async fetchKubernetesImageDigests(targetVersion: string): Promise<NonNullable<SystemUpdatePreflightPayload['imageDigests']>> {
+    const raw = await this.fetchGithub(`/releases/tags/${encodeURIComponent(targetVersion)}`) as GithubRelease;
+    if (!isFormalStableRelease(raw) || raw.tag_name !== targetVersion) throw new Error('GitHub 返回的发布清单与目标版本不匹配');
+    const asset = raw.assets?.find((candidate) => candidate.name === 'release-manifest.json' && candidate.state === 'uploaded' && Number(candidate.size) > 0);
+    if (!asset || !Number.isSafeInteger(asset.id) || (asset.id ?? 0) <= 0) throw new Error('目标版本缺少可验证的 release-manifest.json 资产编号');
+    return fetchKubernetesReleaseManifest({
+      repository: this.repository,
+      releaseVersion: targetVersion,
+      assetId: asset.id!,
+      token: process.env.KUBENOVA_UPDATE_GITHUB_TOKEN,
+    });
   }
 
   install(body: SystemUpdateInstallRequest, operator: string): Promise<SystemUpdateStatusPayload> {
     this.requireConfirm(body.confirm, 'install');
+    if (this.deploymentMode === 'kubernetes') {
+      if (!this.kubernetesTasks) return this.unsupportedDeployment();
+      return this.startKubernetesInstall(body, operator);
+    }
+    if (!this.canUseHostExecutor()) return this.unsupportedDeployment();
     if (!executorConfigured()) return this.unsupportedDeployment();
     return this.startInstall(body, operator);
+  }
+
+  async getKubernetesTask(id: string): Promise<KubernetesUpdateTaskRecord | null> {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new BadRequestException('Kubernetes 更新任务编号无效');
+    return this.kubernetesTasks?.get(id) ?? null;
+  }
+
+  async getLatestKubernetesTask(): Promise<KubernetesUpdateTaskRecord | null> {
+    return this.kubernetesTasks?.getLatest() ?? null;
+  }
+
+  private async startKubernetesInstall(body: SystemUpdateInstallRequest, operator: string): Promise<SystemUpdateStatusPayload> {
+    if (!this.kubernetesTasks) throw new NotImplementedException(KUBERNETES_UPDATE_REASON);
+    const durablePreflight = await this.kubernetesTasks.getLatestPreflight();
+    if (durablePreflight?.action === 'preflight') {
+      const checks = durablePreflight.result?.checks ?? [];
+      if (durablePreflight.status === 'succeeded' && checks.length > 0 && checks.every((check) => check.status === 'passed')) {
+        this.preflightSettingsFingerprint = durablePreflight.payload.settingsFingerprint ?? null;
+        this.state.preflight = {
+          id: durablePreflight.payload.preflightId, taskId: durablePreflight.id, status: 'passed',
+          targetVersion: durablePreflight.payload.targetVersion, deploymentMode: 'kubernetes',
+          expiresAt: durablePreflight.payload.preflightExpiresAt, backupTargetId: durablePreflight.payload.backupTargetId,
+          migrationTargetId: durablePreflight.payload.migrationTargetId ?? null, imageDigests: durablePreflight.payload.images,
+          message: durablePreflight.message ?? 'Kubernetes 临时数据库演练全部通过', checks,
+        };
+      } else {
+        this.state.preflight = {
+          id: durablePreflight.payload.preflightId, taskId: durablePreflight.id,
+          status: durablePreflight.status === 'queued' || durablePreflight.status === 'running' ? 'running' : 'failed',
+          targetVersion: durablePreflight.payload.targetVersion, deploymentMode: 'kubernetes',
+          expiresAt: durablePreflight.payload.preflightExpiresAt, backupTargetId: durablePreflight.payload.backupTargetId,
+          migrationTargetId: durablePreflight.payload.migrationTargetId ?? null, imageDigests: durablePreflight.payload.images,
+          message: durablePreflight.message ?? 'Kubernetes 临时数据库演练失败，已阻止更新', checks,
+        };
+      }
+    }
+    const preflight = this.state.preflight;
+    const targetVersion = body.targetVersion?.trim() || preflight?.targetVersion || '';
+    const settingsFingerprint = this.updateSettings ? await this.updateSettings.fingerprint() : undefined;
+    try {
+      const bound = preflight
+        ? { ...preflight, settingsFingerprint: this.preflightSettingsFingerprint ?? undefined }
+        : null;
+      assertValidPreflight(bound, body.preflightId, targetVersion, Date.now(), settingsFingerprint, body.backupTargetId);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : '请先重新运行预检');
+    }
+    if (!preflight || preflight.deploymentMode !== 'kubernetes' || preflight.status !== 'passed'
+      || preflight.checks.some((check) => check.status !== 'passed') || !preflight.imageDigests) {
+      throw new BadRequestException('Kubernetes 备份与迁移演练尚未全部通过，已阻止更新');
+    }
+    if (!this.updateSettings) throw new BadRequestException('更新设置服务未配置，无法验证备份目标');
+    const selectedTarget = (await this.updateSettings.getForExecutor()).backupTargets
+      .find((target) => target.id === preflight.backupTargetId);
+    if (!selectedTarget) throw new BadRequestException('预检绑定的备份目标不存在，请重新运行预检');
+    if (targetVersion !== preflight.targetVersion) throw new BadRequestException('目标版本与已通过的预检不一致');
+    const task = await this.kubernetesTasks.submit({
+      action: 'install', targetVersion,
+      preflightId: preflight.id,
+      preflightExpiresAt: preflight.expiresAt!,
+      backupTargetId: preflight.backupTargetId!,
+      settingsFingerprint: this.preflightSettingsFingerprint!,
+      previousVersion: this.state.runningVersion,
+      images: preflight.imageDigests,
+      operator,
+    });
+    this.state.installStatus = 'queued';
+    this.state.installProgress = {
+      taskId: task.id, targetVersion, phase: task.phase, percent: task.percent,
+      message: task.message, startedAt: task.createdAt.toISOString(),
+    };
+    this.recordOperation({ operationType: 'install', targetVersion, result: 'queued', message: 'Kubernetes 更新任务已持久化，等待专用执行器处理', operator });
+    return this.getStatus();
   }
 
   private async startInstall(body: SystemUpdateInstallRequest, operator: string): Promise<SystemUpdateStatusPayload> {
@@ -301,11 +593,22 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('目标版本不是已校验的正式版本');
     if (!isNewerVersion(targetVersion, this.state.runningVersion))
       throw new BadRequestException('目标版本必须高于当前运行版本');
+    const settingsFingerprint = this.updateSettings ? await this.updateSettings.fingerprint() : undefined;
+    try {
+      const boundPreflight = this.state.preflight
+        ? { ...this.state.preflight, settingsFingerprint: this.preflightSettingsFingerprint ?? undefined }
+        : null;
+      assertValidPreflight(boundPreflight, body.preflightId, targetVersion, Date.now(), settingsFingerprint, body.backupTargetId);
+    }
+    catch (error) { throw new BadRequestException(error instanceof Error ? error.message : '请先重新运行预检'); }
     this.downloadUrl = release.downloadUrl;
     this.checksumUrl = release.checksumUrl;
     this.manifestUrl = release.manifestUrl;
     this.imageDigests = release.imageDigests ?? null;
-    const task = await this.createExecutorTask('install', targetVersion, operator, release);
+    const updateSettings = this.updateSettings ? await this.updateSettings.getForExecutor() : null;
+    const selectedBackupTarget = updateSettings?.backupTargets.find((item) => item.id === body.backupTargetId);
+    if (!selectedBackupTarget) throw new BadRequestException('预检使用的备份目标不存在，请重新运行预检');
+    const task = await this.createExecutorTask('install', targetVersion, operator, release, selectedBackupTarget);
     this.state.installStatus = 'queued';
     this.state.installProgress = task;
     this.recordOperation({ operationType: 'install', targetVersion, result: 'queued', message: '升级任务已提交，等待宿主机执行器处理', operator });
@@ -320,8 +623,45 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   }
   rollback(body: SystemUpdateRollbackRequest, operator: string): Promise<SystemUpdateStatusPayload> {
     this.requireConfirm(body.confirm, 'rollback');
+    if (this.deploymentMode === 'kubernetes') {
+      if (!this.kubernetesTasks) return Promise.reject(new NotImplementedException(KUBERNETES_UPDATE_REASON));
+      return this.startKubernetesRollback(body, operator);
+    }
+    if (!this.canUseHostExecutor()) return this.unsupportedDeployment();
     if (!executorConfigured()) return this.unsupportedDeployment();
     return this.startRollback(body, operator);
+  }
+
+  private async startKubernetesRollback(body: SystemUpdateRollbackRequest, operator: string): Promise<SystemUpdateStatusPayload> {
+    if (!this.kubernetesTasks) throw new NotImplementedException(KUBERNETES_UPDATE_REASON);
+    if (this.state.installStatus !== 'idle' && this.state.installStatus !== 'installed' && this.state.installStatus !== 'failed')
+      throw new BadRequestException('已有升级任务正在运行，请等待完成');
+    const latest = await this.kubernetesTasks.getLatest();
+    const images = latest?.result?.previousImages;
+    const targetVersion = body.targetVersion?.trim() || latest?.result?.previousVersion;
+    if (!latest || latest.status !== 'succeeded' || latest.action === 'preflight' || !targetVersion
+      || targetVersion !== latest.result?.previousVersion || !images
+      || !Object.entries(rollbackImageDigests).every(([component, pattern]) => typeof images[component] === 'string' && pattern.test(images[component])))
+      throw new BadRequestException('没有通过校验的 Kubernetes 旧版镜像可回滚；最近一次更新未保存完整的不可变镜像集');
+    if (!this.updateSettings) throw new BadRequestException('更新设置服务未配置，无法备份当前数据库');
+    const settings = await this.updateSettings.getForExecutor();
+    const settingsFingerprint = await this.updateSettings.fingerprint();
+    const backupTarget = settings.backupTargets.find((item) => item.id === latest.payload.backupTargetId);
+    if (!backupTarget) throw new BadRequestException('回滚任务绑定的数据库备份目标已不存在，请先修复备份设置');
+    if (targetVersion !== latest.result.previousVersion) throw new BadRequestException('目标版本与持久化回滚镜像不匹配');
+    const task = await this.kubernetesTasks.submit({
+      action: 'rollback', targetVersion, previousVersion: this.state.runningVersion,
+      rollbackTaskId: latest.id, preflightId: randomUUID(),
+      preflightExpiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+      backupTargetId: backupTarget.id, images: images as KubernetesUpdateTaskRecord['payload']['images'], operator,
+      settingsFingerprint,
+    });
+    this.state.installStatus = 'queued';
+    this.state.installProgress = { taskId: task.id, targetVersion, phase: task.phase, percent: task.percent,
+      message: task.message, startedAt: task.createdAt.toISOString() };
+    this.recordOperation({ operationType: 'rollback', targetVersion, result: 'queued',
+      message: 'Kubernetes 回滚任务已持久化；执行前将先备份当前数据库并等待三个服务健康', operator });
+    return this.getStatus();
   }
 
   private async startRollback(body: SystemUpdateRollbackRequest, operator: string): Promise<SystemUpdateStatusPayload> {
@@ -341,17 +681,22 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   private unsupportedDeployment(): never {
     throw new NotImplementedException({
       code: 'SYSTEM_UPDATE_DEPLOYMENT_REQUIRED',
-      message: MANUAL_UPDATE_REASON,
+      message: this.deploymentMode === 'kubernetes' ? KUBERNETES_UPDATE_REASON : MANUAL_UPDATE_REASON,
     });
   }
 
-  private async createExecutorTask(action: 'install' | 'rollback', targetVersion: string, operator: string, release?: SystemUpdateRelease): Promise<ExecutorTaskState> {
+  private canUseHostExecutor(): boolean {
+    return this.deploymentMode === 'compose' || this.deploymentMode === 'systemd';
+  }
+
+  private async createExecutorTask(action: 'install' | 'rollback', targetVersion: string, operator: string, release?: SystemUpdateRelease, backupTarget?: unknown): Promise<ExecutorTaskState> {
     let response: Response;
     try {
       response = await executorRequest('/v1/system-update/tasks', {
           action,
           targetVersion,
           release: action === 'install' ? { downloadUrl: release?.downloadUrl ?? this.downloadUrl, checksumUrl: release?.checksumUrl ?? this.checksumUrl, manifestUrl: release?.manifestUrl ?? this.manifestUrl, imageDigests: release?.imageDigests ?? this.imageDigests } : undefined,
+          backupTarget: action === 'install' ? backupTarget : undefined,
           operator,
       });
     } catch {
@@ -372,7 +717,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async refreshExecutor(): Promise<void> {
-    if (!executorConfigured()) return;
+    if (!this.canUseHostExecutor() || !executorConfigured()) return;
     if (this.executorPromise) return this.executorPromise;
     this.executorPromise = (async () => {
       try {
@@ -445,6 +790,21 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
       timestamp: new Date().toISOString(),
     };
   }
+  async getHistoryForApi() {
+    const tasks = this.kubernetesTasks ? await this.kubernetesTasks.listRecent(50) : [];
+    const durable = tasks.filter((task) => task.action !== 'preflight').map((task): SystemUpdateHistoryItem => ({
+      operationType: task.payload.action as 'install' | 'rollback',
+      targetVersion: task.payload.targetVersion,
+      result: task.status === 'succeeded' ? 'success' : task.status === 'failed' ? 'failed' : task.status === 'running' ? 'running' : 'queued',
+      message: task.message ?? (task.status === 'queued' ? 'Kubernetes 更新任务已排队' : task.status === 'running' ? `Kubernetes 更新阶段：${task.phase}` : task.status === 'succeeded' ? 'Kubernetes 更新任务已完成' : 'Kubernetes 更新任务失败'),
+      timestamp: (task.completedAt ?? task.startedAt ?? task.createdAt).toISOString(),
+      operator: task.payload.operator,
+    }));
+    const taskKeys = new Set(durable.map((item) => `${item.operationType}:${item.targetVersion}:${item.operator}`));
+    const memory = this.history.filter((item) => !taskKeys.has(`${item.operationType}:${item.targetVersion}:${item.operator}`));
+    const items = [...durable, ...memory].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp)).slice(0, 200);
+    return { items, total: items.length, timestamp: new Date().toISOString() };
+  }
 
   async getReleases(): Promise<SystemUpdateReleasesPayload> {
     if (this.releasesCache && Date.now() - this.releasesCacheAt < UPDATE_CHECK_INTERVAL_MS)
@@ -492,7 +852,7 @@ export class SystemUpdateService implements OnModuleInit, OnModuleDestroy {
         await mkdir(join(process.cwd(), '.run'), { recursive: true });
         await writeFile(
           UPDATE_STATE_PATH,
-          JSON.stringify({ history: this.history, completedExecutorTask: this.completedExecutorTask }),
+          JSON.stringify({ history: this.history, completedExecutorTask: this.completedExecutorTask, completedKubernetesTask: this.observedKubernetesTask }),
           { mode: 0o600 },
         );
       })

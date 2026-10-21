@@ -10,6 +10,9 @@ resources:
   - postgres.yaml
   - redis.yaml
   - control-api.yaml
+  - update-executor-rbac.yaml
+  - update-controller.yaml
+  - update-backups-pvc.yaml
   - runtime-gateway.yaml
   - frontend.yaml
   - ingress.yaml

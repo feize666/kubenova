@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubenova-update-controller
+  namespace: kubenova
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubenova-update-controller
+  template:
+    metadata:
+      labels:
+        app: kubenova-update-controller
+    spec:
+      serviceAccountName: kubenova-update-executor
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: update-controller
+          image: ghcr.io/feize1995/kubenova-control-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["node", "dist/src/system-update/kubernetes-update.worker.js"]
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kubenova-platform-secret
+                  key: DATABASE_URL
+            - name: AI_CREDENTIAL_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubenova-platform-secret
+                  key: AI_CREDENTIAL_ENCRYPTION_KEY
+            - name: KUBENOVA_K8S_UPDATE_TASK_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubenova-platform-secret
+                  key: KUBENOVA_K8S_UPDATE_TASK_KEY
+                  optional: true
+            - name: KUBENOVA_UPDATE_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubenova-platform-secret
+                  key: KUBENOVA_UPDATE_ENCRYPTION_KEY
+                  optional: true
+            - name: KUBENOVA_K8S_UPDATE_BACKUP_ROOT
+              value: /var/lib/kubenova/update-backups
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: update-backups
+              mountPath: /var/lib/kubenova/update-backups
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+        - name: update-backups
+          persistentVolumeClaim:
+            claimName: kubenova-update-backups

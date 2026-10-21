@@ -46,7 +46,69 @@ try {
   await page.getByText('操作记录读取失败', { exact: true }).evaluate(node => node.scrollIntoView({ block: 'center' }));
   await page.getByText('操作记录读取失败', { exact: true }).waitFor();
   assert.ok(await page.getByRole('heading', { name: '系统更新', exact: true }).isVisible());
+  const actionPage = await browser.newPage();
+  const actionErrors = [];
+  actionPage.on('pageerror', error => actionErrors.push(error.message));
+  await actionPage.addInitScript(data => {
+    localStorage.setItem('aiops_auth_access', data.accessToken);
+    localStorage.setItem('aiops_auth_user', data.user.username);
+    localStorage.setItem('aiops_auth_role', data.user.role);
+    localStorage.setItem('aiops_auth_expires_at', data.expiresAt);
+  }, auth);
+  const releaseUrl = 'https://github.com/feize666/kubenova/releases/tag/v1.2';
+  const assetBase = 'https://github.com/feize666/kubenova/releases/download/v1.2/';
+  const updateStatus = {
+    deploymentMode: 'compose', checkState: 'available', releaseNotes: 'UI executor regression fixture', migrationRequired: false,
+    runningVersion: 'v1.1', installedVersion: 'v1.1', latestVersion: 'v1.2', updateAvailable: true,
+    latestReleaseUrl: releaseUrl, latestReleasePublishedAt: '2026-10-18T00:00:00.000Z', lastUpdateCheckAt: '2026-10-18T00:00:00.000Z',
+    buildType: 'release', updateCheckError: null, releaseValidationMessage: null, releaseReady: true,
+    downloadUrl: assetBase + 'kubenova-ubuntu.tar.gz', checksumUrl: assetBase + 'kubenova-ubuntu.tar.gz.sha256', manifestUrl: assetBase + 'release-manifest.json',
+    manualUpdateReason: '', backupVersion: 'v1.0', rollbackCandidates: [{ version: 'v1.0', backupAvailable: true }], backupAvailable: true,
+    installStatus: 'idle', installable: true, updateExecutorReady: true, installProgress: null, releaseMode: 'pointer-swap',
+    preflight: { id: 'preflight-ui-test', status: 'passed', targetVersion: 'v1.2', deploymentMode: 'compose', expiresAt: new Date(Date.now() + 60000).toISOString(), backupTargetId: 'backup-ui-test', migrationTargetId: 'migration-ui-test', message: 'passed', checks: [{ name: 'executor', status: 'passed', message: 'ready' }] },
+    postReleaseAudit: { enabled: false, strategy: 'async-after-release', status: 'idle', lastRunAt: null, lastSummary: null },
+    lastOperation: null, lastOperationResult: null, timestamp: new Date().toISOString(),
+  };
+  const release = { tag: 'v1.2', name: 'KubeNova v1.2', url: releaseUrl, publishedAt: updateStatus.latestReleasePublishedAt, notes: 'UI executor regression fixture', downloadUrl: updateStatus.downloadUrl, checksumUrl: updateStatus.checksumUrl, manifestUrl: updateStatus.manifestUrl, releaseReady: true };
+  const submittedActions = [];
+  await actionPage.route('**/api/system/update/status', route => route.fulfill({ json: updateStatus }));
+  await actionPage.route('**/api/system/update/releases', route => route.fulfill({ json: { items: [release], total: 1, timestamp: new Date().toISOString() } }));
+  await actionPage.route('**/api/system/update/history', route => route.fulfill({ json: { items: [], total: 0, timestamp: new Date().toISOString() } }));
+  await actionPage.route('**/api/system/update/check', async route => {
+    await new Promise(resolve => setTimeout(resolve, 700));
+    return route.fulfill({ json: updateStatus });
+  });
+  await actionPage.route('**/api/system/update/install', async route => {
+    submittedActions.push({ action: 'install', body: route.request().postDataJSON() });
+    return route.fulfill({ json: { ...updateStatus, installStatus: 'queued', installProgress: { taskId: 'mock-install', targetVersion: 'v1.2', phase: 'queued', percent: 0, message: 'test task', startedAt: new Date().toISOString() } } });
+  });
+  await actionPage.route('**/api/system/update/rollback', async route => {
+    submittedActions.push({ action: 'rollback', body: route.request().postDataJSON() });
+    return route.fulfill({ json: { ...updateStatus, installStatus: 'idle' } });
+  });
+  await actionPage.goto(base + '/settings/update');
+  await actionPage.getByRole('button', { name: '确认更新并启动 v1.2' }).waitFor();
+  assert.ok(await actionPage.getByRole('button', { name: '一键回滚并启动' }).isVisible());
+  const currentVersion = actionPage.getByText('v1.1', { exact: true }).first();
+  await Promise.all([
+    actionPage.waitForResponse(response => response.url().endsWith('/api/system/update/check') && response.request().method() === 'POST'),
+    actionPage.getByRole('button', { name: '检查更新', exact: true }).click(),
+  ]);
+  assert.ok(await currentVersion.isVisible(), 'checking updates must keep the displayed version instead of flashing to a blank skeleton');
+  await actionPage.getByRole('button', { name: '一键回滚并启动' }).click();
+  await Promise.all([
+    actionPage.waitForResponse(response => response.url().endsWith('/api/system/update/rollback') && response.request().method() === 'POST'),
+    actionPage.getByRole('button', { name: '确认回滚并启动' }).click(),
+  ]);
+  await actionPage.getByRole('button', { name: '确认更新并启动 v1.2' }).click();
+  await Promise.all([
+    actionPage.waitForResponse(response => response.url().endsWith('/api/system/update/install') && response.request().method() === 'POST'),
+    actionPage.getByRole('button', { name: '确认更新并启动', exact: true }).click(),
+  ]);
+  assert.deepEqual(submittedActions.map(item => item.action), ['rollback', 'install']);
+  assert.deepEqual(actionErrors, []);
+  await actionPage.close();
   assert.deepEqual(errors, []);
   assert.deepEqual(missingAssets, []);
-  console.log('PASS real update route: login, rendered page, forced check, desktop/mobile, API reads, explicit 503 errors, no JS errors or missing assets');
+  console.log('PASS update route: real login/API checks, desktop/mobile, explicit errors, stable content during checks, one-click install/rollback UI handoff, no JS errors or missing assets');
 } finally { await browser.close(); }

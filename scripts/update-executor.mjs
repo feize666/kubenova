@@ -2,13 +2,17 @@
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, writeFile, readdir, stat, rm, rename, chmod, lstat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, stat, statfs, rm, rename, chmod, lstat } from 'node:fs/promises';
 import { createWriteStream, createReadStream } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
+import { pruneRetainedBackups } from './update-backup-retention.mjs';
+import { createS3BackupStorage } from './s3-backup-storage.mjs';
+import { runPostgresMigrationRehearsal } from './update-preflight.mjs';
+import { createComposeMigrationAdapter, selectSharedDockerNetwork } from './compose-update-preflight.mjs';
 
 const exec = promisify(execFile);
 const root = resolve(import.meta.dirname, '..');
@@ -30,13 +34,25 @@ const digestValue = value => typeof value === 'string' && /^ghcr\.io\/[A-Za-z0-9
 const safeManifestUrl = (value, tag) => safeReleaseUrl(value, tag, 'release-manifest.json');
 
 function persist() {
-  const data = JSON.stringify([...tasks.values()].slice(-100));
+  const data = JSON.stringify([...tasks.values()].slice(-100).map(persistedTask));
   const operation = persistQueue.then(async () => {
     await writeFile(stateFile + '.tmp', data, { mode: 0o600 });
     await rename(stateFile + '.tmp', stateFile);
   });
   persistQueue = operation.catch(() => {});
   return operation;
+}
+function persistedTask(task) {
+  if (!task.backupTarget) return task;
+  const { secret: _secret, ...backupTarget } = task.backupTarget;
+  return { ...task, backupTarget };
+}
+function s3Storage(target) {
+  return createS3BackupStorage({
+    location: target?.location,
+    secret: target?.secret,
+    run: (command, args, options = {}) => run(command, args, options.timeout, options.env),
+  });
 }
 async function setTask(task, patch) { Object.assign(task, patch); await persist(); }
 async function envValues() {
@@ -63,6 +79,87 @@ async function ready() {
   await run('docker', ['info', '--format', '{{.ServerVersion}}'], 4_000);
   await run('docker', [...await composeArgs(), 'config', '--quiet'], 4_000);
 }
+async function preflight(input = {}) {
+  const checks = [];
+  try { await ready(); checks.push({ name: '部署健康', status: 'passed', message: 'Docker、Compose 配置和应用编排可用' }); }
+  catch (error) { checks.push({ name: '部署健康', status: 'failed', message: error instanceof Error ? error.message : 'Compose 执行器未就绪' }); return { status: 'failed', checks }; }
+  let remoteBackup = null;
+  const target = input.backupTarget?.type === 'local' && input.backupTarget.location ? input.backupTarget.location : join(stateDir, 'backups');
+  let backupProbe = null;
+  try {
+    if (input.backupTarget?.type === 's3') remoteBackup = s3Storage(input.backupTarget);
+    await mkdir(target, { recursive: true, mode: 0o700 });
+    const probe = join(target, `.preflight-${randomUUID()}`);
+    await writeFile(probe, 'kubenova-preflight', { flag: 'wx', mode: 0o600 }); await rm(probe, { force: true });
+    if (remoteBackup) {
+      await remoteBackup.verify();
+      checks.push({ name: '备份目标', status: 'passed', message: 'S3 兼容存储写入、读回校验和临时对象清理均通过' });
+    } else {
+      const stats = await statfs(target);
+      const minimum = Number(process.env.KUBENOVA_UPDATE_MIN_FREE_BYTES || 64 * 1024 * 1024);
+      if (stats.bavail * stats.bsize < minimum) throw new Error('备份目标可用空间不足');
+      checks.push({ name: '备份目标', status: 'passed', message: `本地备份目录可写，剩余 ${Math.floor(stats.bavail * stats.bsize / 1024 / 1024)} MiB` });
+    }
+  } catch (error) { checks.push({ name: '备份目标', status: 'failed', message: error instanceof Error ? error.message : '备份目标不可写' }); }
+  try {
+    const env = await envValues();
+    backupProbe = join(target, `.preflight-${randomUUID()}.dump`);
+    const child = spawn('docker', [...await composeArgs(), 'exec', '-T', '-e', 'PGPASSWORD', 'postgres', 'pg_dump', '--format=custom', '--no-owner', '--no-acl', '-U', env.POSTGRES_USER || 'kubenova', '-d', env.POSTGRES_DB || 'kubenova'], { env: { ...process.env, PGPASSWORD: env.POSTGRES_PASSWORD || '' }, stdio: ['ignore', 'pipe', 'ignore'], timeout: 10 * 60 * 1000 });
+    const dumped = pipeline(child.stdout, createWriteStream(backupProbe, { flags: 'wx', mode: 0o600 }));
+    const exited = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => code === 0 ? resolve() : reject(new Error('PostgreSQL 备份探测失败'))); });
+    await Promise.all([dumped, exited]);
+    if (!(await stat(backupProbe)).size) throw new Error('PostgreSQL 备份探测为空');
+    checks.push({ name: '数据库备份探测', status: 'passed', message: 'PostgreSQL 完整备份探测成功，临时文件将在预检结束时清理' });
+  } catch (error) { checks.push({ name: '数据库备份探测', status: 'failed', message: error instanceof Error ? error.message : 'PostgreSQL 备份探测失败' }); }
+  try {
+    if (!backupProbe || !input.migrationTarget?.connection) throw new Error('迁移兼容试跑需要有效的数据库备份和迁移测试连接');
+    let composeAdapter;
+    const connection = new URL(input.migrationTarget.connection);
+    const baseEnv = { ...process.env, PGPASSWORD: decodeURIComponent(connection.password || '') };
+    if (input.migrationTarget.type === 'local') {
+      const manifestUrl = input.targetRelease?.manifestUrl;
+      if (!safeManifestUrl(manifestUrl, input.targetVersion)) throw new Error('目标版本缺少受信任的 release manifest 地址');
+      await mkdir(stateDir, { recursive: true, mode: 0o700 });
+      const manifestFile = join(stateDir, `.preflight-manifest-${randomUUID()}.json`);
+      let targetImage;
+      try {
+        await downloadFile(manifestUrl, manifestFile, 64 * 1024);
+        const manifest = JSON.parse(await readFile(manifestFile, 'utf8'));
+        if (manifest.version !== input.targetVersion || manifest.repository !== repository || !digestValue(manifest.images?.controlApi)) throw new Error('发布清单与目标版本或 control-api 镜像摘要不匹配');
+        targetImage = manifest.images.controlApi;
+        checks.push({ name: '目标版本镜像清单', status: 'passed', message: '已从正式发布清单取得固定 control-api 镜像摘要' });
+      } finally { await rm(manifestFile, { force: true }); }
+      const apiNetworks = JSON.parse((await run('docker', ['inspect', '--format', '{{json .NetworkSettings.Networks}}', 'kubenova-control-api'], 10_000)).stdout || '{}');
+      const postgresNetworks = JSON.parse((await run('docker', ['inspect', '--format', '{{json .NetworkSettings.Networks}}', 'kubenova-postgres'], 10_000)).stdout || '{}');
+      composeAdapter = createComposeMigrationAdapter({
+        composeArgs: await composeArgs(),
+        dockerNetwork: selectSharedDockerNetwork(apiNetworks, postgresNetworks),
+        targetImage,
+        stateDir,
+        run: (command, args, options = {}) => run(command, args, options.timeout ?? 10 * 60_000, options.env ?? {}),
+      });
+    }
+    const rehearsal = await runPostgresMigrationRehearsal({
+      backupFile: backupProbe,
+      connectionString: input.migrationTarget.connection,
+      targetVersion: input.targetVersion,
+      migrationCommand: process.env.KUBENOVA_UPDATE_MIGRATION_TEST_COMMAND,
+      compatibilityCommand: process.env.KUBENOVA_UPDATE_OLD_VERSION_COMPATIBILITY_COMMAND,
+      baseEnv,
+      ...(composeAdapter ? {
+        mapDatabaseUrl: composeAdapter.databaseUrl,
+        runPostgresCommand: composeAdapter.runPostgresCommand,
+        runMigrations: composeAdapter.runMigrations,
+        checkCompatibility: composeAdapter.checkCompatibility,
+      } : {}),
+    });
+    checks.push(...rehearsal.checks);
+    if (rehearsal.status !== 'passed') throw new Error('临时数据库迁移兼容演练未全部通过');
+  } catch (error) { checks.push({ name: '迁移兼容试跑', status: 'failed', message: error instanceof Error ? error.message : '迁移兼容试跑失败' }); }
+  if (backupProbe) await rm(backupProbe, { force: true }).catch(() => checks.push({ name: '临时备份清理', status: 'failed', message: '无法清理预检临时备份' }));
+  if (!checks.some(check => check.name === '临时备份清理')) checks.push({ name: '临时备份清理', status: 'passed', message: '临时备份已清理' });
+  return { status: checks.every(check => check.status === 'passed') ? 'passed' : 'failed', checks };
+}
 async function currentVersion() {
   const {stdout} = await run('docker', ['inspect', 'kubenova-control-api']);
   const rows = JSON.parse(stdout);
@@ -86,8 +183,9 @@ async function currentImageDigests() {
 }
 async function backup(task) {
   await setTask(task,{phase:'backing-up',percent:10,message:'正在备份 PostgreSQL'});
-  const dir=join(stateDir,'backups'); await mkdir(dir,{recursive:true,mode:0o700});
-  const file=join(dir,task.taskId+'.sql'), temporary=file+'.partial';
+  const remoteBackup = task.backupTarget?.type === 's3' ? s3Storage(task.backupTarget) : null;
+  const dir=task.backupTarget?.type==='local' && task.backupTarget.location ? task.backupTarget.location : join(stateDir,'backups'); await mkdir(dir,{recursive:true,mode:0o700});
+  const file=join(dir,'kubenova-update-'+task.taskId+'.sql'), temporary=file+'.partial';
   const env=await envValues();
   const child=spawn('docker',[...await composeArgs(),'exec','-T','-e','PGPASSWORD','postgres','pg_dump','-U',env.POSTGRES_USER || 'kubenova','-d',env.POSTGRES_DB || 'kubenova'], {
     env:{...process.env,PGPASSWORD:env.POSTGRES_PASSWORD || '',KUBENOVA_COMPOSE_ENV_FILE:envFile}, stdio:['ignore','pipe','ignore'], timeout:20*60*1000,
@@ -99,7 +197,14 @@ async function backup(task) {
     if (!(await stat(temporary)).size) throw new Error('数据库备份为空');
     await rename(temporary,file);
   } catch(error) { child.kill(); await Promise.allSettled([exited,streamed]); await rm(temporary,{force:true}); throw error; }
-  await setTask(task,{backupFile:file,percent:25,message:'PostgreSQL 备份完成'});
+  if (remoteBackup) {
+    try {
+      const name = file.split('/').at(-1);
+      await remoteBackup.upload(file, name);
+      await rm(file, { force: true });
+      await setTask(task,{backupFile:remoteBackup.objectUri(name),percent:25,message:'PostgreSQL 备份已上传并校验'});
+    } catch (error) { await rm(file, { force: true }); throw error; }
+  } else await setTask(task,{backupFile:file,percent:25,message:'PostgreSQL 备份完成'});
 }
 async function downloadFile(url, file, limit = 4*1024*1024*1024) {
   // Only GitHub's release CDN is trusted; never forward executor credentials.
@@ -150,15 +255,6 @@ function rollbackCandidates() {
 function backupVersion() {
   return rollbackCandidates()[0]?.version || null;
 }
-async function pruneBackups() {
-  const dir=join(stateDir,'backups'); const files=[];
-  for(const entry of await readdir(dir,{withFileTypes:true})) if(entry.isFile() && entry.name.endsWith('.sql')) {
-    const file=join(dir,entry.name); files.push({file,mtime:(await stat(file)).mtimeMs});
-  }
-  files.sort((a,b)=>b.mtime-a.mtime);
-  // Keep at least five snapshots AND everything from the last seven days.
-  for(const [i,file] of files.entries()) if(i>=5 && file.mtime<Date.now()-7*86400000) await rm(file.file);
-}
 async function runTask(task) {
   let switching=false;
   try {
@@ -175,7 +271,12 @@ async function runTask(task) {
     await run('bash',[scriptFile,task.action==='install'?'up':'rollback',...(task.action==='install'?['--tag',task.targetVersion]:[task.targetVersion]),'--env-file',envFile],20*60*1000,{FRONTEND_IMAGE:targetImages.frontend,CONTROL_API_IMAGE:targetImages.controlApi,RUNTIME_GATEWAY_IMAGE:targetImages.runtimeGateway});
     await setTask(task,{phase:'health-check',percent:90,message:'服务健康检查通过，正在确认版本'});
     await setTask(task,{status:'succeeded',phase:'completed',percent:100,message:'服务已通过健康检查'});
-    if(task.action==='install') await pruneBackups().catch(()=>console.error('旧备份清理失败；升级结果不受影响'));
+    if(task.action==='install') {
+      try {
+        if (task.backupTarget?.type === 's3') await s3Storage(task.backupTarget).prune();
+        else await pruneRetainedBackups(task.backupTarget?.type==='local' && task.backupTarget.location ? task.backupTarget.location : join(stateDir,'backups'));
+      } catch { console.error('旧备份清理失败；升级结果不受影响'); }
+    }
   } catch(error) {
     let message=error.message;
     if(switching && task.action==='install' && task.previousVersion) {
@@ -195,7 +296,9 @@ async function runTask(task) {
 }
 function publicTask(task) {
   if(!task) return null;
-  const {release,backupFile,...value}=task; return value;
+  const {release,backupFile,...value}=task;
+  if (value.backupTarget) { const { secret: _secret, ...backupTarget } = value.backupTarget; value.backupTarget = backupTarget; }
+  return value;
 }
 function json(response,status,payload) {
   response.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}); response.end(JSON.stringify(payload));
@@ -216,14 +319,16 @@ const server=createServer(async(request,response)=>{
       let issue=null; try {await ready();} catch {issue='执行器未就绪：请检查 Docker、Compose 文件及环境配置';}
       return json(response,200,{ready:!issue,reason:issue,backupVersion:backupVersion(),rollbackCandidates:rollbackCandidates(),latestTask:publicTask([...tasks.values()].at(-1))});
     }
+    if(request.method==='POST' && path==='/v1/system-update/preflight') return json(response, 200, await preflight(await body(request)));
     if(request.method==='POST' && path==='/v1/system-update/tasks') {
       const input=await body(request);
       if(!['install','rollback'].includes(input.action) || !stableTag(input.targetVersion)) return json(response,400,{message:'invalid update task'});
       if(input.action==='install' && (!safeReleaseUrl(input.release?.downloadUrl,input.targetVersion,'kubenova-ubuntu.tar.gz') || !safeReleaseUrl(input.release?.checksumUrl,input.targetVersion,'kubenova-ubuntu.tar.gz.sha256') || !safeManifestUrl(input.release?.manifestUrl,input.targetVersion))) return json(response,400,{message:'untrusted release assets'});
+      if (input.action === 'install' && input.backupTarget && (!['local', 's3'].includes(input.backupTarget.type) || typeof input.backupTarget.location !== 'string' || !input.backupTarget.location.trim())) return json(response, 400, { message: 'invalid backup target' });
       if(input.action==='rollback' && !rollbackCandidates().some(item=>item.version===input.targetVersion)) return json(response,400,{message:'no verified rollback version'});
       // Claim before the first await: concurrent submissions cannot both pass.
       if(activeTask) return json(response,409,{message:'another update task is running'});
-      const task={taskId:randomUUID(),action:input.action,targetVersion:input.targetVersion,release:input.release,operator:String(input.operator || 'unknown').slice(0,200),status:'queued',phase:'queued',percent:0,message:null,createdAt:new Date().toISOString()};
+      const task={taskId:randomUUID(),action:input.action,targetVersion:input.targetVersion,release:input.release,backupTarget:input.action==='install'?input.backupTarget:undefined,operator:String(input.operator || 'unknown').slice(0,200),status:'queued',phase:'queued',percent:0,message:null,createdAt:new Date().toISOString()};
       activeTask=task.taskId; tasks.set(task.taskId,task);
       try { await persist(); } catch(error) {activeTask=null; tasks.delete(task.taskId); throw error;}
       json(response,202,publicTask(task));

@@ -22,6 +22,8 @@ sudo systemctl start kubenova.target
 
 部署包已包含 Prisma CLI 和迁移；control-api 启动前执行 migrate deploy。三个单元为 kubenova-frontend、kubenova-control-api、kubenova-runtime-gateway。前端默认 3000，API 4000，网关 4100。
 
+`prod.sh install` 会同时安装 `kubenova-update-executor.service`，自动生成仅 root 可读的随机密钥，并将 control-api 接入 `/run/kubenova-update/executor.sock`。首次安装时执行器会等待三个应用服务启动后才报告可升级；现有实例重跑安装脚本后会重启 control-api 以读取新配置。更新页面仅超级管理员可提交升级，下载与手动解压是折叠的备用方式。
+
 必需配置：DATABASE_URL、REDIS_URL、JWT_SECRET、RUNTIME_TOKEN_SECRET、RUNTIME_GATEWAY_INTERNAL_SECRET、AI_CREDENTIAL_ENCRYPTION_KEY、DEFAULT_ADMIN_PASSWORD。请替换所有示例密码；已有实例必须保留原加密密钥。前端如需改端口可创建 /etc/kubenova/frontend.env 设置 PORT。
 
 ## 验证
