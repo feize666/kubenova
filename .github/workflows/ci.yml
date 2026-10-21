@@ -138,6 +138,7 @@ jobs:
           RESOURCE_BROWSER_CHANNEL: chromium
           LOCAL_SHELL_URL: http://127.0.0.1:3000
         run: |
+          trap 'status=$?; echo "::error title=UI verification command failed::line ${LINENO}: ${BASH_COMMAND} (exit ${status})"' ERR
           HOSTNAME=127.0.0.1 PORT=3000 node .next/standalone/server.js > "$RUNNER_TEMP/frontend-ui-qa.log" 2>&1 &
           ui_server_pid=$!
           trap 'kill "$ui_server_pid" 2>/dev/null || true' EXIT
