@@ -63,11 +63,13 @@ function fakeDb() {
   };
 }
 
+const futurePreflightExpiry = () => new Date(Date.now() + 60 * 60_000).toISOString();
+
 const payload = {
   action: 'install' as const,
   targetVersion: 'v1.9',
   preflightId: 'preflight-1',
-  preflightExpiresAt: '2026-10-22T01:30:00.000Z',
+  preflightExpiresAt: futurePreflightExpiry(),
   backupTargetId: 'local-backup',
   settingsFingerprint: 'f'.repeat(64),
   images: {

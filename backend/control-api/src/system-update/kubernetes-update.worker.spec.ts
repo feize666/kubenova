@@ -1,6 +1,8 @@
 import { KubernetesUpdateWorker } from './kubernetes-update.worker';
 import type { KubernetesUpdateTaskRecord } from './kubernetes-update-tasks.service';
 
+const futurePreflightExpiry = () => new Date(Date.now() + 60 * 60_000).toISOString();
+
 const task: KubernetesUpdateTaskRecord = {
   id: 'task-1',
   action: 'install',
@@ -10,7 +12,7 @@ const task: KubernetesUpdateTaskRecord = {
     preflightId: 'preflight-1',
     backupTargetId: 'local-backup',
     settingsFingerprint: 'f'.repeat(64),
-    preflightExpiresAt: '2026-10-22T01:30:00.000Z',
+    preflightExpiresAt: futurePreflightExpiry(),
     operator: 'admin',
     images: {
       frontend: `ghcr.io/feize666/kubenova-frontend@sha256:${'a'.repeat(64)}`,
