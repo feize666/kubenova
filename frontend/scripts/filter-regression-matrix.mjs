@@ -348,10 +348,15 @@ async function resolveSampleClusterAndNamespace(page) {
   }
   const namespaceList = page.getByRole("listbox", { name: "命名空间列表", exact: true });
   let namespaceOptions;
-  if (await namespaceList.isVisible()) {
+  try {
+    await namespaceList.waitFor({ state: "visible", timeout: Math.min(timeout, 10_000) });
     namespaceOptions = namespaceList.getByRole("option");
-  } else {
-    await page.locator(".resource-filter-select--namespace").first().click();
+  } catch {
+    const legacyNamespaceSelect = page.locator(".resource-filter-select--namespace").first();
+    if (!(await legacyNamespaceSelect.count())) {
+      fail("命名空间列表未显示，且当前页面没有兼容的命名空间选择器");
+    }
+    await legacyNamespaceSelect.click();
     namespaceOptions = page.locator(".ant-select-dropdown:visible .ant-select-item-option[title]");
   }
   await namespaceOptions.filter({ hasText: /^(?!全部(?:命名|名称)空间$).+/ }).first().waitFor({ state: "visible", timeout });
