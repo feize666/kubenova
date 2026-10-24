@@ -100,7 +100,10 @@ jobs:
           RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/authorization/grant-mutations.browser.test.mjs
           RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/authorization/authorization-read.browser.test.mjs
           RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/authorization/native-settings-read.browser.test.mjs
-          RESOURCE_BROWSER_CHANNEL=chromium node scripts/run-node-tests.mjs src/modules/topology-kubejojo/topology-surface.test.ts
+          if ! RESOURCE_BROWSER_CHANNEL=chromium node scripts/run-node-tests.mjs src/modules/topology-kubejojo/topology-surface.test.ts > "$RUNNER_TEMP/topology-surface-test.log" 2>&1; then
+            node --input-type=module -e 'import{readFileSync}from"node:fs";const lines=readFileSync(process.argv[1],"utf8").trim().split(/\r?\n/).slice(-80);for(const line of lines)console.log(`::error title=Topology browser regression detail::${line.replace(/%/g,"%25").replace(/\r/g,"%0D").replace(/\n/g,"%0A")}`)' "$RUNNER_TEMP/topology-surface-test.log"
+            exit 1
+          fi
           node --test scripts/workspace-theme-regression.test.mjs
           node --test scripts/resource-table-geometry.test.mjs
           RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/resource-table/table-keyboard-browser.test.mjs
