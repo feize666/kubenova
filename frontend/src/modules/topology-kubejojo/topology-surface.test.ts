@@ -120,6 +120,7 @@ async function withTopology(
   // ELK worker startup and parallel browser suites can be slower on hosted CI.
   // Keep the assertions identical while allowing the real page to settle.
   page.setDefaultTimeout(30_000);
+  page.setDefaultNavigationTimeout(30_000);
   const errors: string[] = [];
   const requests: URL[] = [];
   const violations: string[] = [];
@@ -670,7 +671,7 @@ test("background topology reconciliation keeps the current graph mounted", async
       })));
       const stillLoading = await page.locator('button[aria-label="刷新拓扑"].is-loading').count() > 0;
       if (!stillLoading && settledAt === null) settledAt = Date.now();
-      if (Date.now() - startedAt > 5_000) break;
+      if (Date.now() - startedAt > 15_000) break;
       await page.waitForTimeout(20);
     }
     const emptySamples = diagnostics.filter(sample => sample.namespaceCards !== 1 || Number(sample.flowNodes) < 2);
