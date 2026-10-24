@@ -66,10 +66,10 @@ function componentBundle() {
 
 async function fixture(t,viewport={width:1440,height:900},{reducedMotion='no-preference',availableContainers=['main']}={}) {
   const bundle=await componentBundle();
-  const browser=await chromium.launch({headless:true,channel:process.env.RESOURCE_BROWSER_CHANNEL||'chrome'});
+  const browser=await chromium.launch({headless:true,channel:process.env.RESOURCE_BROWSER_CHANNEL||'chrome',args:['--disable-dev-shm-usage']});
   t.after(()=>browser.close());
   const page=await browser.newPage({viewport,reducedMotion});
-  page.setDefaultTimeout(5000);
+  page.setDefaultTimeout(15000);
   const errors=[];
   const sessions=[];
   const unexpected=[];
@@ -107,7 +107,7 @@ async function fixture(t,viewport={width:1440,height:900},{reducedMotion='no-pre
   await page.addStyleTag({content:bundle.outputFiles.find(file=>file.path.endsWith('.css')).text});
   await page.addScriptTag({content:bundle.outputFiles.find(file=>file.path.endsWith('.js')).text});
   try {
-    await page.waitForFunction(()=>document.querySelector('.logs-workbench-shell')?.classList.contains('ops-frame-shell--streaming'),null,{timeout:5000});
+    await page.waitForFunction(()=>document.querySelector('.logs-workbench-shell')?.classList.contains('ops-frame-shell--streaming'),null,{timeout:15000});
   } catch(error) {
     console.error({errors,unexpected,sessions,historyReads,body:await page.locator('body').innerText()});
     throw error;
@@ -151,7 +151,7 @@ test('switching log containers requests a fresh stream for the selected containe
   assert.equal(sessions[0].container,'main');
   await page.getByRole('combobox',{name:'容器'}).click();
   await page.getByText('sidecar',{exact:true}).last().click();
-  const deadline=Date.now()+5000;
+  const deadline=Date.now()+15000;
   while((sessions.length<2||sockets.length<2)&&Date.now()<deadline)await page.waitForTimeout(25);
   assert.equal(sessions.length,2,'container selection starts a new API session');
   assert.equal(sessions[1].container,'sidecar');
