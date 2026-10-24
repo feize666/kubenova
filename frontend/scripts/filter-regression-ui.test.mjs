@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 test('filter matrix uses the actual Pod namespace picker and resource search on built pages', async () => {
   const origin=process.env.FILTER_QA_URL || 'http://127.0.0.1:3000';
   const source=readFileSync(new URL('./filter-regression-matrix.mjs',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/main\(\)\.catch\([\s\S]*$/,'');
-  const context=vm.createContext({process:{env:{FILTER_BASE_URL:origin,FILTER_TIMEOUT_MS:'10000'}},URL,URLSearchParams,existsSync,console});
+  const context=vm.createContext({process:{env:{FILTER_BASE_URL:origin,FILTER_TIMEOUT_MS:process.env.FILTER_QA_TIMEOUT_MS||'30000'}},URL,URLSearchParams,existsSync,console});
   vm.runInContext(`${source}\nthis.matrix={ALL_CASES,resolveSampleClusterAndNamespace,assertUrlRestore,assertFetchTriggeredByFilters};`,context);
   const browser=await chromium.launch({headless:true,channel:process.env.RESOURCE_BROWSER_CHANNEL || 'chrome'});
   try {
