@@ -1,9 +1,16 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Test } from '@nestjs/testing';
 import { KubernetesDatabaseBackupService } from './kubernetes-database-backup.service';
 
 describe('Kubernetes database backup service', () => {
+  it('resolves through Nest with production defaults when no test adapters are provided', async () => {
+    const module = await Test.createTestingModule({ providers: [KubernetesDatabaseBackupService] }).compile();
+    expect(module.get(KubernetesDatabaseBackupService)).toBeInstanceOf(KubernetesDatabaseBackupService);
+    await module.close();
+  });
+
   it('creates a non-empty custom-format backup under the persistent local target', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kubenova-k8s-backup-'));
     const targetDir = join(root, 'backups');

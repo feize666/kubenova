@@ -139,13 +139,6 @@ jobs:
               diagnostic="${diagnostic//$'\n'/%0A}"
               [[ -z "$diagnostic" ]] || echo "::error title=Compose container diagnostic::${diagnostic}"
             done
-            api_log="$(docker logs --tail 60 kubenova-control-api 2>&1 | sed -E 's#(postgres(ql)?://)[^/@[:space:]]+:[^/@[:space:]]+@#\1[REDACTED]@#gI; s/((password|secret|token|authorization|DATABASE_URL)[=:])[[:space:]]*[^[:space:],;]+/\1[REDACTED]/Ig' | tail -n 20 || true)"
-            while IFS= read -r line; do
-              line="${line//%/%25}"
-              line="${line//$'\r'/%0D}"
-              line="${line//$'\n'/%0A}"
-              [[ -z "$line" ]] || echo "::error title=Sanitized control-api startup log::${line}"
-            done <<< "$api_log"
             return "$result"
           }
           trap report_compose_failure ERR

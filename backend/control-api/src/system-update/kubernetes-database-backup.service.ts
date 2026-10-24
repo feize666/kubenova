@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -23,11 +23,14 @@ export type KubernetesBackupResult = { location: string; bytes: number; createdA
 @Injectable()
 export class KubernetesDatabaseBackupService {
   constructor(
+    @Optional()
     private readonly run: (command: string, args: string[], options?: { timeout?: number; maxBuffer?: number; env?: NodeJS.ProcessEnv }) => Promise<{ stdout: string; stderr: string }> = async (command, args, options) => {
       const result = await exec(command, args, { ...options, encoding: 'utf8' });
       return { stdout: result.stdout, stderr: result.stderr };
     },
+    @Optional()
     private readonly backupRoot = process.env.KUBENOVA_K8S_UPDATE_BACKUP_ROOT?.trim() || DEFAULT_BACKUP_ROOT,
+    @Optional()
     private readonly remove: typeof rm = (path, options) => rm(path, options),
   ) {}
 
