@@ -98,7 +98,11 @@ before(async () => {
   // The fixture only bundles once. Release esbuild's service before starting
   // browser workers so its process does not outlive the suite.
   stop();
-  browser = await chromium.launch({ headless: true, channel: process.env.RESOURCE_BROWSER_CHANNEL || "chrome" });
+  browser = await chromium.launch({
+    headless: true,
+    channel: process.env.RESOURCE_BROWSER_CHANNEL || "chrome",
+    args: ["--disable-dev-shm-usage"],
+  });
 });
 
 after(async () => { await browser?.close(); });
@@ -113,7 +117,9 @@ async function withTopology(
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "no-preference", serviceWorkers: "block" });
   await context.routeWebSocket("**/*", socket => socket.close());
   const page = await context.newPage();
-  page.setDefaultTimeout(10_000);
+  // ELK worker startup and parallel browser suites can be slower on hosted CI.
+  // Keep the assertions identical while allowing the real page to settle.
+  page.setDefaultTimeout(30_000);
   const errors: string[] = [];
   const requests: URL[] = [];
   const violations: string[] = [];
