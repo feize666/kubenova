@@ -115,7 +115,10 @@ jobs:
           YAML_EDITOR_BROWSER_CHANNEL=chromium node --test src/components/resource-editor/editor-create-drafts-browser.test.mjs
           YAML_EDITOR_BROWSER_CHANNEL=chromium node --test src/components/resource-editor/editor-schema-read.browser.test.mjs
           RESOURCE_BROWSER_CHANNEL=chromium node --test src/app/workloads/pod-batch-access.test.mjs
-          RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/runtime-workbench/logs-workbench.test.mjs
+          if ! RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/runtime-workbench/logs-workbench.test.mjs > "$RUNNER_TEMP/logs-workbench-test.log" 2>&1; then
+            node --input-type=module -e 'import{readFileSync}from"node:fs";const lines=readFileSync(process.argv[1],"utf8").trim().split(/\r?\n/).slice(-80);for(const line of lines)console.log(`::error title=Logs browser regression detail::${line.replace(/%/g,"%25").replace(/\r/g,"%0D").replace(/\n/g,"%0A")}`)' "$RUNNER_TEMP/logs-workbench-test.log"
+            exit 1
+          fi
           RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/runtime-workbench/terminal-workbench.test.mjs
           RESOURCE_BROWSER_CHANNEL=chromium node --test src/components/navigation-theme-browser.test.mjs
           node --test src/components/navigation-utility-focus.test.mjs
