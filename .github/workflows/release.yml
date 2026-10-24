@@ -97,8 +97,9 @@ jobs:
             [[ "$service" != frontend ]] || context=frontend
             docker build --build-arg "VERSION=$RELEASE_TAG" --build-arg "GIT_COMMIT=$GITHUB_SHA" --build-arg "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.version=$RELEASE_TAG" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE_ROOT-$service:$RELEASE_TAG" "$context"
           done
-      - name: Verify full Compose startup before publication
+      - name: Preflight full Compose release configuration
         run: |
+          set -euo pipefail
           cp deploy/docker/.env.example deploy/docker/.env
           export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
           export JWT_SECRET="$(openssl rand -hex 32)"
@@ -112,6 +113,21 @@ jobs:
           export CONTROL_API_IMAGE="$IMAGE_ROOT-control-api:$RELEASE_TAG"
           export RUNTIME_GATEWAY_IMAGE="$IMAGE_ROOT-runtime-gateway:$RELEASE_TAG"
           bash scripts/compose-release.sh preflight
+      - name: Start and verify full Compose release before publication
+        run: |
+          set -euo pipefail
+          export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+          export JWT_SECRET="$(openssl rand -hex 32)"
+          export RUNTIME_TOKEN_SECRET="$(openssl rand -hex 32)"
+          export RUNTIME_GATEWAY_INTERNAL_SECRET="$(openssl rand -hex 32)"
+          export AI_CREDENTIAL_ENCRYPTION_KEY="$(openssl rand -hex 32)"
+          export DEFAULT_ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          export KUBENOVA_IMAGE_TAG="$RELEASE_TAG"
+          IMAGE_ROOT="ghcr.io/${GITHUB_REPOSITORY,,}"
+          export FRONTEND_IMAGE="$IMAGE_ROOT-frontend:$RELEASE_TAG"
+          export CONTROL_API_IMAGE="$IMAGE_ROOT-control-api:$RELEASE_TAG"
+          export RUNTIME_GATEWAY_IMAGE="$IMAGE_ROOT-runtime-gateway:$RELEASE_TAG"
+          trap 'result=$?; echo "::error title=Compose startup verification failed::line ${LINENO}: ${BASH_COMMAND} (exit ${result})"; docker compose -f deploy/docker/docker-compose.prod.yml --env-file deploy/docker/.env ps -a || true; for container in kubenova-postgres kubenova-redis kubenova-control-api kubenova-runtime-gateway kubenova-frontend; do docker inspect --format "{{.Name}} state={{.State.Status}} exit={{.State.ExitCode}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}" "$container" 2>/dev/null || true; done' ERR
           docker compose -f deploy/docker/docker-compose.prod.yml --env-file deploy/docker/.env up -d --wait --wait-timeout 240
           curl --fail --retry 3 http://127.0.0.1:4000/api/health/ready
           curl --fail --retry 3 http://127.0.0.1:4100/healthz
